@@ -6,6 +6,11 @@ import re
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token, password_policy_error
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.action_permissions import (
+    default_permissions_for_role,
+    normalise_action_permissions,
+)
+from app.services.scope_permissions import normalise_scope_payload
 from app.models import *
 
 router = APIRouter()
@@ -33,6 +38,10 @@ async def _access_roles() -> list:
         {
             **role,
             **{key: overrides[role["id"]][key] for key in ("label", "description") if key in overrides.get(role["id"], {})},
+            "action_permissions": normalise_action_permissions(
+                overrides.get(role["id"], {}).get("action_permissions", default_permissions_for_role(role["id"]))
+            ),
+            "action_permissions_explicit": "action_permissions" in overrides.get(role["id"], {}),
         }
         for role in DEFAULT_ACCESS_ROLES
     ]
@@ -53,6 +62,10 @@ async def _access_roles() -> list:
                 "description": description,
                 "protected": False,
                 "custom": True,
+                "action_permissions": normalise_action_permissions(
+                    item.get("action_permissions", default_permissions_for_role(role_id))
+                ),
+                "action_permissions_explicit": "action_permissions" in item,
             })
     return roles
 
@@ -72,6 +85,40 @@ async def get_access_roles(current_user: dict = Depends(get_current_user)):
     return {"roles": await _access_roles()}
 
 
+@router.get("/technicians/scope-catalog")
+async def get_scope_catalog(current_user: dict = Depends(get_current_user)):
+    """Return the safe client/site choices used by the technician editor."""
+    if not await _caller_is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).sort("name", 1).to_list(5000)
+    client_names = {item.get("id"): item.get("name", "Client") for item in clients}
+    raw_sites = await db.network_sites.find(
+        {},
+        {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1, "location": 1},
+    ).to_list(5000)
+    sites_by_id = {}
+    for item in raw_sites:
+        site_id = str(item.get("id") or "").strip()
+        client_id = str(item.get("client_id") or "").strip()
+        if not site_id or not client_id:
+            continue
+        sites_by_id[site_id] = {
+            "id": site_id,
+            "name": item.get("name") or item.get("location") or "Client site",
+            "client_id": client_id,
+            "client_name": item.get("client_name") or client_names.get(client_id, "Client"),
+            "location": item.get("location", ""),
+        }
+    return {
+        "clients": clients,
+        "sites": sorted(sites_by_id.values(), key=lambda item: (item["client_name"].casefold(), item["name"].casefold())),
+        "semantics": {
+            "all": "Every current and future client and site",
+            "restricted": "Only selected clients; an empty site list allows every site for those clients",
+        },
+    }
+
+
 @router.put("/technicians/access-roles")
 async def update_access_roles(data: dict, current_user: dict = Depends(get_current_user)):
     if not await _caller_is_admin(current_user):
@@ -79,6 +126,15 @@ async def update_access_roles(data: dict, current_user: dict = Depends(get_curre
     requested = data.get("roles")
     if not isinstance(requested, list):
         raise HTTPException(status_code=400, detail="A role catalogue is required")
+    existing_catalogue = await db.settings.find_one(
+        {"key": "access_role_catalogue"},
+        {"_id": 0, "value": 1},
+    ) or {}
+    existing_by_id = {
+        item.get("id"): item
+        for item in existing_catalogue.get("value", [])
+        if isinstance(item, dict) and item.get("id")
+    }
     normalised = []
     for item in requested:
         if not isinstance(item, dict):
@@ -111,12 +167,18 @@ async def update_access_roles(data: dict, current_user: dict = Depends(get_curre
         if label.casefold() in labels:
             raise HTTPException(status_code=400, detail="Each access role needs a unique name")
         labels.add(label.casefold())
-        cleaned.append({
+        cleaned_role = {
             "id": role_id,
             "label": label,
             "description": description,
             "custom": role_id not in required_ids,
-        })
+        }
+        if role_id != "admin":
+            if "action_permissions" in item:
+                cleaned_role["action_permissions"] = normalise_action_permissions(item.get("action_permissions"))
+            elif "action_permissions" in existing_by_id.get(role_id, {}):
+                cleaned_role["action_permissions"] = normalise_action_permissions(existing_by_id[role_id].get("action_permissions"))
+        cleaned.append(cleaned_role)
 
     # A role can only be retired after its members and pending invitations are
     # moved to another role. This prevents silent changes to staff access data.
@@ -264,7 +326,8 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
     is_admin = await _caller_is_admin(current_user)
     admin_fields = {"name", "email", "role", "hourly_rate", "phone", "specialties", "categories", "is_active",
                     "email_signature", "email_signature_html", "signature_config", "avatar",
-                    "job_title", "permissions", "is_admin", "archived", "archived_at", "enabled_modules"}
+                    "job_title", "permissions", "action_permissions", "client_scope_mode", "client_scope_ids",
+                    "site_scope_ids", "is_admin", "archived", "archived_at", "enabled_modules"}
     self_service_fields = {"name", "phone", "avatar", "email_signature", "email_signature_html", "signature_config", "job_title"}
 
     if is_admin:
@@ -275,20 +338,41 @@ async def update_technician(tech_id: str, tech_data: dict, current_user: dict = 
         raise HTTPException(status_code=403, detail="You can only update your own profile")
 
     update = {k: v for k, v in tech_data.items() if k in allowed}
+    target = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Technician not found")
     if "role" in update:
         update["role"] = str(update["role"] or "").strip().lower()
         if update["role"] not in await _access_role_ids():
             raise HTTPException(status_code=400, detail="Choose a valid access role")
     if "hourly_rate" in update:
         update["hourly_rate"] = float(update["hourly_rate"])
+    if any(field in update for field in {"client_scope_mode", "client_scope_ids", "site_scope_ids"}):
+        scope = normalise_scope_payload({**target, **tech_data})
+        client_ids = set(scope["client_scope_ids"])
+        site_ids = set(scope["site_scope_ids"])
+        if scope["client_scope_mode"] == "restricted" and not client_ids:
+            raise HTTPException(status_code=400, detail="Choose at least one client for selected-client access")
+        known_clients = {
+            item["id"]
+            for item in await db.clients.find({"id": {"$in": list(client_ids)}}, {"_id": 0, "id": 1}).to_list(5000)
+        }
+        if known_clients != client_ids:
+            raise HTTPException(status_code=400, detail="One or more selected clients no longer exist")
+        known_sites = await db.network_sites.find(
+            {"id": {"$in": list(site_ids)}},
+            {"_id": 0, "id": 1, "client_id": 1},
+        ).to_list(5000)
+        if {item["id"] for item in known_sites} != site_ids:
+            raise HTTPException(status_code=400, detail="One or more selected sites no longer exist")
+        if any(item.get("client_id") not in client_ids for item in known_sites):
+            raise HTTPException(status_code=400, detail="Selected sites must belong to a selected client")
+        update.update(scope)
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields")
 
-    target = await db.users.find_one({"id": tech_id}, {"_id": 0, "password_hash": 0})
-    if not target:
-        raise HTTPException(status_code=404, detail="Technician not found")
-
-    sensitive_fields = {"role", "is_admin", "permissions", "enabled_modules"}
+    sensitive_fields = {"role", "is_admin", "permissions", "action_permissions", "client_scope_mode",
+                        "client_scope_ids", "site_scope_ids", "enabled_modules"}
     sensitive_changes = {
         field: {"from": target.get(field), "to": update.get(field)}
         for field in sensitive_fields
@@ -544,6 +628,8 @@ async def update_technician_permissions(tech_id: str, data: dict, current_user: 
     update = {}
     if "permissions" in data:
         update["permissions"] = data["permissions"]
+    if "action_permissions" in data:
+        update["action_permissions"] = normalise_action_permissions(data["action_permissions"])
     if "is_admin" in data:
         update["is_admin"] = data["is_admin"]
     if "job_title" in data:

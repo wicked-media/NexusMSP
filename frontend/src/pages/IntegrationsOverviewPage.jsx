@@ -193,7 +193,7 @@ export default function IntegrationsOverviewPage() {
                         </Button>
                       )}
                       <Button size="sm" variant={t.configured ? "ghost" : "default"} className={`${t.command_center && t.configured ? "" : "flex-1"} text-xs`} asChild data-testid={`io-settings-${t.key}`}>
-                        <Link to={`/settings?tab=integrations&anchor=${t.settings_anchor || ""}`}>
+                        <Link to={t.settings_anchor ? `/settings?tab=integrations&anchor=${t.settings_anchor}` : (t.command_center || "/settings?tab=integrations")}>
                           <SettingsIcon className="w-3 h-3 mr-1" />{t.configured ? "Manage" : "Configure"}
                         </Link>
                       </Button>

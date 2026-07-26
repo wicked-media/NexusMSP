@@ -81,7 +81,6 @@ export default function DevicesPage() {
   const [deviceViewers, setDeviceViewers] = useState({});
   const [rdStatusMap, setRdStatusMap] = useState({});
   const [activeProviders, setActiveProviders] = useState([]);
-  const [remoteBusy, setRemoteBusy] = useState({});
   const [liveChatBusy, setLiveChatBusy] = useState({});
   const [siteMap, setSiteMap] = useState([]);
   const [tab, setTab] = useState("pulse");
@@ -95,6 +94,11 @@ export default function DevicesPage() {
   useEffect(() => {
     const clientId = searchParams.get("clientId");
     if (clientId) setFilterClient(clientId);
+    const requestedSearch = searchParams.get("search");
+    if (requestedSearch) {
+      setSearch(requestedSearch);
+      setTab("directory");
+    }
   }, [searchParams]);
 
   useEffect(() => {
@@ -143,30 +147,6 @@ export default function DevicesPage() {
   }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  // Launch handlers for inline Remote button (called from RemoteAccessButton)
-  const setDevBusy = (id, v) => setRemoteBusy(m => ({ ...m, [id]: v }));
-
-  const launchRustDeskForDevice = async (dev) => {
-    if (!dev.rustdesk_id) {
-      toast.info("Opening device to configure RustDesk…");
-      navigate(`/devices/${dev.id}`);
-      return;
-    }
-    setDevBusy(dev.id, true);
-    try {
-      const res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: dev.rustdesk_id }, { headers });
-      const relay = res.data?.relay_server;
-      const uri = relay
-        ? `rustdesk://${dev.rustdesk_id}@${relay.replace(/^https?:\/\//, "").split("/")[0].split(":")[0]}`
-        : `rustdesk://${dev.rustdesk_id}`;
-      const a = document.createElement("a"); a.href = uri; a.style.display = "none";
-      document.body.appendChild(a); a.click();
-      setTimeout(() => document.body.removeChild(a), 100);
-      toast.success(`Launching RustDesk to ${dev.rustdesk_id}`);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
-    finally { setDevBusy(dev.id, false); }
-  };
 
   const startLiveChatForDevice = async (dev) => {
     if (!dev.nexus_agent_id) {
@@ -775,8 +755,6 @@ export default function DevicesPage() {
                           <RemoteAccessButton
                             device={d}
                             status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
-                            busy={!!remoteBusy[d.id]}
-                            onLaunchRustDesk={() => launchRustDeskForDevice(d)}
                             compact
                             providersOverride={activeProviders}
                             testid={`row-remote-${d.id}`}
@@ -889,8 +867,6 @@ export default function DevicesPage() {
                       <RemoteAccessButton
                         device={d}
                         status={d.rustdesk_id ? (rdStatusMap[d.rustdesk_id] || d.status) : d.status}
-                        busy={!!remoteBusy[d.id]}
-                        onLaunchRustDesk={() => launchRustDeskForDevice(d)}
                         compact
                         providersOverride={activeProviders}
                         testid={`card-remote-${d.id}`}

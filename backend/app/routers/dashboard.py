@@ -150,25 +150,29 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "ref_type": "device", "ref_id": a.get("device_id"),
         })
 
-    # Yeastar call log entries (live from PBX if configured)
+    # Yeastar call log entries (live from client-linked PBXs)
     try:
         from datetime import timezone as tz
-        yeastar_settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
-        if yeastar_settings and yeastar_settings.get("client_id"):
-            yeastar_token = await _yeastar_get_token(yeastar_settings)
+        from app.routers.yeastar import _yeastar_api_get, _yeastar_get_token
+        yeastar_pbxs = await db.yeastar_pbxs.find(
+            {"enabled": {"$ne": False}},
+            {"_id": 0, "id": 1, "name": 1, "client_name": 1, "pbx_url": 1, "client_api_id": 1, "client_secret": 1, "tls_validation": 1},
+        ).to_list(20)
+        for yeastar_pbx in yeastar_pbxs:
+            yeastar_token = await _yeastar_get_token(yeastar_pbx)
             if yeastar_token:
-                cdr_data = await _yeastar_api_get("cdr/list", {"page": 1, "page_size": 10})
+                cdr_data = await _yeastar_api_get("cdr/list", {"page": 1, "page_size": 5}, settings=yeastar_pbx)
                 if cdr_data and cdr_data.get("errcode") == 0:
-                    for cdr in (cdr_data.get("data", []) or [])[:10]:
+                    for cdr in (cdr_data.get("data", []) or [])[:5]:
                         call_from = cdr.get("call_from", "")
                         call_to = cdr.get("call_to", "")
                         disp = cdr.get("disposition", "").upper()
                         icon = "phone-missed" if disp in ("NO ANSWER", "FAILED") else "phone"
                         title_prefix = "Missed call" if disp in ("NO ANSWER", "FAILED") else f"{cdr.get('call_type', 'Call')} call"
                         activities.append({
-                            "id": f"cdr-{cdr.get('id','')}", "type": "call", "icon": icon,
+                            "id": f"cdr-{yeastar_pbx.get('id', '')}-{cdr.get('id','')}", "type": "call", "icon": icon,
                             "title": f"{title_prefix}: {call_from} -> {call_to}",
-                            "description": f"Duration: {cdr.get('duration', 0)}s | {disp}",
+                            "description": f"{yeastar_pbx.get('client_name') or yeastar_pbx.get('name') or 'Client PBX'} | Duration: {cdr.get('duration', 0)}s | {disp}",
                             "user": call_from.split("<")[0].strip() if "<" in call_from else call_from,
                             "timestamp": cdr.get("time", datetime.now(tz.utc).isoformat()),
                             "meta": {"direction": cdr.get("call_type", "internal").lower(), "duration": cdr.get("duration", 0)}

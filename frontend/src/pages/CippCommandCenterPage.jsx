@@ -14,18 +14,19 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Cloud, Users, KeyRound, RefreshCw, Loader2, ExternalLink,
+  CheckCircle2, Cloud, Users, KeyRound, RefreshCw, Loader2, ExternalLink,
   UserPlus, Lock, Unlock, UserX, Link as LinkIcon, Search, Shield,
   Send, TrendingUp, AlertTriangle,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 
-export default function CippCommandCenterPage() {
+export default function CippCommandCenterPage({ embedded = false }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
 
   const [summary, setSummary] = useState(null);
+  const [onboarding, setOnboarding] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
   const [activeTab, setActiveTab] = useState("tenants");
 
@@ -56,15 +57,53 @@ export default function CippCommandCenterPage() {
   const loadSummary = useCallback(async () => {
     setLoadingSummary(true);
     try {
-      const [sumRes, linkedRes, clientsRes] = await Promise.all([
+      const [sumRes, onboardingRes, linkedRes, clientsRes] = await Promise.all([
         axios.get(`${API}/cipp/summary`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/m365/onboarding`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/cipp/linked-clients`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
       ]);
       setSummary(sumRes.data);
+      setOnboarding(onboardingRes.data);
       setLinkedClients(linkedRes.data || []);
-      setAllClients(clientsRes.data || []);
-      if (sumRes.data?.tenants) setTenants(sumRes.data.tenants);
+      setAllClients(onboardingRes.data?.clients || clientsRes.data || []);
+
+      const registryByTenant = new Map(
+        (onboardingRes.data?.tenants || []).map((tenant) => [String(tenant.tenant_id), tenant]),
+      );
+      const merged = new Map();
+      for (const tenant of (sumRes.data?.tenants || [])) {
+        const registry = registryByTenant.get(String(tenant.customerId)) || {};
+        merged.set(String(tenant.customerId), {
+          ...tenant,
+          connectionId: registry.id,
+          source: registry.source || "operational_provider",
+          clientId: registry.client_id,
+          clientName: registry.client_name,
+          mapped: Boolean(registry.mapped || registry.client_id),
+          accessStatus: "connected",
+          graphVerified: true,
+          providerOperational: true,
+        });
+      }
+      for (const tenant of (onboardingRes.data?.tenants || [])) {
+        const key = String(tenant.tenant_id);
+        if (merged.has(key)) continue;
+        merged.set(key, {
+          customerId: tenant.tenant_id,
+          displayName: tenant.tenant_name || tenant.tenant_id,
+          defaultDomainName: tenant.default_domain || "",
+          connectionId: tenant.id,
+          source: tenant.source,
+          clientId: tenant.client_id,
+          clientName: tenant.client_name,
+          mapped: Boolean(tenant.mapped),
+          accessStatus: tenant.access_status,
+          graphVerified: Boolean(tenant.graph_verified),
+          providerOperational: false,
+        });
+      }
+      setTenants(Array.from(merged.values()).sort((a, b) => String(a.displayName || "").localeCompare(String(b.displayName || ""))));
     } finally { setLoadingSummary(false); }
   }, [token]); // eslint-disable-line
 
@@ -72,7 +111,7 @@ export default function CippCommandCenterPage() {
 
   // Load tenant users + licenses when selected
   useEffect(() => {
-    if (!selectedTenant) { setUsers([]); setLicenses([]); return; }
+    if (!selectedTenant || !selectedTenant.providerOperational) { setUsers([]); setLicenses([]); return; }
     (async () => {
       setLoadingUsers(true);
       try {
@@ -123,10 +162,9 @@ export default function CippCommandCenterPage() {
     if (newPw === null) return;
     setBusy(true);
     try {
-      const res = await axios.post(`${API}/cipp/tenants/${selectedTenant.customerId}/users/${user.id}/reset-password`,
+      await axios.post(`${API}/cipp/tenants/${selectedTenant.customerId}/users/${user.id}/reset-password`,
         { password: newPw, mustChange: true }, { headers });
       toast.success(`Password reset for ${user.userPrincipalName}`);
-      console.log("CIPP reset-password result", res.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Reset failed"); }
     finally { setBusy(false); }
   };
@@ -164,54 +202,93 @@ export default function CippCommandCenterPage() {
     if (!linkDialog || !linkClientId) return;
     setBusy(true);
     try {
-      await axios.post(`${API}/clients/${linkClientId}/link-cipp-tenant`, {
-        tenant_id: linkDialog.customerId,
-        tenant_display: linkDialog.displayName,
-        tenant_domain: linkDialog.defaultDomainName,
-      }, { headers });
+      if (linkDialog.connectionId) {
+        await axios.put(
+          `${API}/m365/onboarding/tenants/${linkDialog.connectionId}/mapping`,
+          { client_id: linkClientId },
+          { headers },
+        );
+      } else {
+        await axios.post(`${API}/clients/${linkClientId}/link-cipp-tenant`, {
+          tenant_id: linkDialog.customerId,
+          tenant_display: linkDialog.displayName,
+          tenant_domain: linkDialog.defaultDomainName,
+        }, { headers });
+      }
       toast.success("Tenant linked to client");
-      setLinkDialog(null); setLinkClientId("");
-      loadSummary();
+      setLinkDialog(null);
+      setLinkClientId("");
+      const linkedClient = allClients.find((client) => client.id === linkClientId);
+      setSelectedTenant((current) => current ? { ...current, clientId: linkClientId, clientName: linkedClient?.name, mapped: true } : current);
+      await loadSummary();
     } catch (e) { toast.error(e.response?.data?.detail || "Link failed"); }
     finally { setBusy(false); }
   };
 
-  const notConfigured = summary && !summary.configured;
+  const providerOperational = Boolean(summary?.configured);
+  const partnerConnected = onboarding?.connection?.last_test_status === "success";
   const s = summary?.stats || {};
+  const tenantCount = Math.max(Number(s.tenants || 0), Number(onboarding?.summary?.discovered || 0));
+  const linkedCount = Math.max(Number(s.linked_clients || 0), Number(onboarding?.summary?.mapped || 0));
+  const coveragePct = tenantCount ? Math.round((linkedCount / tenantCount) * 100) : 0;
 
   return (
-    <div className="p-6 space-y-5" data-testid="cipp-command-center">
-      <OperationalPageHeader
-        eyebrow="Microsoft partner operations"
-        title="CIPP"
-        description="Manage partner tenants, identity lifecycle work, licensing, hygiene posture, and client linking through the CIPP integration."
+    <div className={embedded ? "space-y-5" : "p-6 space-y-5"} data-testid="cipp-command-center">
+      {!embedded && <OperationalPageHeader
+        eyebrow="Microsoft tenant operations"
+        title="Nexus Control Plane"
+        description="Manage partner tenants, identity lifecycle work, licensing, security posture, and client linking from one NexusMSP control surface."
         icon={Cloud}
-        tone="sky"
+        tone="cyan"
         actions={<>
-          <Badge variant="outline" className={notConfigured ? "border-amber-500/30 text-amber-300" : "border-emerald-500/30 text-emerald-300"}>{notConfigured ? "Configuration required" : "Connected"}</Badge>
+          <Badge variant="outline" className={providerOperational ? "border-emerald-500/30 text-emerald-300" : partnerConnected ? "border-cyan-500/30 text-cyan-200" : "border-amber-500/30 text-amber-300"}>
+            {providerOperational ? "Operations connected" : partnerConnected ? "Discovery connected" : "Configuration required"}
+          </Badge>
           <Button variant="outline" size="sm" asChild data-testid="cipp-configure-btn">
-            <Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Connection</Link>
+            <Link to="/control-plane?module=microsoft365&view=connections"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Connections</Link>
           </Button>
           <Button size="sm" variant="outline" onClick={loadSummary} disabled={loadingSummary} data-testid="cipp-refresh-btn">
             {loadingSummary ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Refresh
           </Button>
         </>}
-      />
+      />}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <HeroTile label="Tenants" value={loadingSummary ? "—" : s.tenants ?? "—"} icon={Cloud} glow="cyan" subtitle="CIPP-managed tenants" testId="cipp-metric-tenants" />
-        <HeroTile label="Linked clients" value={loadingSummary ? "—" : s.linked_clients ?? "—"} icon={LinkIcon} glow="emerald" subtitle="Mapped to Nexus clients" testId="cipp-metric-linked" />
-        <HeroTile label="Coverage" value={loadingSummary ? "—" : s.coverage_pct ?? 0} suffix="%" icon={Shield} glow="sky" subtitle="Tenants linked to clients" testId="cipp-metric-coverage" />
-        <HeroTile label="Actions" value={loadingSummary ? "—" : summary?.recent_actions?.length ?? "—"} icon={RefreshCw} glow="violet" subtitle="Audited in the last 30 days" testId="cipp-metric-actions" />
+        <HeroTile label="Tenants" value={loadingSummary ? "—" : tenantCount} icon={Cloud} glow="cyan" subtitle="Discovered and operational" testId="cipp-metric-tenants" />
+        <HeroTile label="Linked clients" value={loadingSummary ? "—" : linkedCount} icon={LinkIcon} glow="emerald" subtitle="Mapped to Nexus clients" testId="cipp-metric-linked" />
+        <HeroTile label="Coverage" value={loadingSummary ? "—" : coveragePct} suffix="%" icon={Shield} glow="sky" subtitle="Tenants linked to clients" testId="cipp-metric-coverage" />
+        <HeroTile label="Audited actions" value={loadingSummary ? "—" : summary?.recent_actions?.length ?? 0} icon={RefreshCw} glow="violet" subtitle="Last 30 days" testId="cipp-metric-actions" />
       </div>
 
       <div className="space-y-4">
+        <Card className={providerOperational ? "border-emerald-500/25 bg-emerald-500/[0.04]" : partnerConnected ? "border-cyan-500/25 bg-cyan-500/[0.04]" : "border-amber-500/25 bg-amber-500/[0.04]"}>
+          <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
+            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${providerOperational ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200" : partnerConnected ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-200" : "border-amber-500/25 bg-amber-500/10 text-amber-200"}`}>
+              {providerOperational ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold">
+                {providerOperational ? "Microsoft tenant operations are available" : partnerConnected ? "Tenant discovery connected — operational access pending" : "Connect Microsoft tenant discovery"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                {providerOperational
+                  ? "The operational provider can read tenant users and licences. High-impact actions remain permission, client-scope and approval governed."
+                  : partnerConnected
+                    ? "Partner Center can discover customers, but users, licences and write actions stay disabled until the tenant has verified GDAP or customer-admin Graph access."
+                    : "Configure the MSP partner tenant once, discover customers, then map and verify each tenant before technicians carry out identity work."}
+              </p>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/control-plane?module=microsoft365&view=connections"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Manage connections</Link>
+            </Button>
+          </CardContent>
+        </Card>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="w-full md:w-auto" data-testid="cipp-tabs">
             <TabsTrigger value="tenants" data-testid="cipp-tab-tenants"><Cloud className="w-3 h-3 mr-1" />Tenants</TabsTrigger>
-            <TabsTrigger value="hygiene" data-testid="cipp-tab-hygiene"><Shield className="w-3 h-3 mr-1" />Hygiene Digest</TabsTrigger>
-            <TabsTrigger value="linked" data-testid="cipp-tab-linked"><LinkIcon className="w-3 h-3 mr-1" />Linked Clients</TabsTrigger>
+            <TabsTrigger value="hygiene" data-testid="cipp-tab-hygiene"><Shield className="w-3 h-3 mr-1" />Security posture</TabsTrigger>
+            <TabsTrigger value="linked" data-testid="cipp-tab-linked"><LinkIcon className="w-3 h-3 mr-1" />Linked clients</TabsTrigger>
             <TabsTrigger value="audit" data-testid="cipp-tab-audit"><RefreshCw className="w-3 h-3 mr-1" />Audit</TabsTrigger>
           </TabsList>
 
@@ -234,8 +311,13 @@ export default function CippCommandCenterPage() {
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading tenants…
                     </div>
                   ) : filteredTenants.length === 0 ? (
-                    <div className="text-center py-12 text-xs text-muted-foreground">
-                      {notConfigured ? "Add CIPP credentials in Settings → Integrations → CIPP." : "No tenants match."}
+                    <div className="space-y-3 px-5 py-12 text-center">
+                      <Cloud className="mx-auto h-8 w-8 text-muted-foreground/60" />
+                      <p className="text-sm font-medium">{query ? "No tenants match this search" : "No Microsoft tenants are in scope yet"}</p>
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        {query ? "Try a tenant name, primary domain or tenant ID." : "Connect Partner Center to discover CSP customers in bulk, or add an individual tenant."}
+                      </p>
+                      {!query && <Button variant="outline" size="sm" asChild><Link to="/control-plane?module=microsoft365&view=connections">Open tenant onboarding</Link></Button>}
                     </div>
                   ) : (
                     <div className="divide-y divide-border max-h-[calc(100vh-280px)] overflow-y-auto">
@@ -246,8 +328,17 @@ export default function CippCommandCenterPage() {
                           className={`w-full text-left p-3 hover:bg-muted/30 ${selectedTenant?.customerId === t.customerId ? "bg-muted/40 border-l-2 border-l-orange-500" : ""}`}
                           data-testid={`cipp-tenant-${t.customerId}`}
                         >
-                          <div className="text-sm font-medium truncate">{t.displayName}</div>
-                          <div className="text-[11px] text-muted-foreground font-mono truncate">{t.defaultDomainName}</div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">{t.displayName}</div>
+                              <div className="truncate font-mono text-[11px] text-muted-foreground">{t.defaultDomainName || t.customerId}</div>
+                            </div>
+                            <TenantAccessBadge status={t.accessStatus} compact />
+                          </div>
+                          <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                            <span className={`h-1.5 w-1.5 rounded-full ${t.mapped ? "bg-emerald-400" : "bg-amber-400"}`} />
+                            {t.clientName || (t.mapped ? "Client mapped" : "Needs client mapping")}
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -267,17 +358,35 @@ export default function CippCommandCenterPage() {
                           <div className="text-lg font-semibold">{selectedTenant.displayName}</div>
                           <div className="text-xs text-muted-foreground font-mono">{selectedTenant.defaultDomainName}</div>
                           <div className="text-[10px] text-muted-foreground font-mono mt-1">tenant: {selectedTenant.customerId}</div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <TenantAccessBadge status={selectedTenant.accessStatus} />
+                            <Badge variant="outline" className={selectedTenant.mapped ? "border-emerald-500/25 text-emerald-200" : "border-amber-500/25 text-amber-200"}>
+                              {selectedTenant.clientName || (selectedTenant.mapped ? "Client mapped" : "Client mapping required")}
+                            </Badge>
+                            <Badge variant="outline" className="capitalize text-muted-foreground">{String(selectedTenant.source || "unknown").replaceAll("_", " ")}</Badge>
+                          </div>
                         </div>
                         <div className="flex gap-2">
                           <Button size="sm" variant="outline" onClick={() => setLinkDialog(selectedTenant)} data-testid="cipp-link-client-btn">
-                            <LinkIcon className="w-3 h-3 mr-1" />Link to client
+                            <LinkIcon className="w-3 h-3 mr-1" />{selectedTenant.mapped ? "Change mapping" : "Map client"}
                           </Button>
-                          <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setCreateDialog(true)} data-testid="cipp-create-user-btn">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10"
+                            onClick={() => setCreateDialog(true)}
+                            disabled={!selectedTenant.providerOperational || !selectedTenant.mapped}
+                            title={!selectedTenant.providerOperational ? "Verify operational Microsoft access first" : !selectedTenant.mapped ? "Map this tenant to a Nexus client first" : undefined}
+                            data-testid="cipp-create-user-btn"
+                          >
                             <UserPlus className="w-3 h-3 mr-1" />Create user
                           </Button>
                         </div>
                       </div>
 
+                      {!selectedTenant.providerOperational ? (
+                        <TenantReadinessPanel tenant={selectedTenant} />
+                      ) : <>
                       <div className="grid grid-cols-3 gap-2 pt-2">
                         <div className="rounded border border-border p-2 bg-muted/20">
                           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Users</div>
@@ -358,6 +467,7 @@ export default function CippCommandCenterPage() {
                           </Table>
                         )}
                       </div>
+                      </>}
                     </>
                   )}
                 </CardContent>
@@ -373,7 +483,7 @@ export default function CippCommandCenterPage() {
             <Card>
               <CardContent className="p-0">
                 {linkedClients.length === 0 ? (
-                  <div className="text-center py-12 text-xs text-muted-foreground">No clients linked to a CIPP tenant yet.</div>
+                  <div className="text-center py-12 text-xs text-muted-foreground">No clients are linked to a Microsoft tenant yet.</div>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -408,7 +518,7 @@ export default function CippCommandCenterPage() {
             <Card>
               <CardContent className="p-0">
                 {(summary?.recent_actions || []).length === 0 ? (
-                  <div className="text-center py-12 text-xs text-muted-foreground">No CIPP actions yet.</div>
+                  <div className="text-center py-12 text-xs text-muted-foreground">No tenant operations have been recorded yet.</div>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -546,7 +656,7 @@ export default function CippCommandCenterPage() {
         <DialogContent className="max-w-lg" data-testid="cipp-offboard-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><UserX className="w-4 h-4 text-rose-400" />Offboard {offboardDialog?.userPrincipalName}</DialogTitle>
-            <DialogDescription>Choose offboarding actions. This typically runs through CIPP's <code>ExecOffboardUser</code>.</DialogDescription>
+            <DialogDescription>Choose the Microsoft identity and mailbox actions to run through the configured tenant provider.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 text-xs">
             {[
@@ -579,7 +689,7 @@ export default function CippCommandCenterPage() {
       <Dialog open={!!linkDialog} onOpenChange={() => setLinkDialog(null)}>
         <DialogContent data-testid="cipp-link-dialog">
           <DialogHeader>
-            <DialogTitle>Link tenant to NexusOps client</DialogTitle>
+            <DialogTitle>Link tenant to NexusMSP client</DialogTitle>
             <DialogDescription>{linkDialog?.displayName} ({linkDialog?.defaultDomainName})</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -597,6 +707,83 @@ export default function CippCommandCenterPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function TenantAccessBadge({ status, compact = false }) {
+  const size = compact ? "px-1.5 py-0 text-[9px]" : "text-[10px]";
+  if (status === "connected") {
+    return <Badge variant="outline" className={`shrink-0 border-emerald-500/30 bg-emerald-500/10 text-emerald-200 ${size}`}>Ready</Badge>;
+  }
+  if (status === "consent_required") {
+    return <Badge variant="outline" className={`shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-200 ${size}`}>Consent</Badge>;
+  }
+  if (status === "gdap_required") {
+    return <Badge variant="outline" className={`shrink-0 border-cyan-500/30 bg-cyan-500/10 text-cyan-200 ${size}`}>GDAP</Badge>;
+  }
+  return <Badge variant="outline" className={`shrink-0 border-zinc-700 text-muted-foreground ${size}`}>Pending</Badge>;
+}
+
+function TenantReadinessPanel({ tenant }) {
+  const checks = [
+    {
+      label: "Tenant discovered",
+      complete: true,
+      detail: `Source: ${String(tenant.source || "manual").replaceAll("_", " ")}`,
+    },
+    {
+      label: "Nexus client mapped",
+      complete: Boolean(tenant.mapped),
+      detail: tenant.clientName || (tenant.mapped ? "Client mapping retained" : "Choose Map client above"),
+    },
+    {
+      label: "Microsoft access verified",
+      complete: tenant.accessStatus === "connected",
+      detail: tenant.accessStatus === "consent_required"
+        ? "Customer administrator consent is still required"
+        : tenant.accessStatus === "gdap_required"
+          ? "A least-privilege GDAP relationship is still required"
+          : "Waiting for verified Microsoft Graph evidence",
+    },
+    {
+      label: "Operational provider ready",
+      complete: Boolean(tenant.providerOperational),
+      detail: "Required before Nexus reads users, licences or submits tenant changes",
+    },
+  ];
+  const next = checks.find((item) => !item.complete);
+
+  return (
+    <div className="space-y-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.035] p-4" data-testid="tenant-readiness-panel">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10">
+          <AlertTriangle className="h-4 w-4 text-amber-200" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">Tenant operations are safely locked</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Nexus has retained the tenant record, but it will not show fabricated users or enable identity changes until client ownership and Microsoft access are verified.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/control-plane?module=microsoft365&view=connections">Resolve access</Link>
+        </Button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {checks.map((item) => (
+          <div key={item.label} className="flex gap-2 rounded-lg border border-border/70 bg-black/10 p-3">
+            {item.complete
+              ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+              : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />}
+            <div>
+              <p className="text-xs font-medium">{item.label}</p>
+              <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{item.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {next && <p className="text-xs text-amber-100"><span className="font-semibold">Next action:</span> {next.detail}.</p>}
     </div>
   );
 }
@@ -635,7 +822,22 @@ function CippHygienePanel() {
   };
 
   if (loading) return <Card><CardContent className="p-8 text-center text-muted-foreground"><Loader2 className="w-4 h-4 mr-2 animate-spin inline" />Computing hygiene digest…</CardContent></Card>;
-  if (!digest?.configured) return <Card><CardContent className="p-8 text-center text-xs text-amber-400">CIPP not configured — add credentials in Settings first.</CardContent></Card>;
+  if (!digest?.configured) {
+    return (
+      <Card className="border-amber-500/25 bg-amber-500/[0.04]">
+        <CardContent className="flex flex-col items-center gap-3 p-8 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10">
+            <Shield className="h-4 w-4 text-amber-200" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold">Security posture is waiting for verified Microsoft evidence</p>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Connect tenant discovery, map the customer, and verify GDAP or customer-admin access. Nexus will not estimate posture or invent a hygiene score.</p>
+          </div>
+          <Button variant="outline" size="sm" asChild><Link to="/control-plane?module=microsoft365&view=connections">Review Microsoft connections</Link></Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const rows = digest.clients || [];
   const scored = rows.filter(r => typeof r.score === "number");

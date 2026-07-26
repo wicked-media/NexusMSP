@@ -50,13 +50,86 @@ async def get_job_conversation(job_type: str, job_id: str, current_user: dict = 
 
 @router.post("/{job_type}-jobs/{job_id}/conversation/note")
 async def add_job_note(job_type: str, job_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    config, _ = await _job_or_404(job_type, job_id)
+    config, job = await _job_or_404(job_type, job_id)
     content = (data.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="Note content is required")
-    note = {"id": str(uuid.uuid4()), "job_id": job_id, "user_id": current_user["id"], "user_name": current_user.get("name", ""), "avatar_url": current_user.get("avatar"), "content": content, "note_type": "conversation", "is_internal": True, "created_at": datetime.now(timezone.utc).isoformat()}
-    await db[config["notes"]].insert_one(note)
-    await _audit(config, job_id, current_user, "conversation_note_added", "Internal conversation note added")
+    visibility = str(data.get("visibility") or "").strip().lower()
+    is_internal = visibility != "public" if visibility else bool(data.get("is_internal", True))
+    notify_client = bool(data.get("notify_client", False)) and not is_internal
+    recipients = [
+        str(address or "").strip()
+        for address in (data.get("to_addresses") or [])
+        if str(address or "").strip()
+    ]
+    if notify_client and not recipients and str(job.get("customer_email") or "").strip():
+        recipients.append(str(job["customer_email"]).strip())
+    if notify_client and not recipients:
+        raise HTTPException(
+            status_code=400,
+            detail="This public update has no recipient. Add an email address or publish without email.",
+        )
+
+    subject_label = str(data.get("subject_label") or "Update").strip() or "Update"
+    number = job.get("job_number", job_id)
+    subject = str(data.get("subject") or "").strip() or f"{subject_label}: [{number}] {job.get('title') or config['label'].title()}"
+    delivery = {}
+    if notify_client:
+        from app.routers.email_signatures import append_default_signature
+        from app.routers.email_utils import send_email
+
+        body, body_type, _ = await append_default_signature(
+            body=content,
+            body_type="html" if "<" in content else "text",
+            current_user=current_user,
+            subject=subject,
+            ticket_id=None,
+        )
+        delivery = await send_email(
+            recipients,
+            subject,
+            body if body_type == "html" else f"<pre>{body}</pre>",
+            category="service_job_comments",
+            client_id=job.get("client_id"),
+            related_type=f"{job_type}_job",
+            related_id=job_id,
+            initiated_by=current_user.get("id"),
+            initiated_by_name=current_user.get("name"),
+        )
+
+    note = {
+        "id": str(uuid.uuid4()),
+        "job_id": job_id,
+        "user_id": current_user["id"],
+        "user_name": current_user.get("name", ""),
+        "avatar_url": current_user.get("avatar"),
+        "content": content,
+        "note_type": "conversation",
+        "is_internal": is_internal,
+        "visibility": "internal" if is_internal else "public",
+        "portal_visible": not is_internal,
+        "client_notified": notify_client,
+        "to_addresses": recipients if notify_client else [],
+        "subject": subject if not is_internal else "",
+        "subject_label": subject_label if not is_internal else "",
+        "delivery_status": delivery.get("status") if notify_client else "portal_only" if not is_internal else "internal",
+        "delivery_message": delivery.get("message", "") if notify_client else "",
+        "delivery_id": (delivery.get("delivery_id") or delivery.get("email_id")) if notify_client else None,
+        "sender_mailbox": delivery.get("sender") if notify_client else None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db[config["notes"]].insert_one(dict(note))
+    await _audit(
+        config,
+        job_id,
+        current_user,
+        "conversation_public_update_added" if not is_internal else "conversation_note_added",
+        f"Published client update to {', '.join(recipients)} ({note['delivery_status']})"
+        if notify_client
+        else "Published client-visible update"
+        if not is_internal
+        else "Internal conversation note added",
+    )
     return note
 
 
@@ -75,7 +148,7 @@ async def send_job_email(job_type: str, job_id: str, data: dict, current_user: d
         body=body, body_type=data.get("body_type", "html"), current_user=current_user,
         subject=subject, ticket_id=None,
     )
-    delivery = await send_email(recipients, subject, body if body_type == "html" else f"<pre>{body}</pre>", category="service_job_replies", cc_addresses=data.get("cc") or [], client_id=job.get("client_id"), related_type=f"{job_type}_job", related_id=job_id, initiated_by=current_user.get("id"), initiated_by_name=current_user.get("name"))
+    delivery = await send_email(recipients, subject, body if body_type == "html" else f"<pre>{body}</pre>", category="service_job_replies", cc_addresses=data.get("cc") or [], bcc_addresses=data.get("bcc") or [], client_id=job.get("client_id"), related_type=f"{job_type}_job", related_id=job_id, initiated_by=current_user.get("id"), initiated_by_name=current_user.get("name"))
     email = {"id": str(uuid.uuid4()), "job_type": job_type, "job_id": job_id, "client_id": job.get("client_id"), "job_number": number, "user_id": current_user.get("id"), "avatar_url": current_user.get("avatar"), "from_address": current_user.get("email", ""), "from_name": current_user.get("name", ""), "to_addresses": recipients, "cc_addresses": data.get("cc") or [], "bcc_addresses": data.get("bcc") or [], "subject": subject, "body": body, "body_type": body_type, "direction": "outbound", "status": delivery.get("status", "failed"), "delivery_message": delivery.get("message", ""), "sender_mailbox": delivery.get("sender"), "created_at": datetime.now(timezone.utc).isoformat()}
     await db.job_emails.insert_one(email)
     await _audit(config, job_id, current_user, "conversation_email_sent", f"Email sent to {', '.join(recipients)}")

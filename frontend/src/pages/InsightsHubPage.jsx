@@ -3,6 +3,8 @@ import axios from "axios";
 import { Link, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,27 +41,25 @@ export default function InsightsHubPage() {
   return (
     <PageShell>
       <div className="space-y-5" data-testid="insights-hub-page">
-        <div className="flex items-end justify-between flex-wrap gap-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
-              <Sparkles className="w-3 h-3" />Insights Hub
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Cross-cutting Intelligence</h1>
-            <p className="text-sm text-muted-foreground">9 cross-tenant analytics surfaces — built from your live data.</p>
-          </div>
-        </div>
+        <OperationalPageHeader
+          eyebrow="Operations intelligence"
+          title="Insights Hub"
+          description="Cross-tenant signals for workload, security, fleet health, financial exposure, evidence readiness, and reusable runbooks. Each view is generated from your live NexusMSP records."
+          icon={Sparkles}
+          tone="violet"
+        />
 
         <Tabs value={tab} onValueChange={selectTab} className="w-full">
-          <TabsList className="flex-wrap h-auto" data-testid="insights-tabs">
-            <TabsTrigger value="overload" data-testid="tab-overload"><Brain className="w-3 h-3 mr-1" />Tech Load</TabsTrigger>
-            <TabsTrigger value="patches" data-testid="tab-patches"><AlertOctagon className="w-3 h-3 mr-1" />Patch Anomalies</TabsTrigger>
-            <TabsTrigger value="trajectory" data-testid="tab-trajectory"><Server className="w-3 h-3 mr-1" />Device Trajectory</TabsTrigger>
-            <TabsTrigger value="battery" data-testid="tab-battery"><Battery className="w-3 h-3 mr-1" />Battery Wall</TabsTrigger>
-            <TabsTrigger value="ar" data-testid="tab-ar"><DollarSign className="w-3 h-3 mr-1" />Aged AR</TabsTrigger>
-            <TabsTrigger value="xp" data-testid="tab-xp"><Award className="w-3 h-3 mr-1" />Skills XP</TabsTrigger>
-            <TabsTrigger value="vault" data-testid="tab-vault"><ShieldCheck className="w-3 h-3 mr-1" />Insurance Vault</TabsTrigger>
-            <TabsTrigger value="brief" data-testid="tab-brief"><Mic className="w-3 h-3 mr-1" />Voice Brief</TabsTrigger>
-            <TabsTrigger value="runbooks" data-testid="tab-runbooks"><BookOpen className="w-3 h-3 mr-1" />Runbooks</TabsTrigger>
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-3 xl:grid-cols-9" data-testid="insights-tabs">
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="overload" data-testid="tab-overload"><Brain className="w-3.5 h-3.5" />Tech Load</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="patches" data-testid="tab-patches"><AlertOctagon className="w-3.5 h-3.5" />Patch Anomalies</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="trajectory" data-testid="tab-trajectory"><Server className="w-3.5 h-3.5" />Device Trajectory</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="battery" data-testid="tab-battery"><Battery className="w-3.5 h-3.5" />Battery Wall</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="ar" data-testid="tab-ar"><DollarSign className="w-3.5 h-3.5" />Aged AR</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="xp" data-testid="tab-xp"><Award className="w-3.5 h-3.5" />Skills XP</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="vault" data-testid="tab-vault"><ShieldCheck className="w-3.5 h-3.5" />Insurance Vault</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="brief" data-testid="tab-brief"><Mic className="w-3.5 h-3.5" />Voice Brief</TabsTrigger>
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="runbooks" data-testid="tab-runbooks"><BookOpen className="w-3.5 h-3.5" />Runbooks</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overload"><CognitiveLoadView api={api} /></TabsContent>
@@ -188,45 +188,86 @@ const TRAJ_STYLE = {
   healthy: { card: "border-emerald-500/30", title: "text-emerald-400", score: "text-emerald-400", label: "Healthy" },
 };
 function HealthTrajectoryView({ api }) {
-  const { data, loading } = useFetch(api, "/device-health-trajectory");
+  const { data, loading, reload } = useFetch(api, "/device-health-trajectory");
   if (loading) return <Loader label="Calculating device replacement timelines…" />;
   const buckets = data?.buckets || {};
   const totals = data?.totals || {};
+  const fleetTotal = Object.values(totals).reduce((sum, value) => sum + Number(value || 0), 0);
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3" data-testid="health-trajectory-card">
-      {Object.keys(TRAJ_STYLE).map((b) => {
-        const s = TRAJ_STYLE[b];
-        return (
-          <Card key={b} className={s.card}>
-            <CardHeader className="pb-2"><CardTitle className={`text-xs uppercase tracking-widest ${s.title}`}>{s.label} <span className="ml-2 font-mono text-base text-foreground">{totals[b] || 0}</span></CardTitle></CardHeader>
-            <CardContent className="text-xs space-y-1.5 max-h-72 overflow-y-auto">
-              {(buckets[b] || []).slice(0, 12).map((d) => (
-                <div key={d.device_id} className="flex items-center justify-between border-b border-border/30 pb-1">
-                  <div className="truncate"><div className="font-medium truncate">{d.name}</div><div className="text-[10px] text-muted-foreground truncate">{d.client_name} · age {d.age_days || "?"}d · err {d.errors}</div></div>
-                  <div className={`font-mono ml-2 ${s.score}`}>{d.score}</div>
-                </div>
-              ))}
-              {(buckets[b] || []).length === 0 && <div className="text-muted-foreground text-center py-3">None</div>}
-            </CardContent>
-          </Card>
-        );
-      })}
+    <div className="mt-3 space-y-4" data-testid="health-trajectory-card">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <HeroTile label="Replace now" value={totals.replace_now_30 || 0} icon={AlertOctagon} glow="rose" subtitle="Act within 30 days" />
+        <HeroTile label="Plan next" value={totals.plan_next_90 || 0} icon={Server} glow="amber" subtitle="Plan within 90 days" />
+        <HeroTile label="Lifecycle queue" value={totals.monitor || 0} icon={RefreshCw} glow="violet" subtitle="Monitor for replacement" />
+        <HeroTile label="Healthy fleet" value={totals.healthy || fleetTotal} icon={ShieldCheck} glow="emerald" subtitle={`${fleetTotal} assessed endpoints`} />
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">Replacement evidence</h2>
+          <p className="text-xs text-muted-foreground">Open an asset directly to review its health, telemetry, and remediation history before planning replacement.</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={reload} className="shrink-0">
+          <RefreshCw className="mr-2 h-3.5 w-3.5" />Refresh trajectory
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        {Object.keys(TRAJ_STYLE).map((b) => {
+          const s = TRAJ_STYLE[b];
+          return (
+            <Card key={b} className={s.card}>
+              <CardHeader className="pb-2"><CardTitle className={`text-xs uppercase tracking-widest ${s.title}`}>{s.label} <span className="ml-2 font-mono text-base text-foreground">{totals[b] || 0}</span></CardTitle></CardHeader>
+              <CardContent className="max-h-72 space-y-1.5 overflow-y-auto text-xs">
+                {(buckets[b] || []).slice(0, 12).map((d) => (
+                  <Link key={d.device_id} to={`/devices/${d.device_id}`} className="flex items-center justify-between border-b border-border/30 pb-1 transition-colors hover:text-primary">
+                    <div className="min-w-0"><div className="truncate font-medium">{d.name}</div><div className="truncate text-[10px] text-muted-foreground">{d.client_name} · age {d.age_days || "?"}d · err {d.errors}</div></div>
+                    <div className={`ml-2 font-mono ${s.score}`}>{d.score}</div>
+                  </Link>
+                ))}
+                {(buckets[b] || []).length === 0 && <div className="py-3 text-center text-muted-foreground">None</div>}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 /* ─────────── 4. Battery Wall ─────────── */
 function BatteryWallView({ api }) {
-  const { data, loading } = useFetch(api, "/device-battery-wall");
+  const { data, loading, reload } = useFetch(api, "/device-battery-wall");
   if (loading) return <Loader label="Inspecting laptop batteries…" />;
   const rows = data?.devices || [];
+  const replaceCount = rows.filter((row) => row.recommend === "replace").length;
+  const planCount = rows.filter((row) => row.recommend !== "replace").length;
+  const averageHealth = rows.length
+    ? Math.round(rows.reduce((sum, row) => sum + Number(row.battery_health || 0), 0) / rows.length)
+    : 100;
+
   return (
-    <Card className="mt-3" data-testid="battery-wall-card">
-      <CardHeader className="pb-2"><CardTitle className="text-sm">Top 20 laptops with degraded batteries</CardTitle></CardHeader>
+    <div className="mt-3 space-y-4" data-testid="battery-wall-card">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <HeroTile label="Replace now" value={replaceCount} icon={AlertOctagon} glow="rose" subtitle="Critically degraded batteries" />
+        <HeroTile label="Plan refresh" value={planCount} icon={Battery} glow="amber" subtitle="Monitor or schedule replacement" />
+        <HeroTile label="Average health" value={averageHealth} suffix="%" icon={Battery} glow={averageHealth < 70 ? "amber" : "emerald"} subtitle="Across flagged laptops" />
+        <HeroTile label="Devices reviewed" value={rows.length} icon={Server} glow="cyan" subtitle="Top 20 at-risk devices" />
+      </div>
+
+      <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3 pb-2">
+        <div>
+          <CardTitle className="text-sm">Battery replacement queue</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">Prioritised from the latest endpoint telemetry. Open the asset to confirm diagnostics before approving a replacement.</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={reload} className="shrink-0"><RefreshCw className="mr-2 h-3.5 w-3.5" />Refresh readings</Button>
+      </CardHeader>
       <CardContent>
         {rows.length === 0 ? <div className="text-center py-8 text-sm text-muted-foreground">No degraded batteries detected.</div> :
           <Table>
-            <TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead className="text-right">Health %</TableHead><TableHead className="text-right">Cycles</TableHead><TableHead>Recommend</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead className="text-right">Health %</TableHead><TableHead className="text-right">Cycles</TableHead><TableHead>Recommendation</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
             <TableBody>
               {rows.map((r) => (
                 <TableRow key={r.device_id} data-testid={`battery-${r.device_id}`}>
@@ -235,12 +276,14 @@ function BatteryWallView({ api }) {
                   <TableCell className={`text-right font-mono font-bold ${r.battery_health < 50 ? "text-rose-400" : r.battery_health < 70 ? "text-amber-400" : "text-emerald-400"}`}>{r.battery_health}%</TableCell>
                   <TableCell className="text-right font-mono">{r.battery_cycles || "—"}</TableCell>
                   <TableCell><Badge variant="outline" className={r.recommend === "replace" ? "text-rose-400 border-rose-500/40" : "text-amber-400 border-amber-500/40"}>{r.recommend}</Badge></TableCell>
+                  <TableCell className="text-right"><Button asChild size="sm" variant="ghost"><Link to={`/devices/${r.device_id}`}>Open asset<ChevronRight className="ml-1 h-3.5 w-3.5" /></Link></Button></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>}
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }
 

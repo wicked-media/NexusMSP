@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, EyeOff, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Copy, Play, Thermometer, Pencil, Building2, Search, MessageSquare } from "lucide-react";
+import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Thermometer, Pencil, Building2, Search, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -40,10 +40,6 @@ export default function DeviceDetailPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
-  const [remoteDialogOpen, setRemoteDialogOpen] = useState(false);
-  const [connectDialog, setConnectDialog] = useState(null);
-  const [showPassword, setShowPassword] = useState({});
-  const [connectLoading, setConnectLoading] = useState(false);
   const [diskHealth, setDiskHealth] = useState([]);
   const [rdLiveStatus, setRdLiveStatus] = useState(null);
   const [patchWindowOpen, setPatchWindowOpen] = useState(false);
@@ -97,47 +93,6 @@ export default function DeviceDetailPage() {
     const interval = setInterval(fetchRdStatus, 15000);
     return () => clearInterval(interval);
   }, [token, data?.device?.rustdesk_id]);
-
-  // Launch RustDesk via hidden anchor (no blank tab)
-  const launchRustDesk = (rdId, relayServer) => {
-    let uri;
-    if (relayServer) {
-      // Self-hosted: rustdesk://ID@relay_host
-      const host = relayServer.replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
-      uri = `rustdesk://${rdId}@${host}`;
-    } else {
-      uri = `rustdesk://${rdId}`;
-    }
-    const a = document.createElement("a");
-    a.href = uri;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => document.body.removeChild(a), 100);
-  };
-
-  const startRemoteAccess = async () => {
-    if (!dev.rustdesk_id) {
-      setRemoteDialogOpen(true);
-      return;
-    }
-    setConnectLoading(true);
-    try {
-      const res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: dev.rustdesk_id }, { headers: { Authorization: `Bearer ${token}` } });
-      setConnectDialog({
-        rustdesk_id: dev.rustdesk_id,
-        connection_url: res.data.connection_url,
-        web_client_url: res.data.web_client_url,
-        relay_server: res.data.relay_server,
-        rustdesk_password: res.data.rustdesk_password,
-        device_name: dev.name,
-      });
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to initiate connection");
-    } finally {
-      setConnectLoading(false);
-    }
-  };
 
   const downloadAgentScript = async (osType) => {
     try {
@@ -264,8 +219,6 @@ export default function DeviceDetailPage() {
           <RemoteAccessButton
             device={dev}
             status={rdLiveStatus || dev.status}
-            busy={connectLoading}
-            onLaunchRustDesk={startRemoteAccess}
             testid="remote-access-btn"
           />
           <DropdownMenu>
@@ -1033,115 +986,6 @@ export default function DeviceDetailPage() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDeviceEditorOpen(false)} disabled={deviceEditorBusy}>Cancel</Button>
             <Button onClick={saveDeviceIdentity} disabled={deviceEditorBusy} data-testid="save-device-identity">{deviceEditorBusy ? <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}Save changes</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Remote Access Dialog - No RustDesk ID configured */}
-      <Dialog open={remoteDialogOpen} onOpenChange={setRemoteDialogOpen}>
-        <DialogContent className="max-w-md" aria-describedby="no-rustdesk-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><ExternalLink className="w-5 h-5" />Remote Access - {dev.name}</DialogTitle>
-            <DialogDescription id="no-rustdesk-desc">Configure remote access for this device</DialogDescription>
-          </DialogHeader>
-          <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm text-amber-400 space-y-2">
-            <p className="font-semibold">No RustDesk ID Configured</p>
-            <p className="text-xs text-muted-foreground">This device does not have a RustDesk ID assigned. To enable remote access:</p>
-            <ol className="text-xs text-muted-foreground list-decimal pl-4 space-y-1">
-              <li>Install the NexusOps agent or RustDesk client on the device</li>
-              <li>Note the RustDesk ID displayed in the client</li>
-              <li>Assign the ID to this device in the Remote Access Hub</li>
-            </ol>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoteDialogOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Remote Connection Dialog - Matching Remote Access Hub style */}
-      <Dialog open={!!connectDialog} onOpenChange={v => { if (!v) setConnectDialog(null); }}>
-        <DialogContent className="max-w-md" aria-describedby="connect-device-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Play className="w-5 h-5 text-emerald-400" />Connect to {connectDialog?.device_name}</DialogTitle>
-            <DialogDescription id="connect-device-desc">Choose how to connect to this device</DialogDescription>
-          </DialogHeader>
-          {connectDialog && (
-            <div className="space-y-4">
-              {/* Device Info */}
-              <Card className="bg-zinc-800/50 border-border/30">
-                <CardContent className="py-3 px-4 space-y-1.5">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">RustDesk ID</span>
-                    <span className="font-mono font-bold text-emerald-400">{connectDialog.rustdesk_id}</span>
-                  </div>
-                  {connectDialog.rustdesk_password && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Password</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-xs">{showPassword["connect"] ? connectDialog.rustdesk_password : "********"}</span>
-                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setShowPassword(p => ({ ...p, connect: !p.connect }))}>
-                          {showPassword["connect"] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_password); toast.success("Password copied"); }}>
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {connectDialog.relay_server && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Relay Server</span>
-                      <span className="font-mono text-xs text-muted-foreground">{connectDialog.relay_server}</span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Connection Methods */}
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Launch Connection</Label>
-
-                <Button className="w-full justify-start h-12" variant="default" onClick={() => { launchRustDesk(connectDialog.rustdesk_id, connectDialog.relay_server || connectDialog.web_client_url); toast.success("Launching RustDesk client..."); }} data-testid="launch-native-rustdesk">
-                  <Monitor className="w-5 h-5 mr-3" />
-                  <div className="text-left">
-                    <p className="text-sm font-medium">Open in RustDesk Client</p>
-                    <p className="text-[10px] opacity-70">Requires RustDesk installed on this computer</p>
-                  </div>
-                </Button>
-
-                {connectDialog.web_client_url && (
-                  <Button className="w-full justify-start h-12" variant="outline" onClick={() => { window.open(connectDialog.web_client_url, "_blank"); toast.success("Opening web client..."); }} data-testid="launch-web-rustdesk">
-                    <Globe className="w-5 h-5 mr-3" />
-                    <div className="text-left">
-                      <p className="text-sm font-medium">Open Web Client</p>
-                      <p className="text-[10px] text-muted-foreground">Connect via browser at {connectDialog.web_client_url}</p>
-                    </div>
-                  </Button>
-                )}
-
-                <Button className="w-full justify-start h-12" variant="outline" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_id); toast.success(`ID ${connectDialog.rustdesk_id} copied — paste into RustDesk`); }} data-testid="copy-rustdesk-id">
-                  <Copy className="w-5 h-5 mr-3" />
-                  <div className="text-left">
-                    <p className="text-sm font-medium">Copy ID to Clipboard</p>
-                    <p className="text-[10px] text-muted-foreground">Manually paste into your RustDesk client</p>
-                  </div>
-                </Button>
-              </div>
-
-              <div className="text-xs text-muted-foreground bg-muted/10 p-3 rounded-lg">
-                <p className="font-medium mb-1">Troubleshooting</p>
-                <ul className="space-y-0.5 list-disc pl-3">
-                  <li>Ensure the RustDesk client is installed and running on your machine</li>
-                  <li>The target device must be online with RustDesk running</li>
-                  <li>If the native launch doesn't work, copy the ID and connect manually</li>
-                  {connectDialog.relay_server && <li>Your relay server is: <code className="font-mono text-emerald-400">{connectDialog.relay_server}</code></li>}
-                </ul>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

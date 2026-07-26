@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -6,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { Send, MessageSquare, Mail, PhoneCall, Loader2, Zap, LockKeyhole } from "lucide-react";
+import { Send, MessageSquare, Mail, PhoneCall, Loader2, Zap, LockKeyhole, Globe2, MailCheck, CircleAlert } from "lucide-react";
 import DOMPurify from "dompurify";
 import { formatDistanceToNow } from "date-fns";
 
@@ -35,7 +36,12 @@ export default function TicketConversationTab({
   smsForm, setSmsForm, handleSendSms, applySmsTemplate, smsTemplates, smsConfig, smsSending,
   ticketNotes, ticketEmails, ticketSms,
   recordLabel = "ticket",
+  allowStatusChange = true,
 }) {
+  const [publicEmailEnabled, setPublicEmailEnabled] = useState(true);
+  const [publicSubjectLabel, setPublicSubjectLabel] = useState("Update");
+  const [publicStatusAfter, setPublicStatusAfter] = useState("__unchanged");
+  const publicRecipient = (emailForm.to || "").split(",").map(value => value.trim()).filter(Boolean)[0] || "";
   const allItems = [
     ...ticketNotes.map(n => ({ ...n, _type: "note", _sort: n.created_at })),
     ...ticketEmails.map(e => ({ ...e, _type: "email", _sort: e.created_at })),
@@ -54,6 +60,7 @@ export default function TicketConversationTab({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 rounded-lg bg-white/[0.04] p-1" role="tablist" aria-label="Message type">
             {[
+              { value: "public", label: "Public update", icon: Globe2 },
               { value: "note", label: "Internal note", icon: LockKeyhole },
               { value: "email", label: "Email client", icon: Mail },
               { value: "sms", label: "SMS", icon: PhoneCall },
@@ -64,10 +71,97 @@ export default function TicketConversationTab({
             ))}
           </div>
           <span className={`text-[11px] ${conversationType === "note" ? "text-amber-300" : conversationType === "email" ? "text-sky-300" : "text-emerald-300"}`}>
-            {conversationType === "note" ? "Visible to your team only" : conversationType === "email" ? `Sent and tracked on this ${recordLabel}` : "Sent through MobileMessage"}
+            {conversationType === "public"
+              ? "Customer-visible · portal and optional email"
+              : conversationType === "note"
+                ? "Visible to your team only"
+                : conversationType === "email"
+                  ? `Custom email tracked on this ${recordLabel}`
+                  : "Sent through MobileMessage"}
           </span>
         </div>
       </div>
+
+      {/* Customer-visible update */}
+      {conversationType === "public" && (
+        <div className="overflow-hidden rounded-xl border border-emerald-400/25 bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.11),transparent_45%),rgba(16,185,129,0.035)] shadow-[0_14px_34px_rgba(0,0,0,0.15)]" data-testid="public-update-composer">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-emerald-400/15 px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-400/25 bg-emerald-400/10"><Globe2 className="h-4 w-4 text-emerald-300" /></span>
+              <div>
+                <p className="text-sm font-semibold text-emerald-100">Client update</p>
+                <p className="text-[11px] text-zinc-500">Always visible in the client portal. Email delivery is explicit and audited.</p>
+              </div>
+            </div>
+            <Badge variant="outline" className="border-emerald-400/25 bg-emerald-400/[0.07] text-[9px] uppercase tracking-[0.12em] text-emerald-200">Public</Badge>
+          </div>
+          <div className="space-y-3 p-4">
+            <div className={`grid gap-3 ${allowStatusChange ? "md:grid-cols-[1fr_1.35fr_1fr]" : "md:grid-cols-[1fr_1.65fr]"}`}>
+              <div>
+                <Label className="text-[11px] text-zinc-400">Update type</Label>
+                <Select value={publicSubjectLabel} onValueChange={setPublicSubjectLabel}>
+                  <SelectTrigger className="mt-1 h-9" data-testid="public-update-subject"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Update", "Diagnosis", "Approval needed", "Parts ordered", "Parts arrived", "Work completed"].map(label => <SelectItem key={label} value={label}>{label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-[11px] text-zinc-400">Customer email</Label>
+                <Input className="mt-1 h-9" value={emailForm.to} onChange={event => setEmailForm({ ...emailForm, to: event.target.value })} placeholder="customer@example.com" list="public-contact-emails" data-testid="public-update-recipient" />
+                <datalist id="public-contact-emails">
+                  {clientContacts.map(contact => contact.email && <option key={contact.id || contact.email} value={contact.email}>{contact.name || contact.email}</option>)}
+                </datalist>
+              </div>
+              {allowStatusChange && (
+                <div>
+                  <Label className="text-[11px] text-zinc-400">After publishing</Label>
+                  <Select value={publicStatusAfter} onValueChange={setPublicStatusAfter}>
+                    <SelectTrigger className="mt-1 h-9" data-testid="public-update-status"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unchanged">Keep current status</SelectItem>
+                      <SelectItem value="in_progress">In progress</SelectItem>
+                      <SelectItem value="on_hold">Waiting for client</SelectItem>
+                      <SelectItem value="resolved">Resolve and close</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+            <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Write a clear customer update, the next action, and when they should expect to hear from you…" minHeight="150px" />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-400/15 pt-3">
+              <button type="button" onClick={() => setPublicEmailEnabled(value => !value)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition ${publicEmailEnabled ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100" : "border-white/[0.08] bg-white/[0.025] text-zinc-400"}`} data-testid="public-update-email-toggle">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-md ${publicEmailEnabled ? "bg-emerald-400/15" : "bg-white/[0.04]"}`}><MailCheck className="h-3.5 w-3.5" /></span>
+                <span><span className="block text-xs font-medium">{publicEmailEnabled ? "Email this update" : "Portal only"}</span><span className="block text-[10px] opacity-70">{publicEmailEnabled ? (publicRecipient || "Add a recipient above") : "No customer email will be sent"}</span></span>
+              </button>
+              <div className="flex items-center gap-2">
+                {cannedResponses.length > 0 && (
+                  <Select value="" onValueChange={value => { const template = cannedResponses.find(item => item.id === value); if (template) setNewNote(previous => previous ? `${previous}\n${template.content}` : template.content); }}>
+                    <SelectTrigger className="h-9 w-[180px] text-xs"><SelectValue placeholder="Insert response…" /></SelectTrigger>
+                    <SelectContent>{cannedResponses.map(response => <SelectItem key={response.id} value={response.id}>{response.title}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}
+                <Button
+                  size="sm"
+                  className="h-9 bg-emerald-400 text-emerald-950 hover:bg-emerald-300"
+                  disabled={publicEmailEnabled && !publicRecipient}
+                  onClick={() => handleAddNote({
+                    visibility: "public",
+                    notify_client: publicEmailEnabled,
+                    to_addresses: publicEmailEnabled ? (emailForm.to || "").split(",").map(value => value.trim()).filter(Boolean) : [],
+                    subject_label: publicSubjectLabel,
+                    status_after: allowStatusChange && publicStatusAfter !== "__unchanged" ? publicStatusAfter : "",
+                  })}
+                  data-testid="publish-public-update"
+                >
+                  <Send className="mr-1.5 h-3.5 w-3.5" />{publicEmailEnabled ? "Publish & email" : "Publish update"}
+                </Button>
+              </div>
+            </div>
+            {publicEmailEnabled && !publicRecipient && <p className="flex items-center gap-1.5 text-[11px] text-amber-300"><CircleAlert className="h-3.5 w-3.5" />Choose a contact email before sending, or switch to portal-only.</p>}
+          </div>
+        </div>
+      )}
 
       {/* Internal Note Form */}
       {conversationType === "note" && (
@@ -88,7 +182,7 @@ export default function TicketConversationTab({
                 </SelectContent>
               </Select>
             )}
-            <Button size="sm" className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={handleAddNote} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1.5" />Add note</Button>
+            <Button size="sm" className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={() => handleAddNote({ visibility: "internal" })} data-testid="add-note-btn"><Send className="w-3 h-3 mr-1.5" />Add private note</Button>
             </div>
           </div>
         </div>
@@ -191,13 +285,20 @@ export default function TicketConversationTab({
                     {isInternal ? (
                       <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500/80 bg-amber-400/15 px-1.5 py-0.5 rounded">Internal Note</span>
                     ) : (
-                      <Badge variant="outline" className="text-[10px] h-4">Note</Badge>
+                      <Badge variant="outline" className="h-4 border-emerald-400/25 bg-emerald-400/[0.08] text-[10px] text-emerald-300">Public update</Badge>
                     )}
                     <MessageAvatar item={item} name={item.user_name || item.author || "Technician"} />
                     <span className="text-sm font-medium">{item.user_name || item.author || "Technician"}</span>
                   </div>
                   <span className="text-xs text-muted-foreground">{item.created_at && formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}</span>
                 </div>
+                {!isInternal && (
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] text-zinc-500">
+                    <span>{item.client_notified ? `Emailed to ${(item.to_addresses || []).join(", ")}` : "Published to client portal"}</span>
+                    {item.delivery_status && <Badge variant="outline" className={`h-4 text-[9px] ${item.delivery_status === "failed" ? "border-red-400/30 text-red-300" : item.delivery_status === "sent" ? "border-emerald-400/30 text-emerald-300" : "border-zinc-600 text-zinc-400"}`}>{item.delivery_status}</Badge>}
+                    {item.subject_label && <span>· {item.subject_label}</span>}
+                  </div>
+                )}
                 {item.content && /<[a-z][\s\S]*>/i.test(item.content) ? (
                   <div className="text-sm prose prose-sm prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(item.content) }} />
                 ) : (

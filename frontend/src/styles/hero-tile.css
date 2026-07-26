@@ -244,6 +244,8 @@
 .nx-hero__content {
   position: relative;
   z-index: 6;
+  min-width: 0;
+  overflow: hidden;
   padding: 16px 18px 14px;
 }
 
@@ -251,10 +253,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
 .nx-hero__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -284,6 +291,10 @@
 }
 
 .nx-hero__value {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: ui-monospace, SF Mono, Menlo, Consolas, monospace;
   font-size: 30px;
   line-height: 1.05;
@@ -297,6 +308,27 @@
   -webkit-text-fill-color: transparent;
   text-shadow: 0 0 24px color-mix(in srgb, var(--hue-glow) 40%, transparent);
   transition: text-shadow 240ms ease-out;
+}
+
+/* Keep long currency and percentage values readable in compact dashboard
+   grids without changing the visual weight of normal-width KPI tiles. */
+.nx-hero {
+  container-type: inline-size;
+}
+
+@container (max-width: 165px) {
+  .nx-hero__content {
+    padding-inline: 14px;
+  }
+
+  .nx-hero__label {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+  }
+
+  .nx-hero__value {
+    font-size: clamp(18px, 15cqw, 24px);
+  }
 }
 
 .nx-hero:hover .nx-hero__value {

@@ -35,9 +35,15 @@ async def get_morning_checks(current_user: dict = Depends(get_current_user)):
     alerts = await db.security_alerts.find({"created_at": {"$gte": yesterday}}, {"_id": 0}).sort("created_at", -1).to_list(50)
     critical_alerts = [a for a in alerts if a.get("severity") in ("critical", "high")]
 
-    # 5. Yeastar Phone Status (from settings check)
-    yeastar_config = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
-    yeastar_configured = bool(yeastar_config and yeastar_config.get("client_id") and yeastar_config.get("pbx_url"))
+    # 5. Yeastar Phone Status (client-linked PBXs only)
+    yeastar_pbxs = await db.yeastar_pbxs.find(
+        {"enabled": {"$ne": False}},
+        {"_id": 0, "status": 1, "pbx_url": 1, "client_api_id": 1, "client_secret": 1},
+    ).to_list(500)
+    yeastar_configured = any(
+        pbx.get("pbx_url") and pbx.get("client_api_id") and pbx.get("client_secret")
+        for pbx in yeastar_pbxs
+    )
 
     # 6. Client Health Summary
     clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
@@ -114,6 +120,9 @@ async def get_morning_checks(current_user: dict = Depends(get_current_user)):
         },
         "phones": {
             "configured": yeastar_configured,
+            "pbx_count": len(yeastar_pbxs),
+            "online": len([pbx for pbx in yeastar_pbxs if pbx.get("status") == "online"]),
+            "attention": len([pbx for pbx in yeastar_pbxs if pbx.get("status") != "online"]),
         },
         "client_health": client_health,
         "scheduled_tasks": [{"name": t.get("name", ""), "script_name": t.get("script_name", ""), "schedule_time": t.get("schedule_time", ""), "last_run": t.get("last_run", "")} for t in tasks_today[:10]],

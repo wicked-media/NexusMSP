@@ -1,12 +1,60 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 import uuid
-from app.database import db
+from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.activity import ticket_audit
+from app.services.finance_integrity import (
+    begin_idempotent_operation,
+    complete_idempotent_operation,
+    fail_idempotent_operation,
+)
+from app.services.procurement_integrity import get_po_approval_settings, next_po_number, version_filter
 
 router = APIRouter()
+PO_EVIDENCE_DIR = Path(UPLOADS_DIR) / "purchase-orders"
+PO_EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _calculate_po_totals(line_items: list[dict], shipping_value=0) -> tuple[float, float, float, float]:
+    subtotal = 0.0
+    tax = 0.0
+    for index, line in enumerate(line_items, start=1):
+        try:
+            quantity = int(line.get("quantity", 0))
+            unit_price = float(line.get("unit_price", 0) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Line {index} has an invalid quantity or unit price")
+        if quantity < 1 or unit_price < 0 or not str(line.get("product_name") or line.get("name") or "").strip():
+            raise HTTPException(status_code=422, detail=f"Line {index} needs an item name, positive quantity, and valid unit price")
+        product = None
+        if line.get("product_id"):
+            product = await db.products.find_one({"id": line["product_id"]}, {"_id": 0, "tax_rate": 1})
+        try:
+            tax_rate = float(line.get("tax_rate", (product or {}).get("tax_rate", 0)) or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"Line {index} has an invalid tax rate")
+        if not 0 <= tax_rate <= 100:
+            raise HTTPException(status_code=422, detail=f"Line {index} tax rate must be between 0 and 100")
+        line_total = round(quantity * unit_price, 2)
+        line["quantity"] = quantity
+        line["unit_price"] = unit_price
+        line["tax_rate"] = tax_rate
+        line["total"] = line_total
+        subtotal += line_total
+        tax += line_total * tax_rate / 100
+    try:
+        shipping = round(float(shipping_value or 0), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Shipping must be a valid amount")
+    if shipping < 0:
+        raise HTTPException(status_code=422, detail="Shipping cannot be negative")
+    subtotal = round(subtotal, 2)
+    tax = round(tax, 2)
+    return subtotal, tax, shipping, round(subtotal + tax + shipping, 2)
+
 
 # ============== PURCHASE ORDER ENDPOINTS ==============
 
@@ -15,6 +63,7 @@ async def get_po_stats(current_user: dict = Depends(get_current_user)):
     all_pos = await db.purchase_orders.find({}, {"_id": 0}).to_list(10000)
     total = len(all_pos)
     draft = len([p for p in all_pos if p.get("status") == "draft"])
+    pending_approval = len([p for p in all_pos if p.get("status") == "pending_approval"])
     submitted = len([p for p in all_pos if p.get("status") == "submitted"])
     partial = len([p for p in all_pos if p.get("status") == "partial"])
     received = len([p for p in all_pos if p.get("status") == "received"])
@@ -29,9 +78,9 @@ async def get_po_stats(current_user: dict = Depends(get_current_user)):
             except Exception:
                 pass
     total_value = sum(p.get("total", 0) for p in all_pos)
-    pending_value = sum(p.get("total", 0) for p in all_pos if p.get("status") in ("draft", "submitted", "partial"))
+    pending_value = sum(p.get("total", 0) for p in all_pos if p.get("status") in ("draft", "pending_approval", "approved", "submitted", "partial"))
     return {
-        "total": total, "draft": draft, "submitted": submitted, "partial": partial,
+        "total": total, "draft": draft, "pending_approval": pending_approval, "submitted": submitted, "partial": partial,
         "received": received, "overdue": overdue_count,
         "total_value": round(total_value, 2), "pending_value": round(pending_value, 2)
     }
@@ -53,26 +102,36 @@ async def get_purchase_orders(status: Optional[str] = None, search: Optional[str
 
 @router.post("/purchase-orders")
 async def create_purchase_order(data: dict, current_user: dict = Depends(get_current_user)):
-    count = await db.purchase_orders.count_documents({})
+    vendor = str(data.get("vendor", "") or "").strip()
+    if not vendor:
+        raise HTTPException(status_code=422, detail="Vendor is required")
     line_items = await _normalise_line_item_destinations(data.get("line_items", []))
+    if not line_items:
+        raise HTTPException(status_code=422, detail="At least one purchase-order line is required")
     for li in line_items:
         li["received_qty"] = 0
+        li["returned_qty"] = 0
         li["status"] = "pending"
         li["arrival_notified"] = False
+        li["received_serials"] = []
+        li["receipt_batches"] = []
         li.pop("arrival_notification_at", None)
+    subtotal, tax, shipping, total = await _calculate_po_totals(line_items, data.get("shipping", 0))
+    policy = await get_po_approval_settings(db)
     po = {
         "id": str(uuid.uuid4()),
-        "po_number": f"PO-{count + 1001:04d}",
-        "vendor": data.get("vendor", ""),
+        "po_number": await next_po_number(db),
+        "vendor": vendor,
         "vendor_id": data.get("vendor_id", ""),
         "vendor_contact": data.get("vendor_contact", ""),
         "vendor_email": data.get("vendor_email", ""),
-        "status": data.get("status", "draft"),
+        "status": "draft",
         "line_items": line_items,
-        "subtotal": float(data.get("subtotal", 0)),
-        "tax": float(data.get("tax", 0)),
-        "shipping": float(data.get("shipping", 0)),
-        "total": float(data.get("total", 0)),
+        "subtotal": subtotal,
+        "tax": tax,
+        "shipping": shipping,
+        "total": total,
+        "approval_required": bool(policy.get("enabled", True)) and total >= float(policy.get("threshold", 0) or 0),
         "notes": data.get("notes", ""),
         "ship_to": data.get("ship_to", ""),
         "expected_delivery": data.get("expected_delivery", ""),
@@ -90,6 +149,7 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
         "last_ping_at": None,
         "escalated": False,
         "escalated_at": None,
+        "version": 1,
     }
     await db.purchase_orders.insert_one(po)
     po.pop("_id", None)
@@ -111,18 +171,54 @@ async def get_purchase_order(po_id: str, current_user: dict = Depends(get_curren
 
 @router.put("/purchase-orders/{po_id}")
 async def update_purchase_order(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    old_po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not old_po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
     allowed = {"vendor", "vendor_id", "vendor_contact", "vendor_email", "status", "line_items",
                "subtotal", "tax", "shipping", "total", "notes", "ship_to", "expected_delivery",
                "client_id", "client_name", "ticket_id", "ticket_number", "ticket_title", "assigned_to", "assigned_to_name"}
     update = {k: v for k, v in data.items() if k in allowed}
+    financial_fields = {"line_items", "subtotal", "tax", "shipping", "total", "vendor", "vendor_id", "client_id", "ticket_id"}
+    if old_po.get("status") not in {"draft", "rejected"} and financial_fields.intersection(update):
+        raise HTTPException(status_code=409, detail="Ordered purchase orders are financially locked; duplicate or cancel the order to correct it")
+    if "status" in update:
+        requested_status = str(update["status"] or "").strip().lower()
+        allowed_transitions = {
+            "draft": {"cancelled"},
+            "rejected": {"draft", "cancelled"},
+            "approved": {"submitted", "cancelled"},
+            "submitted": {"cancelled"},
+            "pending_approval": set(),
+            "partial": set(),
+            "received": set(),
+            "cancelled": set(),
+        }
+        if requested_status not in allowed_transitions.get(old_po.get("status", "draft"), set()):
+            raise HTTPException(status_code=409, detail=f"Use the approval, receiving, return, or cancellation workflow from status '{old_po.get('status', 'draft')}'")
+        if requested_status == "cancelled" and any(int(item.get("received_qty", 0) or 0) > 0 for item in old_po.get("line_items", [])):
+            raise HTTPException(status_code=409, detail="A purchase order with received stock cannot be cancelled; record a return instead")
+        update["status"] = requested_status
     if "line_items" in update:
         update["line_items"] = await _normalise_line_item_destinations(update["line_items"])
-    for f in ("subtotal", "tax", "shipping", "total"):
-        if f in update:
-            update[f] = float(update[f])
+        for new_line in update["line_items"]:
+            new_line.setdefault("received_qty", 0)
+            new_line.setdefault("returned_qty", 0)
+            new_line.setdefault("received_serials", [])
+            new_line.setdefault("receipt_batches", [])
+    if {"line_items", "shipping", "subtotal", "tax", "total"}.intersection(update):
+        source_lines = update.get("line_items", old_po.get("line_items", []))
+        subtotal, tax, shipping, total = await _calculate_po_totals(
+            source_lines,
+            update.get("shipping", old_po.get("shipping", 0)),
+        )
+        update.update({"line_items": source_lines, "subtotal": subtotal, "tax": tax, "shipping": shipping, "total": total})
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    old_po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    await db.purchase_orders.update_one({"id": po_id}, {"$set": update})
+    result = await db.purchase_orders.update_one(
+        {"id": po_id, **version_filter(old_po)},
+        {"$set": update, "$inc": {"version": 1}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Purchase order changed while you were editing it; refresh and review the latest record")
     if "status" in update and old_po and old_po.get("status") != update["status"]:
         await _log_po_audit(po_id, "status_changed", f"Status changed from '{old_po.get('status')}' to '{update['status']}'", current_user)
     else:
@@ -135,10 +231,21 @@ async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
+    if po.get("status") not in {"submitted", "partial", "received"}:
+        raise HTTPException(status_code=409, detail="Supplier invoices can only be matched after the purchase order has been sent")
+    if po.get("supplier_bill_sync", {}).get("status") in {"queued", "synced"}:
+        raise HTTPException(status_code=409, detail="The supplier invoice is locked because its Xero bill has already been queued")
 
     invoice_number = str(data.get("invoice_number", "")).strip()
     if not invoice_number:
         raise HTTPException(status_code=422, detail="Supplier invoice number is required")
+    duplicate = await db.purchase_orders.find_one({
+        "id": {"$ne": po_id},
+        "vendor_id": po.get("vendor_id", ""),
+        "vendor_invoice_match.invoice_number": invoice_number,
+    }, {"_id": 0, "po_number": 1})
+    if duplicate and po.get("vendor_id"):
+        raise HTTPException(status_code=409, detail=f"Supplier invoice {invoice_number} is already recorded on {duplicate.get('po_number', 'another purchase order')}")
     try:
         supplier_total = round(float(data.get("supplier_total")), 2)
     except (TypeError, ValueError):
@@ -216,10 +323,13 @@ async def review_vendor_invoice_match(po_id: str, data: dict, current_user: dict
 @router.delete("/purchase-orders/{po_id}")
 async def delete_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if po.get("status") not in {"draft", "rejected"} or any(int(item.get("received_qty", 0) or 0) > 0 for item in po.get("line_items", [])):
+        raise HTTPException(status_code=409, detail="Only unreceived draft or rejected purchase orders can be deleted")
+    await _log_po_audit(po_id, "deleted", f"Purchase order {po.get('po_number', po_id)} deleted", current_user)
     await db.purchase_orders.delete_one({"id": po_id})
-    await db.po_audit_log.delete_many({"po_id": po_id})
-    if po:
-        await _log_po_audit(po_id, "deleted", f"Purchase order {po.get('po_number', po_id)} deleted", current_user)
+    # Retain the audit log as evidence even after the draft record is removed.
     return {"message": "Purchase order deleted"}
 
 # ============== STOCK RECEIVING ==============
@@ -232,10 +342,27 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
     if po["status"] not in ("submitted", "partial"):
         raise HTTPException(status_code=400, detail="Only submitted or partial POs can receive stock")
     received_items = data.get("items", [])
+    if not received_items:
+        raise HTTPException(status_code=422, detail="Choose at least one purchase-order line to receive")
+    idempotency_key = str(data.get("idempotency_key", "") or "").strip()
+    replay = await begin_idempotent_operation(
+        db,
+        scope=f"po-receive:{po_id}",
+        key=idempotency_key,
+        payload={
+            "items": received_items,
+            "packing_slip_number": data.get("packing_slip_number", ""),
+            "evidence_reference": data.get("evidence_reference", ""),
+        },
+        user_id=current_user.get("id", ""),
+    )
+    if replay is not None:
+        return {**replay, "replayed": True}
     line_items = po.get("line_items", [])
     notification_deliveries = []
     now_iso = datetime.now(timezone.utc).isoformat()
     total_all_received = True
+    receipt_event_items = []
     for ri in received_items:
         pid = ri.get("product_id", "")
         try:
@@ -266,8 +393,43 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
         remaining_qty = max(0, ordered_qty - prev_received)
         if recv_qty > remaining_qty:
             raise HTTPException(status_code=422, detail=f"Cannot receive {recv_qty}: only {remaining_qty} remaining for this line")
+        serial_numbers = [str(value).strip() for value in (ri.get("serial_numbers") or []) if str(value).strip()]
+        if serial_numbers and len(serial_numbers) != recv_qty:
+            raise HTTPException(status_code=422, detail=f"Provide exactly {recv_qty} serial number(s) for {li.get('product_name') or 'this line'}, or leave serials blank")
+        if len(serial_numbers) != len(set(serial_numbers)):
+            raise HTTPException(status_code=422, detail="Serial numbers must be unique within a receipt")
+        existing_serials = {
+            str(serial)
+            for item in line_items
+            for serial in (item.get("received_serials") or [])
+        }
+        if existing_serials.intersection(serial_numbers):
+            raise HTTPException(status_code=409, detail="One or more serial numbers have already been received on this purchase order")
+        if serial_numbers:
+            serial_match = await db.po_serials.find_one({"serial_number": {"$in": serial_numbers}}, {"_id": 0, "serial_number": 1})
+            if serial_match:
+                raise HTTPException(status_code=409, detail=f"Serial number {serial_match.get('serial_number')} has already been received")
         li["received_qty"] = prev_received + recv_qty
         li["status"] = "received" if li["received_qty"] >= ordered_qty else "partial"
+        li.setdefault("received_serials", []).extend(serial_numbers)
+        batch_number = str(ri.get("batch_number", "") or "").strip()
+        if batch_number:
+            li.setdefault("receipt_batches", []).append({
+                "batch_number": batch_number,
+                "quantity": recv_qty,
+                "received_at": now_iso,
+                "received_by": current_user.get("name", ""),
+            })
+        receipt_event_items.append({
+            "line_index": line_index,
+            "product_id": pid,
+            "product_name": li.get("product_name") or ri.get("product_name", ""),
+            "quantity": recv_qty,
+            "serial_numbers": serial_numbers,
+            "batch_number": batch_number,
+            "destination_type": li.get("destination_type", "stock"),
+            "destination_ticket_id": li.get("destination_ticket_id", ""),
+        })
         if li["received_qty"] < ordered_qty:
             total_all_received = False
 
@@ -369,10 +531,45 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
             total_all_received = False
             break
     new_status = "received" if total_all_received else "partial"
-    await db.purchase_orders.update_one({"id": po_id}, {"$set": {
+    receipt_event = {
+        "id": str(uuid.uuid4()),
+        "received_at": now_iso,
+        "received_by": current_user.get("id", "system"),
+        "received_by_name": current_user.get("name", "System"),
+        "packing_slip_number": str(data.get("packing_slip_number", "") or "").strip(),
+        "evidence_reference": str(data.get("evidence_reference", "") or "").strip(),
+        "items": receipt_event_items,
+        "idempotency_key": idempotency_key or None,
+    }
+    result = await db.purchase_orders.update_one({"id": po_id, **version_filter(po)}, {
+        "$set": {
         "line_items": line_items, "status": new_status,
         "updated_at": now_iso,
-    }})
+        },
+        "$push": {"receipt_events": receipt_event},
+        "$inc": {"version": 1},
+    })
+    if result.matched_count == 0:
+        await fail_idempotent_operation(
+            db,
+            scope=f"po-receive:{po_id}",
+            key=idempotency_key,
+            error="Purchase order changed during receiving",
+        )
+        raise HTTPException(status_code=409, detail="Purchase order changed while stock was being received; refresh before retrying")
+    for item in receipt_event_items:
+        for serial_number in item["serial_numbers"]:
+            await db.po_serials.insert_one({
+                "id": str(uuid.uuid4()),
+                "serial_number": serial_number,
+                "po_id": po_id,
+                "po_number": po.get("po_number", ""),
+                "line_index": item["line_index"],
+                "product_id": item["product_id"],
+                "product_name": item["product_name"],
+                "received_at": now_iso,
+                "received_by": current_user.get("id", "system"),
+            })
     recv_summary = ", ".join(f"{ri.get('product_name', ri.get('product_id', '?'))} x{ri.get('quantity', 0)}" for ri in received_items if ri.get("quantity", 0) > 0)
     await _log_po_audit(po_id, "stock_received", f"Stock received: {recv_summary}. PO status: {new_status}", current_user)
     for delivery in notification_deliveries:
@@ -390,11 +587,303 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
                 f"{delivery['product_name']} arrived on {po.get('po_number', 'a purchase order')}; the linked technician was notified.",
             )
     notification_message = f" {len(notification_deliveries)} ticket technician{'s' if len(notification_deliveries) != 1 else ''} notified." if notification_deliveries else ""
-    return {
+    response = {
         "message": f"Stock received. PO status: {new_status}.{notification_message}",
         "status": new_status,
         "ticket_notifications": notification_deliveries,
+        "receipt_event": receipt_event,
     }
+    await complete_idempotent_operation(
+        db,
+        scope=f"po-receive:{po_id}",
+        key=idempotency_key,
+        response=response,
+    )
+    return response
+
+
+# ============== RETURNS, EVIDENCE & SUPPLIER BILLS ==============
+
+@router.post("/purchase-orders/{po_id}/returns")
+async def return_po_items(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    if po.get("status") not in {"partial", "received"}:
+        raise HTTPException(status_code=409, detail="Only received purchase-order items can be returned")
+    reason = str(data.get("reason", "") or "").strip()
+    if len(reason) < 5:
+        raise HTTPException(status_code=422, detail="Provide a clear return or RMA reason")
+    items = data.get("items") or []
+    if not items:
+        raise HTTPException(status_code=422, detail="Choose at least one received line to return")
+    idempotency_key = str(data.get("idempotency_key", "") or "").strip()
+    replay = await begin_idempotent_operation(
+        db,
+        scope=f"po-return:{po_id}",
+        key=idempotency_key,
+        payload=data,
+        user_id=current_user.get("id", ""),
+    )
+    if replay is not None:
+        return {**replay, "replayed": True}
+
+    lines = po.get("line_items") or []
+    returned_items = []
+    stock_adjustments = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for raw in items:
+        try:
+            index = int(raw.get("line_index"))
+            quantity = int(raw.get("quantity", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Return line and quantity must be whole numbers")
+        if index < 0 or index >= len(lines) or quantity < 1:
+            raise HTTPException(status_code=422, detail="Choose a valid received line and return quantity")
+        line = lines[index]
+        available = int(line.get("received_qty", 0) or 0) - int(line.get("returned_qty", 0) or 0)
+        if quantity > available:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Cannot return {quantity}: only {available} received item(s) remain on {line.get('product_name') or 'this line'}",
+            )
+        serial_numbers = [str(value).strip() for value in (raw.get("serial_numbers") or []) if str(value).strip()]
+        received_serials = {str(value) for value in (line.get("received_serials") or [])}
+        already_returned_serials = {str(value) for value in (line.get("returned_serials") or [])}
+        if serial_numbers and len(serial_numbers) != quantity:
+            raise HTTPException(status_code=422, detail=f"Provide exactly {quantity} returned serial number(s), or leave serials blank")
+        if len(serial_numbers) != len(set(serial_numbers)):
+            raise HTTPException(status_code=422, detail="Returned serial numbers must be unique")
+        if any(serial not in received_serials or serial in already_returned_serials for serial in serial_numbers):
+            raise HTTPException(status_code=409, detail="A selected serial number was not received on this line or has already been returned")
+
+        line["returned_qty"] = int(line.get("returned_qty", 0) or 0) + quantity
+        line.setdefault("returned_serials", []).extend(serial_numbers)
+        line["return_status"] = "returned" if line["returned_qty"] >= int(line.get("received_qty", 0) or 0) else "partial_return"
+        item = {
+            "line_index": index,
+            "product_id": line.get("product_id", ""),
+            "product_name": line.get("product_name") or line.get("name", ""),
+            "quantity": quantity,
+            "serial_numbers": serial_numbers,
+            "destination_type": line.get("destination_type", "stock"),
+            "destination_ticket_id": line.get("destination_ticket_id", ""),
+        }
+        returned_items.append(item)
+        if line.get("product_id"):
+            stock_adjustments.append((line.get("product_id"), quantity, item))
+
+    return_event = {
+        "id": str(uuid.uuid4()),
+        "rma_number": str(data.get("rma_number", "") or "").strip(),
+        "supplier_credit_number": str(data.get("supplier_credit_number", "") or "").strip(),
+        "reason": reason,
+        "notes": str(data.get("notes", "") or "").strip(),
+        "items": returned_items,
+        "returned_at": now_iso,
+        "returned_by": current_user.get("id", "system"),
+        "returned_by_name": current_user.get("name", "System"),
+        "idempotency_key": idempotency_key or None,
+    }
+    result = await db.purchase_orders.update_one(
+        {"id": po_id, **version_filter(po)},
+        {
+            "$set": {"line_items": lines, "updated_at": now_iso},
+            "$push": {"return_events": return_event},
+            "$inc": {"version": 1},
+        },
+    )
+    if result.matched_count == 0:
+        await fail_idempotent_operation(
+            db,
+            scope=f"po-return:{po_id}",
+            key=idempotency_key,
+            error="Purchase order changed during return",
+        )
+        raise HTTPException(status_code=409, detail="Purchase order changed while the return was being recorded; refresh and retry")
+
+    for product_id, quantity, item in stock_adjustments:
+        product = await db.products.find_one({"id": product_id}, {"_id": 0})
+        if product:
+            old_stock = int(product.get("quantity_in_stock", 0) or 0)
+            new_stock = max(0, old_stock - quantity)
+            await db.products.update_one({"id": product_id}, {"$set": {"quantity_in_stock": new_stock, "updated_at": now_iso}})
+            await db.stock_movements.insert_one({
+                "id": str(uuid.uuid4()),
+                "product_id": product_id,
+                "product_name": product.get("name", item["product_name"]),
+                "type": "out",
+                "quantity": quantity,
+                "previous_stock": old_stock,
+                "new_stock": new_stock,
+                "reason": f"Supplier return from {po.get('po_number', 'purchase order')}: {reason}",
+                "reference": po_id,
+                "po_id": po_id,
+                "created_by": current_user.get("id", "system"),
+                "created_by_name": current_user.get("name", "System"),
+                "created_at": now_iso,
+            })
+        for serial in item["serial_numbers"]:
+            await db.po_serials.update_one(
+                {"po_id": po_id, "serial_number": serial},
+                {"$set": {"status": "returned", "returned_at": now_iso, "returned_by": current_user.get("id", "system")}},
+            )
+        if item.get("destination_ticket_id"):
+            await db.ticket_comments.insert_one({
+                "id": str(uuid.uuid4()),
+                "ticket_id": item["destination_ticket_id"],
+                "user_id": current_user.get("id", "system"),
+                "user_name": current_user.get("name", "System"),
+                "content": f"Supplier return recorded: {item['product_name']} x{quantity} from {po.get('po_number', 'the linked PO')}. Reason: {reason}",
+                "is_internal": True,
+                "source": "purchase_order_return",
+                "po_id": po_id,
+                "po_number": po.get("po_number", ""),
+                "created_at": now_iso,
+            })
+            await ticket_audit(
+                item["destination_ticket_id"],
+                current_user,
+                "parts_returned",
+                f"{item['product_name']} x{quantity} returned to supplier from {po.get('po_number', '')}",
+            )
+
+    await _log_po_audit(
+        po_id,
+        "items_returned",
+        f"Returned {sum(item['quantity'] for item in returned_items)} item(s)"
+        + (f" under RMA {return_event['rma_number']}" if return_event["rma_number"] else "")
+        + (f"; supplier credit {return_event['supplier_credit_number']}" if return_event["supplier_credit_number"] else ""),
+        current_user,
+    )
+    response = {"message": "Supplier return recorded", "return_event": return_event}
+    await complete_idempotent_operation(db, scope=f"po-return:{po_id}", key=idempotency_key, response=response)
+    return response
+
+
+@router.post("/purchase-orders/{po_id}/attachments")
+async def upload_po_attachment(
+    po_id: str,
+    file: UploadFile = File(...),
+    category: str = Form("receiving"),
+    note: str = Form(""),
+    current_user: dict = Depends(get_current_user),
+):
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx"}:
+        raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Word, or Excel evidence file")
+    content = await file.read()
+    if not content or len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Evidence files must be between 1 byte and 10 MB")
+    filename = f"{uuid.uuid4().hex}{extension}"
+    path = PO_EVIDENCE_DIR / filename
+    path.write_bytes(content)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    attachment = {
+        "id": str(uuid.uuid4()),
+        "name": Path(file.filename or filename).name,
+        "url": f"/api/uploads/purchase-orders/{filename}",
+        "content_type": file.content_type or "application/octet-stream",
+        "size": len(content),
+        "category": str(category or "receiving").strip().lower(),
+        "note": str(note or "").strip(),
+        "uploaded_by": current_user.get("id", "system"),
+        "uploaded_by_name": current_user.get("name", "System"),
+        "uploaded_at": now_iso,
+    }
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$push": {"attachments": attachment}, "$set": {"updated_at": now_iso}, "$inc": {"version": 1}},
+    )
+    await _log_po_audit(po_id, "evidence_attached", f"Attached {attachment['name']} as {attachment['category']} evidence", current_user)
+    return attachment
+
+
+@router.post("/purchase-orders/{po_id}/supplier-bill/sync")
+async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    match = po.get("vendor_invoice_match") or {}
+    if not match:
+        raise HTTPException(status_code=409, detail="Match the supplier invoice before creating its Xero bill")
+    if match.get("status") == "variance" and (match.get("review") or {}).get("status") != "accepted":
+        raise HTTPException(status_code=409, detail="Resolve or accept the supplier invoice variance before creating its Xero bill")
+    idempotency_key = str(data.get("idempotency_key", "") or "").strip()
+    replay = await begin_idempotent_operation(
+        db,
+        scope=f"po-supplier-bill:{po_id}",
+        key=idempotency_key,
+        payload={"invoice_number": match.get("invoice_number"), "total": match.get("supplier_total")},
+        user_id=current_user.get("id", ""),
+    )
+    if replay is not None:
+        return {**replay, "replayed": True}
+    existing = await db.xero_supplier_bills.find_one({"po_id": po_id}, {"_id": 0})
+    if existing and existing.get("status") in {"queued", "synced"}:
+        response = {"message": "Supplier bill is already queued for Xero", "supplier_bill": existing}
+        await complete_idempotent_operation(db, scope=f"po-supplier-bill:{po_id}", key=idempotency_key, response=response)
+        return response
+
+    xero = await db.settings.find_one({"type": "xero"}, {"_id": 0}) or {}
+    connected = bool(
+        xero.get("client_id")
+        and xero.get("client_secret")
+        and xero.get("tenant_id")
+        and (xero.get("access_token") or xero.get("refresh_token"))
+    )
+    now_iso = datetime.now(timezone.utc).isoformat()
+    bill = {
+        "id": (existing or {}).get("id") or str(uuid.uuid4()),
+        "po_id": po_id,
+        "po_number": po.get("po_number", ""),
+        "type": "ACCPAY",
+        "vendor_id": po.get("vendor_id", ""),
+        "vendor_name": po.get("vendor", ""),
+        "invoice_number": match.get("invoice_number", ""),
+        "invoice_date": match.get("invoice_date", ""),
+        "reference": po.get("po_number", ""),
+        "line_items": po.get("line_items", []),
+        "subtotal": po.get("subtotal", 0),
+        "tax": po.get("tax", 0),
+        "total": match.get("supplier_total", po.get("total", 0)),
+        "status": "queued" if connected else "needs_connection",
+        "xero_tenant_id": xero.get("tenant_id", "") if connected else "",
+        "queued_at": now_iso if connected else None,
+        "created_at": (existing or {}).get("created_at") or now_iso,
+        "updated_at": now_iso,
+        "created_by": current_user.get("id", "system"),
+    }
+    await db.xero_supplier_bills.update_one({"po_id": po_id}, {"$set": bill}, upsert=True)
+    sync_state = {
+        "status": bill["status"],
+        "bill_id": bill["id"],
+        "invoice_number": bill["invoice_number"],
+        "updated_at": now_iso,
+        "updated_by": current_user.get("name", "System"),
+    }
+    await db.purchase_orders.update_one(
+        {"id": po_id},
+        {"$set": {"supplier_bill_sync": sync_state, "updated_at": now_iso}, "$inc": {"version": 1}},
+    )
+    detail = "queued for Xero" if connected else "prepared and waiting for the Xero connection"
+    await _log_po_audit(po_id, "supplier_bill_queued", f"Supplier invoice {bill['invoice_number']} {detail}", current_user)
+    response = {
+        "message": f"Supplier bill {detail}",
+        "supplier_bill": bill,
+        "xero_connected": connected,
+    }
+    await complete_idempotent_operation(db, scope=f"po-supplier-bill:{po_id}", key=idempotency_key, response=response)
+    return response
+
+
+@router.get("/xero/supplier-bills")
+async def list_supplier_bills(current_user: dict = Depends(get_current_user)):
+    return await db.xero_supplier_bills.find({}, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+
 
 # ============== PO AUDIT LOG ==============
 

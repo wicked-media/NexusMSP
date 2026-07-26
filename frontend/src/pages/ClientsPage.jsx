@@ -103,7 +103,7 @@ function IntegrationChip({ type, active }) {
     rmm: { label: "RMM", color: "text-emerald-400 border-emerald-500/40", tip: "RMM agent installed" },
     yeastar: { label: "PBX", color: "text-cyan-400 border-cyan-500/40", tip: "Yeastar PBX linked" },
     suped: { label: "SUP", color: "text-fuchsia-400 border-fuchsia-500/40", tip: "Suped DMARC" },
-    cipp: { label: "CIPP", color: "text-orange-400 border-orange-500/40", tip: "CIPP — M365 management" },
+    cipp: { label: "NCP", color: "text-cyan-400 border-cyan-500/40", tip: "Nexus Control Plane — Microsoft 365" },
   };
   const cfg = map[type];
   if (!cfg) return null;
@@ -394,7 +394,6 @@ export default function ClientsPage() {
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuItem onClick={() => navigate("/client-insights")} className="gap-2.5"><BarChart3 className="h-4 w-4 text-violet-300" />Client insights</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/client-compare")} className="gap-2.5"><Scale className="h-4 w-4 text-sky-300" />Compare clients</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => navigate("/client-portal-admin")} className="gap-2.5"><Users className="h-4 w-4 text-emerald-300" />Portal users</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => navigate("/client-portal")} className="gap-2.5"><Globe className="h-4 w-4 text-cyan-300" />Client portal</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -925,7 +924,7 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
             { v: "blueprints", l: "Blueprints" },
             { v: "ai", l: "AI Insights" },
             { v: "integrations", l: "Integrations" },
-            { v: "cipp", l: "M365 / CIPP" },
+            { v: "cipp", l: "Microsoft 365" },
             { v: "activity", l: "Activity" },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v} className="shrink-0 rounded-lg border border-transparent px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground shadow-none data-[state=active]:border-primary/20 data-[state=active]:bg-primary/10 data-[state=active]:text-primary" data-testid={`tab-${t.v}`}>{t.l}</TabsTrigger>
@@ -1197,7 +1196,7 @@ function CippTenantPanel({ client }) {
     try {
       const r = await axios.get(`${API}/cipp/tenants`, { headers });
       setTenants(r.data || []);
-    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't load CIPP tenants"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't load Microsoft tenants"); }
   };
 
   const doLink = async () => {
@@ -1287,18 +1286,18 @@ function CippTenantPanel({ client }) {
   if (!tenantId) {
     return (
       <div className="border border-zinc-800 rounded-md p-6 bg-zinc-950" data-testid="client-cipp-unlinked">
-        <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-orange-400" /><span className="font-medium">CIPP · M365 tenant</span></div>
-        <p className="text-sm text-zinc-400 mb-3">No CIPP tenant linked to this client. Link a tenant to manage users and licenses in M365.</p>
+        <div className="flex items-center gap-2 mb-2"><Cloud className="w-4 h-4 text-cyan-400" /><span className="font-medium">Nexus Control Plane · Microsoft 365</span></div>
+        <p className="text-sm text-zinc-400 mb-3">No Microsoft tenant is linked to this client. Link one to manage identities and licences in Nexus Control Plane.</p>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={openLink} data-testid="client-cipp-link-btn"><LinkIcon className="w-3 h-3 mr-1" />Link tenant</Button>
-          <Button size="sm" variant="outline" asChild><Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure CIPP</Link></Button>
+          <Button size="sm" variant="outline" asChild><Link to="/settings?tab=integrations&anchor=cipp-settings-card"><ExternalLink className="w-3 h-3 mr-1" />Configure provider</Link></Button>
         </div>
 
         <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
           <DialogContent data-testid="client-cipp-link-dialog">
             <DialogHeader>
-              <DialogTitle>Link CIPP tenant</DialogTitle>
-              <DialogDescription>Map {client.name} to an M365 tenant managed by CIPP.</DialogDescription>
+              <DialogTitle>Link Microsoft tenant</DialogTitle>
+              <DialogDescription>Map {client.name} to the correct Microsoft 365 tenant in Nexus Control Plane.</DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
               <select
@@ -1307,10 +1306,10 @@ function CippTenantPanel({ client }) {
                 className="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm"
                 data-testid="client-cipp-link-tenant-select"
               >
-                <option value="">Select a CIPP tenant…</option>
+                <option value="">Select a Microsoft tenant…</option>
                 {tenants.map(t => <option key={t.customerId} value={t.customerId}>{t.displayName} ({t.defaultDomainName})</option>)}
               </select>
-              {tenants.length === 0 && <p className="text-xs text-muted-foreground">No tenants returned — make sure CIPP is configured in Settings.</p>}
+              {tenants.length === 0 && <p className="text-xs text-muted-foreground">No tenants returned — verify the Microsoft tenant provider in Settings.</p>}
             </div>
             <DialogFooter>
               <Button variant="ghost" onClick={() => setLinkOpen(false)}>Cancel</Button>
@@ -1328,7 +1327,7 @@ function CippTenantPanel({ client }) {
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-orange-400" />
+              <Cloud className="w-4 h-4 text-cyan-400" />
               <span className="font-medium">{clientDoc?.cipp_tenant_display || tenantId}</span>
               <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30">Linked</Badge>
             </div>
@@ -1337,7 +1336,7 @@ function CippTenantPanel({ client }) {
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setCreateOpen(true)} data-testid="client-cipp-create-user"><UserPlus className="w-3 h-3 mr-1" />Create user</Button>
-            <Button size="sm" variant="outline" asChild><Link to="/cipp"><ExternalLink className="w-3 h-3 mr-1" />CIPP Center</Link></Button>
+            <Button size="sm" variant="outline" asChild><Link to="/control-plane?module=microsoft365"><ExternalLink className="w-3 h-3 mr-1" />Control Plane</Link></Button>
             <Button size="sm" variant="ghost" className="text-rose-400" onClick={doUnlink} data-testid="client-cipp-unlink"><X className="w-3 h-3 mr-1" />Unlink</Button>
           </div>
         </div>

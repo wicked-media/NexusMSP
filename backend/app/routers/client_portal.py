@@ -1,12 +1,25 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import datetime, timezone, timedelta
 import uuid
 import secrets
 from app.database import db
 from app.auth import get_current_user
 from app.routers.email_utils import send_email, is_microsoft365_configured
+from app.services.portal_audit import record_portal_event
 
 router = APIRouter()
+
+
+async def _client_identity(client_id: str) -> dict:
+    return await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1}) or {
+        "id": client_id,
+        "name": "Unknown client",
+    }
+
+
+def _require_portal_audit_access(current_user: dict) -> None:
+    if current_user.get("role") not in {"admin", "owner", "super_admin"} and not current_user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Administrator access is required to view portal audit history")
 
 
 def _portal_welcome_email_html(name, email, password, company_name, portal_url, msp_name, primary_color):
@@ -70,6 +83,25 @@ def _password_reset_email_html(name, email, password, msp_name, portal_url, prim
 
 # ============== PORTAL CONFIGURATION ==============
 
+
+@router.get("/client-portal/access-logs")
+async def get_portal_access_logs(
+    client_id: str = Query(None),
+    outcome: str = Query(None),
+    days: int = Query(90, ge=1, le=3650),
+    limit: int = Query(250, ge=1, le=1000),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return persisted portal authentication and administration evidence."""
+    _require_portal_audit_access(current_user)
+    query = {"timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()}}
+    if client_id:
+        query["client_id"] = client_id
+    if outcome in {"success", "failed", "blocked", "warning"}:
+        query["outcome"] = outcome
+    return await db.portal_access_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+
+
 @router.get("/client-portal/config/{client_id}")
 async def get_portal_config(client_id: str, current_user: dict = Depends(get_current_user)):
     config = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0})
@@ -85,13 +117,32 @@ async def get_portal_config(client_id: str, current_user: dict = Depends(get_cur
 
 @router.put("/client-portal/config/{client_id}")
 async def update_portal_config(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    client = await _client_identity(client_id)
+    previous = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0}) or {}
     data["client_id"] = client_id
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.portal_configs.update_one({"client_id": client_id}, {"$set": data}, upsert=True)
+    changed_features = sorted(
+        key for key in set((previous.get("features") or {})) | set((data.get("features") or {}))
+        if (previous.get("features") or {}).get(key) != (data.get("features") or {}).get(key)
+    )
+    await record_portal_event(
+        action="portal_configuration_updated",
+        client_id=client_id,
+        client_name=client["name"],
+        actor=current_user,
+        details=f"Portal configuration updated for {client['name']}",
+        metadata={
+            "enabled_before": bool(previous.get("enabled", False)),
+            "enabled_after": bool(data.get("enabled", False)),
+            "changed_features": changed_features,
+        },
+    )
     return {"message": "Portal config updated"}
 
 @router.post("/client-portal/generate-token/{client_id}")
 async def generate_portal_token(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    client = await _client_identity(client_id)
     token_value = secrets.token_urlsafe(32)
     token_entry = {
         "id": str(uuid.uuid4()), "token": token_value,
@@ -106,13 +157,39 @@ async def generate_portal_token(client_id: str, data: dict, current_user: dict =
         {"$push": {"access_tokens": token_entry}, "$set": {"client_id": client_id, "enabled": True}},
         upsert=True
     )
+    await record_portal_event(
+        action="secure_link_generated",
+        client_id=client_id,
+        client_name=client["name"],
+        actor=current_user,
+        details=f"Secure portal link generated for {data.get('contact_name') or data.get('contact_email') or client['name']}",
+        metadata={
+            "link_id": token_entry["id"],
+            "contact_email": data.get("contact_email", ""),
+            "expires_at": token_entry["expires_at"],
+        },
+    )
     return {"token": token_value, "portal_url": f"/portal/{token_value}", "entry": token_entry}
 
 @router.delete("/client-portal/tokens/{client_id}/{token_id}")
 async def revoke_portal_token(client_id: str, token_id: str, current_user: dict = Depends(get_current_user)):
+    client = await _client_identity(client_id)
+    config = await db.portal_configs.find_one(
+        {"client_id": client_id, "access_tokens.id": token_id},
+        {"_id": 0, "access_tokens.$": 1},
+    ) or {}
+    token_entry = (config.get("access_tokens") or [{}])[0]
     await db.portal_configs.update_one(
         {"client_id": client_id},
         {"$pull": {"access_tokens": {"id": token_id}}}
+    )
+    await record_portal_event(
+        action="secure_link_revoked",
+        client_id=client_id,
+        client_name=client["name"],
+        actor=current_user,
+        details=f"Secure portal link revoked for {token_entry.get('contact_name') or token_entry.get('contact_email') or client['name']}",
+        metadata={"link_id": token_id, "contact_email": token_entry.get("contact_email", "")},
     )
     return {"message": "Token revoked"}
 
@@ -266,6 +343,25 @@ async def create_portal_user(client_id: str, data: dict, current_user: dict = De
     else:
         safe["email_status"] = "skipped"
 
+    await record_portal_event(
+        action="portal_user_invited",
+        client_id=client_id,
+        client_name=client["name"] if client else "",
+        actor=current_user,
+        portal_user=safe,
+        details=f"Portal access created for {name or email}",
+        metadata={
+            "role": user["role"],
+            "welcome_email_status": safe["email_status"],
+            "permissions": sorted(key for key in (
+                "can_view_all_tickets",
+                "can_create_tickets",
+                "can_view_assets",
+                "can_view_invoices",
+                "can_remote_devices",
+            ) if user.get(key)),
+        },
+    )
     return safe
 
 
@@ -286,15 +382,38 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.portal_users.update_one({"id": user_id}, {"$set": updates})
+        await record_portal_event(
+            action="portal_user_access_updated",
+            client_id=client_id,
+            client_name=user.get("client_name", ""),
+            actor=current_user,
+            portal_user=user,
+            details=f"Portal access updated for {user.get('name') or user.get('email')}",
+            metadata={
+                "changed_fields": sorted(key for key in updates if key not in {"password_hash", "updated_at"}),
+                "password_changed": bool(data.get("password")),
+                "active_before": user.get("is_active", True),
+                "active_after": updates.get("is_active", user.get("is_active", True)),
+            },
+        )
     return {"message": "Portal user updated"}
 
 
 @router.delete("/client-portal/users/{client_id}/{user_id}")
 async def delete_portal_user(client_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
     """Delete a portal user."""
+    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0})
     result = await db.portal_users.delete_one({"id": user_id, "client_id": client_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Portal user not found")
+    await record_portal_event(
+        action="portal_user_removed",
+        client_id=client_id,
+        client_name=(user or {}).get("client_name", ""),
+        actor=current_user,
+        portal_user=user or {"id": user_id},
+        details=f"Portal user {(user or {}).get('name') or (user or {}).get('email') or user_id} removed",
+    )
     return {"message": "Portal user deleted"}
 
 
@@ -304,7 +423,10 @@ async def reset_portal_user_password(client_id: str, user_id: str, data: dict = 
     from app.auth import hash_password
     data = data or {}
 
-    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0, "email": 1, "name": 1})
+    user = await db.portal_users.find_one(
+        {"id": user_id, "client_id": client_id},
+        {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "email": 1, "name": 1},
+    )
     if not user:
         raise HTTPException(status_code=404, detail="Portal user not found")
 
@@ -323,6 +445,15 @@ async def reset_portal_user_password(client_id: str, user_id: str, data: dict = 
         email_result = await send_email(user["email"], f"{msp_name} - Password Reset", html, category="notifications")
         result["email_status"] = email_result.get("status", "unknown")
 
+    await record_portal_event(
+        action="portal_password_reset",
+        client_id=client_id,
+        client_name=user.get("client_name", ""),
+        actor=current_user,
+        portal_user=user,
+        details=f"Portal password reset for {user.get('name') or user.get('email')}",
+        metadata={"email_status": result.get("email_status", "skipped"), "mfa_reset": True},
+    )
     return result
 
 

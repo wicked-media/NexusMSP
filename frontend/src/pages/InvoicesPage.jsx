@@ -60,6 +60,22 @@ const RECURRING_INTERVAL_OPTIONS = [
   { value: "annually", label: "Annually", detail: "Once each year" },
 ];
 
+const normaliseInvoice = (invoice) => ({
+  ...invoice,
+  line_items: (invoice?.line_items || []).map((line) => {
+    const quantity = Number(line.quantity ?? 1);
+    const unitPrice = Number(line.unit_price ?? line.rate ?? 0);
+    return {
+      ...line,
+      name: line.name || line.description || "Invoice item",
+      description: line.description || line.name || "",
+      quantity,
+      unit_price: unitPrice,
+      total: Number(line.total ?? line.amount ?? (quantity * unitPrice)),
+    };
+  }),
+});
+
 function ClientAutocomplete({
   clients,
   value,
@@ -294,25 +310,26 @@ export default function InvoicesPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [invRes, clientRes, prodRes, ticketRes, statsRes, xeroRes, reconciliationRes] = await Promise.all([
+      const [invResult, clientResult, productResult, ticketResult, statsResult, xeroResult, reconciliationResult] = await Promise.allSettled([
         axios.get(`${API}/invoices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/products`, { headers }),
-        // Ticket linkage and the summary rail enrich the form, but an
-        // intermittent response from either must not make a successfully
-        // created invoice look as though it failed to save.
-        axios.get(`${API}/tickets`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/invoices/stats/summary`, { headers }).catch(() => ({ data: {} })),
-        axios.get(`${API}/xero/status`, { headers }).catch(() => ({ data: { connected: false, configured: false, org_name: null } })),
-        axios.get(`${API}/billing/reconciliation/summary`, { headers }).catch(() => ({ data: { pending_count: 0, pending_total: 0, by_method: [] } })),
+        axios.get(`${API}/tickets`, { headers }),
+        axios.get(`${API}/invoices/stats/summary`, { headers }),
+        axios.get(`${API}/xero/status`, { headers }),
+        axios.get(`${API}/billing/reconciliation/summary`, { headers }),
       ]);
-      setInvoices(invRes.data);
-      setClients(clientRes.data);
-      setProducts(prodRes.data);
-      setTickets(ticketRes.data);
-      setStats(statsRes.data);
-      setXeroStatus(xeroRes.data || { connected: false, configured: false, org_name: null });
-      setReconciliation(reconciliationRes.data || { pending_count: 0, pending_total: 0, by_method: [] });
+      if (invResult.status !== "fulfilled") throw invResult.reason;
+      setInvoices((invResult.value.data || []).map(normaliseInvoice));
+      setClients(clientResult.status === "fulfilled" ? clientResult.value.data : []);
+      setProducts(productResult.status === "fulfilled" ? productResult.value.data : []);
+      setTickets(ticketResult.status === "fulfilled" ? ticketResult.value.data : []);
+      setStats(statsResult.status === "fulfilled" ? statsResult.value.data : {});
+      setXeroStatus(xeroResult.status === "fulfilled" ? xeroResult.value.data : { connected: false, configured: false, org_name: null });
+      setReconciliation(reconciliationResult.status === "fulfilled" ? reconciliationResult.value.data : { pending_count: 0, pending_total: 0, by_method: [] });
+      if ([clientResult, productResult, ticketResult].some(result => result.status === "rejected")) {
+        toast.warning("Invoices loaded, but one optional client, product, or ticket lookup is temporarily unavailable");
+      }
     } catch {
       setLoadError("NexusMSP could not load invoices and the required billing records. No invoice changes have been made.");
       toast.error("Failed to load invoices");
@@ -385,7 +402,7 @@ export default function InvoicesPage() {
     setEditing(inv);
     setForm({
       client_id: inv.client_id, contract_id: inv.contract_id || "", ticket_id: inv.ticket_id || "", ticket_number: inv.ticket_number || "", ticket_title: inv.ticket_title || "", due_date: inv.due_date,
-      invoice_name: inv.invoice_name || "", notes: inv.notes || "", line_items: inv.line_items || [], tax_rate: String(inv.tax_rate || 0),
+      invoice_name: inv.invoice_name || "", notes: inv.notes || "", line_items: normaliseInvoice(inv).line_items, tax_rate: String(inv.tax_rate || 0),
       is_recurring: inv.is_recurring || false, recurring_interval: inv.recurring_interval || "monthly",
       recurring_start_date: inv.recurring_start_date || "", recurring_end_date: inv.recurring_end_date || ""
     });
@@ -537,7 +554,11 @@ export default function InvoicesPage() {
     const remaining = (payingInvoice?.total || 0) - (payingInvoice?.amount_paid || 0);
     if (parseFloat(paymentForm.amount) > remaining + 0.001) { toast.error(`Payment cannot exceed the remaining balance of $${remaining.toFixed(2)}`); return; }
     try {
-      await axios.post(`${API}/invoices/${payingInvoice.id}/record-payment`, paymentForm, { headers });
+      await axios.post(
+        `${API}/invoices/${payingInvoice.id}/record-payment`,
+        { ...paymentForm, idempotency_key: crypto.randomUUID() },
+        { headers },
+      );
       toast.success("Payment recorded");
       setIsPaymentOpen(false);
       fetchAll();
@@ -639,7 +660,11 @@ export default function InvoicesPage() {
     const invoiceTarget = emailInvoiceTarget || viewInvoice;
     if (!invoiceTarget) return;
     try {
-      const response = await axios.post(`${API}/invoices/${invoiceTarget.id}/email`, emailForm, { headers });
+      const response = await axios.post(
+        `${API}/invoices/${invoiceTarget.id}/email`,
+        { ...emailForm, idempotency_key: crypto.randomUUID() },
+        { headers },
+      );
       if (response.data?.sent) toast.success("Invoice emailed");
       else toast.warning(response.data?.message || "Email delivery is not configured");
       setEmailDialog(false);
@@ -1250,6 +1275,7 @@ export default function InvoicesPage() {
     const isSplitParent = Boolean(inv.is_split_parent);
     const pStatus = isSplitParent ? "split" : (inv.payment_status || "unpaid");
     const canDelete = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
+    const canEditFinancialRecord = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && !isSplitParent;
     const canVoid = pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
     const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
     const balance = isSplitParent ? 0 : (inv.total || 0) - (inv.amount_paid || 0);
@@ -1577,10 +1603,10 @@ export default function InvoicesPage() {
                   <Receipt className="w-4 h-4 mr-1" />Issue Credit Note
                 </Button>
                 {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
-                <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
+                {canEditFinancialRecord && <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
                   <ArrowRightLeft className="w-4 h-4 mr-1" />Move to Client
-                </Button>
-                {pStatus !== "paid" && inv.status !== "cancelled" && <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>}
+                </Button>}
+                {canEditFinancialRecord && <Button variant="outline" className="w-full" onClick={() => openEdit(inv)} data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-1" />Edit</Button>}
                 {canVoid && (
                   <Button variant="outline" className="w-full text-amber-500 hover:text-amber-400" onClick={() => { setVoidingInvoice(inv); setVoidReason(""); setVoidDialog(true); }} data-testid="void-invoice-btn">
                     <Ban className="w-4 h-4 mr-1" />Void Invoice

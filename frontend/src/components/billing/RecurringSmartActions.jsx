@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
   Sparkles, TrendingUp, AlertTriangle, Layers, Mail, PauseCircle, RefreshCcw,
@@ -134,13 +135,14 @@ export default function RecurringSmartActions({ ri, onReload }) {
 
       {/* Renewal Risk */}
       <Dialog open={showRisk} onOpenChange={setShowRisk}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-3xl flex-col overflow-hidden border-emerald-400/25 bg-[linear-gradient(145deg,rgba(9,30,25,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="shrink-0 border-b border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.10),transparent)] px-6 py-5 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Revenue assurance</p>
             <DialogTitle className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" />Renewal Risk — {ri.client_name}</DialogTitle>
             <DialogDescription>AI-driven churn score from payment history, ticket activity & SLA.</DialogDescription>
           </DialogHeader>
-          {busy && !risk ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : risk && (
-            <div className="space-y-4">
+          {busy && !risk ? <Loader2 className="mx-auto my-8 h-5 w-5 animate-spin" /> : risk && (
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
               <div className="flex items-center justify-between p-4 rounded bg-muted/30">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk Score</div>
@@ -171,7 +173,7 @@ export default function RecurringSmartActions({ ri, onReload }) {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => { setRisk(null); loadRisk(); }}><RefreshCcw className="w-3 h-3 mr-1" />Recompute</Button>
             <Button onClick={() => setShowRisk(false)}>Close</Button>
           </DialogFooter>
@@ -180,14 +182,14 @@ export default function RecurringSmartActions({ ri, onReload }) {
 
       {/* CPI Uplift */}
       <Dialog open={showUplift} onOpenChange={setShowUplift}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>CPI / YoY Uplift Rule</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <input type="checkbox" checked={upliftEnabled} onChange={(e) => setUpliftEnabled(e.target.checked)} id="uplift-en" />
-              <label htmlFor="uplift-en" className="text-sm">Enable auto-uplift</label>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-2xl flex-col overflow-hidden border-amber-400/25 bg-[linear-gradient(145deg,rgba(35,28,12,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="shrink-0 border-b border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(251,191,36,0.17),transparent_45%),linear-gradient(135deg,rgba(245,158,11,0.10),transparent)] px-6 py-5 text-left"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300">Revenue protection</p><DialogTitle className="mt-1 text-2xl tracking-tight text-zinc-100">CPI / annual uplift rule</DialogTitle><DialogDescription className="mt-2">Set a clear uplift policy for future billing runs. Any immediate uplift is a financial change and remains auditable.</DialogDescription></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+            <div className="flex items-center justify-between rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-4">
+              <div><p className="text-sm font-medium">Enable automatic uplift</p><p className="text-[10px] text-muted-foreground">Apply on each configured billing anniversary.</p></div>
+              <Switch checked={upliftEnabled} onCheckedChange={setUpliftEnabled} id="uplift-en" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label className="text-xs">Uplift %</Label>
                 <Input type="number" step="0.1" value={upliftPct} onChange={(e) => setUpliftPct(parseFloat(e.target.value || "0"))} />
@@ -208,7 +210,7 @@ export default function RecurringSmartActions({ ri, onReload }) {
               <div className="text-xs text-muted-foreground">Last applied: {new Date(ri.uplift_rule.last_applied_at).toLocaleDateString()} ({ri.uplift_rule.applied_count} times)</div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={applyUpliftNow} disabled={busy} className="text-amber-400 border-amber-500/30"><Zap className="w-3 h-3 mr-1" />Apply Now</Button>
             <Button onClick={saveUplift} disabled={busy}>Save Rule</Button>
           </DialogFooter>
@@ -217,10 +219,10 @@ export default function RecurringSmartActions({ ri, onReload }) {
 
       {/* Pause range */}
       <Dialog open={showPause} onOpenChange={setShowPause}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Scheduled Pause Window</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-2xl flex-col overflow-hidden border-violet-400/25 bg-[linear-gradient(145deg,rgba(22,15,40,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="shrink-0 border-b border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(167,139,250,0.17),transparent_45%),linear-gradient(135deg,rgba(124,58,237,0.10),transparent)] px-6 py-5 text-left"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Billing control</p><DialogTitle className="mt-1 text-2xl tracking-tight text-zinc-100">Scheduled pause window</DialogTitle><DialogDescription className="mt-2">Temporarily pause this billing stream for a defined period. The timing and reason remain visible in its audit history.</DialogDescription></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div><Label className="text-xs">From</Label><Input type="date" value={pauseFrom} onChange={(e) => setPauseFrom(e.target.value)} /></div>
               <div><Label className="text-xs">To</Label><Input type="date" value={pauseTo} onChange={(e) => setPauseTo(e.target.value)} /></div>
             </div>
@@ -229,7 +231,7 @@ export default function RecurringSmartActions({ ri, onReload }) {
               <Textarea value={pauseReason} onChange={(e) => setPauseReason(e.target.value)} rows={2} />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setShowPause(false)}>Cancel</Button>
             <Button onClick={setPauseRange} disabled={busy}>Schedule Pause</Button>
           </DialogFooter>
@@ -238,12 +240,13 @@ export default function RecurringSmartActions({ ri, onReload }) {
 
       {/* Pre-bill preview */}
       <Dialog open={showPrebill} onOpenChange={setShowPrebill}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-4xl flex-col overflow-hidden border-cyan-400/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
+          <DialogHeader className="shrink-0 border-b border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(6,182,212,0.10),transparent)] px-6 py-5 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Client-ready review</p>
             <DialogTitle>Pre-Bill Preview</DialogTitle>
             <DialogDescription>Sends the client a preview of next invoice so they can flag issues before billing.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <Input value={prebillEmail} onChange={(e) => setPrebillEmail(e.target.value)} placeholder="Override email (optional — uses client default)" />
             <Button onClick={sendPrebill} disabled={busy} data-testid="prebill-send-btn">{busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Mail className="w-3 h-3 mr-1" />}Generate & Send Preview</Button>
             {prebillHtml && (
@@ -252,6 +255,7 @@ export default function RecurringSmartActions({ ri, onReload }) {
               </ScrollArea>
             )}
           </div>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="outline" onClick={() => setShowPrebill(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

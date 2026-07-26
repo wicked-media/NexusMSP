@@ -1,4 +1,4 @@
-VERSION ?= 0.1.5-nexus-shield
+VERSION ?= 0.1.7-nexus-identity
 LDFLAGS  = -s -w -X main.Version=$(VERSION)
 
 .PHONY: all windows chat windows-chat linux test clean fmt vet tidy

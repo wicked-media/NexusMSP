@@ -31,6 +31,10 @@ class User(BaseModel):
     categories: List[str] = []
     is_active: bool = True
     is_admin: bool = False
+    action_permissions: Optional[Dict[str, bool] | List[str]] = None
+    client_scope_mode: str = "all"
+    client_scope_ids: List[str] = []
+    site_scope_ids: List[str] = []
     archived: bool = False
     archived_at: Optional[str] = None
     about_me: Optional[str] = None
@@ -99,6 +103,8 @@ class TicketCreate(BaseModel):
     cc: List[str] = []
     watchers: List[str] = []
     contact_id: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
     due_date: Optional[str] = None
     estimated_hours: Optional[float] = None
     ticket_type: str = "incident"
@@ -918,6 +924,7 @@ class YeastarCallLog(BaseModel):
 class TicketEmailCreate(BaseModel):
     to_addresses: List[str]
     cc_addresses: List[str] = []
+    bcc_addresses: List[str] = []
     subject: Optional[str] = None  # If None, uses ticket title
     body: str
     body_type: str = "html"
@@ -934,6 +941,7 @@ class TicketEmail(BaseModel):
     from_name: Optional[str] = None
     to_addresses: List[str] = []
     cc_addresses: List[str] = []
+    bcc_addresses: List[str] = []
     subject: str
     body: str
     body_type: str = "html"

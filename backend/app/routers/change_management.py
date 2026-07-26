@@ -168,6 +168,11 @@ async def approve_change(change_id: str, payload: dict = Body(default={}), user=
     now = _now()
     approval = {"user": _recorded_actor(user), "user_id": user.get("id"), "action": "approved", "note": note, "at": now}
     await _transition_change(change, "pending_review", {"$set": {"status": "approved", "approved_at": now, "approved_by": user.get("id"), "approved_by_name": _recorded_actor(user), "updated_at": now}, "$push": {"approvals": approval, "activity": _event(user, "approved", note)}})
+    if change.get("workflow_id"):
+        await db.workflows.update_one(
+            {"id": change["workflow_id"]},
+            {"$set": {"approval_status": "approved", "approved_change_id": change_id, "updated_at": now}},
+        )
     await _write_audit(user, "change_request_approved", change, {"note": note or None})
     return {"message": "Change approved", "status": "approved"}
 
@@ -184,6 +189,11 @@ async def reject_change(change_id: str, payload: dict = Body(default={}), user=D
         raise HTTPException(403, "The requesting technician cannot reject their own change")
     now = _now()
     await _transition_change(change, "pending_review", {"$set": {"status": "rejected", "rejection_reason": reason, "rejected_at": now, "rejected_by": user.get("id"), "rejected_by_name": _recorded_actor(user), "updated_at": now}, "$push": {"approvals": {"user": _recorded_actor(user), "user_id": user.get("id"), "action": "rejected", "note": reason, "at": now}, "activity": _event(user, "rejected", reason)}})
+    if change.get("workflow_id"):
+        await db.workflows.update_one(
+            {"id": change["workflow_id"]},
+            {"$set": {"approval_status": "rejected", "updated_at": now}},
+        )
     await _write_audit(user, "change_request_rejected", change, {"reason": reason})
     return {"message": "Change rejected", "status": "rejected"}
 
@@ -226,5 +236,10 @@ async def rollback_change(change_id: str, payload: dict = Body(default={}), user
         raise HTTPException(400, "Record the rollback reason and outcome (at least 8 characters)")
     now = _now()
     await _transition_change(change, "implementing", {"$set": {"status": "rollback", "rollback_notes": notes, "rolled_back_at": now, "rolled_back_by": user.get("id"), "rolled_back_by_name": _recorded_actor(user), "updated_at": now}, "$push": {"activity": _event(user, "rolled_back", notes)}})
+    if change.get("workflow_id"):
+        await db.workflows.update_one(
+            {"id": change["workflow_id"]},
+            {"$set": {"enabled": False, "approval_status": "rolled_back", "updated_at": now}},
+        )
     await _write_audit(user, "change_request_rolled_back", change, {"rollback_notes": notes})
     return {"message": "Change rolled back", "status": "rollback"}

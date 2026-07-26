@@ -1,56 +1,45 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_client_scope, scope_query
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.platform_foundation import request_correlation_id
+from app.services.remote_runtime import (
+    REMOTE_POLICY_DEFAULTS,
+    end_remote_session_record,
+    heartbeat_remote_session,
+    mark_remote_session_opened,
+    provider_device_id,
+    provider_is_active,
+    queue_remote_repair,
+    remote_health_for_device,
+    remote_policy,
+    rustdesk_config,
+    start_remote_session,
+)
 from app.models import *
 
 router = APIRouter()
 
-REMOTE_POLICY_DEFAULTS = {
-    "default_provider": "rustdesk",
-    "allow_fallback": True,
-    "require_consent": True,
-    "require_ticket_reference": False,
-}
-
-
 async def _remote_policy():
-    stored = await db.settings.find_one({"type": "remote_access_policy"}, {"_id": 0})
-    return {**REMOTE_POLICY_DEFAULTS, **(stored or {})}
+    return await remote_policy()
 
 
 async def _provider_is_active(provider_id: str) -> bool:
-    if provider_id == "rustdesk":
-        legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
-        if legacy and legacy.get("value", {}).get("server_url") and legacy.get("value", {}).get("enabled", True):
-            return True
-        settings = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0})
-        return bool(settings and settings.get("server_url"))
-    config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
-    return bool(config and config.get("active"))
+    return await provider_is_active(provider_id)
 
 
 async def _rustdesk_config() -> dict:
-    """Read both supported RustDesk setting shapes during the migration period."""
-    typed = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0}) or {}
-    legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
-    legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
-    # Typed settings take precedence when an explicit value exists, while the
-    # established RustDesk integration remains a safe fallback.
-    return {
-        **legacy_value,
-        **{key: value for key, value in typed.items() if value not in (None, "")},
-    }
+    return await rustdesk_config()
 
 
 def _device_provider_id(device: dict, provider_id: str) -> Optional[str]:
     if provider_id == "rustdesk":
         return device.get("rustdesk_id")
-    # Keep integration identifiers in one predictable map while accepting the
-    # straightforward legacy field used by early device imports.
     ids = device.get("remote_provider_ids") or {}
     return ids.get(provider_id) or device.get(f"{provider_id}_id") or device.get(f"{provider_id}_uuid")
 
@@ -60,30 +49,55 @@ async def get_remote_access_policy(current_user: dict = Depends(get_current_user
     return await _remote_policy()
 
 
-@router.put("/remote-access/policy")
+@router.put("/remote-access/policy", dependencies=[Depends(require_action("device.remote.configure"))])
 async def save_remote_access_policy(data: dict, current_user: dict = Depends(get_current_user)):
     user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not user or (user.get("role") != "admin" and not user.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
-    allowed = {"default_provider", "allow_fallback", "require_consent", "require_ticket_reference"}
+    allowed = {
+        "default_provider",
+        "allow_fallback",
+        "require_consent",
+        "require_ticket_reference",
+        "auto_create_time_entry",
+        "auto_ticket_note",
+        "auto_repair",
+        "repair_cooldown_minutes",
+    }
     updates = {key: value for key, value in data.items() if key in allowed}
     if updates.get("default_provider") not in (None, "rustdesk", "splashtop"):
         raise HTTPException(status_code=422, detail="Choose RustDesk or Splashtop as the default provider")
     updates.update({"type": "remote_access_policy", "updated_at": datetime.now(timezone.utc).isoformat()})
     await db.settings.update_one({"type": "remote_access_policy"}, {"$set": updates}, upsert=True)
+    await log_activity(
+        current_user,
+        "remote_policy_updated",
+        "settings",
+        "remote_access_policy",
+        "Nexus Remote",
+        "Updated governed remote-access policy",
+        metadata={"updated_fields": sorted(key for key in updates if key not in {"type", "updated_at"})},
+    )
     return await _remote_policy()
 
 
 @router.get("/devices/{device_id}/remote-options")
-async def get_device_remote_options(device_id: str, current_user: dict = Depends(get_current_user)):
+async def get_device_remote_options(device_id: str, request: Request, current_user: dict = Depends(get_current_user)):
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.view",
+        request=request,
+    )
     policy = await _remote_policy()
     assigned = device.get("remote_provider") or "inherit"
     providers = []
     for provider_id, name in (("rustdesk", "RustDesk"), ("splashtop", "Splashtop")):
-        provider_device_id = _device_provider_id(device, provider_id)
+        provider_device_id = await provider_device_id(device, provider_id)
         active = await _provider_is_active(provider_id)
         selected = provider_id == (policy["default_provider"] if assigned == "inherit" else assigned)
         providers.append({
@@ -99,11 +113,18 @@ async def get_device_remote_options(device_id: str, current_user: dict = Depends
     return {"device_id": device_id, "assigned_provider": assigned, "policy": policy, "providers": providers}
 
 
-@router.put("/devices/{device_id}/remote-access")
-async def save_device_remote_access(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.put("/devices/{device_id}/remote-access", dependencies=[Depends(require_action("device.remote.configure"))])
+async def save_device_remote_access(device_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.configure",
+        request=request,
+    )
     provider = data.get("remote_provider", "inherit")
     if provider not in ("inherit", "rustdesk", "splashtop"):
         raise HTTPException(status_code=422, detail="Unsupported remote provider")
@@ -120,56 +141,36 @@ async def save_device_remote_access(device_id: str, data: dict, current_user: di
         "remote_provider_ids": ids,
         "remote_access_updated_at": datetime.now(timezone.utc).isoformat(),
     }})
-    return await get_device_remote_options(device_id, current_user)
+    await log_activity(
+        current_user,
+        "remote_device_configured",
+        "device",
+        device_id,
+        device.get("name", ""),
+        f"Remote provider assignment changed to {provider}",
+        metadata={"remote_provider_ids": sorted(ids)},
+    )
+    return await get_device_remote_options(device_id, request, current_user)
 
 
-@router.post("/devices/{device_id}/remote-sessions/start")
-async def start_provider_remote_session(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/devices/{device_id}/remote-sessions/start", dependencies=[Depends(require_action("device.remote.start"))])
+async def start_provider_remote_session(device_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    policy = await _remote_policy()
-    provider = data.get("provider") or device.get("remote_provider") or policy["default_provider"]
-    if provider == "inherit":
-        provider = policy["default_provider"]
-    if provider not in ("rustdesk", "splashtop", "trmm"):
-        raise HTTPException(status_code=422, detail="Unsupported remote provider")
-    if policy["require_ticket_reference"] and not data.get("ticket_id"):
-        raise HTTPException(status_code=422, detail="A ticket reference is required before starting a remote session")
-    consent_confirmed = bool(data.get("consent_confirmed"))
-    if policy["require_consent"] and not consent_confirmed:
-        raise HTTPException(status_code=422, detail="End-user consent must be confirmed before starting a remote session")
-    if not await _provider_is_active(provider):
-        raise HTTPException(status_code=409, detail=f"{provider.title()} is not enabled in Remote Access settings")
-    provider_device_id = device.get("trmm_agent_id") if provider == "trmm" else _device_provider_id(device, provider)
-    if not provider_device_id:
-        raise HTTPException(status_code=409, detail=f"This device has not been enrolled in {provider.title()}")
-    client = await db.clients.find_one({"id": device.get("client_id")}, {"_id": 0})
-    now = datetime.now(timezone.utc)
-    handoff_required = provider == "splashtop"
-    session = RemoteSession(
-        device_id=device_id, device_name=device.get("name"), client_id=device.get("client_id"),
-        client_name=client.get("name") if client else None, user_id=current_user["id"],
-        user_name=current_user.get("name"), session_type=data.get("session_type", "remote_desktop"),
-        rustdesk_id=device.get("rustdesk_id"), provider=provider, provider_device_id=provider_device_id,
-        ticket_id=data.get("ticket_id"), consent_required=policy["require_consent"],
-        consent_confirmed=consent_confirmed, consent_confirmed_at=now if consent_confirmed else None,
-        launch_status="handoff_required" if handoff_required else "launched", device_type=device.get("device_type", "workstation"),
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.start",
+        request=request,
     )
-    doc = session.model_dump()
-    for key in ("started_at", "consent_confirmed_at"):
-        if doc.get(key): doc[key] = doc[key].isoformat()
-    await db.remote_sessions.insert_one(doc)
-    await log_activity(current_user, "remote_connect", "device", device_id, device.get("name", ""),
-        f"Started {provider.title()} {session.session_type} session on {device.get('name', '')}",
-        metadata={"session_id": session.id, "provider": provider, "ticket_id": data.get("ticket_id")})
-    return {
-        "session": doc,
-        "provider": provider,
-        "launch_mode": "provider_handoff" if handoff_required else "native_client",
-        "message": ("Open this device from the Splashtop technician console. NexusMSP has recorded the session; API launch handoff is the remaining Splashtop configuration step."
-                    if handoff_required else ("Tactical RMM session recorded. Continue with the MeshCentral connection." if provider == "trmm" else "RustDesk session recorded. Continue with the RustDesk connection dialog.")),
-    }
+    return await start_remote_session(
+        device=device,
+        user=current_user,
+        data=data,
+        correlation_id=request_correlation_id(request),
+    )
 
 # ============== RUSTDESK / REMOTE ACCESS ENDPOINTS ==============
 
@@ -278,31 +279,16 @@ async def get_remote_agents(current_user: dict = Depends(get_current_user)):
     ]
     return agents
 
-@router.post("/remote/sessions")
-async def create_remote_session(device_id: str, session_type: str = "remote_desktop", current_user: dict = Depends(get_current_user)):
-    """Create a new remote session record"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    
-    client = await db.clients.find_one({"id": device.get("client_id")}, {"_id": 0})
-    session = RemoteSession(
-        device_id=device_id,
-        device_name=device.get('name'),
-        client_id=device.get('client_id'),
-        client_name=client.get('name') if client else None,
-        user_id=current_user['id'],
-        user_name=current_user['name'],
-        session_type=session_type,
-        rustdesk_id=device.get('rustdesk_id'),
-        device_type=device.get('device_type', 'workstation'),
+@router.post("/remote/sessions", dependencies=[Depends(require_action("device.remote.start"))])
+async def create_remote_session(device_id: str, request: Request, session_type: str = "remote_desktop", current_user: dict = Depends(get_current_user)):
+    """Retired bypass retained as an explicit migration response."""
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "This legacy session endpoint is retired because it bypassed consent and provider evidence. "
+            f"Use POST /devices/{device_id}/remote-sessions/start."
+        ),
     )
-    doc = session.model_dump()
-    doc['started_at'] = doc['started_at'].isoformat()
-    await db.remote_sessions.insert_one(doc)
-    await log_activity(current_user, "remote_connect", "device", device_id, device.get("name", ""), f"Started {session_type} session on {device.get('name', '')}", metadata={"session_id": session.id, "device_type": device.get("device_type", "workstation")})
-    
-    return session
 
 @router.get("/remote/sessions")
 async def get_remote_sessions(
@@ -311,7 +297,7 @@ async def get_remote_sessions(
     user_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    query = {}
+    query = scope_query(current_user)
     if device_id:
         query["device_id"] = device_id
     if status:
@@ -325,7 +311,8 @@ async def get_remote_sessions(
 @router.get("/remote/active-sessions")
 async def get_active_remote_sessions(current_user: dict = Depends(get_current_user)):
     """Get all currently active remote sessions"""
-    sessions = await db.remote_sessions.find({"status": "active"}, {"_id": 0}).sort("started_at", -1).to_list(100)
+    query = {**scope_query(current_user), "status": {"$in": ["authorised", "active", "ending"]}}
+    sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(100)
     # Calculate live duration for active sessions
     now = datetime.now(timezone.utc)
     for s in sessions:
@@ -336,39 +323,86 @@ async def get_active_remote_sessions(current_user: dict = Depends(get_current_us
             s["live_duration_minutes"] = 0
     return sessions
 
-@router.put("/remote/sessions/{session_id}/end")
-async def end_remote_session(session_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+@router.post("/remote/sessions/{session_id}/opened")
+async def confirm_remote_session_opened(
+    session_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
-    started_at = datetime.fromisoformat(session['started_at']) if isinstance(session['started_at'], str) else session['started_at']
-    duration = int((datetime.now(timezone.utc) - started_at).total_seconds() / 60)
-    
-    was_locked = data.get("was_locked_before_disconnect")
-    lock_action = data.get("lock_action_on_disconnect", "no_change")
-    notes = data.get("notes")
-    
-    await db.remote_sessions.update_one(
-        {"id": session_id},
-        {"$set": {
-            "status": "ended",
-            "ended_at": datetime.now(timezone.utc).isoformat(),
-            "duration_minutes": duration,
-            "notes": notes,
-            "was_locked_before_disconnect": was_locked,
-            "lock_action_on_disconnect": lock_action,
-        }}
+    await assert_client_scope(
+        current_user,
+        session.get("client_id"),
+        site_id=session.get("site_id"),
+        operation="device.remote.start",
+        request=request,
     )
-    device_name = session.get("device_name", "")
-    await log_activity(current_user, "remote_disconnect", "device", session.get("device_id", ""), device_name, f"Ended {session.get('session_type', 'remote')} session on {device_name} ({duration}min). Lock: {lock_action}", metadata={"session_id": session_id, "duration_minutes": duration, "was_locked": was_locked, "lock_action": lock_action})
-    return {"message": "Session ended", "duration_minutes": duration}
+    return await mark_remote_session_opened(session, current_user)
+
+
+@router.post("/remote/sessions/{session_id}/heartbeat")
+async def remote_session_heartbeat(
+    session_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await assert_client_scope(
+        current_user,
+        session.get("client_id"),
+        site_id=session.get("site_id"),
+        operation="device.remote.start",
+        request=request,
+    )
+    return await heartbeat_remote_session(session, current_user)
+
+
+@router.put(
+    "/remote/sessions/{session_id}/end",
+    dependencies=[Depends(require_action("device.remote.end"))],
+)
+async def end_remote_session(
+    session_id: str,
+    request: Request,
+    data: dict | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await assert_client_scope(
+        current_user,
+        session.get("client_id"),
+        site_id=session.get("site_id"),
+        operation="device.remote.end",
+        request=request,
+    )
+    return await end_remote_session_record(
+        session=session,
+        user=current_user,
+        data=data or {},
+        correlation_id=request_correlation_id(request),
+    )
 
 @router.get("/devices/{device_id}/remote-sessions")
-async def get_device_remote_sessions(device_id: str, limit: int = 50, current_user: dict = Depends(get_current_user)):
+async def get_device_remote_sessions(device_id: str, request: Request, limit: int = 50, current_user: dict = Depends(get_current_user)):
     """Get remote session history for a specific device"""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.view",
+        request=request,
+    )
     sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(limit)
-    active_count = sum(1 for s in sessions if s.get("status") == "active")
+    active_count = sum(1 for s in sessions if s.get("status") in {"authorised", "active", "ending"})
     total_minutes = sum(s.get("duration_minutes", 0) for s in sessions if s.get("status") == "ended")
     return {
         "sessions": sessions,
@@ -377,14 +411,63 @@ async def get_device_remote_sessions(device_id: str, limit: int = 50, current_us
         "total_minutes": total_minutes,
     }
 
+
+@router.get("/devices/{device_id}/remote-health")
+async def get_device_remote_health(
+    device_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.health",
+        request=request,
+    )
+    return await remote_health_for_device(device)
+
+
+@router.post(
+    "/devices/{device_id}/remote-repair",
+    dependencies=[Depends(require_action("device.remote.repair"))],
+)
+async def repair_device_remote_access(
+    device_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.repair",
+        request=request,
+    )
+    return await queue_remote_repair(
+        device=device,
+        user=current_user,
+        reason=str(data.get("reason") or "Technician requested remote-access repair"),
+    )
+
 @router.get("/technicians/{tech_id}/remote-sessions")
 async def get_technician_remote_sessions(tech_id: str, limit: int = 100, current_user: dict = Depends(get_current_user)):
     """Get remote session history for a specific technician"""
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin") and current_user["id"] != tech_id):
         raise HTTPException(status_code=403, detail="Admin access required")
-    sessions = await db.remote_sessions.find({"user_id": tech_id}, {"_id": 0}).sort("started_at", -1).to_list(limit)
-    active_count = sum(1 for s in sessions if s.get("status") == "active")
+    sessions = await db.remote_sessions.find(
+        {**scope_query(current_user), "user_id": tech_id},
+        {"_id": 0},
+    ).sort("started_at", -1).to_list(limit)
+    active_count = sum(1 for s in sessions if s.get("status") in {"authorised", "active", "ending"})
     total_minutes = sum(s.get("duration_minutes", 0) for s in sessions if s.get("status") == "ended")
     unique_devices = len(set(s.get("device_id") for s in sessions))
     return {

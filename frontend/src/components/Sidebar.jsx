@@ -255,7 +255,6 @@ function SidebarSearch() {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const navigate = useNavigate();
-  const inputRef = useRef(null);
 
   const allItems = getAllNavItems();
   const filtered = query.trim()
@@ -267,23 +266,11 @@ function SidebarSearch() {
       ).slice(0, 8)
     : [];
 
-  useEffect(() => {
-    const handler = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
   return (
     <div className="px-3 py-1 relative">
       <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg transition-all ${focused ? "bg-muted ring-1 ring-primary/30" : "bg-muted/50"}`}>
         <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         <input
-          ref={inputRef}
           value={query}
           onChange={e => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
@@ -295,7 +282,7 @@ function SidebarSearch() {
         {query ? (
           <button onClick={() => setQuery("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
         ) : (
-          <kbd className="text-[9px] text-muted-foreground/60 bg-background/50 px-1 rounded hidden sm:inline">Ctrl+K</kbd>
+          <span className="hidden text-[9px] uppercase tracking-wider text-muted-foreground/50 sm:inline">Local</span>
         )}
       </div>
       {focused && filtered.length > 0 && (

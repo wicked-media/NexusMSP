@@ -10,7 +10,9 @@
 package updater
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -28,10 +30,14 @@ import (
 
 // Info describes the update advertised by the server.
 type Info struct {
-	Version string `json:"version"`
-	URL     string `json:"url"`
-	SHA256  string `json:"sha256"`
-	Size    int64  `json:"size"`
+	Version            string `json:"version"`
+	URL                string `json:"url"`
+	SHA256             string `json:"sha256"`
+	Size               int64  `json:"size"`
+	SignatureAlgorithm string `json:"signature_algorithm"`
+	Signature          string `json:"signature"`
+	SigningPublicKey   string `json:"signing_public_key"`
+	SignedPayload      string `json:"signed_payload"`
 }
 
 var inProgress atomic.Bool
@@ -51,6 +57,9 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 	}
 	if info.Version == currentVersion {
 		return nil // nothing to do
+	}
+	if err := VerifyManifest(info); err != nil {
+		return fmt.Errorf("update signature: %w", err)
 	}
 
 	exe, err := os.Executable()
@@ -81,6 +90,17 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 		_ = os.Remove(newPath)
 		return fmt.Errorf("checksum mismatch: want %s got %s", info.SHA256, got)
 	}
+	if info.Size > 0 {
+		stat, statErr := os.Stat(newPath)
+		if statErr != nil {
+			_ = os.Remove(newPath)
+			return fmt.Errorf("size check: %w", statErr)
+		}
+		if stat.Size() != info.Size {
+			_ = os.Remove(newPath)
+			return fmt.Errorf("size mismatch: want %d got %d", info.Size, stat.Size())
+		}
+	}
 	log.Printf("[updater] checksum verified — staging swap")
 
 	if err := os.Chmod(newPath, 0o755); err != nil {
@@ -97,6 +117,28 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 		time.Sleep(800 * time.Millisecond)
 		os.Exit(0)
 	}()
+	return nil
+}
+
+func VerifyManifest(info Info) error {
+	if !strings.EqualFold(info.SignatureAlgorithm, "ed25519") {
+		return errors.New("unsupported or missing signature algorithm")
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(info.SigningPublicKey))
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return errors.New("invalid update signing public key")
+	}
+	signature, err := base64.StdEncoding.DecodeString(strings.TrimSpace(info.Signature))
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return errors.New("invalid update signature")
+	}
+	expectedPayload := fmt.Sprintf("%s|%s|%d", info.Version, strings.ToLower(info.SHA256), info.Size)
+	if info.SignedPayload != "" && info.SignedPayload != expectedPayload {
+		return errors.New("signed payload does not match update manifest")
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), []byte(expectedPayload), signature) {
+		return errors.New("manifest signature verification failed")
+	}
 	return nil
 }
 

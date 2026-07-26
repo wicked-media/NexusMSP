@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { TICKET_PRIORITY_STYLES } from "@/lib/ticketWorkspaceHelpers";
 import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } from "@/lib/ticketPreviewData";
 import { toast } from "sonner";
@@ -610,16 +611,19 @@ export function AutomationHubPage() {
   const refresh = async () => {
     setRefreshing(true);
     try {
-      const [runbooks, scripts, workflows, alertStats] = await Promise.all([
+      const [runbooks, scripts, workflows, workflowStats, alertStats] = await Promise.all([
         axios.get(`${API}/runbooks`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/workflows`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/workflows/stats/overview`, { headers }).catch(() => ({ data: {} })),
         axios.get(`${API}/alert-rules/stats`, { headers }).catch(() => ({ data: {} })),
       ]);
       setSnapshot({
         runbooks: (runbooks.data || []).filter(item => item.enabled !== false).length,
         scripts: (scripts.data || []).length,
         workflows: (workflows.data || []).filter(item => item.enabled !== false).length,
+        simulations: workflowStats.data?.simulations || 0,
+        approvals: workflowStats.data?.pending_approvals || 0,
         alertRules: alertStats.data?.active || 0,
       });
     } catch {
@@ -633,23 +637,43 @@ export function AutomationHubPage() {
     { path: "/runbooks", label: "Runbooks", icon: Workflow, desc: "Step-by-step automated playbooks", count: snapshot?.runbooks, countLabel: "enabled" },
     { path: "/scripting", label: "Scripts Library", icon: Zap, desc: "PowerShell / Bash script repo", count: snapshot?.scripts, countLabel: "available" },
     { path: "/git-scripts", label: "Git Scripts Sync", icon: Workflow, desc: "Pull scripts from Git repos" },
-    { path: "/workflow-automation", label: "Workflow Builder", icon: Workflow, desc: "Visual workflow editor", count: snapshot?.workflows, countLabel: "active" },
+    { path: "/workflow-automation", label: "Automation Studio", icon: Workflow, desc: "No-code and JSON orchestration with safe simulation", count: snapshot?.workflows, countLabel: "active" },
+    { path: "/workflow-automation?tab=marketplace", label: "Automation Marketplace", icon: Layers, desc: "Verified onboarding, security, compliance, and recovery packs" },
+    { path: "/workflow-automation?tab=simulations", label: "Simulation History", icon: Sparkles, desc: "Before/after, risk, rollback, and approval evidence", count: snapshot?.simulations, countLabel: "recorded" },
+    { path: "/change-management", label: "Change Governance", icon: GitMerge, desc: "Independent approval and implementation audit", count: snapshot?.approvals, countLabel: "awaiting review" },
     { path: "/alert-rules", label: "Alert Rules Engine", icon: BellRing, desc: "Alert routing & suppression rules", count: snapshot?.alertRules, countLabel: "enabled" },
   ];
   return (
-    <div className="p-6 space-y-4" data-testid="automation-hub-page">
-      <PageHeader title="Automation Hub" subtitle="Runbooks · Scripts · Workflows · Alert routing" icon={Workflow} />
-      <div className="flex justify-end -mt-1">
-        <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} data-testid="automation-hub-refresh"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh status</Button>
-      </div>
+    <div className="space-y-6" data-testid="automation-hub-page">
+      <OperationalPageHeader
+        eyebrow="Automation workspace · orchestration and governance"
+        title="Automation"
+        description="Build governed workflows, install verified packs, run scripts and runbooks, and preview every material change before approval."
+        icon={Workflow}
+        tone="violet"
+        actions={<><Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} data-testid="automation-hub-refresh"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh status</Button><Button size="sm" onClick={() => navigate("/workflow-automation")}><Sparkles className="mr-1.5 h-4 w-4" />Open Studio</Button></>}
+      />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <HeroTile label="Enabled runbooks" value={snapshot?.runbooks ?? "—"} icon={Workflow} glow="violet" animated={false} onClick={() => navigate("/runbooks")} testId="automation-hub-runbooks" />
         <HeroTile label="Scripts" value={snapshot?.scripts ?? "—"} icon={Zap} glow="amber" animated={false} onClick={() => navigate("/scripting")} testId="automation-hub-scripts" />
-        <HeroTile label="Active workflows" value={snapshot?.workflows ?? "—"} icon={GitMerge} glow="sky" animated={false} onClick={() => navigate("/workflow-automation")} testId="automation-hub-workflows" />
-        <HeroTile label="Alert rules" value={snapshot?.alertRules ?? "—"} icon={BellRing} glow="rose" animated={false} onClick={() => navigate("/alert-rules")} testId="automation-hub-alert-rules" />
+        <HeroTile label="Simulations" value={snapshot?.simulations ?? "—"} icon={Sparkles} glow="sky" animated={false} subtitle="Zero-change previews" onClick={() => navigate("/workflow-automation?tab=simulations")} testId="automation-hub-workflows" />
+        <HeroTile label="Awaiting approval" value={snapshot?.approvals ?? "—"} icon={GitMerge} glow={(snapshot?.approvals || 0) ? "rose" : "emerald"} animated={false} subtitle="Change review queue" onClick={() => navigate("/change-management")} testId="automation-hub-alert-rules" />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">{tiles.map(t => (
-        <Card key={t.path} className="cursor-pointer transition-all hover:-translate-y-0.5 hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/5" onClick={() => navigate(t.path)}>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">{tiles.map(t => (
+        <Card
+          key={t.path}
+          role="button"
+          tabIndex={0}
+          aria-label={`${t.label}: ${t.desc}`}
+          className="cursor-pointer border-border/80 transition-all hover:-translate-y-0.5 hover:border-violet-500/40 hover:shadow-lg hover:shadow-violet-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60"
+          onClick={() => navigate(t.path)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              navigate(t.path);
+            }
+          }}
+        >
           <CardContent className="pt-5 pb-4">
             <div className="mb-2 flex items-start justify-between"><t.icon className="w-7 h-7 text-violet-400" />{typeof t.count === "number" && <Badge variant="outline" className="text-[10px] border-violet-500/30 text-violet-300">{t.count} {t.countLabel}</Badge>}</div>
             <p className="font-semibold flex items-center gap-1.5">{t.label}<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></p>

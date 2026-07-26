@@ -45,7 +45,7 @@ async def _get_settings(stype: str) -> dict[str, Any]:
     return await db.settings.find_one({"type": stype}, {"_id": 0}) or {}
 
 
-def _tile(*, key: str, name: str, category: str, description: str, configured: bool, last_synced_at: Any = None, last_test_status: Any = None, command_center: str | None = None, settings_anchor: str) -> dict:
+def _tile(*, key: str, name: str, category: str, description: str, configured: bool, last_synced_at: Any = None, last_test_status: Any = None, command_center: str | None = None, settings_anchor: str | None = None) -> dict:
     return {
         "key": key, "name": name, "category": category, "description": description,
         "configured": configured, "connection_state": _connection_state(configured, last_test_status, last_synced_at),
@@ -57,7 +57,7 @@ def _tile(*, key: str, name: str, category: str, description: str, configured: b
 @router.get("/integrations-overview")
 async def integrations_overview(current_user: dict = Depends(get_current_user)):
     """Expose configured vs verified state without returning secrets or guessing health."""
-    setting_types = ["huntress", "hudu", "acronis", "pax8", "stripe", "o365_mailbox", "sms", "xero", "splynx", "syncro", "suped", "domotz", "rustdesk", "cipp", "yeastar"]
+    setting_types = ["huntress", "hudu", "acronis", "pax8", "stripe", "o365_mailbox", "sms", "xero", "splynx", "syncro", "suped", "domotz", "rustdesk", "cipp"]
     settings = {setting_type: await _get_settings(setting_type) for setting_type in setting_types}
     rustdesk_legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
     rustdesk_legacy_value = rustdesk_legacy.get("value") if isinstance(rustdesk_legacy.get("value"), dict) else {}
@@ -66,13 +66,13 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
     yeastar_configured = any(
         pbx.get("enabled", True) and pbx.get("pbx_url") and pbx.get("client_api_id") and pbx.get("client_secret")
         for pbx in yeastar_pbxs
-    ) or _configured(settings["yeastar"], "pbx_url", "client_id", "client_secret")
-    latest_yeastar_sync = max((pbx.get("last_sync") or "" for pbx in yeastar_pbxs), default="") or settings["yeastar"].get("last_sync")
+    )
+    latest_yeastar_sync = max((pbx.get("last_sync") or "" for pbx in yeastar_pbxs), default="")
     yeastar_status = "failed" if any(pbx.get("status") in {"offline", "authentication_failed"} for pbx in yeastar_pbxs) else None
 
     tiles = [
         _tile(key="rustdesk", name="RustDesk", category="remote-access", description="Self-hosted remote access for managed endpoints", configured=bool(settings["rustdesk"].get("server_url") or rustdesk_legacy_value.get("server_url")), last_synced_at=settings["rustdesk"].get("updated_at") or rustdesk_legacy.get("updated_at"), last_test_status=settings["rustdesk"].get("last_test_status") or rustdesk_legacy.get("last_test_status"), command_center="/remote-access", settings_anchor="rustdesk-settings-card"),
-        _tile(key="cipp", name="CIPP (M365 Management)", category="security", description="Microsoft 365 tenant management via CIPP", configured=_configured(settings["cipp"], "base_url", "api_key_full"), last_synced_at=settings["cipp"].get("last_synced_at"), last_test_status=settings["cipp"].get("last_test_status"), settings_anchor="cipp-settings-card"),
+        _tile(key="cipp", name="Nexus Control Plane - Microsoft 365", category="security", description="Multi-tenant identity, licensing, security, and governed Microsoft operations", configured=_configured(settings["cipp"], "base_url", "api_key_full"), last_synced_at=settings["cipp"].get("last_synced_at"), last_test_status=settings["cipp"].get("last_test_status"), settings_anchor="cipp-settings-card"),
         _tile(key="huntress", name="Huntress", category="security", description="Managed Detection & Response", configured=_configured(settings["huntress"], "api_key", "secret_key"), last_synced_at=settings["huntress"].get("last_synced_at"), last_test_status=settings["huntress"].get("last_test_status"), command_center="/security-dashboard", settings_anchor="huntress-settings-card"),
         _tile(key="hudu", name="Hudu", category="documentation", description="IT documentation & credential reference", configured=_configured(settings["hudu"], "url", "api_key_full"), last_synced_at=settings["hudu"].get("last_synced_at"), last_test_status=settings["hudu"].get("last_test_status"), command_center="/hudu", settings_anchor="hudu-settings-card"),
         _tile(key="acronis", name="Acronis Cyber Cloud", category="backup", description="Backup & disaster recovery", configured=_configured(settings["acronis"], "datacenter_url", "client_id", "client_secret"), last_synced_at=settings["acronis"].get("last_synced_at"), last_test_status=settings["acronis"].get("last_test_status"), command_center="/backup-center", settings_anchor="acronis-settings-card"),
@@ -80,7 +80,7 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
         _tile(key="domotz", name="Domotz", category="network", description="Network monitoring", configured=bool(settings["domotz"].get("api_key")), last_synced_at=settings["domotz"].get("last_sync_at"), last_test_status=settings["domotz"].get("last_test_status"), settings_anchor="domotz-settings-card"),
         _tile(key="stripe", name="Stripe", category="payments", description="Payment processing", configured=bool(settings["stripe"].get("api_key") or settings["stripe"].get("secret_key")), last_test_status=settings["stripe"].get("last_test_status"), settings_anchor="stripe-settings-card"),
         _tile(key="xero", name="Xero", category="accounting", description="Accounting and invoice push", configured=bool(settings["xero"].get("access_token") and settings["xero"].get("tenant_id")), last_synced_at=settings["xero"].get("last_sync_at"), last_test_status=settings["xero"].get("last_test_status"), command_center="/invoices", settings_anchor="xero-settings-card"),
-        _tile(key="yeastar", name="Yeastar Voice", category="voice", description="Client-linked PBXs, extension governance, and recurring billing", configured=yeastar_configured, last_synced_at=latest_yeastar_sync, last_test_status=yeastar_status, command_center="/voice", settings_anchor="voice-services-settings-card"),
+        _tile(key="yeastar", name="Yeastar Voice", category="voice", description="Client-linked PBXs, extension governance, and recurring billing", configured=yeastar_configured, last_synced_at=latest_yeastar_sync, last_test_status=yeastar_status, command_center="/voice"),
         _tile(key="microsoft365", name="Microsoft 365 Email", category="email", description="Shared mailboxes, intake, and role-based outbound delivery", configured=bool(settings["o365_mailbox"].get("enabled") and settings["o365_mailbox"].get("connected")), last_synced_at=settings["o365_mailbox"].get("last_graph_sync"), last_test_status=settings["o365_mailbox"].get("last_outbound_test_status"), settings_anchor="microsoft365-delivery-card"),
         _tile(key="sms", name="MobileMessage SMS", category="messaging", description="Two-way SMS", configured=_configured(settings["sms"], "api_key", "api_secret"), last_test_status=settings["sms"].get("last_test_status"), settings_anchor="sms-settings-card"),
         _tile(key="splynx", name="Splynx", category="isp", description="ISP billing", configured=bool(settings["splynx"].get("url") and settings["splynx"].get("api_key")), last_synced_at=settings["splynx"].get("last_sync_at"), last_test_status=settings["splynx"].get("last_test_status"), settings_anchor="splynx-settings-card"),

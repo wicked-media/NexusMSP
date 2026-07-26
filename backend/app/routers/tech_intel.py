@@ -227,7 +227,16 @@ async def smart_tech_finder(data: dict, current_user: dict = Depends(get_current
 @router.get("/tech-intel/permission-matrix")
 async def permission_matrix(current_user: dict = Depends(get_current_user)):
     """Heatmap data: techs x modules â†’ permission level (none/read/write/admin)."""
-    techs = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(200)
+    raw_techs = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(200)
+    # Older demo seeds can leave duplicate documents for the same stable user
+    # ID. The access matrix is an identity projection, so render one row per
+    # identity rather than leaking storage duplicates into UI keys or counts.
+    techs_by_id = {}
+    for tech in raw_techs:
+        stable_id = tech.get("id")
+        if stable_id:
+            techs_by_id[stable_id] = {**techs_by_id.get(stable_id, {}), **tech}
+    techs = list(techs_by_id.values())
     modules = ["tickets", "clients", "invoices", "products", "devices", "networking",
               "assets", "reports", "knowledge_base", "it_docs", "contracts",
               "projects", "time_tracking", "purchase_orders", "scheduling", "settings"]
@@ -246,13 +255,14 @@ async def permission_matrix(current_user: dict = Depends(get_current_user)):
     rows = []
     for t in techs:
         perms = t.get("permissions") or {}
-        cells = {m: ("admin" if t.get("is_admin") else lvl(perms.get(m))) for m in modules}
+        is_admin = bool(t.get("is_admin") or t.get("role") == "admin")
+        cells = {m: ("admin" if is_admin else lvl(perms.get(m))) for m in modules}
         rows.append({
             "tech_id": t.get("id"),
             "name": t.get("name"),
             "job_title": t.get("job_title", "Technician"),
             "role": t.get("role", "technician"),
-            "is_admin": bool(t.get("is_admin")),
+            "is_admin": is_admin,
             "cells": cells,
         })
     return {"modules": modules, "rows": rows}

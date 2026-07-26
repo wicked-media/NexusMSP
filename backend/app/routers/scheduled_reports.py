@@ -8,6 +8,7 @@ from app.database import db
 from app.database import JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.routers.financial_reports import build_accounts_receivable_aging
+from app.services.nexus_document_pdf import render_nexus_document_pdf
 
 router = APIRouter()
 
@@ -208,7 +209,29 @@ async def download_generated_report_pdf(output_id: str, current_user: dict = Dep
     output = await db.scheduled_report_outputs.find_one({"id": output_id}, {"_id": 0})
     if not history or not output:
         raise HTTPException(status_code=404, detail="Generated report not found")
-    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    branding_record = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    branding = branding_record.get("value") or branding_record
+    summary = output.get("sections", {}).get("summary", {})
+    pdf_bytes = render_nexus_document_pdf(
+        title=history.get("name") or output.get("schedule_name") or "Generated report",
+        document_kind=str(history.get("report_type") or output.get("report_type") or "standard").replace("_", " ").title(),
+        subtitle=branding.get("report_header_text") or "Managed service evidence and operational assurance.",
+        metadata=[
+            ("Generated", _pdf_timestamp(output.get("generated_at"))),
+            ("Prepared by", output.get("generated_by", "System")),
+            ("Evidence", "Retained snapshot"),
+        ],
+        metric_cards=[
+            ("Managed devices", summary.get("devices_total", 0)),
+            ("Devices online", summary.get("devices_online", 0)),
+            ("Open tickets", summary.get("tickets_open", 0)),
+            ("Active alerts", summary.get("active_alerts", 0)),
+        ],
+        sections=[(section.replace("_", " ").title(), values) for section, values in (output.get("sections") or {}).items()],
+        branding=branding,
+    )
+    safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in (history.get("name") or "nexusmsp-report")).strip("-")
+    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'})
 
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_RIGHT

@@ -6,7 +6,7 @@ automatically posts an internal ticket note + audit row so the action is
 auditable in-context.
 """
 
-from fastapi import APIRouter, Depends, Body, HTTPException, Query
+from fastapi import APIRouter, Depends, Body, HTTPException, Query, Request
 from datetime import datetime, timezone
 import uuid
 import logging
@@ -15,6 +15,10 @@ import asyncio
 from app.database import db
 from app.routers.auth import get_current_user
 from app.routers.nexus_agent import queue_command_for_device, require_agent_operator, _audit as _agent_audit
+from app.services.action_permissions import require_action
+from app.services.platform_foundation import request_correlation_id
+from app.services.remote_runtime import start_remote_session
+from app.services.scope_permissions import assert_client_scope
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -72,7 +76,7 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
 
 # ─────────────────────── Power actions ───────────────────────
 
-@router.post("/tickets/{ticket_id}/device/reboot")
+@router.post("/tickets/{ticket_id}/device/reboot", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_reboot(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     cmd_id = await queue_command_for_device(device, "reboot", {"delay_sec": 30}, current_user.get("email") or "system")
@@ -80,7 +84,7 @@ async def device_reboot(ticket_id: str, device_id: str | None = Query(None), cur
     return {"success": True, "command_id": cmd_id}
 
 
-@router.post("/tickets/{ticket_id}/device/shutdown")
+@router.post("/tickets/{ticket_id}/device/shutdown", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     cmd_id = await queue_command_for_device(device, "shutdown", {"delay_sec": 60}, current_user.get("email") or "system")
@@ -88,7 +92,7 @@ async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), c
     return {"success": True, "command_id": cmd_id}
 
 
-@router.post("/tickets/{ticket_id}/device/wol")
+@router.post("/tickets/{ticket_id}/device/wol", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_wake_on_lan(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
     """Wake-on-LAN requires a LAN proxy agent — log the intent."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
@@ -96,7 +100,7 @@ async def device_wake_on_lan(ticket_id: str, device_id: str | None = Query(None)
     return {"success": False, "message": "Wake-on-LAN not yet wired to a LAN proxy. Action logged on the ticket."}
 
 
-@router.post("/tickets/{ticket_id}/device/run-checks")
+@router.post("/tickets/{ticket_id}/device/run-checks", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_run_checks(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Trigger an immediate telemetry refresh (no-op ping at the moment)."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
@@ -105,7 +109,7 @@ async def device_run_checks(ticket_id: str, device_id: str | None = Query(None),
     return {"success": True, "command_id": cmd_id}
 
 
-@router.post("/tickets/{ticket_id}/device/install-patches")
+@router.post("/tickets/{ticket_id}/device/install-patches", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_install_patches(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     # Requires PSWindowsUpdate module on the endpoint
@@ -115,7 +119,7 @@ async def device_install_patches(ticket_id: str, device_id: str | None = Query(N
     return {"success": True, "command_id": cmd_id}
 
 
-@router.post("/tickets/{ticket_id}/device/send-message")
+@router.post("/tickets/{ticket_id}/device/send-message", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_send_message(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Pop a message on the user's screen via msg.exe."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
@@ -129,7 +133,7 @@ async def device_send_message(ticket_id: str, payload: dict = Body(...), device_
     return {"success": True, "command_id": cmd_id}
 
 
-@router.post("/tickets/{ticket_id}/device/run-script")
+@router.post("/tickets/{ticket_id}/device/run-script", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Generic script runner — pass {shell, script, timeout_sec}."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
@@ -149,7 +153,7 @@ async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id
     return {"success": True, "command_id": cmd_id}
 
 
-@router.post("/tickets/{ticket_id}/device/kill-process")
+@router.post("/tickets/{ticket_id}/device/kill-process", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     _, device = await _ticket_with_agent(ticket_id, device_id)
     pid = int(payload.get("pid") or 0)
@@ -162,7 +166,7 @@ async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_
 
 # ─────────────────────── Remote control (Splashtop — Phase 4) ───────────────────────
 
-@router.get("/tickets/{ticket_id}/device/remote-url")
+@router.get("/tickets/{ticket_id}/device/legacy-remote-url", include_in_schema=False)
 async def device_remote_url(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
     """Splashtop session URL — implementation pending Splashtop API integration."""
     _, device = await _ticket_with_agent(ticket_id, device_id)
@@ -170,8 +174,17 @@ async def device_remote_url(ticket_id: str, device_id: str | None = Query(None),
     return {"success": False, "message": "Splashtop integration not yet wired. Coming in Phase 4."}
 
 
-@router.post("/tickets/{ticket_id}/devices/{device_id}/remote-connect")
+@router.get("/tickets/{ticket_id}/device/remote-url")
+async def governed_device_remote_url(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    raise HTTPException(
+        status_code=410,
+        detail="Use the linked asset Remote action so consent and session evidence are captured.",
+    )
+
+
+@router.post("/tickets/{ticket_id}/devices/{device_id}/legacy-remote-connect", include_in_schema=False)
 async def ticket_device_remote_connect(ticket_id: str, device_id: str, current_user: dict = Depends(get_current_user)):
+    raise HTTPException(status_code=410, detail="Legacy remote launch is retired; use the governed Remote action")
     """Create an auditable RustDesk connection from a linked ticket asset.
 
     This deliberately does not require the NexusOps Agent: a managed asset can
@@ -223,6 +236,54 @@ async def ticket_device_remote_connect(ticket_id: str, device_id: str, current_u
     }
 
 
+@router.post(
+    "/tickets/{ticket_id}/devices/{device_id}/remote-connect",
+    dependencies=[Depends(require_action("device.remote.start"))],
+)
+async def governed_ticket_device_remote_connect(
+    ticket_id: str,
+    device_id: str,
+    request: Request,
+    payload: dict | None = Body(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    linked = {str(item) for item in (ticket.get("device_ids") or []) if item}
+    if ticket.get("device_id"):
+        linked.add(str(ticket["device_id"]))
+    if device_id not in linked:
+        raise HTTPException(400, "Device is not linked to this ticket")
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(404, "Linked device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id") or ticket.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.remote.start",
+        request=request,
+    )
+    data = {
+        **(payload or {}),
+        "ticket_id": ticket_id,
+        "purpose": (payload or {}).get("purpose")
+        or f"Support for ticket {ticket.get('ticket_number') or ticket_id}",
+    }
+    result = await start_remote_session(
+        device=device,
+        user=current_user,
+        data=data,
+        correlation_id=request_correlation_id(request),
+    )
+    return {
+        "success": True,
+        "device_name": device.get("name") or device.get("hostname") or device_id,
+        **result,
+    }
+
+
 # ─────────────────────── Linked devices listing (for cockpit) ───────────────────────
 
 @router.get("/tickets/{ticket_id}/devices")
@@ -258,7 +319,7 @@ async def list_ticket_devices(ticket_id: str, current_user: dict = Depends(get_c
 
 # ─────────────────────── Fan-out ───────────────────────
 
-@router.post("/tickets/{ticket_id}/device/fanout/{action}")
+@router.post("/tickets/{ticket_id}/device/fanout/{action}", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_fanout(ticket_id: str, action: str, payload: dict = Body(default={}), current_user: dict = Depends(require_agent_operator)):
     """Run a single action against every linked device that has a NexusOps Agent."""
     allowed = {"run-checks", "install-patches", "reboot", "shutdown", "send-message"}

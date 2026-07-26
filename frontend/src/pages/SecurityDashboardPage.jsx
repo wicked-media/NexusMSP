@@ -11,8 +11,8 @@ import { useNavigate, Link } from "react-router-dom";
 import {
   Shield, ShieldAlert, ShieldCheck, WifiOff, Bug,
   AlertTriangle, Activity, RefreshCw, Loader2, ExternalLink, ChevronRight,
-  Users, Eye, Zap, KeyRound, Flame, Monitor, Link2, CheckCircle, Lock, Unlock,
-  MessageSquare, UserPlus, MoreHorizontal, ChevronDown, History,
+  Users, Eye, Zap, Flame, Monitor, Link2, CheckCircle, Lock, Unlock,
+  MessageSquare, UserPlus, MoreHorizontal, ChevronDown, History, GitBranch,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -35,7 +35,13 @@ const QUICK_LINKS = [
   { to: "/vulnerability-scanner", icon: Bug, label: "Vuln Scanner" },
   { to: "/identity-threats", icon: Users, label: "Identity" },
   { to: "/nexus-shield?tab=canary", icon: Flame, label: "Nexus Canary" },
-  { to: "/m365", icon: KeyRound, label: "Microsoft MFA" },
+];
+
+const VULNERABILITY_SEVERITIES = [
+  { key: "critical", label: "Critical", tone: "text-rose-400" },
+  { key: "high", label: "High", tone: "text-orange-400" },
+  { key: "medium", label: "Medium", tone: "text-amber-400" },
+  { key: "low", label: "Low", tone: "text-sky-400" },
 ];
 
 export default function SecurityDashboardPage() {
@@ -170,6 +176,9 @@ export default function SecurityDashboardPage() {
   const assessmentValue = configured
     ? (s.organizations_count || 0)
     : enrolledAgents > 0 ? `${verifiedAgentEvidence}/${enrolledAgents}` : "—";
+  const unclassifiedVulnerabilities = Number(vulns.unclassified || 0);
+  const affectedVulnerabilityHosts = Number(vulns.total_hosts_affected || 0);
+  const vulnerabilityCoverage = `${Number(vulns.agent_coverage || 0)}/${Number(vulns.managed_endpoints || 0)}`;
 
   return (
     <div className="space-y-6" data-testid="security-dashboard">
@@ -198,6 +207,7 @@ export default function SecurityDashboardPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem asChild><Link to="/soc-feed"><Activity className="mr-2 h-4 w-4" />SOC feed</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/security-graph"><GitBranch className="mr-2 h-4 w-4" />Security graph</Link></DropdownMenuItem>
                 <DropdownMenuItem asChild><Link to="/soc-realtime"><Zap className="mr-2 h-4 w-4" />Smart automation</Link></DropdownMenuItem>
                 <DropdownMenuItem asChild><Link to="/threat-timeline"><History className="mr-2 h-4 w-4" />Threat timeline</Link></DropdownMenuItem>
                 <DropdownMenuItem asChild><Link to="/identity-threats"><Users className="mr-2 h-4 w-4" />Identity threats</Link></DropdownMenuItem>
@@ -455,15 +465,20 @@ export default function SecurityDashboardPage() {
                   </div>
                   <Button variant="ghost" size="sm" className="text-[10px] h-6" onClick={() => navigate("/vulnerability-scanner")}>Scanner <ChevronRight className="w-3 h-3 ml-0.5" /></Button>
                 </div>
-                <div className="flex gap-3 justify-around">
-                  {Object.entries(vulns).filter(([k]) => k !== "last_scan").map(([sev, cnt]) => (
-                    <div key={sev} className="text-center">
-                      <p className={`text-lg font-bold ${sev === "critical" ? "text-rose-400" : sev === "high" ? "text-orange-400" : sev === "medium" ? "text-amber-400" : "text-sky-400"}`}>{cnt}</p>
-                      <p className="text-[10px] text-muted-foreground capitalize">{sev}</p>
-                    </div>
-                  ))}
-                  {Object.keys(vulns).length === 0 && <div className="text-xs text-muted-foreground">No agent evidence yet</div>}
-                </div>
+                {hasVulnerabilityEvidence ? <>
+                  <div className="grid grid-cols-4 gap-2">
+                    {VULNERABILITY_SEVERITIES.map(({ key, label, tone }) => (
+                      <div key={key} className="rounded-lg border border-white/[0.07] bg-black/[0.12] px-2 py-2 text-center">
+                        <p className={`text-lg font-bold ${tone}`}>{Number(vulns[key] || 0)}</p>
+                        <p className="text-[10px] text-muted-foreground">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-[11px] text-muted-foreground">
+                    {Number(vulns.total || 0)} verified findings across {affectedVulnerabilityHosts} endpoint{affectedVulnerabilityHosts === 1 ? "" : "s"} · {vulnerabilityCoverage} agents reporting
+                    {unclassifiedVulnerabilities > 0 ? ` · ${unclassifiedVulnerabilities} awaiting classification` : ""}
+                  </p>
+                </> : <div className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-xs text-muted-foreground">No verified vulnerability evidence has been reported yet.</div>}
               </CardContent>
             </Card>
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -7,9 +7,48 @@ import jwt
 import pyotp
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import hash_password, verify_password
+from app.services.portal_audit import record_portal_event
+from app.services.remote_runtime import build_rustdesk_uri, rustdesk_config
 
 router = APIRouter(prefix="/portal/v2", tags=["Portal V2"])
 portal_security = HTTPBearer(auto_error=False)
+
+
+def _request_context(request: Request) -> dict:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip_address = forwarded.split(",", 1)[0].strip() if forwarded else (request.client.host if request.client else None)
+    return {
+        "ip_address": ip_address,
+        "user_agent": request.headers.get("user-agent", ""),
+    }
+
+
+def _link_is_expired(access_token: dict) -> bool:
+    expires_at = access_token.get("expires_at")
+    if not expires_at:
+        return False
+    try:
+        return datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")) <= datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return True
+
+
+def _latest_timestamp(*values):
+    parsed = []
+    for value in values:
+        if not value:
+            continue
+        if isinstance(value, datetime):
+            candidate = value
+        else:
+            try:
+                candidate = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+        if candidate.tzinfo is None:
+            candidate = candidate.replace(tzinfo=timezone.utc)
+        parsed.append(candidate.astimezone(timezone.utc))
+    return max(parsed).isoformat() if parsed else None
 
 # --- Portal Auth Dependency ---
 async def get_portal_user(credentials: HTTPAuthorizationCredentials = Depends(portal_security)):
@@ -41,7 +80,7 @@ def create_portal_token(user_id: str, client_id: str, email: str):
 # ==================== AUTH ====================
 
 @router.post("/token-auth")
-async def portal_token_auth(data: dict):
+async def portal_token_auth(data: dict, request: Request):
     """Convert a legacy portal access token to a V2 portal session.
     Used when users access /portal/:token links â€” auto-redirects to V2."""
     token = data.get("token", "")
@@ -54,6 +93,17 @@ async def portal_token_auth(data: dict):
     cid = config["client_id"]
     # Find or create a portal user for this token's contact
     access_token = next((t for t in config.get("access_tokens", []) if t.get("token") == token), None)
+    if not access_token or not access_token.get("active", True) or _link_is_expired(access_token):
+        await record_portal_event(
+            action="secure_link_access",
+            client_id=cid,
+            client_name=config.get("client_name", ""),
+            outcome="blocked",
+            details="Expired or revoked client portal link was rejected",
+            metadata={"link_id": (access_token or {}).get("id", "")},
+            **_request_context(request),
+        )
+        raise HTTPException(status_code=403, detail="Portal link expired or revoked")
     contact_email = (access_token.get("contact_email", "") if access_token else "").lower().strip()
 
     if contact_email:
@@ -66,9 +116,28 @@ async def portal_token_auth(data: dict):
     if not portal_user:
         # No portal user exists â€” return info to show limited view
         client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
+        await record_portal_event(
+            action="secure_link_opened",
+            client_id=cid,
+            client_name=client.get("name", "") if client else config.get("client_name", ""),
+            outcome="warning",
+            details="Secure portal link opened without a matching permanent portal user",
+            metadata={"link_id": access_token.get("id", ""), "contact_email": contact_email},
+            **_request_context(request),
+        )
         return {"authenticated": False, "client_name": client.get("name", "") if client else "", "client_id": cid}
 
     if not portal_user.get("is_active", True):
+        await record_portal_event(
+            action="secure_link_access",
+            client_id=cid,
+            client_name=portal_user.get("client_name", config.get("client_name", "")),
+            portal_user=portal_user,
+            outcome="blocked",
+            details="Secure portal link matched a disabled portal user",
+            metadata={"link_id": access_token.get("id", "")},
+            **_request_context(request),
+        )
         raise HTTPException(status_code=401, detail="Account disabled")
 
     # Mark token as used
@@ -78,13 +147,26 @@ async def portal_token_auth(data: dict):
     )
 
     jwt_token = create_portal_token(portal_user["id"], cid, portal_user["email"])
+    await db.portal_users.update_one(
+        {"id": portal_user["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat(), "last_login_method": "secure_link"}},
+    )
+    await record_portal_event(
+        action="secure_link_login_succeeded",
+        client_id=cid,
+        client_name=portal_user.get("client_name", config.get("client_name", "")),
+        portal_user=portal_user,
+        details=f"{portal_user.get('name') or portal_user.get('email')} signed in using a secure link",
+        metadata={"link_id": access_token.get("id", ""), "authentication_method": "secure_link"},
+        **_request_context(request),
+    )
     safe_user = {k: v for k, v in portal_user.items() if k not in ("password_hash", "totp_secret")}
     return {"authenticated": True, "token": jwt_token, "user": safe_user}
 
 
 
 @router.post("/login")
-async def portal_login(data: dict):
+async def portal_login(data: dict, request: Request):
     email = data.get("email", "").lower().strip()
     password = data.get("password", "")
     if not email or not password:
@@ -92,22 +174,63 @@ async def portal_login(data: dict):
 
     user = await db.portal_users.find_one({"email": email}, {"_id": 0})
     if not user or not verify_password(password, user["password_hash"]):
+        await record_portal_event(
+            action="portal_login",
+            client_id=(user or {}).get("client_id", ""),
+            client_name=(user or {}).get("client_name", ""),
+            portal_user=user or {"email": email, "name": email},
+            outcome="failed",
+            details="Client portal sign-in failed",
+            metadata={"authentication_method": "password"},
+            **_request_context(request),
+        )
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.get("is_active", True):
+        await record_portal_event(
+            action="portal_login",
+            client_id=user.get("client_id", ""),
+            client_name=user.get("client_name", ""),
+            portal_user=user,
+            outcome="blocked",
+            details="Disabled client portal account attempted to sign in",
+            metadata={"authentication_method": "password"},
+            **_request_context(request),
+        )
         raise HTTPException(status_code=401, detail="Account is disabled")
 
     # Check 2FA
     if user.get("totp_enabled"):
+        await record_portal_event(
+            action="portal_login_mfa_challenge",
+            client_id=user.get("client_id", ""),
+            client_name=user.get("client_name", ""),
+            portal_user=user,
+            details="Portal password accepted; MFA verification required",
+            metadata={"authentication_method": "password_mfa"},
+            **_request_context(request),
+        )
         return {"requires_2fa": True, "temp_token": create_portal_token(user["id"], user.get("client_id", ""), email) + ":2fa_pending"}
 
     token = create_portal_token(user["id"], user.get("client_id", ""), email)
-    await db.portal_users.update_one({"id": user["id"]}, {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}})
+    await db.portal_users.update_one(
+        {"id": user["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat(), "last_login_method": "password"}},
+    )
+    await record_portal_event(
+        action="portal_login_succeeded",
+        client_id=user.get("client_id", ""),
+        client_name=user.get("client_name", ""),
+        portal_user=user,
+        details=f"{user.get('name') or user.get('email')} signed in to the client portal",
+        metadata={"authentication_method": "password"},
+        **_request_context(request),
+    )
     safe_user = {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret")}
     return {"token": token, "user": safe_user, "requires_2fa": False}
 
 
 @router.post("/verify-2fa")
-async def portal_verify_2fa(data: dict):
+async def portal_verify_2fa(data: dict, request: Request):
     temp_token = data.get("temp_token", "")
     code = data.get("code", "")
     if not temp_token.endswith(":2fa_pending"):
@@ -125,10 +248,32 @@ async def portal_verify_2fa(data: dict):
 
     totp = pyotp.TOTP(user.get("totp_secret", ""))
     if not totp.verify(code, valid_window=1):
+        await record_portal_event(
+            action="portal_mfa_verification",
+            client_id=user.get("client_id", ""),
+            client_name=user.get("client_name", ""),
+            portal_user=user,
+            outcome="failed",
+            details="Client portal MFA verification failed",
+            metadata={"authentication_method": "password_mfa"},
+            **_request_context(request),
+        )
         raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
     token = create_portal_token(user["id"], user.get("client_id", ""), user["email"])
-    await db.portal_users.update_one({"id": user["id"]}, {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}})
+    await db.portal_users.update_one(
+        {"id": user["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat(), "last_login_method": "password_mfa"}},
+    )
+    await record_portal_event(
+        action="portal_login_succeeded",
+        client_id=user.get("client_id", ""),
+        client_name=user.get("client_name", ""),
+        portal_user=user,
+        details=f"{user.get('name') or user.get('email')} completed MFA and signed in",
+        metadata={"authentication_method": "password_mfa"},
+        **_request_context(request),
+    )
     safe_user = {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret")}
     return {"token": token, "user": safe_user}
 
@@ -141,12 +286,12 @@ async def portal_setup_2fa(user: dict = Depends(get_portal_user)):
         await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_secret": secret}})
 
     totp = pyotp.TOTP(secret)
-    uri = totp.provisioning_uri(name=user["email"], issuer_name="NexusOps Portal")
+    uri = totp.provisioning_uri(name=user["email"], issuer_name="NexusMSP Client Portal")
     return {"secret": secret, "uri": uri, "already_enabled": user.get("totp_enabled", False)}
 
 
 @router.post("/enable-2fa")
-async def portal_enable_2fa(data: dict, user: dict = Depends(get_portal_user)):
+async def portal_enable_2fa(data: dict, request: Request, user: dict = Depends(get_portal_user)):
     code = data.get("code", "")
     u = await db.portal_users.find_one({"id": user["id"]}, {"_id": 0})
     secret = u.get("totp_secret")
@@ -155,23 +300,71 @@ async def portal_enable_2fa(data: dict, user: dict = Depends(get_portal_user)):
 
     totp = pyotp.TOTP(secret)
     if not totp.verify(code, valid_window=1):
+        await record_portal_event(
+            action="portal_mfa_enable",
+            client_id=user.get("client_id", ""),
+            client_name=user.get("client_name", ""),
+            portal_user=user,
+            outcome="failed",
+            details="Client portal MFA enablement verification failed",
+            **_request_context(request),
+        )
         raise HTTPException(status_code=400, detail="Invalid code â€” try again")
 
     await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_enabled": True}})
+    await record_portal_event(
+        action="portal_mfa_enabled",
+        client_id=user.get("client_id", ""),
+        client_name=user.get("client_name", ""),
+        portal_user=user,
+        details=f"{user.get('name') or user.get('email')} enabled MFA",
+        **_request_context(request),
+    )
     return {"message": "2FA enabled successfully"}
 
 
 @router.post("/disable-2fa")
-async def portal_disable_2fa(data: dict, user: dict = Depends(get_portal_user)):
+async def portal_disable_2fa(data: dict, request: Request, user: dict = Depends(get_portal_user)):
     code = data.get("code", "")
     u = await db.portal_users.find_one({"id": user["id"]}, {"_id": 0})
     secret = u.get("totp_secret")
     if secret:
         totp = pyotp.TOTP(secret)
         if not totp.verify(code, valid_window=1):
+            await record_portal_event(
+                action="portal_mfa_disable",
+                client_id=user.get("client_id", ""),
+                client_name=user.get("client_name", ""),
+                portal_user=user,
+                outcome="failed",
+                details="Client portal MFA disablement verification failed",
+                **_request_context(request),
+            )
             raise HTTPException(status_code=400, detail="Invalid code")
     await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_enabled": False}})
+    await record_portal_event(
+        action="portal_mfa_disabled",
+        client_id=user.get("client_id", ""),
+        client_name=user.get("client_name", ""),
+        portal_user=user,
+        details=f"{user.get('name') or user.get('email')} disabled MFA",
+        **_request_context(request),
+    )
     return {"message": "2FA disabled"}
+
+
+@router.post("/logout")
+async def portal_logout(request: Request, user: dict = Depends(get_portal_user)):
+    """Record explicit portal sign-out; bearer sessions remain short-lived and stateless."""
+    await record_portal_event(
+        action="portal_logout",
+        client_id=user.get("client_id", ""),
+        client_name=user.get("client_name", ""),
+        portal_user=user,
+        details=f"{user.get('name') or user.get('email')} signed out of the client portal",
+        **_request_context(request),
+    )
+    return {"message": "Signed out"}
 
 
 # ==================== PROFILE ====================
@@ -188,19 +381,38 @@ async def portal_me(user: dict = Depends(get_portal_user)):
         "user": {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret")},
         "client": client,
         "branding": branding,
+        "features": (config or {}).get("features", {
+            "can_create_tickets": True,
+            "can_view_devices": True,
+            "can_view_invoices": True,
+            "can_view_contracts": True,
+            "can_view_kb": True,
+        }),
         "msp_branding": msp_branding.get("value", {}) if msp_branding else {},
         "totp_enabled": user.get("totp_enabled", False),
     }
 
 
 @router.put("/me")
-async def portal_update_profile(data: dict, user: dict = Depends(get_portal_user)):
+async def portal_update_profile(data: dict, request: Request, user: dict = Depends(get_portal_user)):
     allowed = {"name", "phone"}
     updates = {k: v for k, v in data.items() if k in allowed}
     if "password" in data and data["password"]:
         updates["password_hash"] = hash_password(data["password"])
     if updates:
         await db.portal_users.update_one({"id": user["id"]}, {"$set": updates})
+        await record_portal_event(
+            action="portal_profile_updated",
+            client_id=user.get("client_id", ""),
+            client_name=user.get("client_name", ""),
+            portal_user=user,
+            details=f"{user.get('name') or user.get('email')} updated their portal profile",
+            metadata={
+                "changed_fields": sorted(key for key in updates if key != "password_hash"),
+                "password_changed": "password_hash" in updates,
+            },
+            **_request_context(request),
+        )
     return {"message": "Profile updated"}
 
 
@@ -209,21 +421,96 @@ async def portal_update_profile(data: dict, user: dict = Depends(get_portal_user
 @router.get("/dashboard")
 async def portal_dashboard(user: dict = Depends(get_portal_user)):
     cid = user.get("client_id")
-    tickets = await db.tickets.find({"client_id": cid}, {"_id": 0, "id": 1, "status": 1, "priority": 1}).to_list(500)
-    devices = await db.devices.find({"client_id": cid}, {"_id": 0, "id": 1, "status": 1}).to_list(500)
-    invoices = await db.invoices.find({"client_id": cid}, {"_id": 0, "id": 1, "status": 1, "total": 1}).to_list(200)
+    client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1}) or {}
+    config = await db.portal_configs.find_one({"client_id": cid}, {"_id": 0, "features": 1}) or {}
+    features = config.get("features") or {}
+    tickets = await db.tickets.find(
+        {"client_id": cid},
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1, "updated_at": 1},
+    ).sort("updated_at", -1).to_list(500)
+    devices = []
+    if user.get("can_view_assets", True) and features.get("can_view_devices", True):
+        devices = await db.devices.find(
+            {"client_id": cid},
+            {"_id": 0, "id": 1, "name": 1, "hostname": 1, "status": 1, "last_heartbeat": 1},
+        ).to_list(500)
+    invoices = []
+    if user.get("can_view_invoices", False):
+        invoices = await db.invoices.find(
+            {"client_id": cid},
+            {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "payment_status": 1, "total": 1, "amount_paid": 1, "due_date": 1, "created_at": 1},
+        ).sort("created_at", -1).to_list(200)
+    contracts = []
+    if features.get("can_view_contracts", True):
+        contracts = await db.contracts.find(
+            {"client_id": cid, "status": "active"},
+            {"_id": 0, "id": 1, "name": 1, "type": 1, "status": 1, "end_date": 1, "sla_tier": 1},
+        ).to_list(100)
+    backup_jobs = await db.backup_jobs.find(
+        {"$or": [{"client_id": cid}, {"client_name": client.get("name", "")}]},
+        {"_id": 0, "id": 1, "job_name": 1, "device_name": 1, "status": 1, "last_run": 1},
+    ).sort("last_run", -1).to_list(100)
 
     open_t = sum(1 for t in tickets if t.get("status") in ("open", "in_progress"))
     resolved_t = sum(1 for t in tickets if t.get("status") in ("resolved", "closed"))
+    urgent_t = sum(1 for t in tickets if t.get("status") not in ("resolved", "closed") and t.get("priority") in ("critical", "high"))
     online_d = sum(1 for d in devices if d.get("status") == "online")
-    outstanding = sum(i.get("total", 0) for i in invoices if i.get("status") in ("sent", "overdue"))
+    outstanding = sum(
+        max(float(i.get("total", 0) or 0) - float(i.get("amount_paid", 0) or 0), 0)
+        for i in invoices
+        if (i.get("payment_status") or i.get("status")) not in ("paid", "void", "cancelled")
+    )
+    failed_backups = sum(1 for job in backup_jobs if job.get("status") in ("failed", "error"))
+    health_status = "attention" if urgent_t or failed_backups else "operational"
+    activity = []
+    for ticket in tickets[:8]:
+        activity.append({
+            "id": f"ticket-{ticket.get('id')}",
+            "type": "ticket",
+            "title": ticket.get("title") or ticket.get("ticket_number") or "Support request",
+            "detail": f"{str(ticket.get('status') or 'open').replace('_', ' ').title()} · {str(ticket.get('priority') or 'medium').title()} priority",
+            "timestamp": ticket.get("updated_at") or ticket.get("created_at"),
+            "target_id": ticket.get("id"),
+        })
+    for invoice in invoices[:5]:
+        activity.append({
+            "id": f"invoice-{invoice.get('id')}",
+            "type": "invoice",
+            "title": f"Invoice {invoice.get('invoice_number') or ''}".strip(),
+            "detail": str(invoice.get("payment_status") or invoice.get("status") or "issued").replace("_", " ").title(),
+            "timestamp": invoice.get("created_at"),
+            "target_id": invoice.get("id"),
+        })
+    for job in backup_jobs[:5]:
+        activity.append({
+            "id": f"backup-{job.get('id')}",
+            "type": "backup",
+            "title": job.get("job_name") or job.get("device_name") or "Backup verification",
+            "detail": f"Backup {str(job.get('status') or 'unknown').replace('_', ' ')}",
+            "timestamp": job.get("last_run"),
+            "target_id": job.get("id"),
+        })
+    activity.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
 
     return {
         "stats": {
             "open_tickets": open_t, "resolved_tickets": resolved_t, "total_tickets": len(tickets),
+            "urgent_tickets": urgent_t,
             "online_devices": online_d, "total_devices": len(devices),
             "outstanding_invoices": outstanding, "total_invoices": len(invoices),
-        }
+            "active_services": len(contracts), "failed_backups": failed_backups,
+        },
+        "service_health": {
+            "status": health_status,
+            "label": "Attention required" if health_status == "attention" else "All managed services operational",
+            "summary": (
+                f"{urgent_t} urgent request{'s' if urgent_t != 1 else ''} and {failed_backups} failed backup{'s' if failed_backups != 1 else ''}"
+                if health_status == "attention"
+                else "Monitoring, managed assets, and protected workloads are reporting normally"
+            ),
+            "last_checked": datetime.now(timezone.utc).isoformat(),
+        },
+        "recent_activity": activity[:12],
     }
 
 
@@ -248,6 +535,12 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
         "id": f"TKT-{uuid.uuid4().hex[:6].upper()}", "ticket_number": f"PT-{datetime.now(timezone.utc).strftime('%m%d%H%M')}",
         "title": data.get("title", "Portal Ticket"), "description": data.get("description", ""),
         "priority": data.get("priority", "medium"), "category": data.get("category", "support"),
+        "request_type": data.get("request_type", "incident"),
+        "impact": data.get("impact", "single_user"),
+        "urgency": data.get("urgency", data.get("priority", "medium")),
+        "preferred_contact": data.get("preferred_contact", "portal"),
+        "affected_device_id": data.get("affected_device_id") or None,
+        "affected_device_name": data.get("affected_device_name") or None,
         "status": "open", "source": "client_portal",
         "client_id": user.get("client_id"), "client_name": client["name"] if client else "",
         "contact_name": user.get("name"), "contact_email": user.get("email"),
@@ -256,6 +549,22 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
         "created_by": user.get("name"),
     }
     await db.tickets.insert_one(ticket)
+    await db.ticket_comments.insert_one({
+        "id": str(uuid.uuid4()),
+        "ticket_id": ticket["id"],
+        "user_name": user.get("name", "Client"),
+        "sender_name": user.get("name", "Client"),
+        "sender_email": user.get("email", ""),
+        "sender_type": "client",
+        "content": data.get("description", ""),
+        "is_internal": False,
+        "visibility": "public",
+        "portal_visible": True,
+        "client_notified": False,
+        "delivery_status": "received",
+        "event_type": "portal_request_created",
+        "created_at": ticket["created_at"],
+    })
     ticket.pop("_id", None)
     return ticket
 
@@ -266,30 +575,66 @@ async def portal_ticket_detail(ticket_id: str, user: dict = Depends(get_portal_u
     ticket = await db.tickets.find_one({"id": ticket_id, "client_id": user.get("client_id")}, {"_id": 0})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    # Get ticket messages/notes
-    messages = await db.ticket_messages.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    # Present one client-safe thread. Historical portal messages are retained,
+    # while new public technician updates and client replies live in the same
+    # audited ticket-comments collection used by the service desk.
+    legacy_messages = await db.ticket_messages.find(
+        {"ticket_id": ticket_id}, {"_id": 0}
+    ).sort("created_at", 1).to_list(200)
+    public_comments = await db.ticket_comments.find(
+        {"ticket_id": ticket_id, "is_internal": {"$ne": True}},
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(500)
+    messages = [
+        *legacy_messages,
+        *[
+            {
+                **comment,
+                "sender_name": comment.get("user_name") or comment.get("sender_name") or "Support",
+                "sender_email": comment.get("sender_email", ""),
+                "sender_type": comment.get("sender_type") or "technician",
+            }
+            for comment in public_comments
+        ],
+    ]
+    messages.sort(key=lambda item: item.get("created_at") or "")
     return {"ticket": ticket, "messages": messages}
 
 
 @router.post("/tickets/{ticket_id}/messages")
 async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Depends(get_portal_user)):
     """Add a message to a ticket conversation from the portal."""
-    ticket = await db.tickets.find_one({"id": ticket_id, "client_id": user.get("client_id")}, {"_id": 0, "id": 1})
+    ticket = await db.tickets.find_one(
+        {"id": ticket_id, "client_id": user.get("client_id")},
+        {"_id": 0, "id": 1, "status": 1},
+    )
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    content = str(data.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Write a reply before sending")
     message = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
+        "user_name": user.get("name", "Client"),
         "sender_name": user.get("name", "Client"),
         "sender_email": user.get("email", ""),
         "sender_type": "client",
-        "content": data.get("content", ""),
+        "content": content,
+        "is_internal": False,
+        "visibility": "public",
+        "portal_visible": True,
+        "client_notified": False,
+        "delivery_status": "received",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.ticket_messages.insert_one(message)
-    message.pop("_id", None)
-    # Update ticket timestamp
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    await db.ticket_comments.insert_one(dict(message))
+    update = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    if ticket.get("status") in {"on_hold", "resolved", "closed"}:
+        update["status"] = "open"
+        update["reopened_at"] = update["updated_at"]
+        update["reopened_reason"] = "Client replied through the portal"
+    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
     return message
 
 
@@ -303,26 +648,101 @@ async def portal_devices(user: dict = Depends(get_portal_user)):
         raise HTTPException(status_code=403, detail="Device access not permitted")
     devices = await db.devices.find(
         {"client_id": user.get("client_id")},
-        {"_id": 0, "id": 1, "name": 1, "hostname": 1, "device_type": 1, "os": 1, "status": 1, "ip_address": 1, "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1, "last_heartbeat": 1, "antivirus_status": 1, "compliance_score": 1}
+        {
+            "_id": 0,
+            "id": 1,
+            "name": 1,
+            "hostname": 1,
+            "device_type": 1,
+            "os": 1,
+            "status": 1,
+            "ip_address": 1,
+            "cpu_usage": 1,
+            "memory_usage": 1,
+            "disk_usage": 1,
+            "last_seen": 1,
+            "last_heartbeat": 1,
+            "rd_last_seen": 1,
+            "agent_version": 1,
+            "rustdesk_id": 1,
+            "antivirus_status": 1,
+            "compliance_score": 1,
+        },
     ).to_list(500)
-    # Augment with RustDesk availability
     rd_devices = await db.rustdesk_devices.find(
         {"client_id": user.get("client_id")},
-        {"_id": 0, "id": 1, "device_id": 1, "rustdesk_id": 1, "name": 1, "status": 1}
+        {
+            "_id": 0,
+            "id": 1,
+            "device_id": 1,
+            "linked_device_id": 1,
+            "rustdesk_id": 1,
+            "name": 1,
+            "hostname": 1,
+            "status": 1,
+            "last_seen": 1,
+            "last_online": 1,
+            "updated_at": 1,
+        },
     ).to_list(500)
-    # Build a map: matched by device_id first, then by name
-    rd_by_dev_id = {rd.get("device_id"): rd for rd in rd_devices if rd.get("device_id")}
-    rd_by_name = {rd.get("name", "").lower(): rd for rd in rd_devices}
-    for d in devices:
-        rd = rd_by_dev_id.get(d["id"]) or rd_by_name.get((d.get("name") or "").lower()) or rd_by_name.get((d.get("hostname") or "").lower())
-        if rd:
-            d["rustdesk_available"] = True
-            d["rustdesk_device_id"] = rd["id"]
+
+    config = await rustdesk_config()
+    provider_enabled = bool(config.get("enabled", True))
+    rd_by_dev_id = {
+        remote_id: rd
+        for rd in rd_devices
+        for remote_id in (rd.get("linked_device_id"), rd.get("device_id"))
+        if remote_id
+    }
+    rd_by_name = {
+        str(remote_name).strip().lower(): rd
+        for rd in rd_devices
+        for remote_name in (rd.get("name"), rd.get("hostname"))
+        if remote_name
+    }
+
+    for device in devices:
+        mapping = (
+            rd_by_dev_id.get(device.get("id"))
+            or rd_by_name.get(str(device.get("name") or "").strip().lower())
+            or rd_by_name.get(str(device.get("hostname") or "").strip().lower())
+        )
+        rustdesk_id = str(device.get("rustdesk_id") or (mapping or {}).get("rustdesk_id") or "").strip()
+        is_online = str(device.get("status") or "").lower() == "online"
+        remote_ready = bool(rustdesk_id and provider_enabled and is_online)
+        if remote_ready:
+            readiness_reason = "Ready for secure client access"
+        elif not rustdesk_id:
+            readiness_reason = "Remote agent is not enrolled"
+        elif not provider_enabled:
+            readiness_reason = "Remote access is disabled by your MSP"
+        else:
+            readiness_reason = "Device must be online before connecting"
+
+        device["last_check_in"] = _latest_timestamp(
+            device.get("last_heartbeat"),
+            device.get("last_seen"),
+            device.get("rd_last_seen"),
+            (mapping or {}).get("last_seen"),
+            (mapping or {}).get("last_online"),
+            (mapping or {}).get("updated_at"),
+        )
+        device["remote_provider"] = "rustdesk" if rustdesk_id else None
+        device["remote_ready"] = remote_ready
+        device["remote_access_reason"] = readiness_reason
+        device["rustdesk_available"] = remote_ready
+        device["rustdesk_device_id"] = (mapping or {}).get("id") or device.get("id") if rustdesk_id else None
+        device.pop("rustdesk_id", None)
     return devices
 
 
 @router.post("/devices/{device_id}/remote-connect")
-async def portal_remote_connect(device_id: str, data: dict = None, user: dict = Depends(get_portal_user)):
+async def portal_remote_connect(
+    device_id: str,
+    request: Request,
+    data: dict = None,
+    user: dict = Depends(get_portal_user),
+):
     """Initiate a RustDesk remote-connect session from the client portal.
     Strictly scoped to the portal user's own client_id.
     Requires explicit consent acknowledgement for audit compliance."""
@@ -332,56 +752,112 @@ async def portal_remote_connect(device_id: str, data: dict = None, user: dict = 
     if not user.get("can_remote_devices", False):
         raise HTTPException(status_code=403, detail="Remote access not permitted. Ask your MSP to enable it on your portal account.")
 
-    # Accept either the devices.id OR the rustdesk_devices.id or device_id (host mapping)
-    rd = await db.rustdesk_devices.find_one(
-        {"$or": [{"id": device_id}, {"device_id": device_id}], "client_id": user.get("client_id")},
-        {"_id": 0}
+    client_id = user.get("client_id")
+    device = await db.devices.find_one(
+        {"id": device_id, "client_id": client_id},
+        {
+            "_id": 0,
+            "id": 1,
+            "name": 1,
+            "hostname": 1,
+            "os": 1,
+            "device_type": 1,
+            "status": 1,
+            "rustdesk_id": 1,
+        },
     )
-    if not rd:
-        dev = await db.devices.find_one({"id": device_id, "client_id": user.get("client_id")}, {"_id": 0, "name": 1, "hostname": 1})
-        if dev:
-            rd = await db.rustdesk_devices.find_one(
-                {"client_id": user.get("client_id"), "$or": [
-                    {"name": dev.get("name")}, {"name": dev.get("hostname")}
-                ]},
-                {"_id": 0}
+    mapping = None
+    if device:
+        names = [name for name in (device.get("name"), device.get("hostname")) if name]
+        mapping = await db.rustdesk_devices.find_one(
+            {
+                "client_id": client_id,
+                "$or": [
+                    {"linked_device_id": device_id},
+                    {"device_id": device_id},
+                    *[{"name": name} for name in names],
+                    *[{"hostname": name} for name in names],
+                ],
+            },
+            {
+                "_id": 0,
+                "id": 1,
+                "device_id": 1,
+                "linked_device_id": 1,
+                "name": 1,
+                "hostname": 1,
+                "rustdesk_id": 1,
+            },
+        )
+    else:
+        mapping = await db.rustdesk_devices.find_one(
+            {"id": device_id, "client_id": client_id},
+            {
+                "_id": 0,
+                "id": 1,
+                "device_id": 1,
+                "linked_device_id": 1,
+                "name": 1,
+                "hostname": 1,
+                "rustdesk_id": 1,
+            },
+        )
+        linked_device_id = (mapping or {}).get("linked_device_id") or (mapping or {}).get("device_id")
+        if linked_device_id:
+            device = await db.devices.find_one(
+                {"id": linked_device_id, "client_id": client_id},
+                {
+                    "_id": 0,
+                    "id": 1,
+                    "name": 1,
+                    "hostname": 1,
+                    "os": 1,
+                    "device_type": 1,
+                    "status": 1,
+                    "rustdesk_id": 1,
+                },
             )
-    if not rd:
-        raise HTTPException(status_code=404, detail="No RustDesk agent registered for this device. Please contact your MSP.")
 
-    settings = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
-    config = settings.get("value", {})
-    rd_id = rd.get("rustdesk_id", "")
+    if not device:
+        raise HTTPException(status_code=404, detail="Managed device not found for this client")
+
+    rd_id = str(device.get("rustdesk_id") or (mapping or {}).get("rustdesk_id") or "").strip()
+    if not rd_id:
+        raise HTTPException(status_code=404, detail="No RustDesk agent registered for this device. Please contact your MSP.")
+    if str(device.get("status") or "").lower() != "online":
+        raise HTTPException(status_code=409, detail="This device is offline. Wait for it to check in before connecting.")
+
+    config = await rustdesk_config()
+    if not config.get("enabled", True):
+        raise HTTPException(status_code=409, detail="Remote access is disabled by your MSP")
     relay = (config.get("relay_server") or "").strip()
     server_url = (config.get("server_url") or "").strip().rstrip("/")
-
     server_host = ""
     if relay:
         server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
     elif server_url:
         server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    connection_url = f"rustdesk://{rd_id}@{server_host}" if server_host else f"rustdesk://{rd_id}"
+    connection_url = build_rustdesk_uri(rd_id, relay, server_url)
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
     session_id = str(uuid.uuid4())
+    request_context = _request_context(request)
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    resolved_device_id = device.get("id")
+    resolved_device_name = device.get("name") or device.get("hostname") or (mapping or {}).get("name") or "Managed device"
 
-    # Lookup device metadata for the audit record
-    dev_meta = await db.devices.find_one({"id": rd.get("device_id")}, {"_id": 0, "name": 1, "hostname": 1, "os": 1, "device_type": 1}) or {}
-
-    # Create the compliance audit record (remote_session_records)
-    client = await db.clients.find_one({"id": user.get("client_id")}, {"_id": 0, "name": 1})
     record = {
         "id": session_id,
         "type": "portal_remote",
-        "client_id": user.get("client_id"),
+        "client_id": client_id,
         "client_name": (client or {}).get("name", ""),
         "portal_user_id": user.get("id"),
         "portal_user_name": user.get("name") or user.get("email", ""),
         "portal_user_email": user.get("email", ""),
-        "device_id": rd.get("id"),
-        "device_name": rd.get("name") or dev_meta.get("name") or dev_meta.get("hostname", ""),
-        "device_os": dev_meta.get("os", ""),
+        "device_id": resolved_device_id,
+        "device_name": resolved_device_name,
+        "device_os": device.get("os", ""),
         "rustdesk_id": rd_id,
         "started_at": now_iso,
         "ended_at": None,
@@ -392,8 +868,8 @@ async def portal_remote_connect(device_id: str, data: dict = None, user: dict = 
         "consent_text": data.get("consent_text",
             "I acknowledge this remote access session is being initiated by me and will be recorded for audit, compliance (SOC 2 / ISO 27001), and service-quality purposes. "
             "An MSP technician may observe or assist during the session."),
-        "ip_address": data.get("ip_address", ""),
-        "user_agent": data.get("user_agent", ""),
+        "ip_address": request_context.get("ip_address"),
+        "user_agent": request_context.get("user_agent"),
         "created_at": now_iso,
     }
     await db.remote_session_records.insert_one(record)
@@ -401,8 +877,8 @@ async def portal_remote_connect(device_id: str, data: dict = None, user: dict = 
     # Also log to rustdesk_sessions for admin-side visibility
     await db.rustdesk_sessions.insert_one({
         "id": session_id,
-        "device_id": rd.get("id"),
-        "client_id": user.get("client_id"),
+        "device_id": resolved_device_id,
+        "client_id": client_id,
         "rustdesk_id": rd_id,
         "user_id": user.get("id"),
         "user_name": user.get("name", user.get("email", "Portal user")),
@@ -412,9 +888,30 @@ async def portal_remote_connect(device_id: str, data: dict = None, user: dict = 
         "ended_at": None,
         "session_record_id": session_id,
     })
-    await db.rustdesk_devices.update_one(
-        {"id": rd.get("id")},
-        {"$set": {"last_connected": now_iso, "status": "connected"}}
+    if mapping and mapping.get("id"):
+        await db.rustdesk_devices.update_one(
+            {"id": mapping.get("id")},
+            {"$set": {"last_connected": now_iso, "status": "connected"}},
+        )
+    await db.devices.update_one(
+        {"id": resolved_device_id, "client_id": client_id},
+        {"$set": {"last_remote_connected_at": now_iso}},
+    )
+    await record_portal_event(
+        action="portal_remote_session_started",
+        client_id=client_id,
+        client_name=(client or {}).get("name", ""),
+        portal_user=user,
+        outcome="success",
+        details=f"Client-authorised remote session started for {resolved_device_name}",
+        metadata={
+            "session_id": session_id,
+            "device_id": resolved_device_id,
+            "device_name": resolved_device_name,
+            "provider": "rustdesk",
+            "consent_acknowledged": True,
+        },
+        **request_context,
     )
 
     return {
@@ -428,7 +925,12 @@ async def portal_remote_connect(device_id: str, data: dict = None, user: dict = 
 
 
 @router.post("/remote-sessions/{session_id}/end")
-async def portal_end_remote_session(session_id: str, data: dict = None, user: dict = Depends(get_portal_user)):
+async def portal_end_remote_session(
+    session_id: str,
+    request: Request,
+    data: dict = None,
+    user: dict = Depends(get_portal_user),
+):
     """Mark a remote session as ended, compute duration."""
     data = data or {}
     rec = await db.remote_session_records.find_one(
@@ -459,6 +961,23 @@ async def portal_end_remote_session(session_id: str, data: dict = None, user: di
     await db.rustdesk_sessions.update_one(
         {"id": session_id},
         {"$set": {"ended_at": now.isoformat(), "status": "completed"}}
+    )
+    await record_portal_event(
+        action="portal_remote_session_completed",
+        client_id=user.get("client_id"),
+        client_name=rec.get("client_name", ""),
+        portal_user=user,
+        outcome="success",
+        details=f"Client-authorised remote session completed for {rec.get('device_name') or 'managed device'}",
+        metadata={
+            "session_id": session_id,
+            "device_id": rec.get("device_id"),
+            "device_name": rec.get("device_name"),
+            "provider": "rustdesk",
+            "duration_seconds": duration,
+            "notes_recorded": bool(str(data.get("notes") or "").strip()),
+        },
+        **_request_context(request),
     )
     return {"message": "Session ended", "duration_seconds": duration}
 
@@ -585,7 +1104,7 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
     pdf.set_y(-25)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(120, 120, 120)
-    pdf.cell(0, 5, f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} Â· {msp_name}", ln=1, align="C")
+    pdf.cell(0, 5, f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} - {msp_name}", ln=1, align="C")
     pdf.cell(0, 5, "This document is a tamper-evident audit record of a client-initiated remote access session.", ln=1, align="C")
 
     pdf_bytes = bytes(pdf.output(dest="S"))
@@ -690,6 +1209,99 @@ async def portal_pay_invoice(invoice_id: str, data: dict, user: dict = Depends(g
         raise HTTPException(status_code=500, detail=f"Payment failed: {str(e)}")
 
 
+@router.get("/invoices/{invoice_id}/pdf")
+async def portal_invoice_pdf(invoice_id: str, user: dict = Depends(get_portal_user)):
+    """Return the branded invoice PDF after enforcing portal/client scope."""
+    from fastapi.responses import Response
+    from app.routers.invoice_pdf import generate_invoice_pdf, _get_branding, _get_active_theme_config
+
+    if not user.get("can_view_invoices", False):
+        raise HTTPException(status_code=403, detail="Invoice access not permitted")
+    cid = user.get("client_id")
+    invoice = await db.invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    if not invoice:
+        invoice = await db.xero_invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    branding = await _get_branding()
+    theme_config, _ = await _get_active_theme_config()
+    pdf_bytes = generate_invoice_pdf(invoice, branding, theme_config)
+    filename = f"{invoice.get('invoice_number') or 'invoice'}.pdf"
+    return Response(
+        content=bytes(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ==================== MANAGED SERVICES ====================
+
+@router.get("/services")
+async def portal_services(user: dict = Depends(get_portal_user)):
+    """Client-scoped agreements and live subscription quantities."""
+    cid = user.get("client_id")
+    config = await db.portal_configs.find_one({"client_id": cid}, {"_id": 0, "features": 1}) or {}
+    if (config.get("features") or {}).get("can_view_contracts", True) is False:
+        raise HTTPException(status_code=403, detail="Service agreement access not permitted")
+    contracts = await db.contracts.find(
+        {"client_id": cid},
+        {
+            "_id": 0, "id": 1, "name": 1, "type": 1, "status": 1, "start_date": 1,
+            "end_date": 1, "renewal_date": 1, "sla_tier": 1, "billing_frequency": 1,
+            "monthly_value": 1, "mrr": 1, "auto_renew": 1,
+        },
+    ).sort("status", 1).to_list(100)
+    subscriptions = await db.subscriptions.find(
+        {"client_id": cid},
+        {
+            "_id": 0, "id": 1, "product_name": 1, "name": 1, "vendor": 1,
+            "provider": 1, "quantity": 1, "used": 1, "status": 1, "billing_cycle": 1,
+            "unit_price": 1, "monthly_cost": 1, "renewal_date": 1, "source": 1,
+        },
+    ).sort("product_name", 1).to_list(250)
+    active_contracts = sum(1 for row in contracts if row.get("status") == "active")
+    active_subscriptions = sum(1 for row in subscriptions if row.get("status", "active") == "active")
+    licensed_seats = sum(
+        int(row.get("quantity") or row.get("used") or 0)
+        for row in subscriptions
+        if row.get("status", "active") == "active"
+    )
+    return {
+        "contracts": contracts,
+        "subscriptions": subscriptions,
+        "summary": {
+            "active_contracts": active_contracts,
+            "active_subscriptions": active_subscriptions,
+            "licensed_seats": licensed_seats,
+        },
+    }
+
+
+# ==================== CLIENT-SAFE DOCUMENTS ====================
+
+@router.get("/documents")
+async def portal_documents(user: dict = Depends(get_portal_user)):
+    """Only expose documents explicitly marked for the client portal."""
+    cid = user.get("client_id")
+    docs = await db.client_documents.find(
+        {
+            "client_id": cid,
+            "$or": [
+                {"portal_visible": True},
+                {"visibility": {"$in": ["public", "client"]}},
+                {"is_public": True},
+            ],
+        },
+        {
+            "_id": 0, "id": 1, "kind": 1, "title": 1, "category": 1, "url": 1,
+            "extension": 1, "size_bytes": 1, "body": 1, "updated_at": 1,
+            "created_at": 1, "tags": 1,
+        },
+    ).sort("updated_at", -1).to_list(250)
+    return docs
+
+
 # ==================== BACKUPS ====================
 
 @router.get("/backups")
@@ -710,18 +1322,29 @@ async def portal_backups(user: dict = Depends(get_portal_user)):
 @router.get("/compliance")
 async def portal_compliance(user: dict = Depends(get_portal_user)):
     cid = user.get("client_id")
-    # Return global compliance frameworks (applied to all clients)
-    frameworks = await db.compliance_frameworks.find({}, {"_id": 0}).to_list(20)
-    if not frameworks:
-        from app.routers.compliance_frameworks import router as cf_router
-        # Trigger data generation
-        frameworks = [
-            {"id": "nist", "name": "NIST 800-171", "compliance_pct": 77, "controls_total": 110, "controls_met": 85},
-            {"id": "cis", "name": "CIS Controls v8", "compliance_pct": 74, "controls_total": 56, "controls_met": 41},
-            {"id": "soc2", "name": "SOC 2 Type II", "compliance_pct": 78, "controls_total": 64, "controls_met": 50},
-            {"id": "hipaa", "name": "HIPAA", "compliance_pct": 79, "controls_total": 44, "controls_met": 35},
-        ]
-    return {"frameworks": frameworks}
+    scans = await db.compliance_reports.find(
+        {"client_id": cid},
+        {
+            "_id": 0, "id": 1, "framework": 1, "framework_name": 1, "score": 1,
+            "passed": 1, "total": 1, "scanned_at": 1, "controls": 1,
+        },
+    ).sort("scanned_at", -1).to_list(100)
+    latest_by_framework = {}
+    for scan in scans:
+        key = scan.get("framework") or scan.get("framework_name") or scan.get("id")
+        if key not in latest_by_framework:
+            latest_by_framework[key] = scan
+    frameworks = [
+        {
+            **scan,
+            "name": scan.get("framework_name") or str(scan.get("framework") or "Compliance").upper(),
+            "compliance_pct": scan.get("score", 0),
+            "controls_total": scan.get("total", 0),
+            "controls_met": scan.get("passed", 0),
+        }
+        for scan in latest_by_framework.values()
+    ]
+    return {"frameworks": frameworks, "has_assessment": bool(frameworks)}
 
 
 # ==================== QBR ====================
@@ -743,6 +1366,11 @@ async def portal_qbr(user: dict = Depends(get_portal_user)):
 @router.get("/kb")
 async def portal_knowledge_base(user: dict = Depends(get_portal_user)):
     """Get published knowledge base articles for clients."""
+    config = await db.portal_configs.find_one(
+        {"client_id": user.get("client_id")}, {"_id": 0, "features": 1}
+    ) or {}
+    if (config.get("features") or {}).get("can_view_kb", True) is False:
+        return []
     articles = await db.kb_articles.find(
         {"status": "published", "visibility": {"$in": ["public", "client"]}},
         {"_id": 0}

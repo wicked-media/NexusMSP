@@ -65,6 +65,9 @@ def _safe_latin(text):
 
 def generate_invoice_pdf(invoice, branding=None, theme_config=None):
     """Generate a professional branded invoice PDF with theme support"""
+    from app.services.finance_integrity import normalise_invoice_document
+
+    invoice = normalise_invoice_document(invoice) or {}
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -772,6 +775,9 @@ def generate_estimate_pdf(estimate, branding=None, theme_config=None):
         pdf.multi_cell(0, 5, terms[:500])
 
     # Footer
+    # The footer intentionally occupies the reserved bottom margin. Disable the
+    # automatic break first so writing it cannot create an empty trailing page.
+    pdf.set_auto_page_break(auto=False)
     pdf.set_y(-25)
     pdf.set_draw_color(*accent_color)
     pdf.set_line_width(0.8)
@@ -1098,7 +1104,7 @@ async def download_contract_pdf(contract_id: str, user: dict = Depends(_get_user
 # ──────── PO PDF (query-param token auth for iframe) ────────
 
 @router.get("/purchase-orders/{po_id}/pdf/preview")
-async def preview_po_pdf(po_id: str, user: dict = Depends(_get_user_from_token)):
+async def preview_po_pdf(po_id: str, download: bool = Query(False), user: dict = Depends(_get_user_from_token)):
     """Preview PO as inline PDF (query param auth for iframe)."""
     po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
     if not po:
@@ -1242,6 +1248,9 @@ async def preview_po_pdf(po_id: str, user: dict = Depends(_get_user_from_token))
         pdf.multi_cell(0, 5, notes[:500])
 
     # Footer
+    # The footer intentionally occupies the reserved bottom margin. Disable the
+    # automatic break first so writing it cannot create an empty trailing page.
+    pdf.set_auto_page_break(auto=False)
     pdf.set_y(-25)
     pdf.set_draw_color(*accent)
     pdf.set_line_width(0.8)
@@ -1255,5 +1264,5 @@ async def preview_po_pdf(po_id: str, user: dict = Depends(_get_user_from_token))
     return Response(
         content=bytes(pdf.output()),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="PO_{po.get("po_number", po_id)}.pdf"'}
+        headers={"Content-Disposition": f'{"attachment" if download else "inline"}; filename="PO_{po.get("po_number", po_id)}.pdf"'}
     )

@@ -5,14 +5,13 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import {
   Users, Monitor, Ticket, AlertTriangle, DollarSign, Clock, ArrowUpRight,
   RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle, XCircle,
-  Shield, HardDrive, ExternalLink, Plus, Search, Terminal, UserCog, CalendarDays,
+  Shield, HardDrive, ExternalLink, Plus, Search,
   ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, BarChart3, Sparkles,
   Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, ListChecks, FileText, ShoppingCart, Mail
 } from "lucide-react";
@@ -59,17 +58,6 @@ const WIDGET_META = {
   "activity":     { label: "Activity Feed",          icon: Zap },
 };
 
-const DASHBOARD_QUICK_ACTIONS = [
-  { icon: Ticket, label: "Open ticket queue", path: "/tickets", color: "text-blue-500" },
-  { icon: FileText, label: "Invoices", path: "/invoices", color: "text-emerald-500" },
-  { icon: ShoppingCart, label: "Purchase orders", path: "/purchase-orders", color: "text-violet-500" },
-  { icon: Users, label: "Clients", path: "/clients", color: "text-emerald-500" },
-  { icon: Monitor, label: "Assets", path: "/devices", color: "text-purple-500" },
-  { icon: Terminal, label: "Run script", path: "/scripting", color: "text-orange-500" },
-  { icon: CalendarDays, label: "Dispatch calendar", path: "/dispatch-board?tab=calendar", color: "text-cyan-500" },
-  { icon: UserCog, label: "Team command", path: "/team-hub?tab=command&view=directory", color: "text-pink-500" },
-];
-
 // Technician-first default (lg breakpoint = 12 cols).  The dashboard starts
 // with one predictable visual rhythm: full-width status strips, then paired
 // work cards.  Less frequent executive/AI widgets remain available through
@@ -112,6 +100,7 @@ import { SLARadarTile } from "@/components/ai/SLARadarTile";
 import { CoffeeBreakToggle } from "@/components/ai/CoffeeBreakToggle";
 import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
 import WeatherStrip from "@/components/ambient/WeatherStrip";
+import MissionControlOverview from "@/components/dashboard/MissionControlOverview";
 
 export default function DashboardPage() {
   const { token, user } = useAuth();
@@ -129,9 +118,7 @@ export default function DashboardPage() {
   const [mspIntel, setMspIntel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const searchRef = useRef(null);
+  const [missionControl, setMissionControl] = useState(null);
   const autoRefreshRef = useRef(null);
   const [now] = useState(new Date());
 
@@ -140,7 +127,7 @@ export default function DashboardPage() {
   const fetchDashboardData = async () => {
     setDashboardError(null);
     try {
-      const [statsRes, trendsRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes] = await Promise.all([
+      const [statsRes, trendsRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes, missionRes] = await Promise.all([
         axios.get(`${API}/dashboard/stats`, { headers }),
         axios.get(`${API}/dashboard/ticket-trends`, { headers }),
         axios.get(`${API}/alerts?status=active`, { headers }),
@@ -148,6 +135,7 @@ export default function DashboardPage() {
         axios.get(`${API}/dashboard/activity-feed?limit=15`, { headers }),
         axios.get(`${API}/dashboard/enhanced-stats`, { headers }),
         axios.get(`${API}/devices`, { headers }),
+        axios.get(`${API}/mission-control/overview`, { headers }).catch(() => ({ data: null })),
       ]);
       setStats(statsRes.data);
       setEnhancedStats(enhancedRes.data);
@@ -165,6 +153,7 @@ export default function DashboardPage() {
       setTickets(ticketsRes.data.slice(0, 8));
       setActivityFeed(activityRes.data);
       setDevices(devicesRes.data);
+      setMissionControl(missionRes.data);
 
       const [backupRes, predRes, compFwRes] = await Promise.all([
         axios.get(`${API}/backup-dashboard/overview`, { headers }).catch(() => ({ data: null })),
@@ -246,17 +235,6 @@ export default function DashboardPage() {
     return () => clearInterval(autoRefreshRef.current);
   }, []);
 
-  useEffect(() => {
-    const handler = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setSearchOpen(true); }
-      if (e.key === 'Escape') setSearchOpen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  useEffect(() => { if (searchOpen && searchRef.current) searchRef.current.focus(); }, [searchOpen]);
-
   if (loading) {
     return (
       <div className="space-y-6" data-testid="dashboard-loading">
@@ -299,13 +277,9 @@ export default function DashboardPage() {
     navigate("/tickets");
   };
   const ticketPath = (ticket) => `/tickets?ticket=${encodeURIComponent(ticket.ticket_number || ticket.id)}`;
-  const alertPath = (alert) => alert.device_id ? `/devices/${alert.device_id}` : "/security";
+  const alertPath = (alert) => alert.device_id ? `/devices/${alert.device_id}` : "/security-dashboard";
 
-  const quickSearchResults = searchQuery ? [
-    ...DASHBOARD_QUICK_ACTIONS.filter(action => action.label.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(action => ({ type: "action", ...action, sub: "Quick action" })),
-    ...tickets.filter(t => t.title?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(t => ({ type: "ticket", label: t.title, sub: t.ticket_number, path: ticketPath(t) })),
-    ...devices.filter(d => d.name?.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 3).map(d => ({ type: "device", label: d.name, sub: d.client_name, path: `/devices/${d.id}` })),
-  ] : [];
+  const openCommandPalette = () => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"));
 
   const attentionItems = [];
   if ((enhancedStats?.sla_breaches || 0) > 0) attentionItems.push({ label: `${enhancedStats.sla_breaches} SLA Breach${enhancedStats.sla_breaches > 1 ? "es" : ""}`, color: "text-red-400", bg: "bg-red-500/10", borderColor: "border-red-500/20", icon: AlertCircle, path: "/tickets" });
@@ -342,15 +316,18 @@ export default function DashboardPage() {
       <section className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 md:p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300">Operations overview</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-300">MSP operating system</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight flex items-center gap-2">
-            <Sparkles className="w-6 h-6 text-violet-400" />Technician Workspace
+            <Sparkles className="w-6 h-6 text-cyan-300" />Nexus Mission Control
           </h1>
-          <p className="text-sm text-zinc-500">{greeting}, {user?.name?.split(" ")[0] || "Operator"} — live cross-module situational awareness</p>
+          <p className="text-sm text-zinc-500">
+            {greeting}, {user?.name?.split(" ")[0] || "Operator"}. {missionControl?.summary?.attention_count || 0} live item{missionControl?.summary?.attention_count === 1 ? "" : "s"} require attention
+            {missionControl?.summary?.automated_actions_24h ? ` · ${missionControl.summary.automated_actions_24h} automated actions completed in the last 24 hours` : ""}.
+          </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSearchOpen(true)} data-testid="bridge-search-btn">
-            <Search className="w-3 h-3 mr-1" />Quick Search <kbd className="ml-1 text-[9px] bg-zinc-800 px-1 rounded">Ctrl K</kbd>
+          <Button size="sm" variant="outline" className="h-8 text-xs border-cyan-300/20 bg-cyan-400/[0.06]" onClick={openCommandPalette} data-testid="bridge-search-btn">
+            <Search className="w-3 h-3 mr-1" />Nexus Command <kbd className="ml-1 text-[9px] bg-zinc-800 px-1 rounded">Ctrl K</kbd>
           </Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn"><Ticket className="w-3 h-3 mr-1" />Tickets</Button>
           <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => navigate("/leads")} data-testid="bridge-leads-btn"><Users className="w-3 h-3 mr-1" />Leads</Button>
@@ -362,38 +339,7 @@ export default function DashboardPage() {
       </div>
       </section>
 
-      {/* HeroTile Command Strip + Cross-Module Bridge + Team Pins now live INSIDE the customisable widget grid below */}
-      {/* Quick Search Modal */}
-      {searchOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[20vh]" onClick={() => setSearchOpen(false)}>
-          <div className="bg-card border border-border/50 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()} data-testid="quick-search-modal" style={{ boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-border/40">
-              <Search className="w-5 h-5 text-muted-foreground" />
-              <Input ref={searchRef} value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search tickets, devices, clients..." className="border-0 shadow-none focus-visible:ring-0 text-base" />
-              <kbd className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">ESC</kbd>
-            </div>
-            {searchQuery ? (
-              <div className="p-2 max-h-64 overflow-y-auto">
-                {quickSearchResults.length > 0 ? quickSearchResults.map((r, i) => (
-                  <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => { navigate(r.path); setSearchOpen(false); }}>
-                    {r.type === "action" ? <r.icon className={`w-4 h-4 ${r.color}`} /> : r.type === "ticket" ? <Ticket className="w-4 h-4 text-blue-500" /> : <Monitor className="w-4 h-4 text-emerald-500" />}
-                    <div><p className="text-sm font-medium">{r.label}</p><p className="text-[10px] text-muted-foreground">{r.sub}</p></div>
-                  </div>
-                )) : <p className="text-sm text-muted-foreground text-center py-4">No results</p>}
-              </div>
-            ) : (
-              <div className="p-3 space-y-1">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider px-2 mb-2">Quick Actions</p>
-                {DASHBOARD_QUICK_ACTIONS.map((item, i) => (
-                  <div key={`k-${i}`} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors" onClick={() => { navigate(item.path); setSearchOpen(false); }}>
-                    <item.icon className={`w-4 h-4 ${item.color}`} /><span className="text-sm">{item.label}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <MissionControlOverview data={missionControl} navigate={navigate} onOpenCommand={openCommandPalette} />
 
       {/* Widget Edit Mode bar */}
       <div className="flex items-center justify-between px-1">
@@ -480,7 +426,7 @@ export default function DashboardPage() {
           <HeroTile label="Open Tickets" value={stats.open_tickets || 0} icon={Ticket} glow={(stats.open_tickets || 0) > 20 ? "amber" : "cyan"} onClick={() => openTicketQueue({ status: "open" })} testId="bridge-tile-tickets" />
           <HeroTile label="Devices Online" value={onlineDevices.length} icon={Monitor} glow="emerald" onClick={() => navigate("/devices")} testId="bridge-tile-online" />
           <HeroTile label="Devices Offline" value={offlineDevices.length} icon={Server} glow={offlineDevices.length > 0 ? "rose" : "zinc"} onClick={() => navigate("/devices")} testId="bridge-tile-offline" />
-          <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} onClick={() => navigate("/security")} testId="bridge-tile-critical" />
+          <HeroTile label="Critical Alerts" value={(alerts || []).filter(a => a.severity === "critical").length} icon={AlertTriangle} glow={(alerts || []).filter(a => a.severity === "critical").length > 0 ? "rose" : "emerald"} onClick={() => navigate("/security-dashboard")} testId="bridge-tile-critical" />
           <HeroTile label="Clients" value={stats.total_clients || 0} icon={Users} glow="violet" onClick={() => navigate("/clients")} testId="bridge-tile-clients" />
           <HeroTile label="MRR" value={`$${(stats.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/revenue-forecast")} testId="bridge-tile-mrr" />
         </div>
@@ -525,7 +471,7 @@ export default function DashboardPage() {
             <div className="space-y-1.5">
               <div className="text-[10px] uppercase tracking-widest font-mono text-amber-300 flex items-center gap-1 mb-1"><AlertCircle className="w-3 h-3" />Alerts</div>
               {(alerts || []).slice(0, 3).map(a => (
-                <button key={a.id} onClick={() => navigate("/security")} className={`w-full text-left px-2.5 py-1.5 rounded border ${a.severity === "critical" ? "border-rose-500/30 bg-rose-500/5" : "border-amber-500/30 bg-amber-500/5"} hover:brightness-125 transition`} data-testid={`bridge-al-${a.id}`}>
+                <button key={a.id} onClick={() => navigate("/security-dashboard")} className={`w-full text-left px-2.5 py-1.5 rounded border ${a.severity === "critical" ? "border-rose-500/30 bg-rose-500/5" : "border-amber-500/30 bg-amber-500/5"} hover:brightness-125 transition`} data-testid={`bridge-al-${a.id}`}>
                   <div className={`text-xs font-medium truncate ${a.severity === "critical" ? "text-rose-300" : "text-amber-300"}`}>{a.title || a.message}</div>
                   <div className="text-[10px] text-zinc-500 truncate uppercase tracking-widest">{a.severity || "info"}</div>
                 </button>
@@ -569,7 +515,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex gap-2">
             <CoffeeBreakToggle />
-            <Button variant="outline" size="sm" onClick={() => setSearchOpen(true)} className="gap-2 backdrop-blur-md border-border/40" data-testid="quick-search-btn">
+            <Button variant="outline" size="sm" onClick={openCommandPalette} className="gap-2 backdrop-blur-md border-border/40" data-testid="quick-search-btn">
               <Search className="w-4 h-4" /><span className="hidden md:inline">Search</span><kbd className="text-[9px] text-muted-foreground bg-muted/80 px-1 rounded ml-1">Ctrl+K</kbd>
             </Button>
             <Button variant="outline" size="sm" onClick={() => navigate("/tickets")} className="backdrop-blur-md border-border/40" data-testid="new-ticket-btn"><Plus className="w-4 h-4 mr-1" />Ticket</Button>
@@ -889,7 +835,7 @@ export default function DashboardPage() {
           <CardContent className="p-0 px-3">
             <ScrollArea className="h-[240px]">
               {alerts.length > 0 ? alerts.slice(0, 6).map(a => (
-                <button key={a.id} onClick={() => navigate(a.device_id ? `/devices/${a.device_id}` : "/security")} className="group flex w-full items-start gap-2.5 rounded px-1 py-2.5 text-left border-b border-border/20 last:border-0 hover:bg-muted/40 transition-colors" data-testid={`dashboard-alert-${a.id}`}>
+                <button key={a.id} onClick={() => navigate(a.device_id ? `/devices/${a.device_id}` : "/security-dashboard")} className="group flex w-full items-start gap-2.5 rounded px-1 py-2.5 text-left border-b border-border/20 last:border-0 hover:bg-muted/40 transition-colors" data-testid={`dashboard-alert-${a.id}`}>
                   <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.severity === "critical" ? "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]" : "bg-amber-500 shadow-[0_0_6px_rgba(234,179,8,0.4)]"}`} />
                   <div className="min-w-0 flex-1"><p className="text-xs font-medium leading-tight truncate">{a.message || a.title || "Active alert"}</p><span className="text-[10px] text-muted-foreground">{a.device_name || a.source || "Security queue"}</span></div><ChevronRight className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/60 group-hover:translate-x-0.5 transition-transform" />
                 </button>

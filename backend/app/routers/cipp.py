@@ -13,13 +13,15 @@ Endpoints implemented (read + a few writes):
   POST /api/clients/{client_id}/link-cipp-tenant  · link CIPP tenant to a NexusOps client
   POST /api/clients/{client_id}/link-suped-tenant · same for Suped
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone
 from typing import Optional
 import httpx
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_client_scope
 
 router = APIRouter()
 
@@ -46,26 +48,40 @@ def _headers(cfg: dict) -> dict:
 async def _cipp_call(method: str, path: str, params: Optional[dict] = None, json_body: Optional[dict] = None):
     cfg = await _get_config()
     if not cfg:
-        raise HTTPException(503, "CIPP not configured")
+        raise HTTPException(503, "Microsoft tenant provider is not configured")
     base = cfg["base_url"].rstrip("/")
     url = f"{base}/{path.lstrip('/')}"
     try:
         async with httpx.AsyncClient(timeout=45.0) as c:
             r = await c.request(method, url, headers=_headers(cfg), params=params or {}, json=json_body)
     except httpx.TimeoutException:
-        raise HTTPException(504, "CIPP timeout")
+        raise HTTPException(504, "Microsoft tenant provider timed out")
     except httpx.RequestError as e:
-        raise HTTPException(503, f"CIPP unreachable: {str(e)[:120]}")
+        raise HTTPException(503, f"Microsoft tenant provider is unreachable: {str(e)[:120]}")
     if r.status_code == 401:
-        raise HTTPException(401, "CIPP auth failed — check API key")
+        raise HTTPException(401, "Microsoft tenant provider authentication failed — check the API key")
     if r.status_code == 429:
-        raise HTTPException(429, "CIPP rate-limit hit")
+        raise HTTPException(429, "Microsoft tenant provider rate limit reached")
     if r.status_code >= 400:
-        raise HTTPException(r.status_code, f"CIPP error: {r.text[:300]}")
+        raise HTTPException(r.status_code, f"Microsoft tenant provider error: {r.text[:300]}")
     try:
         return r.json() if r.content else {}
     except Exception:
         return {"raw": r.text}
+
+
+async def _assert_tenant_scope(current_user: dict, tenant_id: str, operation: str, request: Request) -> dict:
+    client = await db.clients.find_one(
+        {"cipp_tenant_id": tenant_id},
+        {"_id": 0, "id": 1, "name": 1},
+    )
+    await assert_client_scope(
+        current_user,
+        (client or {}).get("id"),
+        operation=operation,
+        request=request,
+    )
+    return client or {}
 
 
 # --- settings --------------------------------------------------------------
@@ -101,13 +117,13 @@ async def save_settings(data: dict, current_user: dict = Depends(get_current_use
         }},
         upsert=True,
     )
-    return {"message": "CIPP settings saved"}
+    return {"message": "Microsoft tenant provider settings saved"}
 
 
 @router.delete("/cipp/settings")
 async def clear_settings(current_user: dict = Depends(get_current_user)):
     await db.settings.delete_one({"type": SETTINGS_KEY})
-    return {"message": "CIPP credentials removed"}
+    return {"message": "Microsoft tenant provider credentials removed"}
 
 
 @router.get("/cipp/test")
@@ -175,8 +191,8 @@ async def list_tenant_users(tenant_id: str, current_user: dict = Depends(get_cur
     return out
 
 
-@router.post("/cipp/tenants/{tenant_id}/users")
-async def create_user(tenant_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/cipp/tenants/{tenant_id}/users", dependencies=[Depends(require_action("entra.user.create"))])
+async def create_user(tenant_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     """
     body: { displayName, userPrincipalName, mailNickname, password, firstName?, lastName?,
             usageLocation?: 'AU', licenses?: ['SKU_ID'] }
@@ -185,6 +201,7 @@ async def create_user(tenant_id: str, data: dict, current_user: dict = Depends(g
     missing = [k for k in required if not (data or {}).get(k)]
     if missing:
         raise HTTPException(400, f"Missing fields: {', '.join(missing)}")
+    await _assert_tenant_scope(current_user, tenant_id, "entra.user.create", request)
 
     payload = {
         "tenantFilter": tenant_id,
@@ -227,9 +244,10 @@ async def list_tenant_licenses(tenant_id: str, current_user: dict = Depends(get_
     return out
 
 
-@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/assign-license")
-async def assign_license(tenant_id: str, user_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/assign-license", dependencies=[Depends(require_action("entra.license.modify"))])
+async def assign_license(tenant_id: str, user_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     """body: { addLicenses: ['SKU_ID', ...], removeLicenses: ['SKU_ID'] }"""
+    await _assert_tenant_scope(current_user, tenant_id, "entra.license.modify", request)
     payload = {
         "tenantFilter": tenant_id,
         "TenantFilter": tenant_id,
@@ -252,9 +270,10 @@ async def assign_license(tenant_id: str, user_id: str, data: dict, current_user:
     return {"success": True, "result": result}
 
 
-@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/reset-password")
-async def reset_password(tenant_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/reset-password", dependencies=[Depends(require_action("entra.credential.reset"))])
+async def reset_password(tenant_id: str, user_id: str, request: Request, data: dict = None, current_user: dict = Depends(get_current_user)):
     """body: { password?, mustChange?: bool } — password auto-generated if missing."""
+    await _assert_tenant_scope(current_user, tenant_id, "entra.credential.reset", request)
     data = data or {}
     payload = {
         "tenantFilter": tenant_id,
@@ -276,9 +295,10 @@ async def reset_password(tenant_id: str, user_id: str, data: dict = None, curren
     return {"success": True, "result": result}
 
 
-@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/block-signin")
-async def block_signin(tenant_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/block-signin", dependencies=[Depends(require_action("entra.user.disable"))])
+async def block_signin(tenant_id: str, user_id: str, request: Request, data: dict = None, current_user: dict = Depends(get_current_user)):
     """body: { enable?: bool } — default disables sign-in; set enable=true to unblock."""
+    await _assert_tenant_scope(current_user, tenant_id, "entra.user.disable", request)
     data = data or {}
     enable = bool(data.get("enable", False))
     payload = {
@@ -300,10 +320,11 @@ async def block_signin(tenant_id: str, user_id: str, data: dict = None, current_
     return {"success": True, "result": result, "enabled": enable}
 
 
-@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/offboard")
-async def offboard_user(tenant_id: str, user_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
+@router.post("/cipp/tenants/{tenant_id}/users/{user_id}/offboard", dependencies=[Depends(require_action("entra.user.disable"))])
+async def offboard_user(tenant_id: str, user_id: str, request: Request, data: dict = None, current_user: dict = Depends(get_current_user)):
     """body: { convertToShared?: bool, removeLicenses?: bool, resetPassword?: bool, revokeSessions?: bool,
                outOfOffice?: str, forwardTo?: str, disableUser?: bool }"""
+    await _assert_tenant_scope(current_user, tenant_id, "entra.user.disable", request)
     data = data or {}
     payload = {
         "tenantFilter": tenant_id,
@@ -338,7 +359,7 @@ async def cipp_summary(current_user: dict = Depends(get_current_user)):
     """Aggregated dashboard: tenant/user/license counts + linked-client coverage."""
     cfg = await _get_config()
     if not cfg:
-        return {"configured": False, "message": "CIPP not configured"}
+        return {"configured": False, "message": "Microsoft tenant provider is not configured"}
 
     tenants_raw = await _cipp_call("GET", "ListTenants")
     tenants = _norm_tenants(tenants_raw)
@@ -399,7 +420,7 @@ async def link_cipp_tenant(client_id: str, data: dict, current_user: dict = Depe
             "cipp_linked_at": now,
         }},
     )
-    return {"message": "CIPP tenant linked", "client_id": client_id, "tenant_id": tenant_id}
+    return {"message": "Microsoft tenant linked to Nexus Control Plane", "client_id": client_id, "tenant_id": tenant_id}
 
 
 @router.delete("/clients/{client_id}/link-cipp-tenant")
@@ -408,7 +429,7 @@ async def unlink_cipp_tenant(client_id: str, current_user: dict = Depends(get_cu
         {"id": client_id},
         {"$unset": {"cipp_tenant_id": "", "cipp_tenant_display": "", "cipp_tenant_domain": "", "cipp_linked_at": ""}},
     )
-    return {"message": "CIPP tenant unlinked"}
+    return {"message": "Microsoft tenant unlinked from Nexus Control Plane"}
 
 
 @router.post("/clients/{client_id}/link-suped-tenant")

@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	"nexusagent/internal/config"
+	"nexusagent/internal/identity"
 	"nexusagent/internal/telemetry"
 	"nexusagent/internal/transport"
 )
@@ -21,11 +22,36 @@ type request struct {
 	MAC             string   `json:"mac,omitempty"`
 	AgentVersion    string   `json:"agent_version,omitempty"`
 	Capabilities    []string `json:"capabilities,omitempty"`
+	InstallID       string   `json:"install_id,omitempty"`
+	CSR             string   `json:"certificate_signing_request,omitempty"`
+	KeyFingerprint  string   `json:"public_key_fingerprint,omitempty"`
 }
 
 type response struct {
-	AgentToken string `json:"agent_token"`
-	DeviceID   string `json:"device_id"`
+	AgentToken             string                 `json:"agent_token"`
+	DeviceID               string                 `json:"device_id"`
+	IdentityStatus         string                 `json:"identity_status"`
+	CertificatePEM         string                 `json:"certificate_pem"`
+	CACertificatePEM       string                 `json:"ca_certificate_pem"`
+	CertificateFingerprint string                 `json:"certificate_fingerprint"`
+	CertificateExpiresAt   string                 `json:"certificate_expires_at"`
+	SPIFFEID               string                 `json:"spiffe_id"`
+	Policy                 *config.PlatformPolicy `json:"policy,omitempty"`
+}
+
+type renewRequest struct {
+	InstallID      string `json:"install_id"`
+	CSR            string `json:"certificate_signing_request"`
+	KeyFingerprint string `json:"public_key_fingerprint"`
+}
+
+type renewResponse struct {
+	IdentityStatus         string `json:"identity_status"`
+	CertificatePEM         string `json:"certificate_pem"`
+	CACertificatePEM       string `json:"ca_certificate_pem"`
+	CertificateFingerprint string `json:"certificate_fingerprint"`
+	CertificateExpiresAt   string `json:"certificate_expires_at"`
+	SPIFFEID               string `json:"spiffe_id"`
 }
 
 // Run posts an enrollment request and returns (agent_token, device_id).
@@ -35,6 +61,10 @@ func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
 	}
 	host, _ := os.Hostname()
 	info := telemetry.QuickInfo()
+	csr, keyFingerprint, err := identity.Ensure(cfg)
+	if err != nil {
+		return "", "", err
+	}
 
 	req := request{
 		EnrollmentToken: cfg.EnrollmentToken,
@@ -46,6 +76,9 @@ func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
 		MAC:             info.PrimaryMAC,
 		AgentVersion:    info.AgentVersion,
 		Capabilities:    cfg.ShieldCapabilities(),
+		InstallID:       cfg.InstallID,
+		CSR:             csr,
+		KeyFingerprint:  keyFingerprint,
 	}
 	var resp response
 	if err := tr.Do("POST", "/api/nexus-agent/enroll", req, &resp); err != nil {
@@ -54,5 +87,49 @@ func Run(tr *transport.Client, cfg *config.Config) (string, string, error) {
 	if resp.AgentToken == "" || resp.DeviceID == "" {
 		return "", "", errors.New("server returned empty agent_token or device_id")
 	}
+	if err := identity.PersistIssued(
+		cfg,
+		resp.CertificatePEM,
+		resp.CACertificatePEM,
+		resp.CertificateFingerprint,
+		resp.CertificateExpiresAt,
+		resp.SPIFFEID,
+	); err != nil {
+		return "", "", err
+	}
+	cfg.DeviceIdentity.Status = resp.IdentityStatus
+	if resp.Policy != nil {
+		cfg.PlatformPolicy = resp.Policy
+	}
+	if err := config.Save(cfg); err != nil {
+		return "", "", err
+	}
 	return resp.AgentToken, resp.DeviceID, nil
+}
+
+func Renew(tr *transport.Client, cfg *config.Config) error {
+	csr, keyFingerprint, err := identity.Ensure(cfg)
+	if err != nil {
+		return err
+	}
+	var resp renewResponse
+	if err := tr.Do("POST", "/api/nexus-agent/identity/renew", renewRequest{
+		InstallID:      cfg.InstallID,
+		CSR:            csr,
+		KeyFingerprint: keyFingerprint,
+	}, &resp); err != nil {
+		return err
+	}
+	if err := identity.PersistIssued(
+		cfg,
+		resp.CertificatePEM,
+		resp.CACertificatePEM,
+		resp.CertificateFingerprint,
+		resp.CertificateExpiresAt,
+		resp.SPIFFEID,
+	); err != nil {
+		return err
+	}
+	cfg.DeviceIdentity.Status = resp.IdentityStatus
+	return config.Save(cfg)
 }

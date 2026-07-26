@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,16 +7,80 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock, FileText, Building2, ShieldCheck, Sparkles } from "lucide-react";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock, FileText, Building2, ShieldCheck, Sparkles, Check, ChevronsUpDown, CircleCheck, CircleDashed } from "lucide-react";
 import { priorityConfig } from "@/config/ticketConfig";
 
+function TicketSearchPicker({
+  items = [],
+  value,
+  onChange,
+  placeholder,
+  searchPlaceholder,
+  emptyLabel = "No matching records",
+  allowNone = false,
+  noneLabel = "None",
+  testId,
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = items.find(item => String(item.id) === String(value));
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="h-10 w-full justify-between bg-background/65 px-3 font-normal" data-testid={testId}>
+          <span className={`truncate ${selected ? "text-foreground" : "text-muted-foreground"}`}>{selected?.label || (allowNone && !value ? noneLabel : placeholder)}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-45" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder={searchPlaceholder || placeholder} />
+          <CommandList className="max-h-72">
+            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            <CommandGroup heading="Available">
+              {allowNone && (
+                <CommandItem value={`none ${noneLabel}`} onSelect={() => { onChange(""); setOpen(false); }}>
+                  <Check className={`mr-2 h-4 w-4 ${!value ? "opacity-100" : "opacity-0"}`} />
+                  <span>{noneLabel}</span>
+                </CommandItem>
+              )}
+              {items.map(item => (
+                <CommandItem key={item.id} value={`${item.label} ${item.description || ""} ${item.keywords || ""}`} onSelect={() => { onChange(item.id); setOpen(false); }}>
+                  <Check className={`mr-2 h-4 w-4 ${String(item.id) === String(value) ? "opacity-100" : "opacity-0"}`} />
+                  <span className="min-w-0">
+                    <span className="block truncate">{item.label}</span>
+                    {item.description && <span className="block truncate text-[10px] text-muted-foreground">{item.description}</span>}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function CreateTicketDialog({
-  open, onOpenChange, formData, setFormData, clients, devices, users, tickets,
+  open, onOpenChange, formData, setFormData, clients, clientContacts = [], devices, users, tickets,
   handleAiTriage, triaging, triageResult, applyTriage, handleCreateTicket, services,
 }) {
+  const selectedClient = clients.find(client => client.id === formData.client_id);
+  const availableContacts = clientContacts.length ? clientContacts : (selectedClient?.contacts || []);
+  const selectedContact = availableContacts.find(contact => String(contact.id || contact.name) === String(formData.contact_id));
+  const selectedAssignee = users.find(user => user.id === formData.assigned_to);
+  const selectedService = services?.find(service => service.code === formData.service_code);
+  const linkedDeviceCount = new Set([...(formData.device_ids || []), ...(formData.device_id ? [formData.device_id] : [])]).size;
+  const readiness = [
+    { label: "Service brief", ready: Boolean(formData.title?.trim()) },
+    { label: "Client", ready: Boolean(selectedClient) },
+    { label: "Requester", ready: Boolean(selectedContact) },
+    { label: "Routing", ready: Boolean(formData.priority && formData.category) },
+  ];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden gap-0 p-0">
+      <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden gap-0 p-0">
         <DialogHeader className="border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))] px-6 py-5">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-400/[0.10] shadow-[0_10px_28px_rgba(6,182,212,0.12)]"><FileText className="h-5 w-5 text-cyan-200" /></div>
@@ -24,9 +89,25 @@ export function CreateTicketDialog({
               <DialogTitle className="text-xl tracking-tight">Create a service ticket</DialogTitle>
               <p className="max-w-2xl text-sm text-muted-foreground">Capture the operational brief once. NexusMSP will inherit the client service tier, calculate SLA targets, and preserve the intake context on the ticket.</p>
             </div>
+            <div className="ml-auto hidden shrink-0 grid-cols-4 gap-1.5 xl:grid">
+              {readiness.map((item, index) => (
+                <div key={item.label} className={`min-w-[92px] rounded-lg border px-2.5 py-2 ${item.ready ? "border-emerald-400/25 bg-emerald-400/[0.07]" : "border-white/[0.08] bg-white/[0.025]"}`}>
+                  <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.11em] text-zinc-500">
+                    {item.ready ? <CircleCheck className="h-3 w-3 text-emerald-300" /> : <CircleDashed className="h-3 w-3" />}0{index + 1}
+                  </div>
+                  <p className={`mt-1 text-[10px] ${item.ready ? "text-emerald-100" : "text-zinc-500"}`}>{item.label}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </DialogHeader>
-        <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5 pr-4">
+        <div className="scrollbar-thin space-y-4 overflow-y-auto max-h-[68vh] px-6 py-5 pr-4">
+          <section className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/[0.14] p-3 md:grid-cols-4" data-testid="ticket-intake-summary">
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Client</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedClient?.name || "Not selected"}</p><p className="truncate text-[10px] text-zinc-600">{selectedContact?.name || "No requester selected"}</p></div>
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Service policy</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedService?.name || "Manual routing"}</p><p className="truncate text-[10px] text-zinc-600">{selectedService ? `${selectedService.sla_resolve_hours || "—"}h resolution target` : "Client SLA inherited"}</p></div>
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Ownership</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedAssignee?.name || "Dispatch queue"}</p><p className="truncate text-[10px] capitalize text-zinc-600">{formData.priority || "medium"} priority · {formData.impact || "medium"} impact</p></div>
+            <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Affected assets</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{linkedDeviceCount ? `${linkedDeviceCount} linked ${linkedDeviceCount === 1 ? "asset" : "assets"}` : "No asset linked"}</p><p className="truncate text-[10px] text-zinc-600">{formData.parent_id ? "Linked to parent ticket" : "Standalone service record"}</p></div>
+          </section>
           <section className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.025] p-4 shadow-sm">
             <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Service brief</h3><span className="ml-auto text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Required context</span></div>
             <div><Label>Title <span className="text-destructive">*</span></Label><Input className="mt-1.5 bg-background/65" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief, outcome-focused description of the issue" data-testid="create-title" /></div>
@@ -95,51 +176,47 @@ export function CreateTicketDialog({
           <div className="mb-3 flex items-center gap-2"><Building2 className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Client and affected asset</h3><span className="ml-auto text-[10px] text-muted-foreground">The client tier is applied automatically</span></div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div><Label>Client *</Label>
-              <Select value={formData.client_id} onValueChange={v => setFormData({ ...formData, client_id: v, contact_id: "", device_id: "" })}>
-                <SelectTrigger data-testid="create-client"><SelectValue placeholder="Select client" /></SelectTrigger>
-                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <TicketSearchPicker
+                items={clients.map(client => ({ id: client.id, label: client.name || client.company_name, description: client.email || client.contact_email || client.phone || "Managed client", keywords: `${client.company_name || ""} ${client.email || ""}` }))}
+                value={formData.client_id}
+                onChange={value => setFormData({ ...formData, client_id: value, contact_id: "", device_id: "", device_ids: [] })}
+                placeholder="Search clients…"
+                searchPlaceholder="Type a client, contact or email…"
+                emptyLabel="No matching client"
+                testId="create-client"
+              />
             </div>
             <div><Label>Contact</Label>
-              <Select value={formData.contact_id || "none"} onValueChange={v => setFormData({ ...formData, contact_id: v === "none" ? "" : v })}>
-                <SelectTrigger data-testid="create-contact"><SelectValue placeholder="Select contact" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-- No specific contact --</SelectItem>
-                  {formData.client_id && (clients.find(c => c.id === formData.client_id)?.contacts || []).map((ct, i) => (
-                    <SelectItem key={ct.id || i} value={ct.id || ct.name}>{ct.name} - {ct.email || ct.role || "General"}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <TicketSearchPicker
+                items={availableContacts.map((contact, index) => ({ id: contact.id || contact.name || `contact-${index}`, label: contact.name || contact.email || "Unnamed contact", description: contact.email || contact.role || "Client contact", keywords: `${contact.email || ""} ${contact.phone || contact.mobile || ""}` }))}
+                value={formData.contact_id}
+                onChange={value => setFormData({ ...formData, contact_id: value })}
+                placeholder={selectedClient ? "Search contacts…" : "Select a client first"}
+                searchPlaceholder="Type a name, email or phone…"
+                emptyLabel={selectedClient ? "No matching contacts" : "Select a client first"}
+                allowNone
+                noneLabel="No specific requester"
+                testId="create-contact"
+              />
             </div>
             <div><Label>Linked Devices</Label>
               <div className="space-y-1.5">
-                <Select
-                  value="__add"
-                  onValueChange={v => {
-                    if (v && v !== "__add" && v !== "__none") {
-                      const ids = formData.device_ids || (formData.device_id ? [formData.device_id] : []);
-                      if (!ids.includes(v)) {
-                        const next = [...ids, v];
-                        setFormData({
-                          ...formData,
-                          device_ids: next,
-                          device_id: formData.device_id || v,
-                        });
-                      }
-                    }
+                <TicketSearchPicker
+                  items={devices
+                    .filter(device => !formData.client_id || device.client_id === formData.client_id)
+                    .filter(device => !(formData.device_ids || []).includes(device.id) && device.id !== formData.device_id)
+                    .map(device => ({ id: device.id, label: device.name || device.hostname || "Unnamed asset", description: [device.os, device.serial_number, device.status].filter(Boolean).join(" · "), keywords: `${device.hostname || ""} ${device.serial_number || ""}` }))}
+                  value=""
+                  onChange={value => {
+                    if (!value) return;
+                    const ids = formData.device_ids || (formData.device_id ? [formData.device_id] : []);
+                    if (!ids.includes(value)) setFormData({ ...formData, device_ids: [...ids, value], device_id: formData.device_id || value });
                   }}
-                >
-                  <SelectTrigger data-testid="create-device"><SelectValue placeholder="+ Link a device..." /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__add" disabled>Choose device to link...</SelectItem>
-                    {devices
-                      .filter(d => !formData.client_id || d.client_id === formData.client_id)
-                      .filter(d => !(formData.device_ids || []).includes(d.id) && d.id !== formData.device_id)
-                      .map(d => (
-                        <SelectItem key={d.id} value={d.id}>{d.name} ({d.os || "OS?"})</SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
+                  placeholder="+ Search and link an asset…"
+                  searchPlaceholder="Type an asset, hostname or serial…"
+                  emptyLabel={formData.client_id ? "No other client assets" : "No matching assets"}
+                  testId="create-device"
+                />
                 {/* Chip list */}
                 {((formData.device_ids?.length || 0) > 0 || formData.device_id) && (
                   <div className="flex flex-wrap gap-1">
@@ -252,13 +329,16 @@ export function CreateTicketDialog({
               </Select>
             </div>
             <div><Label>Assign To</Label>
-              <Select value={formData.assigned_to || "none"} onValueChange={v => setFormData({ ...formData, assigned_to: v === "none" ? "" : v })}>
-                <SelectTrigger data-testid="create-assigned"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-- Unassigned --</SelectItem>
-                  {users.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <TicketSearchPicker
+                items={users.map(user => ({ id: user.id, label: user.name, description: user.role || user.email || "Technician", keywords: `${user.email || ""} ${user.role || ""}` }))}
+                value={formData.assigned_to}
+                onChange={value => setFormData({ ...formData, assigned_to: value })}
+                placeholder="Search technicians…"
+                searchPlaceholder="Type a technician, role or email…"
+                allowNone
+                noneLabel="Unassigned · dispatch queue"
+                testId="create-assigned"
+              />
             </div>
           </div>
 
@@ -270,13 +350,16 @@ export function CreateTicketDialog({
               <Input type="number" step="0.5" value={formData.estimated_hours || ""} onChange={e => setFormData({ ...formData, estimated_hours: e.target.value })} placeholder="e.g. 2.5" data-testid="create-est-hours" />
             </div>
             <div><Label>Parent Ticket</Label>
-              <Select value={formData.parent_id || "none"} onValueChange={v => setFormData({ ...formData, parent_id: v === "none" ? "" : v })}>
-                <SelectTrigger><SelectValue placeholder="None (standalone)" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None (standalone ticket)</SelectItem>
-                  {tickets.filter(t => !t.parent_id).slice(0, 30).map(t => <SelectItem key={t.id} value={t.id}>{t.ticket_number} - {t.title?.slice(0, 30)}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <TicketSearchPicker
+                items={tickets.filter(ticket => !ticket.parent_id).map(ticket => ({ id: ticket.id, label: `${ticket.ticket_number} · ${ticket.title}`, description: `${ticket.client_name || "Client"} · ${ticket.status || "open"}`, keywords: `${ticket.ticket_number || ""} ${ticket.client_name || ""}` }))}
+                value={formData.parent_id}
+                onChange={value => setFormData({ ...formData, parent_id: value })}
+                placeholder="Search parent tickets…"
+                searchPlaceholder="Type ticket number, title or client…"
+                allowNone
+                noneLabel="Standalone ticket"
+                testId="create-parent-ticket"
+              />
             </div>
           </div>
 

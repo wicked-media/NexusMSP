@@ -9,6 +9,7 @@ import logging
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
+from app.services.finance_integrity import begin_idempotent_operation, complete_idempotent_operation
 from app.routers.financial_reports import build_accounts_receivable_aging
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,16 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         current_user=current_user,
         subject=subject,
     )
+    idempotency_key = str(data.get("idempotency_key", "") or "").strip()
+    replay = await begin_idempotent_operation(
+        db,
+        scope=f"invoice-email:{invoice_id}",
+        key=idempotency_key,
+        payload={"email": email, "subject": subject, "message": message},
+        user_id=current_user.get("id", ""),
+    )
+    if replay is not None:
+        return {**replay, "replayed": True}
     from app.routers.email_utils import send_email
     delivery = await send_email(
         email,
@@ -88,13 +99,20 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         "last_emailed_at": datetime.now(timezone.utc).isoformat(),
         "last_email_delivery_status": delivery_status,
     }
-    if sent and invoice.get("status") in {"draft", "pending_approval"}:
+    if sent and invoice.get("status") == "draft":
         update["status"] = "sent"
-    await db.invoices.update_one({"id": invoice_id}, {"$set": update})
+    await db.invoices.update_one({"id": invoice_id}, {"$set": update, "$inc": {"version": 1}})
     activity_action = "emailed" if sent else "email_attempted"
     activity_detail = f"Invoice emailed to {email}" if sent else f"Invoice email {delivery_status} for {email}"
     await log_activity(current_user, activity_action, "invoice", invoice_id, invoice.get("invoice_number", ""), activity_detail)
-    return {"message": delivery.get("message") or (f"Invoice emailed to {email}" if sent else f"Email recorded; connect Microsoft 365 to deliver to {email}"), "sent": sent, "delivery_status": delivery_status, "email_id": delivery.get("email_id")}
+    response = {"message": delivery.get("message") or (f"Invoice emailed to {email}" if sent else f"Email recorded; connect Microsoft 365 to deliver to {email}"), "sent": sent, "delivery_status": delivery_status, "email_id": delivery.get("email_id")}
+    await complete_idempotent_operation(
+        db,
+        scope=f"invoice-email:{invoice_id}",
+        key=idempotency_key,
+        response=response,
+    )
+    return response
 
 
 @router.get("/invoices/{invoice_id}/email-history")
@@ -170,6 +188,10 @@ async def apply_credit_note(cn_id: str, data: dict, current_user: dict = Depends
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.get("status") == "pending_approval":
+        raise HTTPException(status_code=409, detail="Approve the invoice before sending it to the customer")
+    if invoice.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Voided invoices cannot be emailed as payable documents")
     if invoice.get("is_split_parent"):
         raise HTTPException(status_code=409, detail="Email the generated payer invoices; the split-billing source is retained for audit only")
     if invoice.get("status") in {"cancelled", "voided"}:

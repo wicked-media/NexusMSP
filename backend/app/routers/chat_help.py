@@ -1220,43 +1220,112 @@ try:
 except Exception:
     DEFAULT_ARTICLES = DEFAULT_ARTICLES + EXTENDED_ARTICLES
 
+# Keep the historical shipped list only for safe catalogue migration. Known
+# product articles can be refreshed without changing technician-authored docs.
+from app.routers._help_seed_modern import MODERN_ARTICLES as _LEGACY_MODERN_ARTICLES
+from app.routers._help_seed_curated import CURATED_ARTICLES, HELP_CATALOG_VERSION
+
+_LEGACY_SHIPPED_SLUGS = {
+    article["slug"]
+    for article in [*DEFAULT_ARTICLES, *_LEGACY_MODERN_ARTICLES]
+    if article.get("slug")
+}
+_CURATED_SLUGS = {article["slug"] for article in CURATED_ARTICLES}
+_SHIPPED_SLUGS = _LEGACY_SHIPPED_SLUGS | _CURATED_SLUGS
+
+# The Help Centre used several earlier catalogues. Keep their deep links useful
+# by resolving retired slugs to the current task-first procedures. A technician
+# should never arrive at a dead help link because a workspace was consolidated.
+_HELP_SLUG_ALIASES = {
+    "backup-command-center": "backup-operations",
+    "backup-page-audit": "backup-operations",
+    "blueprints": "ticket-blueprints",
+    "bulk-trmm-actions": "managed-assets",
+    "change-freezes": "maintenance-windows",
+    "chat-presence": "team-chat-guide",
+    "cipp-audit": "m365-command-center",
+    "cipp-m365": "m365-command-center",
+    "clients-360": "client-360",
+    "clients-module": "client-360",
+    "command-center": "getting-started",
+    "communications": "ticket-communications",
+    "consolidated-workspaces": "using-help-center",
+    "dashboard-overview": "getting-started",
+    "device-family-tree": "managed-assets",
+    "device-graveyard": "managed-assets",
+    "device-operations": "managed-assets",
+    "devices-page-audit": "managed-assets",
+    "devices-rmm": "managed-assets",
+    "hudu-audit": "it-documentation",
+    "hudu-docs": "it-documentation",
+    "huntress-soc": "nexus-shield-and-canary",
+    "insights-hub": "client-insights-hub",
+    "insights-hub-audit": "client-insights-hub",
+    "integrations-overview": "integrations-safely",
+    "invoice-detail-audit": "invoice-from-ticket",
+    "invoice-dispute-scan": "invoice-from-ticket",
+    "invoicing": "invoice-from-ticket",
+    "nexus-agent-enrolment": "agent-installer",
+    "notifications": "notification-preferences",
+    "outage-detective": "war-rooms",
+    "patch-hub": "patch-management",
+    "patching-with-winget": "patch-management",
+    "pax8-audit": "recurring-billing",
+    "pax8-csp": "recurring-billing",
+    "products-inventory-and-ticket-billing": "products-catalog",
+    "qbr-generator": "qbr-reviews",
+    "qbr-page-audit": "qbr-reviews",
+    "reports-hub-audit": "reports-and-evidence",
+    "scheduling": "dispatch-and-scheduling",
+    "scheduling-audit": "dispatch-and-scheduling",
+    "slow-internet": "networking-unifi",
+    "soc-audit": "nexus-shield-and-canary",
+    "stale-agent-radar": "managed-assets",
+    "storm-broadcast": "morning-checks",
+    "tech-profile": "team-hub",
+    "ticket-workspace-and-email": "work-ticket",
+    "tickets-module": "ticket-triage",
+    "tickets-toolbar-reference": "ticket-triage",
+    "time-tracking": "work-ticket",
+    "trmm-reliability": "managed-assets",
+    "unifi-audit": "networking-unifi",
+    "unifi-network": "networking-unifi",
+}
+# Retired novelty/reference articles still open a clear, current guide instead
+# of returning a 404. Purposeful mappings above take priority.
+for _retired_slug in _LEGACY_SHIPPED_SLUGS - _CURATED_SLUGS:
+    _HELP_SLUG_ALIASES.setdefault(_retired_slug, "using-help-center")
+
 
 @router.get("/help/articles")
 async def list_help_articles(q: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    # Auto-seed if empty
+    # Auto-seed the concise task-first catalogue if the library is empty.
     count = await db.help_articles.count_documents({})
     if count == 0:
-        for a in DEFAULT_ARTICLES:
+        for a in CURATED_ARTICLES:
             await db.help_articles.insert_one({
                 **a,
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
             })
 
-    # Apply each versioned product catalogue update once. This keeps shipped
-    # guidance current without touching admin-authored articles.
-    try:
-        from app.routers._help_seed_modern import HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES
-        metadata = db.help_center_metadata
-        catalog = await metadata.find_one({"key": "catalog_version"}, {"_id": 0, "value": 1})
-        if catalog is None or catalog.get("value") != HELP_CATALOG_VERSION:
-            if STALE_SLUGS:
-                await db.help_articles.delete_many({"slug": {"$in": STALE_SLUGS}})
-            for a in MODERN_ARTICLES:
-                doc = {**a, "updated_at": _now_iso()}
-                existing = await db.help_articles.find_one({"slug": a["slug"]}, {"_id": 0})
-                if existing:
-                    await db.help_articles.update_one({"slug": a["slug"]}, {"$set": doc})
-                else:
-                    doc["created_at"] = _now_iso()
-                    await db.help_articles.insert_one(doc)
-            await metadata.update_one(
-                {"key": "catalog_version"},
-                {"$set": {"value": HELP_CATALOG_VERSION, "updated_at": _now_iso()}},
-                upsert=True,
-            )
-    except Exception:
-        pass
+    # Replace only known historical product guidance. Custom articles remain
+    # untouched because their slugs are outside the shipped catalogue.
+    metadata = db.help_center_metadata
+    catalog = await metadata.find_one({"key": "catalog_version"}, {"_id": 0, "value": 1})
+    if catalog is None or catalog.get("value") != HELP_CATALOG_VERSION:
+        await db.help_articles.delete_many({"slug": {"$in": list(_SHIPPED_SLUGS)}})
+        for article in CURATED_ARTICLES:
+            await db.help_articles.insert_one({
+                **article,
+                "created_at": _now_iso(),
+                "updated_at": _now_iso(),
+            })
+        await metadata.update_one(
+            {"key": "catalog_version"},
+            {"$set": {"value": HELP_CATALOG_VERSION, "updated_at": _now_iso()}},
+            upsert=True,
+        )
     qry = {}
     if q:
         qry["$or"] = [
@@ -1275,22 +1344,26 @@ async def list_help_articles(q: Optional[str] = None, current_user: dict = Depen
 
 @router.get("/help/articles/{slug}")
 async def get_help_article(slug: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.help_articles.find_one({"slug": slug}, {"_id": 0})
+    requested_slug = _slugify(slug)
+    doc = await db.help_articles.find_one({"slug": requested_slug}, {"_id": 0})
+    resolved_slug = _HELP_SLUG_ALIASES.get(requested_slug, requested_slug)
+    if not doc and resolved_slug != requested_slug:
+        doc = await db.help_articles.find_one({"slug": resolved_slug}, {"_id": 0})
     # Direct in-product setup links must work even before the technician has
     # opened the Help library (which normally performs the catalogue upsert).
     # Seed just the requested shipped article instead of requiring a full reset.
     if not doc:
-        try:
-            from app.routers._help_seed_modern import MODERN_ARTICLES
-            shipped = next((article for article in MODERN_ARTICLES if article.get("slug") == slug), None)
-            if shipped:
-                doc = {**shipped, "created_at": _now_iso(), "updated_at": _now_iso()}
-                await db.help_articles.insert_one(dict(doc))
-        except Exception:
-            doc = None
+        shipped = next((article for article in CURATED_ARTICLES if article.get("slug") == resolved_slug), None)
+        if shipped:
+            doc = {**shipped, "created_at": _now_iso(), "updated_at": _now_iso()}
+            await db.help_articles.insert_one(dict(doc))
     if not doc:
         raise HTTPException(404, "Article not found")
-    return _repair_mojibake(doc)
+    response = _repair_mojibake(doc)
+    if requested_slug != response.get("slug"):
+        response["redirect_slug"] = response.get("slug")
+        response["requested_slug"] = requested_slug
+    return response
 
 
 @router.post("/help/articles")
@@ -1330,7 +1403,26 @@ async def delete_help_article(slug: str, current_user: dict = Depends(get_curren
 
 @router.post("/help/seed")
 async def reseed(current_user: dict = Depends(get_current_user)):
-    """Reseed default + modern articles. Also prunes stale slugs from prior versions."""
+    """Refresh shipped product guides without changing technician-authored articles."""
+    res = await db.help_articles.delete_many({"slug": {"$in": list(_SHIPPED_SLUGS)}})
+    for article in CURATED_ARTICLES:
+        await db.help_articles.insert_one({
+            **article,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+        })
+    await db.help_center_metadata.update_one(
+        {"key": "catalog_version"},
+        {"$set": {"value": HELP_CATALOG_VERSION, "updated_at": _now_iso()}},
+        upsert=True,
+    )
+    return {
+        "seeded": len(CURATED_ARTICLES),
+        "modern_seeded": len(CURATED_ARTICLES),
+        "pruned": res.deleted_count or 0,
+    }
+
+    # Compatibility body retained below only for source-history readability.
     try:
         from app.routers._help_seed_modern import HELP_CATALOG_VERSION, STALE_SLUGS, MODERN_ARTICLES
     except Exception:

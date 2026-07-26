@@ -16,12 +16,49 @@ type Config struct {
 	ClientName      string             `json:"client_name"`
 	DeviceID        string             `json:"device_id,omitempty"`
 	AgentToken      string             `json:"agent_token,omitempty"`
+	InstallID       string             `json:"install_id,omitempty"`
 	HeartbeatSecs   int                `json:"heartbeat_secs,omitempty"`
 	PollSecs        int                `json:"poll_secs,omitempty"`
 	NexusShield     *NexusShieldConfig `json:"nexus_shield,omitempty"`
+	NexusDNS        *NexusDNSConfig    `json:"nexus_dns,omitempty"`
+	DeviceIdentity  *DeviceIdentity    `json:"device_identity,omitempty"`
+	PlatformPolicy  *PlatformPolicy    `json:"platform_policy,omitempty"`
+	UpdateEvidence  *UpdateEvidence    `json:"update_evidence,omitempty"`
 
 	// Computed
 	configPath string `json:"-"`
+}
+
+type DeviceIdentity struct {
+	Status                 string `json:"status,omitempty"`
+	CertificatePath        string `json:"certificate_path,omitempty"`
+	PrivateKeyPath         string `json:"private_key_path,omitempty"`
+	CACertificatePath      string `json:"ca_certificate_path,omitempty"`
+	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
+	CertificateExpiresAt   string `json:"certificate_expires_at,omitempty"`
+	SPIFFEID               string `json:"spiffe_id,omitempty"`
+	PublicKeyFingerprint   string `json:"public_key_fingerprint,omitempty"`
+}
+
+type PlatformPolicy struct {
+	SchemaVersion  int             `json:"schema_version,omitempty"`
+	Version        string          `json:"version,omitempty"`
+	ChecksumSHA256 string          `json:"checksum_sha256,omitempty"`
+	IssuedAt       string          `json:"issued_at,omitempty"`
+	HeartbeatSecs  int             `json:"heartbeat_secs,omitempty"`
+	PollSecs       int             `json:"poll_secs,omitempty"`
+	Modules        map[string]bool `json:"modules,omitempty"`
+	Updates        map[string]any  `json:"updates,omitempty"`
+	SelfRepair     map[string]any  `json:"self_repair,omitempty"`
+	DNS            map[string]any  `json:"dns,omitempty"`
+}
+
+type UpdateEvidence struct {
+	Version           string `json:"version,omitempty"`
+	SHA256            string `json:"sha256,omitempty"`
+	SignatureVerified bool   `json:"signature_verified"`
+	Status            string `json:"status,omitempty"`
+	CheckedAt         string `json:"checked_at,omitempty"`
 }
 
 // NexusShieldConfig is intentionally small and declarative. The service only
@@ -33,6 +70,23 @@ type NexusShieldConfig struct {
 	CanaryEnabled    bool `json:"canary_enabled"`
 	CanaryCheckSecs  int  `json:"canary_check_secs"`
 	AutoDeployCanary bool `json:"auto_deploy_canary"`
+}
+
+// NexusDNSConfig is a control-plane profile, not an enforcement engine.
+// Visibility is safe to install everywhere. Resolver changes are made only by
+// a separately approved deployment after a trusted edge is attested healthy.
+type NexusDNSConfig struct {
+	Enabled                    bool     `json:"enabled"`
+	Mode                       string   `json:"mode"`
+	Transport                  string   `json:"transport"`
+	ResolverEndpoints          []string `json:"resolver_endpoints,omitempty"`
+	BypassDetection            bool     `json:"bypass_detection"`
+	LocalPolicyCache           bool     `json:"local_policy_cache"`
+	RestorePreviousDNSOnRemove bool     `json:"restore_previous_dns_on_remove"`
+	EnforcementReady           bool     `json:"enforcement_ready"`
+	Enrolled                   bool     `json:"enrolled,omitempty"`
+	DeploymentID               string   `json:"deployment_id,omitempty"`
+	Status                     string   `json:"status,omitempty"`
 }
 
 // LoadOrInit reads config.json next to the executable, or returns a sensible default.
@@ -89,6 +143,13 @@ func Save(c *Config) error {
 	return os.Rename(tmp, c.configPath)
 }
 
+func (c *Config) BaseDir() string {
+	if c.configPath != "" {
+		return filepath.Dir(c.configPath)
+	}
+	return "."
+}
+
 // ShieldCanaryEnabled remains true for older agent configurations so an
 // existing Canary deployment is never silently disabled during an upgrade.
 func (c *Config) ShieldCanaryEnabled() bool {
@@ -106,15 +167,20 @@ func (c *Config) ShieldCanaryInterval() int {
 }
 
 func (c *Config) ShieldCapabilities() []string {
+	var capabilities []string
 	if c.NexusShield == nil {
-		return []string{"nexus_shield", "endpoint_posture", "nexus_canary"}
+		capabilities = []string{"nexus_shield", "endpoint_posture", "nexus_canary"}
+	} else {
+		capabilities = []string{"nexus_shield"}
+		if c.NexusShield.PostureTelemetry {
+			capabilities = append(capabilities, "endpoint_posture")
+		}
+		if c.ShieldCanaryEnabled() {
+			capabilities = append(capabilities, "nexus_canary")
+		}
 	}
-	capabilities := []string{"nexus_shield"}
-	if c.NexusShield.PostureTelemetry {
-		capabilities = append(capabilities, "endpoint_posture")
-	}
-	if c.ShieldCanaryEnabled() {
-		capabilities = append(capabilities, "nexus_canary")
+	if c.NexusDNS == nil || c.NexusDNS.Enabled {
+		capabilities = append(capabilities, "nexus_dns", "dns_visibility", "dns_policy_cache")
 	}
 	return capabilities
 }

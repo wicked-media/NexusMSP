@@ -3,6 +3,7 @@ package transport
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,28 @@ func (c *Client) SetToken(t string) {
 	c.mu.Lock()
 	c.token = t
 	c.mu.Unlock()
+}
+
+// SetClientIdentity presents the issued device certificate when the Nexus API
+// is fronted by an mTLS-validating reverse proxy. Bearer-token authentication
+// remains enabled during migration and for direct local development.
+func (c *Client) SetClientIdentity(certificatePath, privateKeyPath string) error {
+	if strings.TrimSpace(certificatePath) == "" || strings.TrimSpace(privateKeyPath) == "" {
+		return errors.New("device certificate and private key paths are required")
+	}
+	certificate, err := tls.LoadX509KeyPair(certificatePath, privateKeyPath)
+	if err != nil {
+		return fmt.Errorf("load device identity: %w", err)
+	}
+	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport.TLSClientConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{certificate},
+	}
+	c.mu.Lock()
+	c.http.Transport = baseTransport
+	c.mu.Unlock()
+	return nil
 }
 
 // Do issues an authenticated JSON request and decodes the response.

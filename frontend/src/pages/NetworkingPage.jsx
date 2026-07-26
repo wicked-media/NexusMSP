@@ -54,7 +54,7 @@ const DPI_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#8b5cf6", "#ef4444", "#06b
 const NETWORK_WORKSPACE_TOOLS = [
   { path: "/unifi", label: "UniFi Operations", icon: Wifi },
   { path: "/topology", label: "Topology", icon: GitBranch },
-  { path: "/dns-monitor", label: "DNS Monitor", icon: Search },
+  { path: "/dns-monitor", label: "Nexus DNS", icon: Search },
   { path: "/bandwidth-monitor", label: "Bandwidth", icon: Activity },
   { path: "/dmarc-compliance", label: "Email Security", icon: Shield },
   { path: "/splynx-dashboard", label: "ISP Health", icon: FileSearch },

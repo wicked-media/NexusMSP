@@ -189,7 +189,7 @@ export default function HeroTile({
             </span>
           )}
         </div>
-        <p className="nx-hero__value">
+        <p className="nx-hero__value" title={`${value}${suffix}`}>
           {animated && typeof value === "number"
             ? <AnimatedCounter value={value} suffix={suffix} />
             : <>{value}{suffix}</>}

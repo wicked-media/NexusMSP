@@ -44,7 +44,15 @@ async def get_benchmarking(current_user: dict = Depends(get_current_user)):
             "sample_size": len(durations),
         }
 
-    techs = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    tech_records = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    # Legacy imports can contain repeated user rows. A technician represents one
+    # workload subject, so calculate the benchmark once per stable user ID.
+    techs_by_id = {}
+    for technician in tech_records:
+        technician_id = str(technician.get("id") or "").strip()
+        if technician_id and technician_id not in techs_by_id:
+            techs_by_id[technician_id] = technician
+    techs = list(techs_by_id.values())
     tech_metrics = []
     for technician in techs:
         resolved = await db.tickets.count_documents({"assigned_to": technician["id"], "status": {"$in": RESOLVED_STATUSES}})

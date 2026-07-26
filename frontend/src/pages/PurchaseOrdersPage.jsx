@@ -24,7 +24,7 @@ import {
   AlertTriangle, Scan, History, ChevronRight, PackageCheck, Box, RefreshCw,
   BellRing, Mail, Download, Copy, ThumbsUp, ThumbsDown, MessageSquare,
   BarChart3, TrendingUp, Printer, BookTemplate, Save, Layers, Check, ChevronsUpDown,
-  MoreHorizontal, ChevronDown, Building2
+  MoreHorizontal, ChevronDown, Building2, Paperclip, RotateCcw, Settings2
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
@@ -119,7 +119,7 @@ function SearchableSelect({
 }
 
 export default function PurchaseOrdersPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [pos, setPos] = useState([]);
   const [products, setProducts] = useState([]);
@@ -140,6 +140,12 @@ export default function PurchaseOrdersPage() {
   const [newNote, setNewNote] = useState("");
   const [receiveDialog, setReceiveDialog] = useState(false);
   const [receiveItems, setReceiveItems] = useState([]);
+  const [receiptMeta, setReceiptMeta] = useState({ packing_slip_number: "", evidence_reference: "" });
+  const [returnDialog, setReturnDialog] = useState(false);
+  const [returnItems, setReturnItems] = useState([]);
+  const [returnForm, setReturnForm] = useState({ reason: "", rma_number: "", supplier_credit_number: "", notes: "" });
+  const [approvalPolicyOpen, setApprovalPolicyOpen] = useState(false);
+  const [approvalPolicy, setApprovalPolicy] = useState({ enabled: true, threshold: 1000, require_separation: true, require_assigned_approver_above_threshold: true, approver_roles: ["admin", "owner", "finance"] });
   const [scannerInput, setScannerInput] = useState("");
   const scanRef = useRef(null);
   const handledVendorPreset = useRef(false);
@@ -169,7 +175,7 @@ export default function PurchaseOrdersPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [posRes, prodRes, clientRes, statsRes, vendorRes, userRes, ticketRes] = await Promise.all([
+      const [poResult, productResult, clientResult, statsResult, vendorResult, userResult, ticketResult, policyResult] = await Promise.allSettled([
         axios.get(`${API}/purchase-orders`, { headers }),
         axios.get(`${API}/products`, { headers }),
         axios.get(`${API}/clients`, { headers }),
@@ -177,15 +183,21 @@ export default function PurchaseOrdersPage() {
         axios.get(`${API}/vendors`, { headers }),
         axios.get(`${API}/users`, { headers }),
         axios.get(`${API}/tickets`, { headers }),
+        axios.get(`${API}/settings/po-approval`, { headers }),
       ]);
-      setPos(posRes.data);
-      setProducts(prodRes.data);
-      setClients(clientRes.data);
-      setStats(statsRes.data);
-      setVendors(vendorRes.data);
-      setUsers(userRes.data);
-      setTickets(ticketRes.data);
-    } catch { toast.error("Failed to load data"); }
+      if (poResult.status !== "fulfilled") throw poResult.reason;
+      setPos(poResult.value.data || []);
+      setProducts(productResult.status === "fulfilled" ? productResult.value.data : []);
+      setClients(clientResult.status === "fulfilled" ? clientResult.value.data : []);
+      setStats(statsResult.status === "fulfilled" ? statsResult.value.data : {});
+      setVendors(vendorResult.status === "fulfilled" ? vendorResult.value.data : []);
+      setUsers(userResult.status === "fulfilled" ? userResult.value.data : []);
+      setTickets(ticketResult.status === "fulfilled" ? ticketResult.value.data : []);
+      if (policyResult.status === "fulfilled") setApprovalPolicy(policyResult.value.data);
+      if ([productResult, clientResult, vendorResult, userResult, ticketResult].some(result => result.status === "rejected")) {
+        toast.warning("Purchase orders loaded, but one optional lookup is temporarily unavailable");
+      }
+    } catch { toast.error("Failed to load purchase orders"); }
     finally { setLoading(false); }
   }, [token]);
 
@@ -404,9 +416,9 @@ export default function PurchaseOrdersPage() {
   const handlePreviewPdf = (po) => {
     setPdfViewer({
       open: true,
-      url: `${API}/purchase-orders/${po.id}/pdf/preview?token=${token}`,
+      url: `${API}/purchase-orders/${po.id}/pdf/preview?token=${encodeURIComponent(token)}`,
       title: `PO ${po.po_number}`,
-      downloadUrl: "",
+      downloadUrl: `${API}/purchase-orders/${po.id}/pdf/preview?token=${encodeURIComponent(token)}&download=true`,
     });
   };
 
@@ -414,7 +426,11 @@ export default function PurchaseOrdersPage() {
   const handleEmailVendor = async () => {
     if (!emailForm.email.trim()) { toast.error("Enter a vendor email address"); return; }
     try {
-      await axios.post(`${API}/purchase-orders/${viewPO.id}/email-vendor`, emailForm, { headers });
+      await axios.post(
+        `${API}/purchase-orders/${viewPO.id}/email-vendor`,
+        { ...emailForm, idempotency_key: crypto.randomUUID() },
+        { headers },
+      );
       toast.success("PO emailed to vendor");
       setEmailVendorDialog(false);
       fetchPODetail(viewPO.id);
@@ -445,18 +461,28 @@ export default function PurchaseOrdersPage() {
   // --- Receive Stock ---
   const openReceiveDialog = (po) => {
     const items = (po.line_items || []).map((li, line_index) => ({ ...li, line_index })).filter(li => (li.received_qty || 0) < li.quantity);
-    setReceiveItems(items.map(li => ({ ...li, receive_now: 0 })));
+    setReceiveItems(items.map(li => ({ ...li, receive_now: 0, serial_numbers_text: "", batch_number: "" })));
+    setReceiptMeta({ packing_slip_number: "", evidence_reference: "" });
     setReceiveDialog(true);
   };
 
   const handleReceiveStock = async () => {
     if (!viewPO) return;
     const items = receiveItems.filter(ri => ri.receive_now > 0).map(ri => ({
-      line_index: ri.line_index, product_id: ri.product_id, product_name: ri.product_name, quantity: ri.receive_now
+      line_index: ri.line_index,
+      product_id: ri.product_id,
+      product_name: ri.product_name,
+      quantity: ri.receive_now,
+      batch_number: ri.batch_number || "",
+      serial_numbers: String(ri.serial_numbers_text || "").split(/\r?\n|,/).map(value => value.trim()).filter(Boolean),
     }));
     if (items.length === 0) { toast.error("No items to receive"); return; }
     try {
-      const res = await axios.post(`${API}/purchase-orders/${viewPO.id}/receive`, { items }, { headers });
+      const res = await axios.post(
+        `${API}/purchase-orders/${viewPO.id}/receive`,
+        { items, ...receiptMeta, idempotency_key: crypto.randomUUID() },
+        { headers },
+      );
       toast.success(res.data.message);
       setReceiveDialog(false);
       fetchPODetail(viewPO.id); fetchData();
@@ -517,6 +543,70 @@ export default function PurchaseOrdersPage() {
     setDestructiveAction(null);
     if (type === "cancel") await handleStatusChange(po, "cancelled");
     if (type === "delete") await handleDelete(po.id);
+  };
+
+  const openReturnDialog = (po) => {
+    const items = (po.line_items || [])
+      .map((line, line_index) => ({ ...line, line_index, return_now: 0, serial_numbers_text: "" }))
+      .filter(line => Number(line.received_qty || 0) > Number(line.returned_qty || 0));
+    setReturnItems(items);
+    setReturnForm({ reason: "", rma_number: "", supplier_credit_number: "", notes: "" });
+    setReturnDialog(true);
+  };
+
+  const handleReturnStock = async () => {
+    const items = returnItems.filter(item => Number(item.return_now) > 0).map(item => ({
+      line_index: item.line_index,
+      quantity: Number(item.return_now),
+      serial_numbers: String(item.serial_numbers_text || "").split(/\r?\n|,/).map(value => value.trim()).filter(Boolean),
+    }));
+    if (!items.length) { toast.error("Choose at least one item to return"); return; }
+    if (returnForm.reason.trim().length < 5) { toast.error("Add a clear return or RMA reason"); return; }
+    try {
+      const response = await axios.post(
+        `${API}/purchase-orders/${viewPO.id}/returns`,
+        { ...returnForm, items, idempotency_key: crypto.randomUUID() },
+        { headers },
+      );
+      toast.success(response.data.message);
+      setReturnDialog(false);
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (error) { toast.error(error.response?.data?.detail || "Failed to record supplier return"); }
+  };
+
+  const handleUploadEvidence = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !viewPO) return;
+    const payload = new FormData();
+    payload.append("file", file);
+    payload.append("category", "procurement");
+    try {
+      await axios.post(`${API}/purchase-orders/${viewPO.id}/attachments`, payload, { headers });
+      toast.success("Evidence attached to the purchase order");
+      fetchPODetail(viewPO.id);
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not attach evidence"); }
+  };
+
+  const handleQueueSupplierBill = async () => {
+    try {
+      const response = await axios.post(
+        `${API}/purchase-orders/${viewPO.id}/supplier-bill/sync`,
+        { idempotency_key: crypto.randomUUID() },
+        { headers },
+      );
+      response.data.xero_connected ? toast.success("Supplier bill queued for Xero") : toast.warning("Supplier bill prepared; connect Xero to send it");
+      fetchPODetail(viewPO.id); fetchData();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not prepare the supplier bill"); }
+  };
+
+  const saveApprovalPolicy = async () => {
+    try {
+      const response = await axios.put(`${API}/settings/po-approval`, approvalPolicy, { headers });
+      setApprovalPolicy(response.data);
+      setApprovalPolicyOpen(false);
+      toast.success("Procurement approval policy saved");
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not save procurement policy"); }
   };
 
   const openVendorInvoiceMatch = (po) => {
@@ -808,6 +898,19 @@ export default function PurchaseOrdersPage() {
               })}
             </TableBody>
           </Table>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div><Label>Packing slip number</Label><Input value={receiptMeta.packing_slip_number} onChange={event => setReceiptMeta(current => ({ ...current, packing_slip_number: event.target.value }))} placeholder="Delivery docket or packing slip" data-testid="po-packing-slip" /></div>
+            <div><Label>Evidence reference</Label><Input value={receiptMeta.evidence_reference} onChange={event => setReceiptMeta(current => ({ ...current, evidence_reference: event.target.value }))} placeholder="Shelf, photo, courier, or attachment reference" /></div>
+          </div>
+          {receiveItems.filter(item => Number(item.receive_now) > 0).map((item, index) => (
+            <Card key={`receive-evidence-${item.line_index}`} className="border-cyan-500/20 bg-cyan-500/[0.04]">
+              <CardContent className="grid gap-3 p-3 md:grid-cols-2">
+                <div className="md:col-span-2"><p className="text-xs font-medium text-cyan-100">{item.product_name || item.name || `Line ${index + 1}`} · {item.receive_now} arriving</p></div>
+                <div><Label>Batch / lot number</Label><Input value={item.batch_number || ""} onChange={event => setReceiveItems(current => current.map(line => line.line_index === item.line_index ? { ...line, batch_number: event.target.value } : line))} placeholder="Optional batch or shipment reference" /></div>
+                <div><Label>Serial numbers</Label><Textarea rows={2} value={item.serial_numbers_text || ""} onChange={event => setReceiveItems(current => current.map(line => line.line_index === item.line_index ? { ...line, serial_numbers_text: event.target.value } : line))} placeholder="Optional · one per line or comma separated" /></div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setReceiveItems(prev => prev.map(ri => ({ ...ri, receive_now: ri.quantity - (ri.received_qty || 0) })))}>Receive All</Button>
@@ -845,7 +948,9 @@ export default function PurchaseOrdersPage() {
                 searchPlaceholder="Search approver name or email…"
                 options={[
                   { value: "management", label: "Management queue", detail: "Use the default approval queue", searchText: "default management queue" },
-                  ...users.map(user => ({ value: user.id, label: user.name || "Unnamed technician", detail: user.email || user.role || "Team member", searchText: `${user.name || ""} ${user.email || ""} ${user.role || ""}` })),
+                  ...users
+                    .filter(user => user.is_admin || (approvalPolicy.approver_roles || []).includes(String(user.role || "").toLowerCase()))
+                    .map(user => ({ value: user.id, label: user.name || "Unnamed approver", detail: user.email || user.role || "Approver", searchText: `${user.name || ""} ${user.email || ""} ${user.role || ""}` })),
                 ]}
                 onValueChange={value => setApprovalApprover(value === "management" ? "" : value)}
               />
@@ -885,6 +990,53 @@ export default function PurchaseOrdersPage() {
     </Dialog>
   );
 
+  const returnStockDialog = (
+    <Dialog open={returnDialog} onOpenChange={setReturnDialog}>
+      <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden border-amber-400/25 bg-[linear-gradient(145deg,rgba(24,19,10,0.98),rgba(12,14,19,0.98))] p-0">
+        <DialogHeader className="border-b border-amber-400/15 px-6 py-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300">Audited supplier return</p>
+          <DialogTitle className="mt-1 flex items-center gap-2"><RotateCcw className="h-5 w-5 text-amber-300" />Return items from {viewPO?.po_number}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 overflow-y-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div><Label>RMA number</Label><Input value={returnForm.rma_number} onChange={event => setReturnForm(current => ({ ...current, rma_number: event.target.value }))} placeholder="Optional supplier RMA" /></div>
+            <div><Label>Supplier credit number</Label><Input value={returnForm.supplier_credit_number} onChange={event => setReturnForm(current => ({ ...current, supplier_credit_number: event.target.value }))} placeholder="Optional credit reference" /></div>
+            <div className="md:col-span-2"><Label>Reason *</Label><Textarea value={returnForm.reason} onChange={event => setReturnForm(current => ({ ...current, reason: event.target.value }))} placeholder="Why the stock is being returned" rows={2} /></div>
+          </div>
+          {returnItems.map(item => {
+            const available = Number(item.received_qty || 0) - Number(item.returned_qty || 0);
+            return (
+              <Card key={`return-${item.line_index}`} className="border-white/[0.08] bg-black/10">
+                <CardContent className="grid gap-3 p-3 md:grid-cols-[1fr_8rem]">
+                  <div><p className="font-medium">{item.product_name || item.name || "Purchase-order item"}</p><p className="text-xs text-muted-foreground">{available} available to return{item.received_serials?.length ? ` · ${item.received_serials.length} serial(s) recorded` : ""}</p></div>
+                  <div><Label>Return now</Label><Input type="number" min="0" max={available} value={item.return_now} onChange={event => setReturnItems(current => current.map(line => line.line_index === item.line_index ? { ...line, return_now: Math.min(Number(event.target.value) || 0, available) } : line))} /></div>
+                  {Number(item.return_now) > 0 && item.received_serials?.length > 0 && <div className="md:col-span-2"><Label>Returned serial numbers</Label><Textarea rows={2} value={item.serial_numbers_text} onChange={event => setReturnItems(current => current.map(line => line.line_index === item.line_index ? { ...line, serial_numbers_text: event.target.value } : line))} placeholder="One per line or comma separated" /></div>}
+                </CardContent>
+              </Card>
+            );
+          })}
+          <div><Label>Internal notes</Label><Textarea value={returnForm.notes} onChange={event => setReturnForm(current => ({ ...current, notes: event.target.value }))} rows={2} placeholder="Supplier conversation, courier, or credit expectations" /></div>
+        </div>
+        <DialogFooter className="border-t border-white/[0.08] px-6 py-4"><Button variant="outline" onClick={() => setReturnDialog(false)}>Cancel</Button><Button className="bg-amber-500 text-amber-950 hover:bg-amber-400" onClick={handleReturnStock} data-testid="confirm-po-return"><RotateCcw className="mr-1.5 h-4 w-4" />Record return</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const approvalPolicyDialog = (
+    <Dialog open={approvalPolicyOpen} onOpenChange={setApprovalPolicyOpen}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-cyan-300" />Procurement approval policy</DialogTitle><p className="text-sm text-muted-foreground">Set who can approve purchase orders and when the creator must be separated from the approver.</p></DialogHeader>
+        <div className="space-y-4">
+          <label className="flex items-center justify-between rounded-xl border p-3"><span><span className="block text-sm font-medium">Approval workflow</span><span className="block text-xs text-muted-foreground">Require an approval stage before ordering.</span></span><input type="checkbox" checked={approvalPolicy.enabled} onChange={event => setApprovalPolicy(current => ({ ...current, enabled: event.target.checked }))} /></label>
+          <div><Label>High-value threshold</Label><Input type="number" min="0" step="0.01" value={approvalPolicy.threshold} onChange={event => setApprovalPolicy(current => ({ ...current, threshold: Number(event.target.value) || 0 }))} /><p className="mt-1 text-xs text-muted-foreground">Orders at or above this value enforce the controls below.</p></div>
+          <label className="flex items-center justify-between rounded-xl border p-3"><span><span className="block text-sm font-medium">Separate creator and approver</span><span className="block text-xs text-muted-foreground">Prevents high-value self-approval.</span></span><input type="checkbox" checked={approvalPolicy.require_separation} onChange={event => setApprovalPolicy(current => ({ ...current, require_separation: event.target.checked }))} /></label>
+          <label className="flex items-center justify-between rounded-xl border p-3"><span><span className="block text-sm font-medium">Named approver required</span><span className="block text-xs text-muted-foreground">High-value orders cannot use an unassigned queue.</span></span><input type="checkbox" checked={approvalPolicy.require_assigned_approver_above_threshold} onChange={event => setApprovalPolicy(current => ({ ...current, require_assigned_approver_above_threshold: event.target.checked }))} /></label>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={() => setApprovalPolicyOpen(false)}>Cancel</Button><Button onClick={saveApprovalPolicy}><Save className="mr-1.5 h-4 w-4" />Save policy</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   const destructiveActionDialog = (
     <AlertDialog open={Boolean(destructiveAction)} onOpenChange={open => !open && setDestructiveAction(null)}>
       <AlertDialogContent>
@@ -892,7 +1044,7 @@ export default function PurchaseOrdersPage() {
           <AlertDialogTitle>{destructiveAction?.type === "delete" ? `Delete ${destructiveAction?.po?.po_number}?` : `Cancel ${destructiveAction?.po?.po_number}?`}</AlertDialogTitle>
           <AlertDialogDescription>
             {destructiveAction?.type === "delete"
-              ? "This permanently removes the draft purchase order and its audit history. Ordered or received purchase orders cannot be deleted."
+              ? "This permanently removes the draft purchase-order record. Its deletion evidence remains in the audit log. Ordered or received purchase orders cannot be deleted."
               : "This stops further ordering and receiving on this purchase order. The order stays in the audit trail as cancelled."}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -906,6 +1058,16 @@ export default function PurchaseOrdersPage() {
     </AlertDialog>
   );
 
+  const pdfViewerDialogEl = (
+    <PdfViewerDialog
+      open={pdfViewer.open}
+      onOpenChange={value => setPdfViewer(current => ({ ...current, open: value }))}
+      pdfUrl={pdfViewer.url}
+      title={pdfViewer.title}
+      downloadUrl={pdfViewer.downloadUrl}
+    />
+  );
+
   // ========== DETAIL VIEW ==========
   if (viewPO) {
     const po = viewPO;
@@ -915,6 +1077,7 @@ export default function PurchaseOrdersPage() {
     const receivePct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
     const isOverdue = po.expected_delivery && new Date(po.expected_delivery) < new Date() && po.status !== "received" && po.status !== "cancelled";
     const vendorInvoiceMatch = po.vendor_invoice_match;
+    const canApprove = Boolean(user?.is_admin || (approvalPolicy.approver_roles || []).includes(String(user?.role || "").toLowerCase()));
 
     return (
       <div className="space-y-4" data-testid="po-detail">
@@ -930,7 +1093,7 @@ export default function PurchaseOrdersPage() {
               {vendorInvoiceMatch && <Badge className={vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted" ? "border-emerald-500/30 bg-emerald-500/20 text-emerald-400" : "border-amber-500/30 bg-amber-500/20 text-amber-400"}><DollarSign className="mr-1 h-3 w-3" />{vendorInvoiceMatch.status === "matched" ? "Invoice matched" : vendorInvoiceMatch.review?.status === "accepted" ? "Variance accepted" : "Invoice variance"}</Badge>}
               <div className="order-last basis-full min-w-0 pt-1 lg:order-none lg:ml-2 lg:basis-auto lg:flex-1"><p className="truncate text-xl font-semibold tracking-tight text-white">{po.vendor || "Vendor purchase order"}</p><p className="mt-1 text-xs text-zinc-400">Expected {po.expected_delivery || "delivery date not set"} <span className="px-1.5 text-zinc-600">/</span> Total <span className="font-mono text-emerald-200">${(po.total || 0).toFixed(2)}</span></p></div>
               {(po.status === "submitted" || po.status === "partial") && <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={() => openReceiveDialog(po)} data-testid="header-receive-stock-btn"><PackageCheck className="mr-1.5 h-3.5 w-3.5" />Receive stock</Button>}
-              <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] px-3 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => { setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` }); setEmailVendorDialog(true); }} data-testid="header-email-po-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>
+              {["approved", "submitted", "partial"].includes(po.status) && <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] px-3 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => { setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` }); setEmailVendorDialog(true); }} data-testid="header-email-po-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
               <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePreviewPdf(po)} data-testid="header-preview-po-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3"><span className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] px-2.5 py-1 text-xs font-medium text-emerald-100">{po.vendor || "No vendor"}</span><span className="rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">{totalReceived} / {totalOrdered} received</span>{po.client_name && <span className="rounded-lg bg-white/[0.05] px-2.5 py-1 text-[10px] text-zinc-400">For {po.client_name}</span>}<span className="ml-auto rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">${(po.total || 0).toFixed(2)}</span></div>
@@ -1149,6 +1312,8 @@ export default function PurchaseOrdersPage() {
                 <div><span className="text-muted-foreground block">Created By</span><span className="font-medium">{po.created_by_name || "System"}</span></div>
                 <div><span className="text-muted-foreground block">Created</span><span className="font-medium">{po.created_at ? format(new Date(po.created_at), "MMM d, yyyy HH:mm") : "N/A"}</span></div>
                 {po.emailed_to && <><Separator /><div><span className="text-muted-foreground block">Emailed To</span><span className="font-medium text-blue-400">{po.emailed_to}</span><span className="block text-xs text-muted-foreground">{po.emailed_at ? format(new Date(po.emailed_at), "MMM d, HH:mm") : ""}</span></div></>}
+                {(po.attachments || []).length > 0 && <><Separator /><div><span className="mb-1.5 block text-muted-foreground">Evidence</span><div className="space-y-1">{po.attachments.map(file => <a key={file.id} href={file.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md border border-white/[0.08] px-2 py-1.5 text-xs text-cyan-200 hover:bg-cyan-500/[0.06]"><Paperclip className="h-3 w-3" /><span className="truncate">{file.name}</span></a>)}</div></div></>}
+                {(po.return_events || []).length > 0 && <><Separator /><div><span className="text-muted-foreground block">Returns / RMAs</span><span className="font-medium text-amber-300">{po.return_events.length} audited return event{po.return_events.length === 1 ? "" : "s"}</span></div></>}
               </CardContent>
             </Card>
             <Card className={vendorInvoiceMatch?.status === "variance" ? "border-amber-500/30" : vendorInvoiceMatch ? "border-emerald-500/25" : ""}>
@@ -1181,7 +1346,7 @@ export default function PurchaseOrdersPage() {
                     <Send className="mr-1.5 h-4 w-4" />Submit for approval
                   </Button>
                 )}
-                {po.status === "pending_approval" && (
+                {po.status === "pending_approval" && canApprove && (
                   <>
                     <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => { setApprovalDialog("approve"); setApprovalNotes(""); }} data-testid="approve-po-btn">
                       <ThumbsUp className="mr-1.5 h-4 w-4" />Approve
@@ -1217,12 +1382,26 @@ export default function PurchaseOrdersPage() {
                     <PackageCheck className="mr-1.5 h-4 w-4" />Receive Stock
                   </Button>
                 )}
+                {(po.status === "partial" || po.status === "received") && (po.line_items || []).some(item => Number(item.received_qty || 0) > Number(item.returned_qty || 0)) && (
+                  <Button variant="outline" className="w-full border-amber-500/30 text-amber-300 hover:bg-amber-500/10" onClick={() => openReturnDialog(po)} data-testid="return-po-stock-btn">
+                    <RotateCcw className="mr-1.5 h-4 w-4" />Return / RMA items
+                  </Button>
+                )}
                 <Button variant="outline" className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => openVendorInvoiceMatch(po)} data-testid="match-vendor-invoice-btn">
                   <DollarSign className="w-4 h-4 mr-1" />{vendorInvoiceMatch ? "Review Supplier Invoice" : "Match Supplier Invoice"}
                 </Button>
                 {vendorInvoiceMatch?.status === "variance" && <Button variant="outline" className="w-full" onClick={() => openVendorInvoiceReview(po)} data-testid="review-supplier-invoice-variance">
                   <CheckCircle className="w-4 h-4 mr-1" />{vendorInvoiceMatch.review ? "Update Variance Review" : "Review Invoice Variance"}
                 </Button>}
+                {vendorInvoiceMatch && (vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted") && (
+                  <Button variant="outline" className="w-full border-sky-500/30 text-sky-300 hover:bg-sky-500/10" onClick={handleQueueSupplierBill} data-testid="queue-xero-supplier-bill">
+                    <Building2 className="mr-1.5 h-4 w-4" />{po.supplier_bill_sync?.status === "queued" ? "Supplier bill queued" : po.supplier_bill_sync?.status === "needs_connection" ? "Connect Xero to send bill" : "Queue supplier bill for Xero"}
+                  </Button>
+                )}
+                <label className="flex h-9 w-full cursor-pointer items-center rounded-lg border border-white/[0.12] bg-black/10 px-3 text-sm text-zinc-100 hover:border-cyan-400/30 hover:bg-cyan-500/[0.06]">
+                  <Paperclip className="mr-1.5 h-4 w-4" />Attach invoice or receiving evidence
+                  <input type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg,.csv,.docx,.xlsx" onChange={handleUploadEvidence} data-testid="po-evidence-upload" />
+                </label>
                 <Separator />
                 {/* PDF & Email */}
                 <Button variant="outline" className="w-full border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePreviewPdf(po)} data-testid="preview-po-pdf">
@@ -1236,22 +1415,22 @@ export default function PurchaseOrdersPage() {
                 <Button variant="outline" className="w-full" onClick={() => handleDuplicate(po)} data-testid="duplicate-po-btn">
                   <Copy className="w-4 h-4 mr-1" />Duplicate PO
                 </Button>
-                <Button variant="outline" className="w-full" onClick={() => openEdit(po)} data-testid="edit-po">
+                {(po.status === "draft" || po.status === "rejected") && <Button variant="outline" className="w-full" onClick={() => openEdit(po)} data-testid="edit-po">
                   <Edit className="w-4 h-4 mr-1" />Edit
-                </Button>
-                {(po.status === "draft" || po.status === "submitted") && (
+                </Button>}
+                {["draft", "rejected", "approved", "submitted"].includes(po.status) && !((po.line_items || []).some(item => Number(item.received_qty || 0) > 0)) && (
                   <Button variant="outline" className="w-full text-amber-400" onClick={() => requestDestructiveAction("cancel", po)} data-testid="cancel-po-btn">
                     <XCircle className="w-4 h-4 mr-1" />Cancel PO
                   </Button>
                 )}
-                {po.status === "draft" && <Button variant="destructive" className="w-full" onClick={() => requestDestructiveAction("delete", po)} data-testid="delete-po-btn">
+                {(po.status === "draft" || po.status === "rejected") && <Button variant="destructive" className="w-full" onClick={() => requestDestructiveAction("delete", po)} data-testid="delete-po-btn">
                   <Trash2 className="w-4 h-4 mr-1" />Delete
                 </Button>}
               </CardContent>
             </Card>
           </div>
         </div>
-        {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}{destructiveActionDialog}
+        {formDialog}{receiveStockDialog}{returnStockDialog}{approvalDialogEl}{approvalPolicyDialog}{emailVendorDialogEl}{destructiveActionDialog}{pdfViewerDialogEl}
         <Dialog open={vendorInvoiceDialog} onOpenChange={setVendorInvoiceDialog}>
           <DialogContent className="max-w-md">
             <DialogHeader><DialogTitle>Match supplier invoice</DialogTitle></DialogHeader>
@@ -1390,6 +1569,9 @@ export default function PurchaseOrdersPage() {
               <DropdownMenuItem asChild className="gap-2" data-testid="po-tools-vendor-scorecard">
                 <Link to="/vendor-scorecard"><BarChart3 className="w-4 h-4" />Vendor scorecard</Link>
               </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2" onSelect={() => setApprovalPolicyOpen(true)} data-testid="po-tools-approval-policy">
+                <Settings2 className="w-4 h-4" />Approval policy
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" onClick={handleCheckEscalations} data-testid="check-escalations-btn">
@@ -1506,14 +1688,8 @@ export default function PurchaseOrdersPage() {
         </CardContent>
       </Card>
 
-      {formDialog}{receiveStockDialog}{approvalDialogEl}{emailVendorDialogEl}{destructiveActionDialog}
-      <PdfViewerDialog
-        open={pdfViewer.open}
-        onOpenChange={v => setPdfViewer(p => ({ ...p, open: v }))}
-        pdfUrl={pdfViewer.url}
-        title={pdfViewer.title}
-        downloadUrl={pdfViewer.downloadUrl}
-      />
+      {formDialog}{receiveStockDialog}{returnStockDialog}{approvalDialogEl}{approvalPolicyDialog}{emailVendorDialogEl}{destructiveActionDialog}
+      {pdfViewerDialogEl}
     </div>
   );
 }

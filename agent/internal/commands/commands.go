@@ -19,6 +19,7 @@ import (
 
 	"nexusagent/internal/canary"
 	"nexusagent/internal/config"
+	"nexusagent/internal/identity"
 	"nexusagent/internal/transport"
 )
 
@@ -38,7 +39,7 @@ func NewLoop(tr *transport.Client, cfg *config.Config, fallback time.Duration) *
 
 type cmdItem struct {
 	ID      string `json:"id"`
-	Kind    string `json:"kind"` // run_script, reboot, shutdown, run_powershell, run_cmd, kill_process, elevate_launch, install_companion, canary_deploy
+	Kind    string `json:"kind"` // run_script, reboot, shutdown, run_powershell, run_cmd, kill_process, elevate_launch, install_companion, canary_deploy, remote_repair
 	Payload struct {
 		Script        string   `json:"script,omitempty"`
 		Shell         string   `json:"shell,omitempty"` // powershell | cmd | bash
@@ -51,6 +52,9 @@ type cmdItem struct {
 		ApprovedUntil string   `json:"approved_until,omitempty"`
 		CanaryID      string   `json:"canary_id,omitempty"`
 		CanaryPath    string   `json:"canary_path,omitempty"`
+		Actions       []string `json:"actions,omitempty"`
+		Reason        string   `json:"reason,omitempty"`
+		Provider      string   `json:"provider,omitempty"`
 	} `json:"payload"`
 }
 
@@ -183,12 +187,136 @@ func (l *Loop) execute(c cmdItem) (res cmdResult) {
 		res = deployRansomwareCanary(c, res)
 		return res
 
+	case "agent_repair":
+		evidence, err := identity.Repair(l.cfg, c.Payload.Actions)
+		if err != nil {
+			res.Status = "error"
+			res.Stderr = err.Error()
+			return res
+		}
+		for _, action := range c.Payload.Actions {
+			if strings.EqualFold(strings.TrimSpace(action), "companion") && runtime.GOOS == "windows" {
+				executable, locateErr := os.Executable()
+				if locateErr != nil {
+					evidence.Status = "attention"
+					evidence.Details["companion"] = locateErr.Error()
+					continue
+				}
+				companion := filepath.Join(filepath.Dir(executable), "nexus-client-chat.exe")
+				if _, statErr := os.Stat(companion); statErr != nil {
+					evidence.Status = "attention"
+					evidence.Details["companion"] = "nexus-client-chat.exe is missing"
+					continue
+				}
+				if _, shortcutErr := installCompanionStartMenuEntry(companion); shortcutErr != nil {
+					evidence.Status = "attention"
+					evidence.Details["companion"] = shortcutErr.Error()
+				} else {
+					evidence.Repairs = append(evidence.Repairs, "companion_start_menu_rewritten")
+				}
+			}
+		}
+		encoded, err := json.Marshal(evidence)
+		if err != nil {
+			res.Status = "error"
+			res.Stderr = err.Error()
+			return res
+		}
+		res.Stdout = string(encoded)
+		return res
+
+	case "remote_repair":
+		res = repairRemoteAccess(ctx, c, res)
+		return res
+
 	case "ping":
 		res.Stdout = "pong"
 
 	default:
 		res.Status = "error"
 		res.Stderr = fmt.Sprintf("unknown command kind: %s", c.Kind)
+	}
+	return res
+}
+
+// repairRemoteAccess is deliberately bounded. It can check the locally
+// installed RustDesk service and start it when stopped, but it never downloads
+// software, changes credentials, rewrites relay configuration, or kills an
+// active technician session.
+func repairRemoteAccess(ctx context.Context, c cmdItem, res cmdResult) cmdResult {
+	provider := strings.ToLower(strings.TrimSpace(c.Payload.Provider))
+	if provider == "" {
+		provider = "rustdesk"
+	}
+	if provider != "rustdesk" {
+		res.Status = "error"
+		res.Stderr = "bounded repair is currently available for RustDesk only"
+		return res
+	}
+
+	type evidence struct {
+		Provider string `json:"provider"`
+		Status   string `json:"status"`
+		Action   string `json:"action"`
+		Detail   string `json:"detail"`
+	}
+	report := evidence{Provider: provider, Status: "attention", Action: "none"}
+
+	switch runtime.GOOS {
+	case "windows":
+		query := exec.CommandContext(ctx, "sc.exe", "query", "RustDesk")
+		output, err := query.CombinedOutput()
+		text := strings.TrimSpace(string(output))
+		if err != nil {
+			report.Detail = "RustDesk Windows service was not found; reinstall through the signed Nexus Agent package"
+			break
+		}
+		if strings.Contains(strings.ToUpper(text), "RUNNING") {
+			report.Status = "healthy"
+			report.Action = "verified"
+			report.Detail = "RustDesk Windows service is running"
+			break
+		}
+		start := exec.CommandContext(ctx, "sc.exe", "start", "RustDesk")
+		startOutput, startErr := start.CombinedOutput()
+		if startErr != nil {
+			report.Detail = "RustDesk service exists but could not be started: " + truncate(string(startOutput), 2048)
+			break
+		}
+		report.Status = "healthy"
+		report.Action = "service_started"
+		report.Detail = "RustDesk Windows service was started"
+	case "linux":
+		query := exec.CommandContext(ctx, "systemctl", "is-active", "rustdesk")
+		if output, err := query.CombinedOutput(); err == nil && strings.TrimSpace(string(output)) == "active" {
+			report.Status = "healthy"
+			report.Action = "verified"
+			report.Detail = "RustDesk service is active"
+			break
+		}
+		start := exec.CommandContext(ctx, "systemctl", "start", "rustdesk")
+		output, err := start.CombinedOutput()
+		if err != nil {
+			report.Detail = "RustDesk service could not be started: " + truncate(string(output), 2048)
+			break
+		}
+		report.Status = "healthy"
+		report.Action = "service_started"
+		report.Detail = "RustDesk service was started"
+	default:
+		report.Detail = "Automatic RustDesk service repair is not yet supported on " + runtime.GOOS
+	}
+
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		res.Status = "error"
+		res.Stderr = err.Error()
+		return res
+	}
+	res.Stdout = string(encoded)
+	if report.Status != "healthy" {
+		res.Status = "error"
+		res.Stderr = report.Detail
 	}
 	return res
 }

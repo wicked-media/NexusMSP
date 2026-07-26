@@ -6,6 +6,8 @@ import os
 import logging
 import importlib
 import pkgutil
+import re
+import uuid
 
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
@@ -14,6 +16,19 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NexusOps API", version="3.0.0")
+
+_CORRELATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+@app.middleware("http")
+async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
+    """Carry one safe correlation ID through every Nexus API request."""
+    supplied = str(request.headers.get("X-Correlation-ID") or "").strip()
+    correlation_id = supplied if _CORRELATION_ID_RE.fullmatch(supplied) else str(uuid.uuid4())
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
 
 # Static files for uploads
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
@@ -127,16 +142,40 @@ async def startup_event():
     asyncio.create_task(_chain_reactions_loop())
     asyncio.create_task(_microsoft365_mail_sync_loop())
     asyncio.create_task(_scheduled_script_loop())
+    asyncio.create_task(_event_delivery_loop())
+    asyncio.create_task(_event_retention_loop())
+    asyncio.create_task(_automation_runtime_loop())
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
 async def _boot_warmup():
     """Run seed + ticket-number backfill without blocking app startup."""
     try:
+        from app.services.event_backbone import backfill_legacy_event_metadata, ensure_event_backbone_indexes
+        await ensure_event_backbone_indexes()
+        migrated_events = await backfill_legacy_event_metadata()
+        if migrated_events:
+            logger.info(f"Backfilled durable metadata for {migrated_events} platform events")
+    except Exception as e:
+        logger.error(f"Event backbone index initialization failed: {e}")
+    try:
+        from app.services.automation_runtime import ensure_automation_runtime_indexes
+        await ensure_automation_runtime_indexes()
+    except Exception as e:
+        logger.error(f"Automation runtime index initialization failed: {e}")
+    try:
         from app.services.chat_access import initialize_chat_storage
         await initialize_chat_storage()
     except Exception as e:
         logger.error(f"Chat index initialization failed: {e}")
+    try:
+        await db.yeastar_pbxs.create_index(
+            [("client_id", 1), ("pbx_url", 1)],
+            unique=True,
+            name="unique_client_pbx_url",
+        )
+    except Exception as e:
+        logger.error(f"Yeastar PBX uniqueness guard failed: {e}")
     try:
         await seed_data()
     except Exception as e:
@@ -154,6 +193,55 @@ async def _boot_warmup():
             logger.info(f"Assigned ticket numbers to {len(tickets_without_number)} tickets")
     except Exception as e:
         logger.error(f"Ticket number backfill failed: {e}")
+
+
+async def _event_delivery_loop():
+    """Deliver due platform events with durable checkpoints and bounded retries."""
+    import asyncio
+    from app.services.event_backbone import process_due_deliveries
+
+    while True:
+        try:
+            result = await process_due_deliveries(50)
+            await asyncio.sleep(1 if result.get("processed") else 5)
+        except Exception as e:
+            logger.error(f"Event delivery worker failed: {e}")
+            await asyncio.sleep(10)
+
+
+async def _event_retention_loop():
+    """Apply configured event retention without touching legal-hold evidence."""
+    import asyncio
+    from app.services.event_backbone import purge_expired_events
+
+    while True:
+        try:
+            result = await purge_expired_events(5000)
+            if result.get("events_purged"):
+                logger.info(
+                    "Event retention purged %s events and %s delivery checkpoints",
+                    result["events_purged"],
+                    result["deliveries_purged"],
+                )
+            await asyncio.sleep(21600)
+        except Exception as e:
+            logger.error(f"Event retention worker failed: {e}")
+            await asyncio.sleep(600)
+
+
+async def _automation_runtime_loop():
+    """Resume queued workflows, timed waits and expired worker leases."""
+    import asyncio
+    from app.services.automation_runtime import process_due_runs
+
+    while True:
+        try:
+            result = await process_due_runs(25)
+            await asyncio.sleep(1 if result.get("processed") else 4)
+        except Exception as e:
+            logger.error(f"Automation runtime worker failed: {e}")
+            await asyncio.sleep(10)
+
 
 async def _rustdesk_auto_sync_loop():
     """Background loop that syncs RustDesk peers every 5 minutes if enabled."""

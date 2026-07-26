@@ -141,7 +141,7 @@ export function Client360Subscriptions({ clientId, token }) {
 /* ──────────────── SECURITY ──────────────── */
 const SEC_META = {
   "stats":  { label: "Security Stats",      icon: ShieldCheck },
-  "cipp":   { label: "CIPP 7-Dimension",    icon: Cloud },
+  "cipp":   { label: "Microsoft posture",   icon: Cloud },
   "users":  { label: "Users & Passwords",   icon: KeyRound },
   "links":  { label: "Quick Links",         icon: ListChecks },
 };
@@ -190,7 +190,7 @@ export function Client360Security({ clientId, token }) {
             <grid.HideBtn id="stats" />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 h-full">
               <Stat label="MFA coverage" value={s.mfa_pct != null ? `${s.mfa_pct}%` : "—"} color={mfaColor} icon={KeyRound} />
-              <Stat label="CIPP hygiene" value={s.cipp_hygiene != null ? `${s.cipp_hygiene}/100` : "—"} color={hygColor} icon={ShieldCheck} />
+              <Stat label="Microsoft posture" value={s.cipp_hygiene != null ? `${s.cipp_hygiene}/100` : "—"} color={hygColor} icon={ShieldCheck} />
               <Stat label="Assessed endpoints" value={`${s.assessed_endpoints || 0}/${s.managed_endpoints || 0}`} color={s.assessed_endpoints ? "violet" : "zinc"} icon={ShieldCheck} />
               <Stat label="Defender active" value={`${s.defender_active || 0}/${s.assessed_endpoints || 0}`} color={s.assessed_endpoints && s.defender_active === s.assessed_endpoints ? "emerald" : "zinc"} icon={ShieldCheck} />
               <Stat label="Firewall on" value={`${s.firewall_enabled || 0}/${s.assessed_endpoints || 0}`} color={s.assessed_endpoints && s.firewall_enabled === s.assessed_endpoints ? "emerald" : "zinc"} icon={ShieldCheck} />
@@ -204,7 +204,7 @@ export function Client360Security({ clientId, token }) {
           <div key="cipp" className="nx-widget-card">
             <grid.HideBtn id="cipp" />
             <div className="border border-zinc-800 rounded-md p-4 bg-zinc-950 h-full overflow-auto">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3">CIPP 7-dimension scoring</div>
+              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3">Nexus Control Plane · Microsoft posture</div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {Object.entries(s.cipp_dimensions).map(([k, v]) => {
                   const pct = typeof v === "number" ? v : (v?.score || 0);
@@ -240,7 +240,7 @@ export function Client360Security({ clientId, token }) {
           <div key="links" className="nx-widget-card">
             <grid.HideBtn id="links" />
             <div className="border border-zinc-800 rounded-md p-3 bg-zinc-950 h-full flex items-center gap-2 flex-wrap">
-              <Link to="/cipp" className="text-xs text-indigo-400 hover:underline">Manage in CIPP →</Link>
+              <Link to="/control-plane?module=microsoft365" className="text-xs text-indigo-400 hover:underline">Open Nexus Control Plane →</Link>
               <span className="text-zinc-700">·</span>
               <Link to="/huntress-dashboard" className="text-xs text-indigo-400 hover:underline">Huntress console →</Link>
             </div>

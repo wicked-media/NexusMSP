@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -6,6 +6,14 @@ import os
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_client_scope
+from app.services.finance_integrity import (
+    begin_idempotent_operation,
+    complete_idempotent_operation,
+    fail_idempotent_operation,
+    normalise_invoice_document,
+)
 from app.models import *
 
 router = APIRouter()
@@ -82,9 +90,11 @@ async def get_invoices(
         query["status"] = status
     
     invoices = await db.invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    for i in invoices:
+    for index, invoice in enumerate(invoices):
+        i = normalise_invoice_document(invoice)
         if isinstance(i.get('created_at'), str):
             i['created_at'] = datetime.fromisoformat(i['created_at'])
+        invoices[index] = i
     return invoices
 
 @router.get("/invoices/stats/summary")
@@ -116,7 +126,7 @@ async def get_invoice(invoice_id: str, current_user: dict = Depends(get_current_
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    return invoice
+    return normalise_invoice_document(invoice)
 
 @router.get("/invoices/{invoice_id}/activity-log")
 async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends(get_current_user)):
@@ -127,10 +137,16 @@ async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends
     logs = await db.activity_logs.find({"entity_type": "invoice", "entity_id": invoice_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return logs
 
-@router.post("/invoices", response_model=Invoice)
-async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depends(get_current_user)):
+@router.post("/invoices", response_model=Invoice, dependencies=[Depends(require_action("billing.invoice.create"))])
+async def create_invoice(invoice_data: InvoiceCreate, request: Request, current_user: dict = Depends(get_current_user)):
     if not invoice_data.client_id:
         raise HTTPException(status_code=422, detail="Client is required")
+    await assert_client_scope(
+        current_user,
+        invoice_data.client_id,
+        operation="billing.invoice.create",
+        request=request,
+    )
     client = await db.clients.find_one({"id": invoice_data.client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -266,6 +282,7 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
     doc["discount_pct"] = inv_discount_pct
     doc["discount_amount"] = inv_discount_amt
     doc["needs_approval"] = needs_approval
+    doc["version"] = 1
     await db.invoices.insert_one(doc)
     doc.pop("_id", None)
     await log_activity(
@@ -286,13 +303,26 @@ async def create_invoice(invoice_data: InvoiceCreate, current_user: dict = Depen
         )
     return invoice
 
-@router.put("/invoices/{invoice_id}")
-async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict = Depends(get_current_user)):
+@router.put("/invoices/{invoice_id}", dependencies=[Depends(require_action("billing.invoice.modify"))])
+async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not old_inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        old_inv.get("client_id"),
+        operation="billing.invoice.modify",
+        request=request,
+    )
     allowed = {"client_id", "client_name", "contract_id", "ticket_id", "invoice_name", "due_date", "notes", "line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total", "is_recurring", "recurring_interval", "recurring_start_date", "recurring_end_date", "status"}
     update = {key: value for key, value in invoice_data.items() if key in allowed}
+    if update.get("client_id") and update.get("client_id") != old_inv.get("client_id"):
+        await assert_client_scope(
+            current_user,
+            update.get("client_id"),
+            operation="billing.invoice.move-client",
+            request=request,
+        )
     if "invoice_name" in update:
         update["invoice_name"] = str(update["invoice_name"] or "").strip()
         if len(update["invoice_name"]) > 160:
@@ -312,6 +342,16 @@ async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict
         ticket_link = await _resolve_invoice_ticket_link(update.get("ticket_id", old_ticket_id), update.get("client_id", old_inv.get("client_id")))
         update.update(ticket_link)
     financial_fields = {"line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total"}
+    issued_locked_fields = financial_fields | {
+        "client_id", "client_name", "contract_id", "ticket_id", "due_date",
+    }
+    if old_inv.get("is_split_parent") and issued_locked_fields.intersection(update):
+        raise HTTPException(status_code=409, detail="Split-billing source records are locked; correct the payer invoices instead")
+    if old_inv.get("status") not in {"draft", "pending_approval"} and issued_locked_fields.intersection(update):
+        raise HTTPException(
+            status_code=409,
+            detail="Issued invoices are financially locked; use a credit note, void, or reissue workflow",
+        )
     if old_inv.get("payment_status") == "paid" and financial_fields.intersection(update):
         raise HTTPException(status_code=409, detail="Paid invoices cannot be financially edited; issue a credit note instead")
     if old_inv.get("status") in {"cancelled", "voided"}:
@@ -374,7 +414,14 @@ async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict
             "tax": tax,
             "total": round(discounted_subtotal + tax, 2),
         })
-    result = await db.invoices.update_one({"id": invoice_id}, {"$set": update})
+    version = old_inv.get("version")
+    version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
+    result = await db.invoices.update_one(
+        {"id": invoice_id, **version_filter},
+        {"$set": update, "$inc": {"version": 1}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Invoice changed while you were editing it; refresh and review the latest record")
     if old_inv:
         change_dict = {}
         for k, v in update.items():
@@ -390,7 +437,7 @@ async def update_invoice(invoice_id: str, invoice_data: dict, current_user: dict
     return {"message": "Invoice updated"}
 
 
-@router.post("/invoices/{invoice_id}/split-billing")
+@router.post("/invoices/{invoice_id}/split-billing", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def create_split_billing_invoices(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Replace one unpaid draft with auditable payer-specific invoices.
 
@@ -566,7 +613,7 @@ async def delete_invoice(invoice_id: str, current_user: dict = Depends(get_curre
         await log_activity(current_user, "deleted", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Deleted invoice {old_inv.get('invoice_number', '')}")
     return {"message": "Invoice deleted"}
 
-@router.post("/invoices/{invoice_id}/generate-from-contract")
+@router.post("/invoices/{invoice_id}/generate-from-contract", dependencies=[Depends(require_action("billing.invoice.create"))])
 async def generate_invoice_from_contract(invoice_id: str, contract_id: str, current_user: dict = Depends(get_current_user)):
     contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
     if not contract:
@@ -703,11 +750,17 @@ async def check_payment_status(invoice_id: str, session_id: str, current_user: d
 
     return {"payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency}
 
-@router.post("/invoices/{invoice_id}/record-payment")
-async def record_manual_payment(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/invoices/{invoice_id}/record-payment", dependencies=[Depends(require_action("billing.payment.record"))])
+async def record_manual_payment(invoice_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.payment.record",
+        request=request,
+    )
     if invoice.get("is_split_parent"):
         raise HTTPException(status_code=409, detail="Record payments against the generated payer invoices, not the split-billing source record")
     if invoice.get("status") in {"cancelled", "voided"}:
@@ -739,22 +792,57 @@ async def record_manual_payment(invoice_id: str, data: dict, current_user: dict 
         payment_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     new_paid = float(invoice.get("amount_paid", 0) or 0) + amount
     new_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
+    idempotency_key = str(data.get("idempotency_key", "") or "").strip()
     payment_record = {
         "amount": amount, "method": method, "date": payment_date,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "reference": reference, "notes": data.get("notes", ""),
         "recorded_by": current_user.get("name", ""),
+        "idempotency_key": idempotency_key or None,
         "reconciliation_status": "matched" if method == "xero_reconciled" else "pending_xero_reconciliation",
     }
-    await db.invoices.update_one({"id": invoice_id}, {
+    replay = await begin_idempotent_operation(
+        db,
+        scope=f"invoice-payment:{invoice_id}",
+        key=idempotency_key,
+        payload={
+            "amount": amount,
+            "method": method,
+            "date": payment_date,
+            "reference": reference,
+            "notes": data.get("notes", ""),
+        },
+        user_id=current_user.get("id", ""),
+    )
+    if replay is not None:
+        return {**replay, "replayed": True}
+    version = invoice.get("version")
+    version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
+    result = await db.invoices.update_one({"id": invoice_id, **version_filter}, {
         "$set": {"payment_status": new_status, "amount_paid": new_paid,
                  "status": "paid" if new_status == "paid" else invoice.get("status"),
                  "paid_date": payment_date if new_status == "paid" else invoice.get("paid_date")},
-        "$push": {"payments": payment_record}
+        "$push": {"payments": payment_record},
+        "$inc": {"version": 1},
     })
+    if result.matched_count == 0:
+        await fail_idempotent_operation(
+            db,
+            scope=f"invoice-payment:{invoice_id}",
+            key=idempotency_key,
+            error="Invoice changed during payment recording",
+        )
+        raise HTTPException(status_code=409, detail="Invoice changed while the payment was being recorded; refresh before retrying")
     await _sync_split_billing_parent_payment(invoice, new_paid, new_status, current_user)
     await log_activity(current_user, "payment_recorded", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Recorded {method} payment of ${amount:.2f}", metadata={"amount": amount, "method": method, "payment_date": payment_date, "reference": data.get("reference", "")})
-    return {"message": "Payment recorded", "new_balance": max(0, float(invoice.get("total", 0) or 0) - new_paid)}
+    response = {"message": "Payment recorded", "new_balance": max(0, float(invoice.get("total", 0) or 0) - new_paid)}
+    await complete_idempotent_operation(
+        db,
+        scope=f"invoice-payment:{invoice_id}",
+        key=idempotency_key,
+        response=response,
+    )
+    return response
 
 
 @router.get("/billing/reconciliation/summary")
@@ -776,7 +864,7 @@ async def get_reconciliation_summary(current_user: dict = Depends(get_current_us
     return {"pending_count": len(pending), "pending_total": round(sum(p["amount"] for p in pending), 2), "by_method": [{**m, "amount": round(m["amount"], 2)} for m in methods.values()], "items": pending[:50]}
 
 
-@router.post("/billing/reconciliation/settlements")
+@router.post("/billing/reconciliation/settlements", dependencies=[Depends(require_action("billing.payment.record"))])
 async def close_payment_settlement(data: dict, current_user: dict = Depends(get_current_user)):
     """Closes a daily EFTPOS/cash batch without claiming it has been matched in Xero."""
     method = str(data.get("method", "") or "").strip().lower()
@@ -828,7 +916,7 @@ async def update_client_billing_profile(client_id: str, data: dict, current_user
     return profile
 
 # Move invoice to different client
-@router.post("/invoices/{invoice_id}/move-client")
+@router.post("/invoices/{invoice_id}/move-client", dependencies=[Depends(require_action("billing.invoice.modify"))])
 async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
@@ -857,11 +945,22 @@ async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict
     return {"message": f"Invoice moved to {new_client['name']}", "new_client_name": new_client["name"]}
 
 # Void / write off invoice
-@router.post("/invoices/{invoice_id}/void")
-async def void_invoice(invoice_id: str, data: dict = {}, current_user: dict = Depends(get_current_user)):
+@router.post("/invoices/{invoice_id}/void", dependencies=[Depends(require_action("billing.invoice.void"))])
+async def void_invoice(invoice_id: str, request: Request, data: dict = {}, current_user: dict = Depends(get_current_user)):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.invoice.void",
+        request=request,
+    )
+    if invoice.get("status") not in {"draft", "pending_approval"} or invoice.get("payment_status") not in {"unpaid", None}:
+        raise HTTPException(
+            status_code=409,
+            detail="Only unpaid draft invoices can be moved; use a credit note, void, or reissue workflow",
+        )
     if invoice.get("payment_status") in {"paid", "partial"}:
         raise HTTPException(status_code=409, detail="Paid or partially paid invoices cannot be voided; issue a credit note instead")
     if invoice.get("status") in {"cancelled", "voided"}:

@@ -63,15 +63,16 @@ async def _resolve_client_for_addresses(addresses: list[str], explicit_client_id
     return None
 
 
-async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
+async def _record_delivery(*, recipients: list[str], cc_recipients: list[str], bcc_recipients: list[str], subject: str, category: str, sender: str | None, attachments: list[dict] | None, result: dict, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
     """Maintain a delivery audit and attach client correspondence to the client history."""
     try:
         delivery_id = str(uuid.uuid4())
-        client = await _resolve_client_for_addresses([*recipients, *cc_recipients], client_id)
+        client = await _resolve_client_for_addresses([*recipients, *cc_recipients, *bcc_recipients], client_id)
         entry = {
             "id": delivery_id,
             "recipients": recipients,
             "cc_recipients": cc_recipients,
+            "bcc_recipient_count": len(bcc_recipients),
             "subject": subject,
             "category": category,
             "sender_mailbox": sender,
@@ -140,14 +141,15 @@ async def record_inbound_client_email(*, sender_email: str, sender_name: str, su
     return event
 
 
-async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, attachments: list[dict] | None = None, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
+async def send_email(to_email: str | list[str], subject: str, html_content: str, category: str = "notifications", cc_addresses: list[str] | None = None, bcc_addresses: list[str] | None = None, attachments: list[dict] | None = None, client_id: str | None = None, related_type: str | None = None, related_id: str | None = None, initiated_by: str | None = None, initiated_by_name: str | None = None):
     """Send through the selected Microsoft 365 mailbox for an outbound category."""
     recipients = [to_email] if isinstance(to_email, str) else [address for address in to_email if address]
     cc_recipients = [address for address in (cc_addresses or []) if address]
+    bcc_recipients = [address for address in (bcc_addresses or []) if address]
 
     async def record(result: dict):
         result["delivery_id"] = await _record_delivery(
-            recipients=recipients, cc_recipients=cc_recipients, subject=subject, category=category,
+            recipients=recipients, cc_recipients=cc_recipients, bcc_recipients=bcc_recipients, subject=subject, category=category,
             sender=result.get("sender"), attachments=attachments, result=result, client_id=client_id,
             related_type=related_type, related_id=related_id, initiated_by=initiated_by,
             initiated_by_name=initiated_by_name,
@@ -198,6 +200,7 @@ async def send_email(to_email: str | list[str], subject: str, html_content: str,
                         "body": {"contentType": "HTML", "content": html_content},
                         "toRecipients": [{"emailAddress": {"address": address}} for address in recipients],
                         "ccRecipients": [{"emailAddress": {"address": address}} for address in cc_recipients],
+                        "bccRecipients": [{"emailAddress": {"address": address}} for address in bcc_recipients],
                         "attachments": graph_attachments,
                     },
                     "saveToSentItems": True,

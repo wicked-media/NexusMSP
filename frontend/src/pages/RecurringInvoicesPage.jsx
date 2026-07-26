@@ -25,10 +25,77 @@ import {
 import ReconcileDialog from "@/components/billing/ReconcileDialog";
 import RecurringSmartActions, { ConsolidateButton } from "@/components/billing/RecurringSmartActions";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
 const STATUS_STYLES = { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", paused: "bg-amber-500/10 text-amber-400 border-amber-500/20", cancelled: "bg-red-500/10 text-red-400 border-red-500/20" };
+
+const WORKFLOW_TONES = {
+  emerald: { border: "border-emerald-400/25", background: "bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.10),transparent)]", icon: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300", eyebrow: "text-emerald-300", badge: "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" },
+  cyan: { border: "border-cyan-400/25", background: "bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(6,182,212,0.10),transparent)]", icon: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300", eyebrow: "text-cyan-300", badge: "border-cyan-400/30 bg-cyan-400/5 text-cyan-200" },
+  violet: { border: "border-violet-400/25", background: "bg-[radial-gradient(circle_at_top_right,rgba(167,139,250,0.18),transparent_45%),linear-gradient(135deg,rgba(124,58,237,0.12),transparent)]", icon: "border-violet-400/25 bg-violet-400/10 text-violet-300", eyebrow: "text-violet-300", badge: "border-violet-400/30 bg-violet-400/5 text-violet-200" },
+};
+
+function WorkflowDialogHeader({ icon: Icon = RefreshCw, eyebrow, title, description, badge, tone = "emerald" }) {
+  const palette = WORKFLOW_TONES[tone] || WORKFLOW_TONES.emerald;
+  return (
+    <DialogHeader className={`shrink-0 border-b border-white/[0.07] px-6 py-5 text-left ${palette.background}`}>
+      <p className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${palette.eyebrow}`}>{eyebrow}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-xl border ${palette.icon}`}><Icon className="h-4 w-4" /></span>
+        <DialogTitle className="text-2xl tracking-tight text-zinc-100">{title}</DialogTitle>
+        {badge && <Badge variant="outline" className={`text-[10px] ${palette.badge}`}>{badge}</Badge>}
+      </div>
+      <DialogDescription className="mt-2 max-w-3xl">{description}</DialogDescription>
+    </DialogHeader>
+  );
+}
+
+function ClientAutocomplete({ clients, value, onValueChange, testId, placeholder = "Search for a client…" }) {
+  const selectedName = clients.find((client) => client.id === value)?.name || "";
+  const [query, setQuery] = useState(selectedName);
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) setQuery(selectedName);
+  }, [isOpen, selectedName]);
+
+  const matches = clients
+    .filter((client) => `${client.name || ""} ${client.email || ""} ${client.billing_email || ""}`.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 8);
+
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={query}
+        onChange={(event) => { setQuery(event.target.value); setIsOpen(true); }}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => window.setTimeout(() => setIsOpen(false), 150)}
+        placeholder={placeholder}
+        className="pl-9"
+        data-testid={testId}
+      />
+      {isOpen && (
+        <div className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-border/80 bg-popover p-1 shadow-xl">
+          {matches.length === 0 ? <p className="px-3 py-2 text-xs text-muted-foreground">No clients match that search.</p> : matches.map((client) => (
+            <button
+              key={client.id}
+              type="button"
+              className="flex w-full flex-col rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => { setQuery(client.name || ""); setIsOpen(false); onValueChange(client); }}
+            >
+              <span className="text-sm font-medium">{client.name}</span>
+              <span className="text-[10px] text-muted-foreground">{client.billing_email || client.email || "No billing email recorded"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RecurringInvoicesPage() {
   const { token } = useAuth();
@@ -248,37 +315,37 @@ export default function RecurringInvoicesPage() {
 
   // Line Items Editor Component
   const LineItemsEditor = ({ items, setter }) => (
-    <div className="space-y-2">
-      <div className="grid grid-cols-12 gap-2 text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+    <div className="rounded-xl border border-border/70 bg-muted/15 p-3">
+      <div className="hidden grid-cols-12 gap-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground sm:grid">
         <div className="col-span-5">Description</div><div className="col-span-2">Qty</div><div className="col-span-2">Rate</div><div className="col-span-2">Amount</div><div className="col-span-1"></div>
       </div>
       {items.map((li, idx) => (
-        <div key={`li-${idx}`} className="grid grid-cols-12 gap-2 items-center">
-          <Input className="col-span-5 h-8 text-xs" value={li.description} onChange={e => updateLineItem(setter, items, idx, "description", e.target.value)} placeholder="Service description" />
-          <Input className="col-span-2 h-8 text-xs font-mono" type="number" value={li.quantity} onChange={e => updateLineItem(setter, items, idx, "quantity", e.target.value)} />
-          <Input className="col-span-2 h-8 text-xs font-mono" type="number" value={li.rate} onChange={e => updateLineItem(setter, items, idx, "rate", e.target.value)} placeholder="0.00" />
-          <div className="col-span-2 text-xs font-mono font-bold">${parseFloat(li.amount || 0).toFixed(2)}</div>
-          <Button variant="ghost" size="sm" className="col-span-1 h-8 w-8 p-0" onClick={() => removeLineItem(setter, idx)} disabled={items.length <= 1}><Trash2 className="w-3 h-3" /></Button>
+        <div key={`li-${idx}`} className="mt-2 grid grid-cols-1 items-end gap-2 rounded-lg border border-border/60 bg-background/60 p-2 sm:grid-cols-12 sm:border-0 sm:bg-transparent sm:p-1">
+          <div className="sm:col-span-5"><Label className="text-[10px] sm:hidden">Description</Label><Input className="h-9 text-xs" value={li.description} onChange={e => updateLineItem(setter, items, idx, "description", e.target.value)} placeholder="Service description" /></div>
+          <div className="sm:col-span-2"><Label className="text-[10px] sm:hidden">Quantity</Label><Input className="h-9 text-xs font-mono" type="number" value={li.quantity} onChange={e => updateLineItem(setter, items, idx, "quantity", e.target.value)} /></div>
+          <div className="sm:col-span-2"><Label className="text-[10px] sm:hidden">Unit rate</Label><Input className="h-9 text-xs font-mono" type="number" value={li.rate} onChange={e => updateLineItem(setter, items, idx, "rate", e.target.value)} placeholder="0.00" /></div>
+          <div className="flex h-9 items-center justify-between text-xs font-mono font-bold sm:col-span-2 sm:justify-start"><span className="sm:hidden text-[10px] font-sans font-normal text-muted-foreground">Line total</span>${parseFloat(li.amount || 0).toFixed(2)}</div>
+          <Button variant="ghost" size="sm" className="h-9 w-full text-destructive hover:bg-destructive/10 hover:text-destructive sm:col-span-1 sm:w-9 sm:p-0" onClick={() => removeLineItem(setter, idx)} disabled={items.length <= 1}><Trash2 className="h-3.5 w-3.5" /><span className="ml-1 sm:hidden">Remove line</span></Button>
         </div>
       ))}
-      <Button variant="outline" size="sm" onClick={() => addLineItem(setter)} className="mt-1"><Plus className="w-3 h-3 mr-1" />Add Line</Button>
-      <div className="text-right font-mono text-sm font-bold mt-2">Subtotal: ${calcSubtotal(items).toFixed(2)}</div>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-border/60 pt-3"><Button type="button" variant="outline" size="sm" onClick={() => addLineItem(setter)}><Plus className="mr-1 h-3.5 w-3.5" />Add line</Button><div className="text-right text-sm"><span className="mr-3 text-xs text-muted-foreground">Subtotal</span><span className="font-mono font-bold">${calcSubtotal(items).toFixed(2)}</span></div></div>
     </div>
   );
 
   return (
     <div className="space-y-6" data-testid="recurring-invoices-page">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><RefreshCw className="w-4 h-4 text-violet-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">Recurring Billing</h1><p className="text-sm text-muted-foreground">Contracts, templates, automated generation, and revenue health.</p></div>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader
+        eyebrow="Billing automation"
+        title="Recurring Billing"
+        description="Create auditable billing streams from client commitments, live subscription sources, and reusable templates. Generated invoices retain their source, approval, and delivery history."
+        icon={RefreshCw}
+        tone="emerald"
+        actions={<>
           <Button variant="outline" size="sm" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Sparkles className="w-3.5 h-3.5 mr-1" />Billing Command</Button>
           <Button variant="outline" onClick={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} data-testid="create-template-btn"><FileText className="w-4 h-4 mr-1" />New Template</Button>
           <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Recurring Invoice</Button>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* Stats */}
       {stats && (
@@ -292,10 +359,10 @@ export default function RecurringInvoicesPage() {
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
-          <TabsTrigger value="recurring" data-testid="tab-recurring">Recurring Invoices ({invoices.length})</TabsTrigger>
-          <TabsTrigger value="templates" data-testid="tab-templates">Invoice Templates ({templates.length})</TabsTrigger>
-          <TabsTrigger value="scheduler" data-testid="tab-scheduler">Auto-Scheduler</TabsTrigger>
+        <TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-3">
+          <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="recurring" data-testid="tab-recurring"><Receipt className="h-3.5 w-3.5" />Recurring Invoices ({invoices.length})</TabsTrigger>
+          <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="templates" data-testid="tab-templates"><FileText className="h-3.5 w-3.5" />Invoice Templates ({templates.length})</TabsTrigger>
+          <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="scheduler" data-testid="tab-scheduler"><Zap className="h-3.5 w-3.5" />Auto-Scheduler</TabsTrigger>
         </TabsList>
 
         {/* RECURRING INVOICES TAB */}
@@ -429,8 +496,8 @@ export default function RecurringInvoicesPage() {
               <CardTitle className="text-sm flex items-center justify-between">
                 <span className="flex items-center gap-2"><Zap className="w-4 h-4 text-amber-400" />Auto-Generation Scheduler</span>
                 <div className="flex items-center gap-2">
-                  <Badge className="bg-emerald-500/10 text-emerald-400 text-[9px] border border-emerald-500/20">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse" />Active
+                  <Badge className={`${schedulerStatus?.scheduler_active === false ? "border-rose-500/20 bg-rose-500/10 text-rose-300" : "border-emerald-500/20 bg-emerald-500/10 text-emerald-400"} text-[9px] border`}>
+                    <div className={`mr-1.5 h-1.5 w-1.5 rounded-full ${schedulerStatus?.scheduler_active === false ? "bg-rose-400" : "animate-pulse bg-emerald-400"}`} />{schedulerStatus?.scheduler_active === false ? "Inactive" : "Active"}
                   </Badge>
                   <Button size="sm" onClick={() => setConfirmSchedulerRun(true)} disabled={runningScheduler} data-testid="run-scheduler-btn">
                     {runningScheduler ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}
@@ -440,23 +507,11 @@ export default function RecurringInvoicesPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-4 gap-3 mb-4">
-                <div className="p-3 rounded-lg border bg-card text-center">
-                  <p className="text-2xl font-bold text-amber-400">{schedulerStatus?.due_now || 0}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase">Due Now</p>
-                </div>
-                <div className="p-3 rounded-lg border bg-card text-center">
-                  <p className="text-2xl font-bold text-emerald-400">{schedulerStatus?.total_auto_generated || 0}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase">Auto-Generated</p>
-                </div>
-                <div className="p-3 rounded-lg border bg-card text-center">
-                  <p className="text-2xl font-bold text-red-400">{schedulerStatus?.total_errors || 0}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase">Errors</p>
-                </div>
-                <div className="p-3 rounded-lg border bg-card text-center">
-                  <p className="text-lg font-bold">{schedulerStatus?.check_interval_seconds ? `${schedulerStatus.check_interval_seconds / 60}m` : "5m"}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase">Check Interval</p>
-                </div>
+              <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <HeroTile label="Due now" value={schedulerStatus?.due_now || 0} icon={Calendar} glow={schedulerStatus?.due_now ? "amber" : "emerald"} subtitle="Billing streams ready" />
+                <HeroTile label="Auto-generated" value={schedulerStatus?.total_auto_generated || 0} icon={CheckCircle} glow="emerald" subtitle="All recorded runs" />
+                <HeroTile label="Exceptions" value={schedulerStatus?.total_errors || 0} icon={AlertTriangle} glow={schedulerStatus?.total_errors ? "rose" : "emerald"} subtitle="Requires billing review" />
+                <HeroTile label="Check interval" value={schedulerStatus?.check_interval_seconds ? `${schedulerStatus.check_interval_seconds / 60}m` : "5m"} icon={Clock} glow="cyan" animated={false} subtitle="Automatic scan cadence" />
               </div>
 
               <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/10 mb-4 text-xs text-muted-foreground space-y-1">
@@ -495,18 +550,15 @@ export default function RecurringInvoicesPage() {
 
       {/* CREATE RECURRING DIALOG */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-ri-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><RefreshCw className="w-5 h-5 text-blue-400" />New Recurring Invoice</DialogTitle>
-            <DialogDescription id="create-ri-desc">Set up automated recurring billing for a client</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Client</Label>
-                <Select value={form.client_id} onValueChange={v => { const c = clients.find(x => x.id === v); setForm(p => ({ ...p, client_id: v, client_name: c?.name || "" })); }}>
-                  <SelectTrigger data-testid="ri-client-select"><SelectValue placeholder="Select client..." /></SelectTrigger>
-                  <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-                </Select>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-5xl flex-col overflow-hidden border-emerald-400/25 bg-[linear-gradient(145deg,rgba(9,30,25,0.98),rgba(13,15,21,0.98))] p-0" aria-describedby="create-ri-desc">
+          <WorkflowDialogHeader icon={RefreshCw} eyebrow="Revenue automation" title="Create recurring billing stream" badge="Auditable workflow" description="Set up a client billing commitment once. NexusMSP carries the source lines, schedule, delivery preferences, and future invoice history forward on every generation." />
+          <div id="create-ri-desc" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+            <section className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.035] p-4">
+              <div className="mb-3"><Label className="text-base font-semibold">Billing profile</Label><p className="mt-0.5 text-xs text-muted-foreground">Choose the client, name the commitment, and establish the recurring cadence.</p></div>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div><Label>Client *</Label>
+                <ClientAutocomplete clients={clients} value={form.client_id} testId="ri-client-select" onValueChange={client => setForm(p => ({ ...p, client_id: client.id, client_name: client.name || "" }))} />
+                <p className="mt-1 text-[10px] text-emerald-100/70">Search by client name or recorded billing email.</p>
               </div>
               <div><Label>Frequency</Label>
                 <Select value={form.frequency} onValueChange={v => setForm(p => ({ ...p, frequency: v }))}>
@@ -514,13 +566,16 @@ export default function RecurringInvoicesPage() {
                   <SelectContent>{Object.entries(FREQ_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-            </div>
-            <div><Label>Description</Label><Input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g., Monthly Managed IT Services" data-testid="ri-description" /></div>
-            <Separator />
-            <Label className="text-sm font-medium">Line Items</Label>
+              <div className="md:col-span-2"><Label>Commitment name *</Label><Input value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="e.g., Monthly Managed IT Services" data-testid="ri-description" /><p className="mt-1 text-[10px] text-muted-foreground">This appears in billing operations and helps technicians identify the commercial agreement behind each generated invoice.</p></div>
+              </div>
+            </section>
+            <section>
+            <div className="mb-3"><Label className="text-base font-semibold">Recurring line items</Label><p className="mt-0.5 text-xs text-muted-foreground">Define the fixed commercial lines. Live Acronis or Pax8 sources can be appended automatically at each billing run.</p></div>
             <LineItemsEditor items={form.line_items} setter={setForm} />
-            <Separator />
-            <div className="grid grid-cols-3 gap-3">
+            </section>
+            <section className="rounded-xl border border-border/70 bg-muted/15 p-4">
+              <div className="mb-3"><Label className="text-base font-semibold">Schedule and payment policy</Label><p className="mt-0.5 text-xs text-muted-foreground">These settings become part of the billing record and are retained with every generated invoice.</p></div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div><Label>Tax Rate (%)</Label><Input type="number" value={form.tax_rate} onChange={e => setForm(p => ({ ...p, tax_rate: e.target.value }))} /></div>
               <div><Label>Payment Terms</Label>
                 <Select value={form.payment_terms} onValueChange={v => setForm(p => ({ ...p, payment_terms: v }))}>
@@ -530,12 +585,15 @@ export default function RecurringInvoicesPage() {
               </div>
               <div><Label>Start Date</Label><Input type="date" value={form.start_date} onChange={e => setForm(p => ({ ...p, start_date: e.target.value }))} /></div>
             </div>
-            <div className="flex items-center gap-4 p-3 rounded-lg border">
+            </section>
+            <section className="space-y-3">
+              <div><Label className="text-base font-semibold">Delivery and live sources</Label><p className="mt-0.5 text-xs text-muted-foreground">Attach approved live usage when the invoice is generated and preserve each delivery attempt in the audit history.</p></div>
+            <div className="flex flex-col gap-3 rounded-xl border border-border/70 p-4 sm:flex-row sm:items-center sm:gap-4">
               <Switch checked={form.auto_send} onCheckedChange={v => setForm(p => ({ ...p, auto_send: v }))} data-testid="ri-auto-send" />
               <div className="flex-1"><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Send through the shared Microsoft 365 mailbox; delivery is recorded for every invoice.</p></div>
-              {form.auto_send && <Input value={form.auto_send_email} onChange={e => setForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
+              {form.auto_send && <Input value={form.auto_send_email} onChange={e => setForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-full sm:w-72" />}
             </div>
-            <div className="flex items-center gap-4 p-3 rounded-lg border bg-sky-500/[0.03] border-sky-500/20">
+            <div className="flex items-start gap-4 rounded-xl border border-sky-500/20 bg-sky-500/[0.03] p-4">
               <Switch checked={form.include_acronis_usage} onCheckedChange={v => setForm(p => ({ ...p, include_acronis_usage: v }))} data-testid="ri-acronis-auto-toggle" />
               <div className="flex-1 flex items-start gap-2">
                 <Cloud className="w-4 h-4 text-sky-400 mt-0.5" />
@@ -547,7 +605,7 @@ export default function RecurringInvoicesPage() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-4 p-3 rounded-lg border bg-indigo-500/[0.03] border-indigo-500/20">
+            <div className="flex items-start gap-4 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.03] p-4">
               <Switch checked={form.include_pax8_usage} onCheckedChange={v => setForm(p => ({ ...p, include_pax8_usage: v }))} data-testid="ri-pax8-auto-toggle" />
               <div className="flex-1 flex items-start gap-2">
                 <Cloud className="w-4 h-4 text-indigo-400 mt-0.5" />
@@ -559,28 +617,27 @@ export default function RecurringInvoicesPage() {
                 </div>
               </div>
             </div>
-            <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="Invoice notes..." rows={2} /></div>
+            </section>
+            <section><Label className="text-base font-semibold">Internal billing note</Label><p className="mt-0.5 text-xs text-muted-foreground">Keep a short audit note for the billing team; it is not the client-facing invoice narrative.</p><Textarea className="mt-2" value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} placeholder="e.g., Agreement reference, approval context, or billing handover" rows={3} /></section>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button onClick={createRecurring} disabled={saving} data-testid="ri-create-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Recurring Invoice"}</Button>
+            <Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={createRecurring} disabled={saving} data-testid="ri-create-submit">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create audited billing stream"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* EDIT DIALOG */}
       <Dialog open={!!showEdit} onOpenChange={v => { if (!v) setShowEdit(null); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="edit-ri-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5" />Edit Recurring Invoice</DialogTitle>
-            <DialogDescription id="edit-ri-desc">Update the recurring invoice settings</DialogDescription>
-          </DialogHeader>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-5xl flex-col overflow-hidden border-cyan-400/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0" aria-describedby="edit-ri-desc">
+          <WorkflowDialogHeader icon={Edit} eyebrow="Billing control" title="Edit recurring billing stream" badge="Changes audited" tone="cyan" description="Update the commercial commitment without losing its invoice history. Source attachments and annual indexation remain explicit before future generation runs." />
           {showEdit && (
-            <div className="space-y-4">
-              <div><Label>Description</Label><Input value={showEdit.description || ""} onChange={e => setShowEdit(p => ({ ...p, description: e.target.value }))} /></div>
-              <Label className="text-sm font-medium">Line Items</Label>
+            <div id="edit-ri-desc" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+              <section className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-4"><Label className="text-base font-semibold">Billing commitment</Label><p className="mt-0.5 text-xs text-muted-foreground">This name stays visible in billing, contract, and generated-invoice audit trails.</p><Input className="mt-3" value={showEdit.description || ""} onChange={e => setShowEdit(p => ({ ...p, description: e.target.value }))} /></section>
+              <section><div className="mb-3"><Label className="text-base font-semibold">Recurring line items</Label><p className="mt-0.5 text-xs text-muted-foreground">Updates apply to future invoice generations. Generated invoices keep their original locked lines.</p></div>
               <LineItemsEditor items={showEdit.line_items || []} setter={setShowEdit} />
-              <div className="grid grid-cols-3 gap-3">
+              </section>
+              <section className="rounded-xl border border-border/70 bg-muted/15 p-4"><div className="mb-3"><Label className="text-base font-semibold">Schedule and payment policy</Label><p className="mt-0.5 text-xs text-muted-foreground">The next run recalculates from this schedule while preserving the completed billing history.</p></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div><Label>Frequency</Label>
                   <Select value={showEdit.frequency} onValueChange={v => setShowEdit(p => ({ ...p, frequency: v }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -595,12 +652,14 @@ export default function RecurringInvoicesPage() {
                   </Select>
                 </div>
               </div>
-              <div className="flex items-center gap-4 p-3 rounded-lg border">
+              </section>
+              <section className="space-y-3"><div><Label className="text-base font-semibold">Delivery and source controls</Label><p className="mt-0.5 text-xs text-muted-foreground">These controls are recorded with the billing stream and visible to the team before the next run.</p></div>
+              <div className="flex flex-col gap-3 rounded-xl border border-border/70 p-4 sm:flex-row sm:items-center sm:gap-4">
                 <Switch checked={showEdit.auto_send} onCheckedChange={v => setShowEdit(p => ({ ...p, auto_send: v }))} />
-                <div><p className="text-sm font-medium">Auto-send</p></div>
-                {showEdit.auto_send && <Input value={showEdit.auto_send_email || ""} onChange={e => setShowEdit(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-64" />}
+                <div className="flex-1"><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Delivery is sent through the configured Microsoft 365 billing mailbox and recorded against the generated invoice.</p></div>
+                {showEdit.auto_send && <Input value={showEdit.auto_send_email || ""} onChange={e => setShowEdit(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" className="w-full sm:w-72" />}
               </div>
-              <div className="flex items-center gap-4 p-3 rounded-lg border bg-sky-500/[0.03] border-sky-500/20">
+              <div className="flex items-start gap-4 rounded-xl border border-sky-500/20 bg-sky-500/[0.03] p-4">
                 <Switch checked={!!showEdit.include_acronis_usage} onCheckedChange={v => setShowEdit(p => ({ ...p, include_acronis_usage: v }))} data-testid="ri-edit-acronis-auto-toggle" />
                 <div className="flex-1 flex items-start gap-2">
                   <Cloud className="w-4 h-4 text-sky-400 mt-0.5" />
@@ -610,7 +669,7 @@ export default function RecurringInvoicesPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4 p-3 rounded-lg border bg-indigo-500/[0.03] border-indigo-500/20">
+              <div className="flex items-start gap-4 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.03] p-4">
                 <Switch checked={!!showEdit.include_pax8_usage} onCheckedChange={v => setShowEdit(p => ({ ...p, include_pax8_usage: v }))} data-testid="ri-edit-pax8-auto-toggle" />
                 <div className="flex-1 flex items-start gap-2">
                   <Cloud className="w-4 h-4 text-indigo-400 mt-0.5" />
@@ -620,7 +679,7 @@ export default function RecurringInvoicesPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-4 p-3 rounded-lg border bg-emerald-500/[0.03] border-emerald-500/20">
+              <div className="flex flex-col gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] p-4 sm:flex-row sm:items-center sm:gap-4">
                 <Switch
                   checked={!!showEdit.indexation?.enabled}
                   onCheckedChange={v => setShowEdit(p => ({ ...p, indexation: { ...(p.indexation || {}), enabled: v, pct: p.indexation?.pct ?? 3, anniversary_date: p.indexation?.anniversary_date || p.start_date || new Date().toISOString().slice(0, 10) } }))}
@@ -641,12 +700,13 @@ export default function RecurringInvoicesPage() {
                   </div>
                 )}
               </div>
-              <div><Label>Notes</Label><Textarea value={showEdit.notes || ""} onChange={e => setShowEdit(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
+              </section>
+              <section><Label className="text-base font-semibold">Internal billing note</Label><p className="mt-0.5 text-xs text-muted-foreground">Record why the billing stream changed. The note remains available for billing review and audit.</p><Textarea className="mt-2" value={showEdit.notes || ""} onChange={e => setShowEdit(p => ({ ...p, notes: e.target.value }))} rows={3} /></section>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setShowEdit(null)}>Cancel</Button>
-            <Button onClick={saveEdit} disabled={saving}>{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save Changes"}</Button>
+            <Button className="bg-cyan-400 text-cyan-950 hover:bg-cyan-300" onClick={saveEdit} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save audited changes"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -676,13 +736,10 @@ export default function RecurringInvoicesPage() {
 
       {/* CREATE TEMPLATE DIALOG */}
       <Dialog open={showTemplateCreate} onOpenChange={setShowTemplateCreate}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby="create-tpl-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5 text-blue-400" />New Invoice Template</DialogTitle>
-            <DialogDescription id="create-tpl-desc">Create a reusable billing template</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-5xl flex-col overflow-hidden border-violet-400/25 bg-[linear-gradient(145deg,rgba(22,15,40,0.98),rgba(13,15,21,0.98))] p-0" aria-describedby="create-tpl-desc">
+          <WorkflowDialogHeader icon={FileText} eyebrow="Reusable revenue design" title="Create invoice template" badge="Reusable baseline" tone="violet" description="Build a repeatable billing baseline for a service package. Applying the template still requires a client, schedule, and delivery choice so every billing stream stays accountable." />
+          <div id="create-tpl-desc" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+            <section className="rounded-xl border border-violet-400/15 bg-violet-400/[0.035] p-4"><div className="mb-3"><Label className="text-base font-semibold">Template identity</Label><p className="mt-0.5 text-xs text-muted-foreground">Name the commercial baseline clearly enough for technicians to choose it safely.</p></div><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div><Label>Template Name</Label><Input value={templateForm.name} onChange={e => setTemplateForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Standard MSP Monthly" data-testid="tpl-name" /></div>
               <div><Label>Category</Label>
                 <Select value={templateForm.category} onValueChange={v => setTemplateForm(p => ({ ...p, category: v }))}>
@@ -698,12 +755,12 @@ export default function RecurringInvoicesPage() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            <div><Label>Description</Label><Input value={templateForm.description} onChange={e => setTemplateForm(p => ({ ...p, description: e.target.value }))} placeholder="Template description..." /></div>
-            <Separator />
-            <Label className="text-sm font-medium">Line Items</Label>
+              <div className="sm:col-span-2"><Label>Description</Label><Input value={templateForm.description} onChange={e => setTemplateForm(p => ({ ...p, description: e.target.value }))} placeholder="What is included in this reusable billing package?" /></div>
+            </div></section>
+            <section><div className="mb-3"><Label className="text-base font-semibold">Baseline line items</Label><p className="mt-0.5 text-xs text-muted-foreground">The template sets defaults only. You can refine client-specific quantities and live usage sources when it is applied.</p></div>
             <LineItemsEditor items={templateForm.line_items} setter={setTemplateForm} />
-            <div className="grid grid-cols-2 gap-3">
+            </section>
+            <section className="grid grid-cols-1 gap-3 rounded-xl border border-border/70 bg-muted/15 p-4 sm:grid-cols-2">
               <div><Label>Tax Rate (%)</Label><Input type="number" value={templateForm.tax_rate} onChange={e => setTemplateForm(p => ({ ...p, tax_rate: e.target.value }))} /></div>
               <div><Label>Payment Terms</Label>
                 <Select value={templateForm.payment_terms} onValueChange={v => setTemplateForm(p => ({ ...p, payment_terms: v }))}>
@@ -711,28 +768,23 @@ export default function RecurringInvoicesPage() {
                   <SelectContent>{Object.entries(TERMS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-            </div>
+            </section>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setShowTemplateCreate(false)}>Cancel</Button>
-            <Button onClick={createTemplate} disabled={saving} data-testid="tpl-create-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Template"}</Button>
+            <Button className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={createTemplate} disabled={saving} data-testid="tpl-create-submit">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create reusable template"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* APPLY TEMPLATE DIALOG */}
       <Dialog open={!!showApplyTemplate} onOpenChange={v => { if (!v) setShowApplyTemplate(null); }}>
-        <DialogContent className="max-w-md" aria-describedby="apply-tpl-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Plus className="w-5 h-5 text-emerald-400" />Create from Template</DialogTitle>
-            <DialogDescription id="apply-tpl-desc">Using: {showApplyTemplate?.name}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Client</Label>
-              <Select value={applyForm.client_id} onValueChange={v => { const c = clients.find(x => x.id === v); setApplyForm(p => ({ ...p, client_id: v, client_name: c?.name || "" })); }}>
-                <SelectTrigger data-testid="apply-client"><SelectValue placeholder="Select client..." /></SelectTrigger>
-                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+        <DialogContent className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-3xl flex-col overflow-hidden border-emerald-400/25 bg-[linear-gradient(145deg,rgba(9,30,25,0.98),rgba(13,15,21,0.98))] p-0" aria-describedby="apply-tpl-desc">
+          <WorkflowDialogHeader icon={Plus} eyebrow="Template deployment" title="Create stream from template" badge="Client-specific" description={`Using ${showApplyTemplate?.name || "the selected template"}. Confirm the client, billing cadence, and delivery preference before the reusable baseline becomes a live billing commitment.`} />
+          <div id="apply-tpl-desc" className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+            <section className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.035] p-4"><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><div className="sm:col-span-2"><Label>Client *</Label>
+              <ClientAutocomplete clients={clients} value={applyForm.client_id} testId="apply-client" onValueChange={client => setApplyForm(p => ({ ...p, client_id: client.id, client_name: client.name || "" }))} />
+              <p className="mt-1 text-[10px] text-emerald-100/70">Search by client name or billing email.</p>
             </div>
             <div><Label>Frequency</Label>
               <Select value={applyForm.frequency} onValueChange={v => setApplyForm(p => ({ ...p, frequency: v }))}>
@@ -741,15 +793,16 @@ export default function RecurringInvoicesPage() {
               </Select>
             </div>
             <div><Label>Start Date</Label><Input type="date" value={applyForm.start_date} onChange={e => setApplyForm(p => ({ ...p, start_date: e.target.value }))} /></div>
-            <div className="flex items-center gap-3 p-3 rounded-lg border">
+            </div></section>
+            <div className="flex flex-col gap-3 rounded-xl border border-border/70 p-4 sm:flex-row sm:items-center">
               <Switch checked={applyForm.auto_send} onCheckedChange={v => setApplyForm(p => ({ ...p, auto_send: v }))} />
-              <span className="text-sm">Auto-send invoices when generated (delivery is recorded)</span>
+              <div><p className="text-sm font-medium">Auto-send invoices</p><p className="text-[10px] text-muted-foreground">Delivery is recorded on each generated invoice.</p></div>
             </div>
             {applyForm.auto_send && <div><Label>Invoice recipient email</Label><Input type="email" value={applyForm.auto_send_email} onChange={e => setApplyForm(p => ({ ...p, auto_send_email: e.target.value }))} placeholder="accounts@client.com" /></div>}
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setShowApplyTemplate(null)}>Cancel</Button>
-            <Button onClick={applyTemplate} disabled={saving} data-testid="apply-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Recurring Invoice"}</Button>
+            <Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={applyTemplate} disabled={saving} data-testid="apply-submit">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create billing stream"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

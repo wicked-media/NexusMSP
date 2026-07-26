@@ -17,11 +17,12 @@ import (
 	"nexusagent/internal/config"
 	"nexusagent/internal/enroll"
 	"nexusagent/internal/heartbeat"
+	"nexusagent/internal/identity"
 	"nexusagent/internal/transport"
 )
 
 // Version is injected at build time via -ldflags.
-var Version = "0.1.5-nexus-shield"
+var Version = "0.1.7-nexus-identity"
 
 func main() {
 	var (
@@ -126,6 +127,20 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	}
 
 	tr.SetToken(cfg.AgentToken)
+	if _, _, err := identity.Ensure(cfg); err != nil {
+		log.Printf("[identity] WARN: device identity initialisation failed: %v", err)
+	} else if identity.NeedsRotation(cfg, 30*24*time.Hour) {
+		if err := enroll.Renew(tr, cfg); err != nil {
+			log.Printf("[identity] WARN: certificate renewal failed; token-compatible transport remains active: %v", err)
+		}
+	}
+	if cfg.DeviceIdentity != nil && cfg.DeviceIdentity.CertificatePath != "" {
+		if err := tr.SetClientIdentity(cfg.DeviceIdentity.CertificatePath, cfg.DeviceIdentity.PrivateKeyPath); err != nil {
+			log.Printf("[identity] WARN: mTLS identity unavailable; token-compatible transport remains active: %v", err)
+		} else {
+			log.Printf("[identity] client certificate active for %s", cfg.DeviceIdentity.SPIFFEID)
+		}
+	}
 
 	// Background loops
 	hb := heartbeat.NewLoop(tr, cfg, Version, 60*time.Second)

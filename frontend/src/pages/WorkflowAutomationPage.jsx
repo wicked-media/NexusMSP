@@ -1,338 +1,695 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
-import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  Workflow, Plus, Trash2, Play, Pause, Settings, Zap, ChevronRight,
-  ArrowRight, ArrowDown, RefreshCw, Loader2, CheckCircle, XCircle,
-  Clock, Mail, MessageSquare, Monitor, Shield, AlertTriangle, DollarSign,
-  Terminal, Globe, Tag, RotateCcw, GitBranch, Eye, Copy, Search
+  Activity, AlertTriangle, ArrowDown, Blocks, Bot, Box, CheckCircle2,
+  ChevronRight, ClipboardCheck, Clock3, Code2, Copy, FileClock, GitBranch,
+  History, Layers3, Loader2, LockKeyhole, PackageCheck, Play, Plus,
+  RefreshCw, Save, Search, Settings2, ShieldCheck, Sparkles, Trash2,
+  Workflow, XCircle, Zap,
 } from "lucide-react";
 
-const ACTION_ICONS = {
-  assign_ticket: Zap, change_priority: ArrowRight, add_note: MessageSquare,
-  send_email: Mail, send_slack: MessageSquare, send_teams: MessageSquare,
-  create_ticket: Plus, escalate: AlertTriangle, run_script: Terminal,
-  webhook: Globe, tag_device: Tag, reboot_device: RotateCcw,
-  wait: Clock, condition: GitBranch,
-};
+import { API, useAuth } from "@/App";
+import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 
-const TRIGGER_ICONS = {
-  ticket_created: Zap, ticket_updated: RefreshCw, ticket_sla_breach: Clock,
-  device_offline: XCircle, device_warning: AlertTriangle, backup_failed: Shield,
-  alert_triggered: AlertTriangle, client_health_change: Monitor,
-  invoice_overdue: DollarSign, schedule: Clock, patch_available: Shield, new_client: Plus,
+const PAGE_TABS = ["studio", "marketplace", "runtime", "simulations"];
+const EMPTY_CREATE = { name: "", description: "", category: "Custom" };
+const RISK_STYLE = {
+  low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+  medium: "border-amber-500/30 bg-amber-500/10 text-amber-200",
+  high: "border-rose-500/30 bg-rose-500/10 text-rose-200",
 };
+const STATUS_STYLE = {
+  ready_for_approval: "border-sky-500/30 bg-sky-500/10 text-sky-200",
+  safe_to_run: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
+  blocked: "border-rose-500/30 bg-rose-500/10 text-rose-200",
+};
+const CATEGORY_ICON = {
+  Flow: GitBranch,
+  AI: Bot,
+  Governance: ShieldCheck,
+  Tickets: ClipboardCheck,
+  Communications: Activity,
+  "Managed assets": Settings2,
+  "Microsoft 365": Layers3,
+  Voice: Zap,
+  Documentation: FileClock,
+  Integrations: Blocks,
+};
+const titleCase = (value) => String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+const readableDate = (value) => value ? new Date(value).toLocaleString() : "Not yet";
+
+function StepCard({ action, index, definition, onRemove, onConfig }) {
+  const Icon = CATEGORY_ICON[definition?.category] || Zap;
+  return (
+    <div className="relative rounded-xl border border-border/80 bg-card/80 p-4" data-testid={`automation-step-${index + 1}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/20 bg-emerald-500/10">
+            <Icon className="h-4 w-4 text-emerald-300" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-medium">{definition?.label || titleCase(action.type)}</p>
+              <Badge variant="outline" className="text-[10px]">Step {index + 1}</Badge>
+              <Badge variant="outline" className={RISK_STYLE[(definition?.risk || 0) >= 4 ? "high" : (definition?.risk || 0) >= 2 ? "medium" : "low"]}>
+                {(definition?.risk || 0) >= 4 ? "High" : (definition?.risk || 0) >= 2 ? "Medium" : "Low"} risk
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">{definition?.category || "Automation"} · rollback captured automatically</p>
+          </div>
+        </div>
+        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => onRemove(action.id)} aria-label={`Remove ${definition?.label || action.type}`}>
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      {!!definition?.fields?.length && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {definition.fields.map((field) => (
+            <div key={field}>
+              <Label className="text-[11px] text-muted-foreground">{titleCase(field)}</Label>
+              <Input
+                className="mt-1 h-9 text-xs"
+                value={action.config?.[field] || ""}
+                onChange={(event) => onConfig(action.id, field, event.target.value)}
+                placeholder={`Set ${titleCase(field).toLowerCase()}`}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimulationDialog({ simulation, open, onOpenChange, onSubmit, submitting }) {
+  const [justification, setJustification] = useState("");
+  useEffect(() => { if (open) setJustification(""); }, [open, simulation?.id]);
+  if (!simulation) return null;
+  const gaps = simulation.summary?.configuration_gaps || 0;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] max-w-5xl overflow-hidden p-0" data-testid="simulation-results-dialog">
+        <div className="border-b border-border/80 bg-gradient-to-br from-slate-950 via-slate-950 to-cyan-950/40 px-6 py-5">
+          <DialogHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-300">Safe execution preview · no changes made</p>
+                <DialogTitle className="mt-2 flex items-center gap-2 text-xl"><Sparkles className="h-5 w-5 text-cyan-300" />Simulation Mode</DialogTitle>
+                <DialogDescription className="mt-2">{simulation.workflow_name} · {simulation.id}</DialogDescription>
+              </div>
+              <div className="flex gap-2">
+                <Badge variant="outline" className={RISK_STYLE[simulation.risk_level]}>{titleCase(simulation.risk_level)} risk</Badge>
+                <Badge variant="outline" className={STATUS_STYLE[simulation.status]}>{titleCase(simulation.status)}</Badge>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              ["Proposed steps", simulation.summary?.steps || 0],
+              ["Systems touched", simulation.summary?.systems || 0],
+              ["Config gaps", gaps],
+              ["Executed", "No"],
+            ].map(([label, value]) => <div key={label} className="rounded-lg border border-white/10 bg-white/[0.035] p-3"><p className="text-lg font-semibold">{value}</p><p className="text-[10px] uppercase tracking-wider text-slate-400">{label}</p></div>)}
+          </div>
+        </div>
+        <ScrollArea className="max-h-[55vh]">
+          <div className="space-y-5 p-6">
+            {gaps > 0 && (
+              <div className="rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
+                <p className="flex items-center gap-2 font-medium text-amber-100"><AlertTriangle className="h-4 w-4" />Configuration required before approval</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {simulation.missing_configuration?.flatMap((item) => item.fields.map((field) => <Badge key={`${item.step}-${field}`} variant="outline" className="border-amber-500/25 text-amber-200">Step {item.step}: {titleCase(field)}</Badge>))}
+                </div>
+              </div>
+            )}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Predicted change plan</p>
+              <div className="mt-3 space-y-3">
+                {simulation.steps?.map((step) => (
+                  <div key={step.step} className="rounded-xl border border-border/80 bg-muted/[0.08] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-medium">{step.step}. {step.label}</p>
+                      <Badge variant="outline" className={RISK_STYLE[step.risk]}>{titleCase(step.risk)} risk</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">Target: {String(step.target)}</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-lg border border-border/70 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Before</p><p className="mt-1 text-xs text-muted-foreground">{step.before}</p></div>
+                      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300">After</p><p className="mt-1 text-xs text-muted-foreground">{step.after}</p></div>
+                      <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/[0.04] p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-300">Rollback</p><p className="mt-1 text-xs text-muted-foreground">{step.rollback}</p></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {simulation.requires_approval && !gaps && (
+              <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.05] p-4">
+                <Label>Approval justification or CAB reference</Label>
+                <Textarea className="mt-2" rows={3} value={justification} onChange={(event) => setJustification(event.target.value)} placeholder="Explain why this automation should proceed and the validation expected after execution." />
+                <p className="mt-2 text-xs text-muted-foreground">Submitting creates a linked Change Management record. It does not execute the workflow.</p>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+        <DialogFooter className="border-t border-border/80 px-6 py-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close preview</Button>
+          {simulation.requires_approval && !gaps && <Button onClick={() => onSubmit(justification)} disabled={submitting || justification.trim().length < 8}>{submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Submit to Change Management</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function WorkflowAutomationPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const requestedTab = new URLSearchParams(location.search).get("tab");
+  const [tab, setTab] = useState(PAGE_TABS.includes(requestedTab) ? requestedTab : "studio");
   const [workflows, setWorkflows] = useState([]);
   const [triggers, setTriggers] = useState([]);
   const [actions, setActions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [templates, setTemplates] = useState([]);
+  const [simulations, setSimulations] = useState([]);
+  const [runs, setRuns] = useState([]);
+  const [runtimeHealth, setRuntimeHealth] = useState(null);
+  const [selectedRun, setSelectedRun] = useState(null);
+  const [runReason, setRunReason] = useState("");
+  const [runtimeBusy, setRuntimeBusy] = useState("");
+  const [clients, setClients] = useState([]);
   const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [packSearch, setPackSearch] = useState("");
   const [editWf, setEditWf] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", description: "" });
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState(null);
+  const [installing, setInstalling] = useState("");
+  const [simulation, setSimulation] = useState(null);
+  const [simulationOpen, setSimulationOpen] = useState(false);
+  const [simulating, setSimulating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [simulationClientId, setSimulationClientId] = useState("");
+  const [simulationTarget, setSimulationTarget] = useState("");
+  const [editorMode, setEditorMode] = useState("visual");
+  const [codeDraft, setCodeDraft] = useState("");
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     try {
-      const [wfRes, trigRes, actRes, statsRes] = await Promise.all([
+      const [wfResult, triggerResult, actionResult, statsResult, templateResult, simulationResult, clientResult, runResult, runtimeResult] = await Promise.all([
         axios.get(`${API}/workflows`, { headers }),
         axios.get(`${API}/workflows/triggers`, { headers }),
         axios.get(`${API}/workflows/actions`, { headers }),
         axios.get(`${API}/workflows/stats/overview`, { headers }),
+        axios.get(`${API}/workflows/templates`, { headers }),
+        axios.get(`${API}/workflows/simulations/recent`, { headers }),
+        axios.get(`${API}/clients`, { headers }),
+        axios.get(`${API}/workflows/runs?limit=150`, { headers }),
+        axios.get(`${API}/workflows/runtime/health`, { headers }),
       ]);
-      setWorkflows(wfRes.data);
-      setTriggers(trigRes.data);
-      setActions(actRes.data);
-      setStats(statsRes.data);
-    } catch { toast.error("Failed to load workflows"); }
-    finally { setLoading(false); }
+      setWorkflows(wfResult.data || []);
+      setTriggers(triggerResult.data || []);
+      setActions(actionResult.data || []);
+      setStats(statsResult.data || null);
+      setTemplates(templateResult.data || []);
+      setSimulations(simulationResult.data || []);
+      setClients(clientResult.data || []);
+      setRuns(runResult.data || []);
+      setRuntimeHealth(runtimeResult.data || null);
+      setSelectedRun((current) => current ? (runResult.data || []).find((item) => item.id === current.id) || current : null);
+      setEditWf((current) => {
+        if (!current) return wfResult.data?.[0] || null;
+        return wfResult.data?.find((item) => item.id === current.id) || current;
+      });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Automation Studio could not be loaded");
+    } finally {
+      setLoading(false);
+    }
   }, [headers]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const next = PAGE_TABS.includes(requestedTab) ? requestedTab : "studio";
+    setTab(next);
+  }, [requestedTab]);
+  useEffect(() => {
+    if (!editWf) { setCodeDraft(""); return; }
+    setCodeDraft(JSON.stringify({ trigger: editWf.trigger || {}, conditions: editWf.conditions || [], actions: editWf.actions || [] }, null, 2));
+  }, [editWf?.id, editorMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const selectTab = (next) => {
+    setTab(next);
+    navigate(next === "studio" ? "/workflow-automation" : `/workflow-automation?tab=${next}`, { replace: true });
+  };
+  const chooseWorkflow = (workflow) => {
+    setEditWf(workflow);
+    setEditorMode("visual");
+    setSimulation(null);
+  };
   const createWorkflow = async () => {
-    if (!createForm.name.trim()) { toast.error("Name required"); return; }
+    if (createForm.name.trim().length < 3) { toast.error("Enter a clear workflow name"); return; }
     setSaving(true);
     try {
-      const res = await axios.post(`${API}/workflows`, createForm, { headers });
-      toast.success("Workflow created");
+      const response = await axios.post(`${API}/workflows`, createForm, { headers });
+      toast.success("Draft workflow created");
       setShowCreate(false);
-      setCreateForm({ name: "", description: "" });
-      setEditWf(res.data);
-      fetchData();
-    } catch { toast.error("Failed to create workflow"); }
-    finally { setSaving(false); }
+      setCreateForm(EMPTY_CREATE);
+      await load({ quiet: true });
+      setEditWf(response.data);
+      selectTab("studio");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Workflow could not be created");
+    } finally { setSaving(false); }
   };
-
-  const toggleWorkflow = async (wfId) => {
-    try {
-      const res = await axios.post(`${API}/workflows/${wfId}/toggle`, {}, { headers });
-      toast.success(res.data.enabled ? "Workflow enabled" : "Workflow disabled");
-      fetchData();
-    } catch { toast.error("Failed to toggle"); }
-  };
-
-  const deleteWorkflow = async (wfId) => {
-    if (!window.confirm("Delete this workflow?")) return;
-    try {
-      await axios.delete(`${API}/workflows/${wfId}`, { headers });
-      toast.success("Workflow deleted");
-      if (editWf?.id === wfId) setEditWf(null);
-      fetchData();
-    } catch { toast.error("Failed to delete"); }
-  };
-
-  const saveWorkflow = async () => {
-    if (!editWf) return;
+  const saveWorkflow = async ({ quiet = false } = {}) => {
+    if (!editWf) return false;
     setSaving(true);
     try {
       await axios.put(`${API}/workflows/${editWf.id}`, editWf, { headers });
-      toast.success("Workflow saved");
-      fetchData();
-    } catch { toast.error("Failed to save"); }
-    finally { setSaving(false); }
+      if (!quiet) toast.success("Workflow draft saved");
+      await load({ quiet: true });
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Workflow could not be saved");
+      return false;
+    } finally { setSaving(false); }
   };
-
-  const testWorkflow = async () => {
-    if (!editWf) return;
+  const applyCodeDraft = () => {
     try {
-      const res = await axios.post(`${API}/workflows/${editWf.id}/test`, {}, { headers });
-      setTestResult(res.data);
-      toast.success("Test completed");
-      fetchData();
-    } catch { toast.error("Test failed"); }
+      const parsed = JSON.parse(codeDraft);
+      setEditWf((current) => ({ ...current, trigger: parsed.trigger || {}, conditions: parsed.conditions || [], actions: parsed.actions || [] }));
+      toast.success("JSON contract applied to the draft");
+      setEditorMode("visual");
+    } catch {
+      toast.error("The JSON contract is not valid");
+    }
+  };
+  const addAction = (type) => {
+    setEditWf((current) => ({ ...current, actions: [...(current.actions || []), { id: `act-${Date.now()}`, type, config: {} }] }));
+  };
+  const removeAction = (id) => setEditWf((current) => ({ ...current, actions: (current.actions || []).filter((item) => item.id !== id) }));
+  const updateActionConfig = (id, field, value) => setEditWf((current) => ({
+    ...current,
+    actions: (current.actions || []).map((item) => item.id === id ? { ...item, config: { ...(item.config || {}), [field]: value } } : item),
+  }));
+  const addCondition = () => setEditWf((current) => ({ ...current, conditions: [...(current.conditions || []), { field: "", operator: "equals", value: "" }] }));
+  const updateCondition = (index, field, value) => setEditWf((current) => ({ ...current, conditions: (current.conditions || []).map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) }));
+  const removeCondition = (index) => setEditWf((current) => ({ ...current, conditions: (current.conditions || []).filter((_, itemIndex) => itemIndex !== index) }));
+  const installPack = async (pack) => {
+    setInstalling(pack.id);
+    try {
+      const response = await axios.post(`${API}/workflows/templates/${pack.id}/install`, {}, { headers });
+      toast.success(`${pack.name} installed as a disabled draft`);
+      await load({ quiet: true });
+      setEditWf(response.data);
+      selectTab("studio");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Automation pack could not be installed");
+    } finally { setInstalling(""); }
+  };
+  const runSimulation = async () => {
+    if (!editWf) return;
+    setSimulating(true);
+    try {
+      const saved = await saveWorkflow({ quiet: true });
+      if (!saved) return;
+      const client = clients.find((item) => item.id === simulationClientId);
+      const response = await axios.post(`${API}/workflows/${editWf.id}/simulate`, {
+        context: { client_id: simulationClientId, client_name: client?.name || "", target_name: simulationTarget },
+      }, { headers });
+      setSimulation(response.data);
+      setSimulationOpen(true);
+      toast.success("Simulation complete — no changes were made");
+      await load({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Simulation could not be completed");
+    } finally { setSimulating(false); }
+  };
+  const submitApproval = async (justification) => {
+    if (!editWf || !simulation) return;
+    setSubmitting(true);
+    try {
+      const response = await axios.post(`${API}/workflows/${editWf.id}/submit-approval`, {
+        simulation_id: simulation.id,
+        justification,
+        client_id: simulationClientId,
+      }, { headers });
+      toast.success(`${response.data.id} submitted to Change Management`);
+      setSimulationOpen(false);
+      await load({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Approval request could not be submitted");
+    } finally { setSubmitting(false); }
+  };
+  const toggleWorkflow = async (workflow) => {
+    try {
+      const response = await axios.post(`${API}/workflows/${workflow.id}/toggle`, {}, { headers });
+      toast.success(response.data.enabled ? "Workflow enabled" : "Workflow paused");
+      await load({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Workflow state could not be changed");
+    }
+  };
+  const deleteWorkflow = async () => {
+    if (!editWf || !window.confirm(`Delete "${editWf.name}"? Its audit and simulation history will remain.`)) return;
+    try {
+      await axios.delete(`${API}/workflows/${editWf.id}`, { headers });
+      toast.success("Workflow deleted");
+      setEditWf(null);
+      await load({ quiet: true });
+    } catch (error) { toast.error(error.response?.data?.detail || "Workflow could not be deleted"); }
+  };
+  const copyWorkflow = async (workflow) => {
+    try {
+      const response = await axios.post(`${API}/workflows`, { ...workflow, name: `${workflow.name} copy`, enabled: false }, { headers });
+      toast.success("Workflow copied as a disabled draft");
+      await load({ quiet: true });
+      setEditWf(response.data);
+    } catch (error) { toast.error(error.response?.data?.detail || "Workflow could not be copied"); }
+  };
+  const queueWorkflow = async () => {
+    if (!editWf) return;
+    setRuntimeBusy("queue");
+    try {
+      const client = clients.find((item) => item.id === simulationClientId);
+      const response = await axios.post(`${API}/workflows/${editWf.id}/run`, {
+        context: { client_id: simulationClientId, client_name: client?.name || "", target_name: simulationTarget },
+      }, { headers });
+      toast.success(`${response.data.id} durably queued`);
+      await load({ quiet: true });
+      setSelectedRun(response.data);
+      selectTab("runtime");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Workflow could not be queued");
+    } finally { setRuntimeBusy(""); }
+  };
+  const runControl = async (action) => {
+    if (!selectedRun) return;
+    if (runReason.trim().length < 8) { toast.error("Record a clear reason of at least 8 characters"); return; }
+    setRuntimeBusy(action);
+    try {
+      const response = await axios.post(`${API}/workflows/runs/${selectedRun.id}/${action}`, { reason: runReason }, { headers });
+      toast.success(action === "approve" ? "Run approved and resumed" : action === "reject" ? "Run rejected" : action === "retry" ? "Run queued for retry" : "Compensation completed");
+      setRunReason("");
+      await load({ quiet: true });
+      if (action === "compensate") setSelectedRun((current) => ({ ...current, compensation_status: response.data.status, compensation: response.data }));
+    } catch (error) {
+      toast.error(error.response?.data?.detail || `Run could not ${action}`);
+    } finally { setRuntimeBusy(""); }
   };
 
-  const addAction = (actionType) => {
-    const newAction = { id: `act-${Date.now()}`, type: actionType, config: {} };
-    setEditWf(prev => ({ ...prev, actions: [...(prev.actions || []), newAction] }));
-  };
+  const filteredWorkflows = workflows.filter((item) => [item.name, item.description, item.category].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase()));
+  const filteredPacks = templates.filter((item) => [item.name, item.description, item.category].filter(Boolean).join(" ").toLowerCase().includes(packSearch.toLowerCase()));
 
-  const removeAction = (actionId) => {
-    setEditWf(prev => ({ ...prev, actions: (prev.actions || []).filter(a => a.id !== actionId) }));
-  };
-
-  const updateActionConfig = (actionId, key, value) => {
-    setEditWf(prev => ({
-      ...prev,
-      actions: (prev.actions || []).map(a => a.id === actionId ? { ...a, config: { ...a.config, [key]: value } } : a),
-    }));
-  };
-
-  const filtered = workflows.filter(w => w.name?.toLowerCase().includes(search.toLowerCase()));
-
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-cyan-300" /></div>;
 
   return (
-    <div className="space-y-5" data-testid="workflow-automation-page">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2"><Workflow className="w-6 h-6 text-violet-400" />Workflow Automation</h1>
-          <p className="text-muted-foreground mt-1">Build automated workflows with triggers, conditions, and actions</p>
-        </div>
-        <Button onClick={() => setShowCreate(true)} data-testid="create-workflow-btn"><Plus className="w-4 h-4 mr-1" />New Workflow</Button>
+    <div className="space-y-6" data-testid="automation-studio-page">
+      <OperationalPageHeader
+        eyebrow="Automation workspace · governed orchestration"
+        title="Automation Studio"
+        description="Build no-code or JSON workflows, install verified packs, preview every outcome, and hand material changes into an independent approval trail."
+        icon={Workflow}
+        tone="cyan"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => navigate("/change-management")}><ShieldCheck className="mr-1.5 h-4 w-4" />Change Management</Button>
+          <Button variant="outline" size="sm" onClick={() => load()}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-1.5 h-4 w-4" />New workflow</Button>
+        </>}
+      />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+        <HeroTile label="Workflows" value={stats?.total || 0} icon={Workflow} glow="cyan" subtitle="Governed definitions" onClick={() => selectTab("studio")} active={tab === "studio"} />
+        <HeroTile label="Enabled" value={stats?.active || 0} icon={Zap} glow="emerald" subtitle="Approved and active" />
+        <HeroTile label="Installed packs" value={stats?.installed_packs || 0} icon={PackageCheck} glow="violet" subtitle="Nexus verified" onClick={() => selectTab("marketplace")} active={tab === "marketplace"} />
+        <HeroTile label="Simulations" value={stats?.simulations || 0} icon={Sparkles} glow="sky" subtitle="Zero-change previews" onClick={() => selectTab("simulations")} active={tab === "simulations"} />
+        <HeroTile label="Awaiting approval" value={stats?.pending_approvals || 0} icon={ClipboardCheck} glow={(stats?.pending_approvals || 0) ? "amber" : "zinc"} subtitle="Change review queue" onClick={() => navigate("/change-management")} />
+        <HeroTile label="Runtime" value={runtimeHealth?.active || 0} icon={Activity} glow={(runtimeHealth?.failed || 0) ? "rose" : "indigo"} subtitle={`${runtimeHealth?.failed || 0} failed · ${runtimeHealth?.completed || 0} completed`} onClick={() => selectTab("runtime")} active={tab === "runtime"} />
       </div>
 
-      {/* Stats */}
-      {stats && (
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { label: "Total Workflows", value: stats.total, icon: Workflow, color: "text-violet-400", bg: "bg-violet-500/10" },
-            { label: "Active", value: stats.active, icon: Play, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-            { label: "Inactive", value: stats.inactive, icon: Pause, color: "text-zinc-400", bg: "bg-zinc-500/10" },
-            { label: "Total Executions", value: stats.total_executions, icon: Zap, color: "text-amber-400", bg: "bg-amber-500/10" },
-          ].map((s, i) => (
-            <Card key={`s-${i}`}>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center`}><s.icon className={`w-5 h-5 ${s.color}`} /></div>
-                <div><p className="text-2xl font-bold">{s.value}</p><p className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.label}</p></div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <Tabs value={tab} onValueChange={selectTab}>
+        <TabsList className="grid w-full grid-cols-4 lg:w-[820px]">
+          <TabsTrigger value="studio"><Workflow className="mr-1.5 h-4 w-4" />Studio</TabsTrigger>
+          <TabsTrigger value="marketplace"><Box className="mr-1.5 h-4 w-4" />Automation Marketplace</TabsTrigger>
+          <TabsTrigger value="runtime"><Activity className="mr-1.5 h-4 w-4" />Runtime</TabsTrigger>
+          <TabsTrigger value="simulations"><History className="mr-1.5 h-4 w-4" />Simulation history</TabsTrigger>
+        </TabsList>
 
-      <div className="grid grid-cols-12 gap-4">
-        {/* Workflow List */}
-        <div className="col-span-4 space-y-3">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search workflows..." value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-          <ScrollArea className="h-[calc(100vh-340px)]">
-            <div className="space-y-2">
-              {filtered.map(wf => (
-                <Card key={wf.id}
-                  className={`cursor-pointer transition-all hover:border-primary/30 ${editWf?.id === wf.id ? "border-primary ring-1 ring-primary" : ""}`}
-                  onClick={() => { setEditWf(wf); setTestResult(null); }}
-                  data-testid={`workflow-${wf.id}`}>
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-sm truncate">{wf.name}</span>
-                      <Switch checked={wf.enabled} onCheckedChange={() => toggleWorkflow(wf.id)} onClick={e => e.stopPropagation()} />
-                    </div>
-                    <p className="text-[10px] text-muted-foreground truncate">{wf.description || "No description"}</p>
-                    <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
-                      <Badge variant="outline" className="text-[9px]">{wf.trigger?.type || "No trigger"}</Badge>
-                      <span>{(wf.actions || []).length} actions</span>
-                      <span className="ml-auto">{wf.execution_count || 0} runs</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-              {filtered.length === 0 && <p className="text-center text-muted-foreground py-8 text-sm">No workflows yet</p>}
-            </div>
-          </ScrollArea>
-        </div>
-
-        {/* Workflow Editor */}
-        <div className="col-span-8">
-          {editWf ? (
-            <Card data-testid="workflow-editor">
-              <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                <div>
-                  <Input value={editWf.name} onChange={e => setEditWf(prev => ({ ...prev, name: e.target.value }))}
-                    className="text-lg font-bold border-0 p-0 h-auto focus-visible:ring-0 shadow-none" data-testid="workflow-name-input" />
-                  <Input value={editWf.description || ""} onChange={e => setEditWf(prev => ({ ...prev, description: e.target.value }))}
-                    className="text-sm text-muted-foreground border-0 p-0 h-auto focus-visible:ring-0 shadow-none mt-1" placeholder="Add description..." />
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={testWorkflow} data-testid="test-workflow-btn"><Play className="w-3 h-3 mr-1" />Test</Button>
-                  <Button size="sm" onClick={saveWorkflow} disabled={saving} data-testid="save-workflow-btn">
-                    {saving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <CheckCircle className="w-3 h-3 mr-1" />}Save
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => deleteWorkflow(editWf.id)}><Trash2 className="w-3 h-3" /></Button>
-                </div>
+        <TabsContent value="studio" className="mt-5">
+          <div className="grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]">
+            <Card className="overflow-hidden">
+              <CardHeader className="border-b border-border/70 pb-3">
+                <div className="flex items-center justify-between gap-3"><CardTitle className="text-base">Workflow library</CardTitle><Badge variant="outline">{filteredWorkflows.length}</Badge></div>
+                <div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" placeholder="Search workflows" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Trigger */}
-                <div className="p-4 rounded-xl border-2 border-dashed border-violet-500/30 bg-violet-500/5">
-                  <Label className="text-xs text-violet-400 uppercase tracking-wider flex items-center gap-1"><Zap className="w-3 h-3" />When (Trigger)</Label>
-                  <Select value={editWf.trigger?.type || ""} onValueChange={v => setEditWf(prev => ({ ...prev, trigger: { ...prev.trigger, type: v } }))}>
-                    <SelectTrigger className="mt-2" data-testid="trigger-select"><SelectValue placeholder="Select trigger..." /></SelectTrigger>
-                    <SelectContent>
-                      {triggers.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {editWf.trigger?.type && (
-                    <div className="mt-2 text-xs text-muted-foreground">
-                      Category: {triggers.find(t => t.id === editWf.trigger.type)?.category}
+              <ScrollArea className="h-[680px]">
+                <CardContent className="space-y-2 p-3">
+                  {filteredWorkflows.map((workflow) => (
+                    <button key={workflow.id} type="button" onClick={() => chooseWorkflow(workflow)} className={`w-full rounded-xl border p-3 text-left transition-all ${editWf?.id === workflow.id ? "border-cyan-500/40 bg-cyan-500/[0.07] shadow-sm shadow-cyan-500/10" : "border-border/70 hover:border-cyan-500/25 hover:bg-muted/20"}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0"><p className="truncate text-sm font-medium">{workflow.name}</p><p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{workflow.description || "No description recorded"}</p></div>
+                        <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${workflow.enabled ? "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.65)]" : "bg-slate-600"}`} />
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <Badge variant="outline" className="text-[9px]">{titleCase(workflow.trigger?.type || "No trigger")}</Badge>
+                        <Badge variant="outline" className="text-[9px]">{workflow.actions?.length || 0} steps</Badge>
+                        {workflow.source_pack_id && <Badge variant="outline" className="border-violet-500/25 text-[9px] text-violet-200">Pack</Badge>}
+                      </div>
+                    </button>
+                  ))}
+                  {!filteredWorkflows.length && <div className="py-12 text-center"><Workflow className="mx-auto h-8 w-8 text-muted-foreground/40" /><p className="mt-3 text-sm text-muted-foreground">No matching workflows</p></div>}
+                </CardContent>
+              </ScrollArea>
+            </Card>
+
+            {editWf ? (
+              <Card className="overflow-hidden" data-testid="workflow-editor">
+                <div className="border-b border-border/80 bg-gradient-to-r from-slate-950/80 to-cyan-950/20 p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <Input value={editWf.name || ""} onChange={(event) => setEditWf((current) => ({ ...current, name: event.target.value }))} className="h-auto border-0 bg-transparent p-0 text-xl font-semibold shadow-none focus-visible:ring-0" />
+                      <Input value={editWf.description || ""} onChange={(event) => setEditWf((current) => ({ ...current, description: event.target.value }))} className="mt-2 h-auto border-0 bg-transparent p-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0" placeholder="Explain the business outcome and intended scope" />
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">{editWf.category || "Custom"}</Badge>
+                        <Badge variant="outline" className={editWf.approval_status === "approved" ? RISK_STYLE.low : editWf.approval_status === "pending_review" ? RISK_STYLE.medium : ""}>{titleCase(editWf.approval_status || "Draft")}</Badge>
+                        <span className="text-xs text-muted-foreground">Last simulated {readableDate(editWf.last_simulated_at)}</span>
+                      </div>
                     </div>
-                  )}
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => copyWorkflow(editWf)}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy</Button>
+                      <Button variant="outline" size="sm" onClick={() => saveWorkflow()} disabled={saving}><Save className="mr-1.5 h-3.5 w-3.5" />Save draft</Button>
+                      <Button size="sm" onClick={runSimulation} disabled={saving || simulating}><Sparkles className="mr-1.5 h-3.5 w-3.5" />{simulating ? "Simulating…" : "Simulate"}</Button>
+                      <Button size="sm" variant="outline" onClick={queueWorkflow} disabled={runtimeBusy === "queue" || !editWf.enabled || !["approved", "not_required"].includes(editWf.approval_status)}>
+                        {runtimeBusy === "queue" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Play className="mr-1.5 h-3.5 w-3.5" />}Run now
+                      </Button>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Visual Flow Arrow */}
-                <div className="flex justify-center"><ArrowDown className="w-5 h-5 text-muted-foreground" /></div>
+                <CardContent className="space-y-5 p-5">
+                  <div className="flex flex-col gap-3 rounded-xl border border-border/80 bg-muted/[0.06] p-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="grid flex-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label>Simulation client context</Label>
+                        <Select value={simulationClientId || "none"} onValueChange={(value) => setSimulationClientId(value === "none" ? "" : value)}>
+                          <SelectTrigger className="mt-1"><SelectValue placeholder="Internal or choose client" /></SelectTrigger>
+                          <SelectContent><SelectItem value="none">Internal / no client</SelectItem>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div><Label>Target or person</Label><Input className="mt-1" value={simulationTarget} onChange={(event) => setSimulationTarget(event.target.value)} placeholder="Optional user, asset, site, or request" /></div>
+                    </div>
+                    <div className="flex items-center gap-2"><Switch checked={!!editWf.enabled} onCheckedChange={() => toggleWorkflow(editWf)} /><div><p className="text-sm font-medium">Enabled</p><p className="text-[10px] text-muted-foreground">Requires simulation and approval</p></div></div>
+                  </div>
 
-                {/* Actions List */}
-                <div className="space-y-2">
-                  <Label className="text-xs text-emerald-400 uppercase tracking-wider flex items-center gap-1"><Play className="w-3 h-3" />Then (Actions)</Label>
-                  {(editWf.actions || []).map((action, idx) => {
-                    const ActIcon = ACTION_ICONS[action.type] || Zap;
-                    const actionDef = actions.find(a => a.id === action.type);
-                    return (
-                      <div key={action.id} className="p-3 rounded-lg border bg-card hover:border-primary/30 transition-colors" data-testid={`action-${idx}`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center"><ActIcon className="w-4 h-4 text-emerald-400" /></div>
-                            <span className="text-sm font-medium">{actionDef?.label || action.type}</span>
-                            <Badge variant="outline" className="text-[9px]">Step {idx + 1}</Badge>
-                          </div>
-                          <Button size="sm" variant="ghost" onClick={() => removeAction(action.id)}><Trash2 className="w-3 h-3" /></Button>
-                        </div>
-                        {/* Config fields based on action type */}
-                        <div className="grid grid-cols-2 gap-2">
-                          {(actionDef?.fields || []).map(field => (
-                            <div key={field}>
-                              <Label className="text-[10px] text-muted-foreground capitalize">{field.replace(/_/g, " ")}</Label>
-                              <Input size="sm" className="h-8 text-xs" value={action.config?.[field] || ""}
-                                onChange={e => updateActionConfig(action.id, field, e.target.value)}
-                                placeholder={field} />
+                  <Tabs value={editorMode} onValueChange={setEditorMode}>
+                    <TabsList><TabsTrigger value="visual"><Blocks className="mr-1.5 h-4 w-4" />Visual builder</TabsTrigger><TabsTrigger value="code"><Code2 className="mr-1.5 h-4 w-4" />JSON contract</TabsTrigger></TabsList>
+                    <TabsContent value="visual" className="mt-5 space-y-4">
+                      <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/[0.05] p-4">
+                        <div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/10"><Zap className="h-4 w-4 text-cyan-300" /></div><div><p className="font-medium">Trigger</p><p className="text-xs text-muted-foreground">The observed event that starts this workflow</p></div></div>
+                        <Select value={editWf.trigger?.type || "none"} onValueChange={(value) => setEditWf((current) => ({ ...current, trigger: value === "none" ? {} : { ...(current.trigger || {}), type: value } }))}>
+                          <SelectTrigger className="mt-3" data-testid="automation-trigger-select"><SelectValue placeholder="Choose a trigger" /></SelectTrigger>
+                          <SelectContent><SelectItem value="none">Choose a trigger</SelectItem>{triggers.map((trigger) => <SelectItem key={trigger.id} value={trigger.id}>{trigger.label} · {trigger.category}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="flex justify-center"><ArrowDown className="h-5 w-5 text-cyan-400/60" /></div>
+
+                      <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.035] p-4">
+                        <div className="flex items-center justify-between gap-3"><div><p className="font-medium">Conditions</p><p className="text-xs text-muted-foreground">Only continue when observed evidence matches</p></div><Button variant="outline" size="sm" onClick={addCondition}><Plus className="mr-1 h-3.5 w-3.5" />Condition</Button></div>
+                        <div className="mt-3 space-y-2">
+                          {(editWf.conditions || []).map((condition, index) => (
+                            <div key={`condition-${index}`} className="grid gap-2 rounded-lg border border-border/70 bg-background/40 p-3 sm:grid-cols-[1fr_160px_1fr_36px]">
+                              <Input value={condition.field || ""} onChange={(event) => updateCondition(index, "field", event.target.value)} placeholder="Event field" />
+                              <Select value={condition.operator || "equals"} onValueChange={(value) => updateCondition(index, "operator", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{["equals", "not_equals", "contains", "greater_than", "less_than", "is_empty", "is_not_empty"].map((operator) => <SelectItem key={operator} value={operator}>{titleCase(operator)}</SelectItem>)}</SelectContent></Select>
+                              <Input value={condition.value || ""} onChange={(event) => updateCondition(index, "value", event.target.value)} placeholder="Expected value" />
+                              <Button variant="ghost" size="icon" onClick={() => removeCondition(index)}><XCircle className="h-4 w-4" /></Button>
                             </div>
                           ))}
+                          {!(editWf.conditions || []).length && <p className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">No conditions — every matching trigger will proceed to simulation or execution.</p>}
                         </div>
-                        {idx < (editWf.actions || []).length - 1 && (
-                          <div className="flex justify-center mt-2"><ArrowDown className="w-4 h-4 text-muted-foreground/50" /></div>
-                        )}
                       </div>
-                    );
-                  })}
 
-                  {/* Add Action */}
-                  <Select onValueChange={v => addAction(v)}>
-                    <SelectTrigger className="border-dashed border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/5" data-testid="add-action-select">
-                      <SelectValue placeholder="+ Add Action..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {actions.map(a => <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
+                      <div className="flex justify-center"><ArrowDown className="h-5 w-5 text-emerald-400/60" /></div>
 
-                {/* Test Results */}
-                {testResult && (
-                  <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20" data-testid="test-results">
-                    <p className="text-sm font-medium text-emerald-400 mb-2">Test Results</p>
-                    {testResult.results?.map((r, i) => (
-                      <div key={`r-${i}`} className="flex items-center gap-2 text-xs text-muted-foreground py-1">
-                        <CheckCircle className="w-3 h-3 text-emerald-400" />
-                        <span>{r.message}</span>
+                      <div>
+                        <div className="flex items-center justify-between gap-3"><div><p className="font-medium">Actions</p><p className="text-xs text-muted-foreground">Ordered, independently auditable steps with rollback metadata</p></div><Badge variant="outline">{editWf.actions?.length || 0} steps</Badge></div>
+                        <div className="mt-3 space-y-3">
+                          {(editWf.actions || []).map((action, index) => <StepCard key={action.id || index} action={action} index={index} definition={actions.find((item) => item.id === action.type)} onRemove={removeAction} onConfig={updateActionConfig} />)}
+                        </div>
+                        <Select onValueChange={addAction}>
+                          <SelectTrigger className="mt-3 border-dashed border-emerald-500/30 text-emerald-200" data-testid="automation-add-action"><SelectValue placeholder="+ Add AI, approval, action, notification, or documentation step" /></SelectTrigger>
+                          <SelectContent>{[...new Set(actions.map((item) => item.category))].map((category) => <div key={category}><p className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{category}</p>{actions.filter((item) => item.category === category).map((action) => <SelectItem key={action.id} value={action.id}>{action.label}</SelectItem>)}</div>)}</SelectContent>
+                        </Select>
                       </div>
-                    ))}
+                    </TabsContent>
+                    <TabsContent value="code" className="mt-5">
+                      <div className="rounded-xl border border-border/80 bg-slate-950/80 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-medium">Versionable workflow contract</p><p className="mt-1 text-xs text-muted-foreground">Edit trigger, conditions, and actions as JSON for review or source control.</p></div><Button size="sm" onClick={applyCodeDraft}><Code2 className="mr-1.5 h-4 w-4" />Apply JSON</Button></div>
+                        <Textarea value={codeDraft} onChange={(event) => setCodeDraft(event.target.value)} className="mt-4 min-h-[480px] resize-y border-slate-700 bg-slate-950 font-mono text-xs leading-6 text-cyan-50" spellCheck={false} />
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+
+                  <Separator />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground"><LockKeyhole className="h-4 w-4 text-cyan-300" />Simulation never performs an external action. Material changes require independent approval.</div>
+                    <Button variant="destructive" size="sm" onClick={deleteWorkflow}><Trash2 className="mr-1.5 h-3.5 w-3.5" />Delete workflow</Button>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="h-full flex items-center justify-center">
-              <CardContent className="text-center py-20">
-                <Workflow className="w-16 h-16 mx-auto text-muted-foreground/20 mb-4" />
-                <p className="text-lg font-medium text-muted-foreground">Select a workflow to edit</p>
-                <p className="text-sm text-muted-foreground/60 mt-1">Or create a new one to get started</p>
-                <Button className="mt-4" onClick={() => setShowCreate(true)}><Plus className="w-4 h-4 mr-1" />Create Workflow</Button>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      </div>
-
-      {/* Create Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-md" aria-describedby="create-wf-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Workflow className="w-5 h-5 text-violet-400" />New Workflow</DialogTitle>
-            <DialogDescription id="create-wf-desc">Create a new automation workflow</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Name</Label><Input value={createForm.name} onChange={e => setCreateForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Auto-escalate critical tickets" data-testid="create-wf-name" /></div>
-            <div><Label>Description</Label><Textarea value={createForm.description} onChange={e => setCreateForm(p => ({ ...p, description: e.target.value }))} placeholder="What does this workflow do?" rows={3} /></div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="flex min-h-[680px] items-center justify-center"><CardContent className="text-center"><Workflow className="mx-auto h-14 w-14 text-muted-foreground/25" /><p className="mt-4 font-medium">Choose or create a workflow</p><p className="mt-1 text-sm text-muted-foreground">Start with a verified pack or compose a governed flow.</p><Button className="mt-4" onClick={() => setShowCreate(true)}><Plus className="mr-1.5 h-4 w-4" />New workflow</Button></CardContent></Card>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button onClick={createWorkflow} disabled={saving} data-testid="create-wf-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create"}</Button>
-          </DialogFooter>
+        </TabsContent>
+
+        <TabsContent value="marketplace" className="mt-5 space-y-4">
+          <Card><CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="font-medium">Nexus Automation Marketplace</p><p className="mt-1 text-sm text-muted-foreground">Install a verified, disabled draft. Configure it, simulate it, then request approval before activation.</p></div><div className="relative w-full lg:w-80"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={packSearch} onChange={(event) => setPackSearch(event.target.value)} placeholder="Search packs and outcomes" /></div></CardContent></Card>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredPacks.map((pack) => (
+              <Card key={pack.id} className="group overflow-hidden border-border/80 transition-all hover:-translate-y-0.5 hover:border-violet-500/35 hover:shadow-lg hover:shadow-violet-500/5">
+                <div className="h-1 bg-gradient-to-r from-violet-500 via-cyan-400 to-emerald-400" />
+                <CardContent className="p-5">
+                  <div className="flex items-start justify-between gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-500/20 bg-violet-500/10"><Box className="h-5 w-5 text-violet-300" /></div>{pack.installed ? <Badge variant="outline" className={RISK_STYLE.low}><CheckCircle2 className="mr-1 h-3 w-3" />Installed</Badge> : <Badge variant="outline">{pack.publisher}</Badge>}</div>
+                  <p className="mt-4 font-semibold">{pack.name}</p>
+                  <p className="mt-1 min-h-10 text-sm text-muted-foreground">{pack.description}</p>
+                  <div className="mt-4 flex flex-wrap gap-2"><Badge variant="outline">{pack.category}</Badge><Badge variant="outline">{pack.steps} steps</Badge><Badge variant="outline">{titleCase(pack.trigger?.type)}</Badge></div>
+                  <div className="mt-4 flex flex-wrap gap-1.5">{pack.actions.slice(0, 4).map((action) => <span key={action.type} className="rounded-md bg-muted/40 px-2 py-1 text-[10px] text-muted-foreground">{titleCase(action.type)}</span>)}{pack.actions.length > 4 && <span className="rounded-md bg-muted/40 px-2 py-1 text-[10px] text-muted-foreground">+{pack.actions.length - 4} more</span>}</div>
+                  <Button className="mt-5 w-full" variant={pack.installed ? "outline" : "default"} disabled={pack.installed || installing === pack.id} onClick={() => installPack(pack)}>{installing === pack.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : pack.installed ? <PackageCheck className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}{pack.installed ? "Installed as workflow" : "Install disabled draft"}</Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="runtime" className="mt-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              ["Active", runtimeHealth?.active || 0, "Queued, running, waiting or approval", "border-cyan-500/20 bg-cyan-500/[0.04]"],
+              ["Waiting", runtimeHealth?.waiting || 0, "Persisted timed continuations", "border-violet-500/20 bg-violet-500/[0.04]"],
+              ["Approvals", runtimeHealth?.awaiting_approval || 0, "Protected execution boundaries", "border-amber-500/20 bg-amber-500/[0.04]"],
+              ["Failed", runtimeHealth?.failed || 0, "Stopped without fabricated success", "border-rose-500/20 bg-rose-500/[0.04]"],
+            ].map(([label, value, helper, style]) => (
+              <Card key={label} className={style}><CardContent className="p-4"><p className="text-2xl font-semibold">{value}</p><p className="mt-1 text-sm font-medium">{label}</p><p className="mt-1 text-[11px] text-muted-foreground">{helper}</p></CardContent></Card>
+            ))}
+          </div>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <Card>
+              <CardHeader className="flex-row items-start justify-between gap-3">
+                <div><CardTitle className="text-base">Durable execution ledger</CardTitle><p className="mt-1 text-sm text-muted-foreground">Every wait, approval, mutation, failure and recovery survives a service restart.</p></div>
+                <Button variant="outline" size="sm" onClick={() => load({ quiet: true })}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {runs.map((run) => (
+                  <button key={run.id} type="button" onClick={() => { setSelectedRun(run); setRunReason(""); }} className={`flex w-full flex-col gap-3 rounded-xl border p-4 text-left transition-all lg:flex-row lg:items-center ${selectedRun?.id === run.id ? "border-cyan-500/35 bg-cyan-500/[0.05]" : "border-border/80 hover:border-cyan-500/25 hover:bg-muted/10"}`}>
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${run.status === "failed" ? "border-rose-500/25 bg-rose-500/10" : run.status === "completed" ? "border-emerald-500/25 bg-emerald-500/10" : "border-cyan-500/25 bg-cyan-500/10"}`}>
+                      {run.status === "failed" ? <XCircle className="h-5 w-5 text-rose-300" /> : run.status === "completed" ? <CheckCircle2 className="h-5 w-5 text-emerald-300" /> : <Activity className="h-5 w-5 text-cyan-300" />}
+                    </div>
+                    <div className="min-w-0 flex-1"><p className="truncate font-medium">{run.workflow_name}</p><p className="mt-1 text-xs text-muted-foreground">{run.id} · {titleCase(run.trigger_subject)} · {readableDate(run.created_at)}</p></div>
+                    <div className="flex flex-wrap gap-2"><Badge variant="outline">{titleCase(run.status)}</Badge><Badge variant="outline">Step {Math.min((run.current_step || 0) + 1, run.steps?.length || 0)} / {run.steps?.length || 0}</Badge><Badge variant="outline">{run.attempts || 0} attempt{run.attempts === 1 ? "" : "s"}</Badge></div>
+                  </button>
+                ))}
+                {!runs.length && <div className="py-16 text-center"><Activity className="mx-auto h-10 w-10 text-muted-foreground/30" /><p className="mt-4 font-medium">No execution runs yet</p><p className="mt-1 text-sm text-muted-foreground">Enable an approved workflow, then let an event trigger it or choose Run now.</p></div>}
+              </CardContent>
+            </Card>
+
+            <Card className="h-fit xl:sticky xl:top-4">
+              {selectedRun ? <CardContent className="space-y-5 p-5">
+                <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Runtime evidence</p><p className="mt-2 text-lg font-semibold">{selectedRun.workflow_name}</p><p className="mt-1 text-xs text-muted-foreground">{selectedRun.id} · correlation {selectedRun.correlation_id}</p></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-border/70 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</p><p className="mt-1 text-sm font-medium">{titleCase(selectedRun.status)}</p></div>
+                  <div className="rounded-lg border border-border/70 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Checkpoint</p><p className="mt-1 text-sm font-medium">{selectedRun.current_step || 0} of {selectedRun.steps?.length || 0}</p></div>
+                </div>
+                {selectedRun.failure && <div className="rounded-xl border border-rose-500/25 bg-rose-500/[0.05] p-4"><p className="flex items-center gap-2 text-sm font-medium text-rose-100"><AlertTriangle className="h-4 w-4" />Execution stopped safely</p><p className="mt-2 text-xs leading-5 text-muted-foreground">{selectedRun.failure.message}</p></div>}
+                <ScrollArea className="max-h-[360px] pr-3">
+                  <div className="space-y-2">
+                    {(selectedRun.step_results || []).map((step, index) => <div key={`${step.step_id}-${index}`} className="rounded-lg border border-border/70 p-3"><div className="flex items-center justify-between gap-2"><p className="text-sm font-medium">{step.step_index + 1}. {titleCase(step.type)}</p><Badge variant="outline" className="text-[9px]">{titleCase(step.status)}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{step.message}</p></div>)}
+                    {!(selectedRun.step_results || []).length && <p className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">The worker has not committed a step yet.</p>}
+                  </div>
+                </ScrollArea>
+                {["awaiting_approval", "failed", "completed", "cancelled"].includes(selectedRun.status) && <div className="space-y-3 border-t border-border/70 pt-4">
+                  <div><Label>Decision or recovery reason</Label><Textarea className="mt-1" rows={3} value={runReason} onChange={(event) => setRunReason(event.target.value)} placeholder="Record why this governed action is appropriate." /></div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedRun.status === "awaiting_approval" && <><Button size="sm" onClick={() => runControl("approve")} disabled={!!runtimeBusy}><CheckCircle2 className="mr-1.5 h-4 w-4" />Approve & resume</Button><Button size="sm" variant="destructive" onClick={() => runControl("reject")} disabled={!!runtimeBusy}><XCircle className="mr-1.5 h-4 w-4" />Reject</Button></>}
+                    {selectedRun.status === "failed" && <Button size="sm" variant="outline" onClick={() => runControl("retry")} disabled={!!runtimeBusy}><RefreshCw className="mr-1.5 h-4 w-4" />Retry failed step</Button>}
+                    {["failed", "completed", "cancelled"].includes(selectedRun.status) && selectedRun.compensation_status === "available" && <Button size="sm" variant="outline" onClick={() => runControl("compensate")} disabled={!!runtimeBusy}><History className="mr-1.5 h-4 w-4" />Compensate safely</Button>}
+                  </div>
+                  <p className="text-[10px] leading-4 text-muted-foreground">Compensation restores only values that still match this run's after-state. Later technician changes are preserved as conflicts.</p>
+                </div>}
+              </CardContent> : <CardContent className="py-20 text-center"><Clock3 className="mx-auto h-10 w-10 text-muted-foreground/30" /><p className="mt-4 font-medium">Select a run</p><p className="mt-1 text-sm text-muted-foreground">Inspect committed steps, approval evidence, failures and recovery controls.</p></CardContent>}
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="simulations" className="mt-5">
+          <Card>
+            <CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle className="text-base">Simulation and approval evidence</CardTitle><p className="mt-1 text-sm text-muted-foreground">Every preview proves that no action ran and records the proposed before/after, risk, rollback, and technician.</p></div><Button variant="outline" size="sm" onClick={() => navigate("/change-management")}><ChevronRight className="mr-1 h-4 w-4" />Approval queue</Button></CardHeader>
+            <CardContent className="space-y-3">
+              {simulations.map((item) => (
+                <button type="button" key={item.id} onClick={() => { setSimulation(item); setSimulationOpen(true); }} className="flex w-full flex-col gap-3 rounded-xl border border-border/80 p-4 text-left transition-colors hover:border-cyan-500/30 hover:bg-cyan-500/[0.025] lg:flex-row lg:items-center">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/10"><Sparkles className="h-5 w-5 text-cyan-300" /></div>
+                  <div className="min-w-0 flex-1"><p className="font-medium">{item.workflow_name}</p><p className="mt-1 text-xs text-muted-foreground">{item.id} · {item.simulated_by} · {readableDate(item.simulated_at)}</p></div>
+                  <div className="flex flex-wrap gap-2"><Badge variant="outline" className={RISK_STYLE[item.risk_level]}>{titleCase(item.risk_level)} risk</Badge><Badge variant="outline" className={STATUS_STYLE[item.status]}>{titleCase(item.status)}</Badge><Badge variant="outline">{item.summary?.steps || 0} steps</Badge><Badge variant="outline" className="border-emerald-500/25 text-emerald-200">0 executed</Badge></div>
+                </button>
+              ))}
+              {!simulations.length && <div className="py-16 text-center"><Sparkles className="mx-auto h-10 w-10 text-muted-foreground/30" /><p className="mt-4 font-medium">No simulations recorded</p><p className="mt-1 text-sm text-muted-foreground">Choose a workflow in Studio and run its first zero-change preview.</p><Button className="mt-4" onClick={() => selectTab("studio")}>Open Studio</Button></div>}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Automation Studio</p><DialogTitle className="mt-1 flex items-center gap-2"><Workflow className="h-5 w-5 text-cyan-300" />Create a governed workflow</DialogTitle><DialogDescription>Begin with a disabled draft. Nothing can run until it has been configured and simulated.</DialogDescription></DialogHeader>
+          <div className="grid gap-4 py-2 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Label>Workflow name</Label><Input className="mt-1" value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Approved new employee onboarding" /></div>
+            <div className="sm:col-span-2"><Label>Business outcome</Label><Textarea className="mt-1" rows={4} value={createForm.description} onChange={(event) => setCreateForm((current) => ({ ...current, description: event.target.value }))} placeholder="Describe the intended result, owner, and safe operating scope." /></div>
+            <div><Label>Category</Label><Input className="mt-1" value={createForm.category} onChange={(event) => setCreateForm((current) => ({ ...current, category: event.target.value }))} /></div>
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3"><p className="flex items-center gap-2 text-sm font-medium text-emerald-100"><LockKeyhole className="h-4 w-4" />Safe by default</p><p className="mt-1 text-xs text-muted-foreground">Created disabled with an empty action plan.</p></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button><Button onClick={createWorkflow} disabled={saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create draft</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SimulationDialog simulation={simulation} open={simulationOpen} onOpenChange={setSimulationOpen} onSubmit={submitApproval} submitting={submitting} />
     </div>
   );
 }

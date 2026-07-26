@@ -26,7 +26,7 @@ import {
   Clock, CalendarDays, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
   CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
-  Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun, Phone
+  Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun
 } from "lucide-react";
 
 const TABS = [
@@ -90,13 +90,12 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
   { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
   { tab: "integrations", anchor: "microsoft365-delivery-card", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications" },
-  { tab: "integrations", anchor: "voice-services-settings-card", label: "Voice Services & YCM", keywords: "voice yeastar ycm central management pbx phone system cloud url extensions billing synchronisation sync client id secret" },
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
   { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
-  { tab: "integrations", anchor: "cipp-settings-card", label: "CIPP (M365 management)", keywords: "cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
+  { tab: "integrations", anchor: "cipp-settings-card", label: "Nexus Control Plane (Microsoft 365)", keywords: "control plane cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
   { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
   { tab: "integrations", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", keywords: "nexus agent rmm in-house windows agent patches scripts splashtop" },
   { tab: "integrations", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", keywords: "privilege elevation admin request approval uac keeper epm endpoint privilege manager" },
@@ -1399,23 +1398,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card id="voice-services-settings-card" data-testid="voice-services-settings-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Phone className="w-5 h-5 text-cyan-400" />
-            <CardTitle>Voice Services &amp; Yeastar YCM</CardTitle>
-          </div>
-          <CardDescription>
-            Keep the provider entry point in Settings while managing every client PBX, extension, and billing rule from the Voice workspace.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="max-w-2xl text-sm text-muted-foreground">YCM is the provider control-plane; it should not collapse customer separation. NexusMSP keeps every PBX URL, P-Series API credential, extension count, product mapping, and billing approval attached to the right client record.</p>
-          <Button onClick={() => navigate("/voice?tab=pbxs")} data-testid="open-voice-services-settings"><Phone className="mr-2 h-4 w-4" />Open Voice &amp; PBXs</Button>
-        </CardContent>
-      </Card>
-
-
       {/* SMS - MobileMessage Integration */}
       <Card data-testid="sms-settings-card">
         <CardHeader>
@@ -1967,20 +1949,20 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* CIPP M365 Tenant Management */}
+      {/* Nexus Control Plane Microsoft tenant provider */}
       <Card id="cipp-settings-card" data-testid="cipp-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-orange-500" />
-            <CardTitle>CIPP · M365 Tenant Management</CardTitle>
+            <Shield className="w-5 h-5 text-cyan-400" />
+            <CardTitle>Nexus Control Plane · Microsoft 365 provider</CardTitle>
           </div>
           <CardDescription>
-            Connect your hosted CIPP (CyberDrain Improved Partner Portal) Azure function URL to manage
-            Microsoft 365 tenants, users, licenses, and offboarding directly from NexusOps.
+            Connect the Microsoft tenant provider used by Nexus Control Plane to manage tenants, users,
+            licences, security posture and offboarding from NexusMSP.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SetupGuideCallout title="Create a UniFi Site Manager API key" source="In UniFi Site Manager, open Settings → API Keys and create a dedicated key for NexusMSP." steps={["Use the stable api.ui.com/v1 endpoint unless Early Access is required.", "Create a dedicated key with the least site access needed.", "Test the connection and confirm the expected consoles appear before using alerts."]} securityNote="This key can reveal network topology and client details. Keep it in NexusMSP only and revoke it when no longer required." />
+          <SetupGuideCallout title="Connect the Microsoft tenant provider" source="Use the Azure Function base URL and a dedicated function host key from your existing hosted tenant-management provider." steps={["Confirm the provider URL ends in /api.", "Create a dedicated host key for NexusMSP instead of reusing a general administrator key.", "Save and test the connection, then confirm the expected tenant list in Nexus Control Plane before enabling technician actions."]} securityNote="This key can perform high-impact Microsoft 365 actions. Store it only in NexusMSP, restrict provider permissions, and rotate it after any suspected exposure." />
           <div className="flex items-center gap-2 flex-wrap">
             <Badge className={cipp.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="cipp-status-badge">
               {cipp.configured ? "Configured" : "Not Configured"}
@@ -1997,7 +1979,7 @@ export default function SettingsPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <Label>CIPP Base URL</Label>
+              <Label>Microsoft tenant provider URL</Label>
               <Input
                 value={cipp.base_url}
                 onChange={(e) => setCipp({ ...cipp, base_url: e.target.value })}
@@ -2005,7 +1987,7 @@ export default function SettingsPage() {
                 data-testid="cipp-base-url"
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                The Azure Function URL for your CIPP instance. Usually ends in <code>/api</code>.
+                The Azure Function URL for the configured provider adapter. It normally ends in <code>/api</code>.
               </p>
             </div>
             <div>
@@ -2014,17 +1996,17 @@ export default function SettingsPage() {
                 type="password"
                 value={cipp.api_key}
                 onChange={(e) => setCipp({ ...cipp, api_key: e.target.value })}
-                placeholder={cipp.configured ? "****** (enter to replace)" : "Enter CIPP function key"}
+                placeholder={cipp.configured ? "•••••• (enter to replace)" : "Enter provider function key"}
                 data-testid="cipp-api-key"
               />
               <p className="text-[11px] text-muted-foreground mt-1">
-                In CIPP Azure Functions -> App Keys -> copy the <code>default</code> host key.
+                In Azure Functions, open <strong>App Keys</strong> and copy the dedicated NexusMSP host key.
               </p>
             </div>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Docs: <a href="https://docs.cipp.app/" target="_blank" rel="noreferrer" className="text-primary underline">docs.cipp.app</a>.
-            NexusOps calls <code>ListTenants</code>, <code>ListUsers</code>, <code>ListLicenses</code>,
+            The current compatibility adapter supports established CIPP deployments while Nexus Control Plane remains the product technicians use.
+            NexusMSP calls <code>ListTenants</code>, <code>ListUsers</code>, <code>ListLicenses</code>,
             <code>AddUser</code>, <code>ExecBulkUserLicense</code>, <code>ExecResetPass</code>,
             <code>ExecDisableUser</code>, and <code>ExecOffboardUser</code>.
           </p>
@@ -2039,7 +2021,7 @@ export default function SettingsPage() {
                 setCippBusy(true);
                 try {
                   await axios.post(`${API}/cipp/settings`, { base_url: cipp.base_url, api_key: cipp.api_key }, { headers });
-                  toast.success("CIPP credentials saved");
+                  toast.success("Microsoft tenant provider credentials saved");
                   const st = await axios.get(`${API}/cipp/status`, { headers });
                   setCipp(prev => ({ ...prev, ...st.data, api_key: "" }));
                 } catch (e) { toast.error(e.response?.data?.detail || e.message); }
@@ -2072,12 +2054,12 @@ export default function SettingsPage() {
               <Button
                 variant="ghost" className="text-red-400 hover:bg-red-500/10"
                 onClick={async () => {
-                  if (!window.confirm("Remove CIPP credentials? Tenant management features will stop working.")) return;
+                  if (!window.confirm("Remove the Microsoft tenant provider credentials? Tenant management actions in Nexus Control Plane will stop working.")) return;
                   setCippBusy(true);
                   try {
                     await axios.delete(`${API}/cipp/settings`, { headers });
                     setCipp({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
-                    toast.success("CIPP credentials removed");
+                    toast.success("Microsoft tenant provider credentials removed");
                   } catch (e) { toast.error(e.response?.data?.detail || e.message); }
                   finally { setCippBusy(false); }
                 }}
@@ -2103,7 +2085,7 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SetupGuideCallout title="Connect the correct CIPP instance" source="Use the Azure Function base URL for your hosted CIPP deployment and the function host key from Azure Functions → App Keys." steps={["Confirm the URL ends in /api.", "Use a dedicated host key for NexusMSP when possible.", "Run the connection test and validate the tenant list before enabling technician workflows."]} securityNote="The function key can perform high-impact Microsoft 365 actions. Treat it as an admin credential and rotate it after any suspected exposure." />
+          <SetupGuideCallout title="Create a UniFi Site Manager API key" source="In UniFi Site Manager, open Settings → API Keys and create a dedicated key for NexusMSP." steps={["Use the stable api.ui.com/v1 endpoint unless Early Access is required.", "Create a dedicated key with the least site access needed.", "Test the connection and confirm the expected consoles appear before using alerts."]} securityNote="This key can reveal network topology and client details. Keep it in NexusMSP only and revoke it when no longer required." />
           <div className="flex items-center gap-2 flex-wrap">
             <Badge className={unifi.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="unifi-status-badge">
               {unifi.configured ? "Configured" : "Not Configured"}

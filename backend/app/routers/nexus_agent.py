@@ -41,6 +41,14 @@ from pydantic import BaseModel, Field
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
+from app.services.agent_trust import (
+    agent_trust_state,
+    build_agent_policy,
+    issue_device_certificate,
+    sign_update_manifest,
+)
+from app.services.action_permissions import require_action
+from app.services.platform_foundation import emit_platform_event
 
 logger = logging.getLogger("nexus_agent")
 router = APIRouter(tags=["NexusOps Agent"])
@@ -61,7 +69,10 @@ AGENT_BINARY_PATH = Path(os.environ["NEXUS_AGENT_BINARY"]) if os.environ.get("NE
 CHAT_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_CHAT_COMPANION_BINARY"]) if os.environ.get("NEXUS_CHAT_COMPANION_BINARY") else (
     _CONTAINER_CHAT_COMPANION_BINARY if _CONTAINER_CHAT_COMPANION_BINARY.exists() else _LOCAL_CHAT_COMPANION_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.5-nexus-shield"
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.7-nexus-identity"
+MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 
 # Bundled into every newly generated Windows installer. This profile enables
 # evidence collection and Canary integrity monitoring only; it does not claim
@@ -72,6 +83,21 @@ NEXUS_SHIELD_AGENT_PROFILE = {
     "canary_enabled": True,
     "canary_check_secs": 30,
     "auto_deploy_canary": True,
+}
+
+# Every newly generated installer also carries the Nexus DNS control-plane
+# profile. Visibility is the safe default: the installer does not change the
+# endpoint resolver until a technician approves a staged deployment and a
+# trusted resolver edge has attested healthy.
+NEXUS_DNS_AGENT_PROFILE = {
+    "enabled": True,
+    "mode": "visibility",
+    "transport": "doh",
+    "resolver_endpoints": [],
+    "bypass_detection": True,
+    "local_policy_cache": True,
+    "restore_previous_dns_on_remove": True,
+    "enforcement_ready": False,
 }
 
 # Cached binary fingerprint (computed lazily; invalidated when mtime changes).
@@ -192,13 +218,93 @@ def _batch_scope(batch_id: str, user: dict) -> dict[str, Any]:
     return query
 
 
-async def _verify_agent_token(db, x_agent_token: str | None) -> dict:
+async def _verify_agent_token(
+    db,
+    x_agent_token: str | None,
+    x_client_cert_fingerprint: str | None = None,
+) -> dict:
     if not x_agent_token:
         raise HTTPException(401, "missing agent token")
     agent = await db.nexus_agents.find_one({"agent_token": x_agent_token, "is_active": True})
     if not agent:
         raise HTTPException(401, "invalid agent token")
+    expected = str((agent.get("device_identity") or {}).get("certificate_fingerprint") or "").lower()
+    presented = (
+        str(x_client_cert_fingerprint or "").replace(":", "").strip().lower()
+        if MTLS_PROXY_TRUST_ENABLED
+        else ""
+    )
+    if presented and (not expected or not secrets.compare_digest(expected, presented)):
+        raise HTTPException(401, "device certificate fingerprint does not match enrolled identity")
+    transport = "mtls" if presented and expected else "token"
+    if (agent.get("device_identity") or {}).get("last_transport") != transport:
+        now = _now()
+        await db.nexus_agents.update_one(
+            {"id": agent["id"]},
+            {"$set": {
+                "device_identity.last_transport": transport,
+                "device_identity.last_transport_verified_at": now,
+            }},
+        )
+        agent.setdefault("device_identity", {})["last_transport"] = transport
     return agent
+
+
+async def _issue_enrollment_identity(
+    *,
+    agent_id: str,
+    client_id: str,
+    hostname: str,
+    install_id: str,
+    csr_pem: str,
+    public_key_fingerprint: str,
+) -> dict[str, Any]:
+    """Issue and retain certificate metadata without storing the device key."""
+    if not csr_pem.strip():
+        return {
+            "status": "legacy_token",
+            "install_id": install_id,
+            "public_key_fingerprint": public_key_fingerprint,
+            "last_transport": "token",
+        }
+    try:
+        issued = issue_device_certificate(
+            csr_pem=csr_pem,
+            device_id=agent_id,
+            client_id=client_id,
+            hostname=hostname,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    await db.nexus_agent_certificates.update_many(
+        {"device_id": agent_id, "status": "active"},
+        {"$set": {"status": "superseded", "superseded_at": _now()}},
+    )
+    await db.nexus_agent_certificates.insert_one({
+        "id": str(uuid.uuid4()),
+        "device_id": agent_id,
+        "client_id": client_id,
+        "install_id": install_id,
+        "fingerprint_sha256": issued["fingerprint_sha256"],
+        "serial_number": issued["serial_number"],
+        "spiffe_id": issued["spiffe_id"],
+        "issued_at": issued["issued_at"],
+        "expires_at": issued["expires_at"],
+        "status": "active",
+    })
+    return {
+        "status": "certificate_issued",
+        "install_id": install_id,
+        "public_key_fingerprint": public_key_fingerprint,
+        "certificate_fingerprint": issued["fingerprint_sha256"],
+        "certificate_serial_number": issued["serial_number"],
+        "certificate_issued_at": issued["issued_at"],
+        "certificate_expires_at": issued["expires_at"],
+        "spiffe_id": issued["spiffe_id"],
+        "last_transport": "token",
+        "certificate_pem": issued["certificate_pem"],
+        "ca_certificate_pem": issued["ca_certificate_pem"],
+    }
 
 
 async def _audit(db, kind: str, payload: dict) -> None:
@@ -345,21 +451,42 @@ class EnrollRequest(BaseModel):
     mac: str = ""
     agent_version: str = ""
     capabilities: list[str] = Field(default_factory=list, max_length=20)
+    install_id: str = Field(default="", max_length=200)
+    certificate_signing_request: str = Field(default="", max_length=20_000)
+    public_key_fingerprint: str = Field(default="", max_length=128)
 
 
 class EnrollResponse(BaseModel):
     agent_token: str
     device_id: str
+    identity_status: str = "legacy_token"
+    certificate_pem: str = ""
+    ca_certificate_pem: str = ""
+    certificate_fingerprint: str = ""
+    certificate_expires_at: str = ""
+    spiffe_id: str = ""
+    policy: dict = Field(default_factory=dict)
 
 
 class HeartbeatPayload(BaseModel):
     agent_version: str = ""
     snapshot: dict = Field(default_factory=dict)
     capabilities: list[str] = Field(default_factory=list, max_length=20)
+    nexus_dns: dict = Field(default_factory=dict)
+    identity: dict = Field(default_factory=dict)
+    policy_evidence: dict = Field(default_factory=dict)
+    self_repair: dict = Field(default_factory=dict)
+    update_evidence: dict = Field(default_factory=dict)
+
+
+class IdentityRenewRequest(BaseModel):
+    install_id: str = Field(default="", max_length=200)
+    certificate_signing_request: str = Field(min_length=100, max_length=20_000)
+    public_key_fingerprint: str = Field(default="", max_length=128)
 
 
 class CommandRequest(BaseModel):
-    kind: Literal["run_script", "run_powershell", "run_cmd", "reboot", "shutdown", "kill_process", "ping"]
+    kind: Literal["run_script", "run_powershell", "run_cmd", "reboot", "shutdown", "kill_process", "ping", "agent_repair"]
     payload: dict = Field(default_factory=dict)
     include_offline: bool = False
 
@@ -378,6 +505,14 @@ class CompanionDeployRequest(BaseModel):
     all_online: bool = False
 
 
+class AgentRepairRequest(BaseModel):
+    actions: list[Literal["identity", "policy", "config", "companion"]] = Field(
+        default_factory=lambda: ["identity", "policy", "config", "companion"],
+        max_length=4,
+    )
+    reason: str = Field(default="", max_length=500)
+
+
 class InstallerBuildRequest(BaseModel):
     client_id: str = Field(min_length=1, max_length=200)
     note: str = Field(default="", max_length=500)
@@ -390,6 +525,8 @@ class NexusAgentSettings(BaseModel):
     splashtop_enabled: bool = False
     splashtop_deploy_code_default: str = Field(default="", max_length=500)
     auto_update_enabled: bool = True
+    self_repair_enabled: bool = True
+    require_signed_updates: Literal[True] = True
     winget_enabled: bool = False
     winget_allowed_ids: list[str] = Field(default_factory=list, max_length=100)
 
@@ -409,7 +546,10 @@ async def enroll(req: EnrollRequest):
 
     client_id = tok.get("client_id") or req.client_id or ""
     shield_profile = _nexus_shield_profile_from_token(tok)
+    dns_profile = tok.get("nexus_dns") if isinstance(tok.get("nexus_dns"), dict) else dict(NEXUS_DNS_AGENT_PROFILE)
     reported_capabilities = [item for item in req.capabilities if isinstance(item, str)][:20]
+    settings = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
+    policy = build_agent_policy(settings, dns_profile)
 
     # Idempotency Ã¢â‚¬â€ try to find an existing agent for (hostname, client_id, mac)
     existing = None
@@ -422,6 +562,15 @@ async def enroll(req: EnrollRequest):
     if existing:
         # Rotate token
         new_token = secrets.token_urlsafe(32)
+        identity = await _issue_enrollment_identity(
+            agent_id=existing["id"],
+            client_id=client_id,
+            hostname=req.hostname or existing.get("hostname", ""),
+            install_id=req.install_id,
+            csr_pem=req.certificate_signing_request,
+            public_key_fingerprint=req.public_key_fingerprint,
+        )
+        stored_identity = {key: value for key, value in identity.items() if not key.endswith("_pem")}
         await db.nexus_agents.update_one(
             {"id": existing["id"]},
             {"$set": {
@@ -434,15 +583,49 @@ async def enroll(req: EnrollRequest):
                 "primary_mac": req.mac,
                 "nexus_shield": shield_profile,
                 "nexus_shield_capabilities": reported_capabilities,
+                "nexus_dns": {**dns_profile, "enrolled": bool(dns_profile.get("enrolled", False))},
+                "device_identity": stored_identity,
+                "policy_evidence": {
+                    "version": policy["version"],
+                    "expected_checksum_sha256": policy["checksum_sha256"],
+                    "status": "offered",
+                    "offered_at": _now(),
+                },
             }},
         )
         await _audit(db, "re-enroll", {"device_id": existing["id"], "client_id": client_id})
         await _sync_to_devices(db, existing["id"], client_id, req)
         await _queue_default_nexus_canary({**existing, "os": req.os or existing.get("os"), "nexus_shield": shield_profile}, shield_profile)
-        return EnrollResponse(agent_token=new_token, device_id=existing["id"])
+        await emit_platform_event(
+            subject="device.identity.issued",
+            source="nexus.agent.enrollment",
+            actor={"id": existing["id"], "name": req.hostname or "Nexus Agent", "role": "device"},
+            client_id=client_id or None,
+            payload={"device_id": existing["id"], "identity_status": identity["status"], "reenrollment": True},
+        )
+        return EnrollResponse(
+            agent_token=new_token,
+            device_id=existing["id"],
+            identity_status=identity["status"],
+            certificate_pem=identity.get("certificate_pem", ""),
+            ca_certificate_pem=identity.get("ca_certificate_pem", ""),
+            certificate_fingerprint=identity.get("certificate_fingerprint", ""),
+            certificate_expires_at=identity.get("certificate_expires_at", ""),
+            spiffe_id=identity.get("spiffe_id", ""),
+            policy=policy,
+        )
 
     device_id = str(uuid.uuid4())
     agent_token = secrets.token_urlsafe(32)
+    identity = await _issue_enrollment_identity(
+        agent_id=device_id,
+        client_id=client_id,
+        hostname=req.hostname,
+        install_id=req.install_id,
+        csr_pem=req.certificate_signing_request,
+        public_key_fingerprint=req.public_key_fingerprint,
+    )
+    stored_identity = {key: value for key, value in identity.items() if not key.endswith("_pem")}
     doc = {
         "id": device_id,
         "client_id": client_id,
@@ -459,12 +642,79 @@ async def enroll(req: EnrollRequest):
         "source": "nexus-agent",
         "nexus_shield": shield_profile,
         "nexus_shield_capabilities": reported_capabilities,
+        "nexus_dns": {**dns_profile, "enrolled": bool(dns_profile.get("enrolled", False))},
+        "device_identity": stored_identity,
+        "policy_evidence": {
+            "version": policy["version"],
+            "expected_checksum_sha256": policy["checksum_sha256"],
+            "status": "offered",
+            "offered_at": _now(),
+        },
     }
     await db.nexus_agents.insert_one(doc)
     await _audit(db, "enroll", {"device_id": device_id, "client_id": client_id, "hostname": req.hostname})
     await _sync_to_devices(db, device_id, client_id, req)
     await _queue_default_nexus_canary(doc, shield_profile)
-    return EnrollResponse(agent_token=agent_token, device_id=device_id)
+    await emit_platform_event(
+        subject="device.identity.issued",
+        source="nexus.agent.enrollment",
+        actor={"id": device_id, "name": req.hostname or "Nexus Agent", "role": "device"},
+        client_id=client_id or None,
+        payload={"device_id": device_id, "identity_status": identity["status"], "reenrollment": False},
+    )
+    return EnrollResponse(
+        agent_token=agent_token,
+        device_id=device_id,
+        identity_status=identity["status"],
+        certificate_pem=identity.get("certificate_pem", ""),
+        ca_certificate_pem=identity.get("ca_certificate_pem", ""),
+        certificate_fingerprint=identity.get("certificate_fingerprint", ""),
+        certificate_expires_at=identity.get("certificate_expires_at", ""),
+        spiffe_id=identity.get("spiffe_id", ""),
+        policy=policy,
+    )
+
+
+@router.post("/nexus-agent/identity/renew")
+async def renew_device_identity(
+    req: IdentityRenewRequest,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    identity = await _issue_enrollment_identity(
+        agent_id=agent["id"],
+        client_id=str(agent.get("client_id") or ""),
+        hostname=str(agent.get("hostname") or ""),
+        install_id=req.install_id or str((agent.get("device_identity") or {}).get("install_id") or ""),
+        csr_pem=req.certificate_signing_request,
+        public_key_fingerprint=req.public_key_fingerprint,
+    )
+    stored_identity = {key: value for key, value in identity.items() if not key.endswith("_pem")}
+    await db.nexus_agents.update_one(
+        {"id": agent["id"]},
+        {"$set": {"device_identity": stored_identity}},
+    )
+    await _audit(db, "device_identity_renewed", {
+        "device_id": agent["id"],
+        "client_id": agent.get("client_id"),
+        "certificate_fingerprint": identity.get("certificate_fingerprint"),
+    })
+    await emit_platform_event(
+        subject="device.identity.issued",
+        source="nexus.agent.renewal",
+        actor={"id": agent["id"], "name": agent.get("hostname") or "Nexus Agent", "role": "device"},
+        client_id=agent.get("client_id") or None,
+        payload={"device_id": agent["id"], "identity_status": identity["status"], "renewal": True},
+    )
+    return {
+        "identity_status": identity["status"],
+        "certificate_pem": identity.get("certificate_pem", ""),
+        "ca_certificate_pem": identity.get("ca_certificate_pem", ""),
+        "certificate_fingerprint": identity.get("certificate_fingerprint", ""),
+        "certificate_expires_at": identity.get("certificate_expires_at", ""),
+        "spiffe_id": identity.get("spiffe_id", ""),
+    }
 
 
 async def _sync_to_devices(db, nexus_device_id: str, client_id: str, req: "EnrollRequest"):
@@ -494,6 +744,8 @@ async def _sync_to_devices(db, nexus_device_id: str, client_id: str, req: "Enrol
             "source": "nexus-agent",
             "nexus_shield_enabled": True,
             "nexus_canary_enabled": True,
+            "nexus_dns_available": True,
+            "nexus_dns_mode": "visibility",
         },
         "$setOnInsert": {
             "id": str(uuid.uuid4()),
@@ -620,8 +872,12 @@ def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], l
 
 
 @router.post("/nexus-agent/heartbeat")
-async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None)):
-    agent = await _verify_agent_token(db, x_agent_token)
+async def heartbeat(
+    p: HeartbeatPayload,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
     snap = p.snapshot or {}
     now = _now()
     update = {
@@ -630,6 +886,39 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
         "online": True,
         "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
     }
+    if p.identity:
+        update.update({
+            "device_identity.reported_install_id": str(p.identity.get("install_id") or "")[:200],
+            "device_identity.reported_certificate_fingerprint": str(p.identity.get("certificate_fingerprint") or "")[:128].lower(),
+            "device_identity.agent_reported_at": now,
+        })
+    if p.policy_evidence:
+        update["policy_evidence.reported_version"] = str(p.policy_evidence.get("version") or "")[:100]
+        update["policy_evidence.reported_checksum_sha256"] = str(p.policy_evidence.get("checksum_sha256") or "")[:128].lower()
+        update["policy_evidence.reported_at"] = now
+    if p.self_repair:
+        update["self_repair"] = {
+            "status": str(p.self_repair.get("status") or "unknown")[:50],
+            "checks": list(p.self_repair.get("checks") or [])[:20],
+            "repairs": list(p.self_repair.get("repairs") or [])[:20],
+            "reported_at": now,
+        }
+    if p.update_evidence:
+        update["update_evidence"] = {
+            "status": str(p.update_evidence.get("status") or "unknown")[:50],
+            "version": str(p.update_evidence.get("version") or "")[:100],
+            "signature_verified": bool(p.update_evidence.get("signature_verified")),
+            "reported_at": now,
+        }
+    if p.nexus_dns:
+        reported_deployment = str(p.nexus_dns.get("deployment_id") or "")
+        expected_deployment = str((agent.get("nexus_dns") or {}).get("deployment_id") or "")
+        update.update({
+            "nexus_dns.reported_mode": str(p.nexus_dns.get("mode") or "visibility"),
+            "nexus_dns.acknowledged_deployment_id": reported_deployment,
+            "nexus_dns.agent_reported_at": now,
+            "nexus_dns.status": "acknowledged" if reported_deployment and reported_deployment == expected_deployment else "profile_reported",
+        })
     # Top-level snapshot fields useful for list views
     for k in ("hostname", "os", "os_version", "os_platform", "arch",
               "cpu_percent", "cpu_count", "cpu_model",
@@ -777,14 +1066,77 @@ async def heartbeat(p: HeartbeatPayload, x_agent_token: str | None = Header(None
                 "url": "/api/nexus-agent/binary/latest",
                 "sha256": info["sha256"],
                 "size": info["size"],
+                **sign_update_manifest(
+                    version=info["version"],
+                    sha256=info["sha256"],
+                    size=info["size"],
+                ),
             }
 
-    return {"ok": True, "update": update_info, "server_time": now}
+    # Deliver the low-risk Nexus DNS control-plane profile through the same
+    # authenticated heartbeat. The current agent persists this profile but does
+    # not change adapter DNS or install certificates; enforcement remains false
+    # until a separately signed resolver module and trusted edge attestation
+    # exist.
+    dns_settings = await db.nexus_dns_settings.find_one({"id": "nexus-dns-settings"}, {"_id": 0}) or {}
+    stored_dns = agent.get("nexus_dns") if isinstance(agent.get("nexus_dns"), dict) else {}
+    dns_profile = {
+        **NEXUS_DNS_AGENT_PROFILE,
+        **stored_dns,
+        "transport": dns_settings.get("dns_transport") or stored_dns.get("transport") or "doh",
+        "resolver_endpoints": dns_settings.get("resolver_endpoints") or [],
+        "bypass_detection": dns_settings.get("bypass_detection", True),
+        "local_policy_cache": dns_settings.get("local_policy_cache", True),
+        "enforcement_ready": False,
+    }
+    if dns_profile.get("enrolled"):
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+            "nexus_dns.status": "profile_offered",
+            "nexus_dns.profile_offered_at": now,
+        }})
+
+    policy = build_agent_policy(settings, dns_profile)
+    reported_checksum = str(p.policy_evidence.get("checksum_sha256") or "").lower()
+    policy_status = "acknowledged" if reported_checksum and secrets.compare_digest(
+        reported_checksum,
+        policy["checksum_sha256"],
+    ) else "offered"
+    await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+        "policy_evidence.version": policy["version"],
+        "policy_evidence.expected_checksum_sha256": policy["checksum_sha256"],
+        "policy_evidence.status": policy_status,
+        "policy_evidence.offered_at": now,
+    }})
+
+    identity = agent.get("device_identity") if isinstance(agent.get("device_identity"), dict) else {}
+    rotation_required = False
+    if identity.get("certificate_expires_at"):
+        try:
+            expires = datetime.fromisoformat(str(identity["certificate_expires_at"]).replace("Z", "+00:00"))
+            rotation_required = expires <= datetime.now(timezone.utc) + timedelta(days=30)
+        except ValueError:
+            rotation_required = True
+    return {
+        "ok": True,
+        "update": update_info,
+        "server_time": now,
+        "nexus_dns": dns_profile,
+        "policy": policy,
+        "identity": {
+            "status": agent_trust_state(agent)["status"],
+            "certificate_rotation_required": rotation_required,
+            "certificate_expires_at": identity.get("certificate_expires_at"),
+            "spiffe_id": identity.get("spiffe_id"),
+        },
+    }
 
 
 @router.get("/nexus-agent/commands/poll")
-async def commands_poll(x_agent_token: str | None = Header(None)):
-    agent = await _verify_agent_token(db, x_agent_token)
+async def commands_poll(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
     # Read candidates, then atomically claim each one. The status predicate on
     # update prevents overlapping polls from dispatching the same command twice.
     pending = await db.nexus_agent_commands.find({
@@ -807,8 +1159,12 @@ async def commands_poll(x_agent_token: str | None = Header(None)):
 
 
 @router.post("/nexus-agent/command-result")
-async def command_result(res: CommandResult, x_agent_token: str | None = Header(None)):
-    agent = await _verify_agent_token(db, x_agent_token)
+async def command_result(
+    res: CommandResult,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
     await db.nexus_agent_commands.update_one(
         {"id": res.id, "device_id": agent["id"]},
         {"$set": {
@@ -981,6 +1337,7 @@ async def list_agents(client_id: str | None = None, user=Depends(get_current_use
     for a in agents:
         a.pop("_id", None)
         a["online"] = _is_online(a.get("last_seen"))
+        a["trust"] = agent_trust_state(a)
     return agents
 
 
@@ -989,12 +1346,145 @@ async def get_agent(device_id: str, user=Depends(require_agent_operator)):
     agent = await db.nexus_agents.find_one({"id": device_id}, {"agent_token": 0, "_id": 0})
     if not agent:
         raise HTTPException(404, "agent not found")
+    agent["trust"] = agent_trust_state(agent)
     # Recent commands
     cmds = await db.nexus_agent_commands.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(length=50)
     # Heartbeat history (last 60 points)
     hb = await db.nexus_agent_heartbeats.find({"device_id": device_id}, {"_id": 0}).sort("at", -1).to_list(length=60)
     hb.reverse()
     return {"agent": agent, "commands": cmds, "heartbeats": hb}
+
+
+@router.get("/nexus-agent/trust/overview")
+async def trust_overview(user=Depends(get_current_user)):
+    """Summarise endpoint identity, policy and local resilience evidence."""
+    agents = await db.nexus_agents.find(
+        {"is_active": True},
+        {
+            "_id": 0,
+            "id": 1,
+            "hostname": 1,
+            "client_id": 1,
+            "client_name": 1,
+            "last_seen": 1,
+            "device_identity": 1,
+            "policy_evidence": 1,
+            "self_repair": 1,
+            "update_evidence": 1,
+        },
+    ).sort("last_seen", -1).to_list(length=10_000)
+    client_ids = list({str(agent.get("client_id")) for agent in agents if agent.get("client_id")})
+    clients = await db.clients.find(
+        {"id": {"$in": client_ids}},
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(length=max(1, len(client_ids)))
+    client_names = {str(client.get("id")): str(client.get("name") or "") for client in clients}
+    counts = {
+        "total": len(agents),
+        "mtls_verified": 0,
+        "certificate_issued": 0,
+        "legacy_token": 0,
+        "certificate_expired": 0,
+        "policy_acknowledged": 0,
+        "self_repair_healthy": 0,
+        "signed_update_verified": 0,
+    }
+    attention: list[dict[str, Any]] = []
+    for agent in agents:
+        trust = agent_trust_state(agent)
+        status = trust["status"]
+        if status in counts:
+            counts[status] += 1
+        if status == "mtls_verified":
+            counts["certificate_issued"] += 1
+        policy_ok = (agent.get("policy_evidence") or {}).get("status") == "acknowledged"
+        repair_ok = (agent.get("self_repair") or {}).get("status") == "healthy"
+        update_ok = bool((agent.get("update_evidence") or {}).get("signature_verified"))
+        counts["policy_acknowledged"] += int(policy_ok)
+        counts["self_repair_healthy"] += int(repair_ok)
+        counts["signed_update_verified"] += int(update_ok)
+        issues: list[str] = []
+        if status in {"legacy_token", "certificate_expired"}:
+            issues.append("Device certificate requires enrollment or renewal")
+        elif status == "certificate_issued":
+            issues.append("Certificate issued; validated proxy transport not yet observed")
+        if not policy_ok:
+            issues.append("Current policy has not been acknowledged")
+        if not repair_ok:
+            issues.append("Local self-repair evidence is missing or unhealthy")
+        if issues:
+            attention.append({
+                "device_id": agent.get("id"),
+                "hostname": agent.get("hostname") or "Unnamed endpoint",
+                "client_id": agent.get("client_id"),
+                "client_name": agent.get("client_name") or client_names.get(str(agent.get("client_id"))) or "Unassigned client",
+                "online": _is_online(agent.get("last_seen")),
+                "trust_status": status,
+                "issues": issues,
+                "last_seen": agent.get("last_seen"),
+            })
+    return {
+        "counts": counts,
+        "attention": attention[:100],
+        "transport": {
+            "mode": "token-compatible-mtls-ready",
+            "proxy_header": "X-Client-Cert-Fingerprint",
+            "proxy_trust_enabled": MTLS_PROXY_TRUST_ENABLED,
+            "note": "mTLS is recorded only when a validating reverse proxy supplies the verified certificate fingerprint.",
+        },
+    }
+
+
+@router.post("/nexus-agent/agents/{device_id}/trust/remediate")
+async def remediate_agent_trust(
+    device_id: str,
+    req: AgentRepairRequest,
+    user=Depends(require_action("agent.trust.remediate")),
+):
+    agent = await db.nexus_agents.find_one({"id": device_id, "is_active": True}, {"_id": 0})
+    if not agent:
+        raise HTTPException(404, "agent not found")
+    if not _is_online(agent.get("last_seen")):
+        raise HTTPException(409, "agent is offline; reconnect it before repairing trust")
+    command_id = str(uuid.uuid4())
+    now = _now()
+    await db.nexus_agent_commands.insert_one({
+        "id": command_id,
+        "device_id": device_id,
+        "kind": "agent_repair",
+        "payload": {
+            "actions": req.actions,
+            "reason": req.reason.strip(),
+        },
+        "status": "pending",
+        "queued_by": user.get("email") or user.get("id"),
+        "created_at": now,
+    })
+    await _audit(db, "trust_repair_queued", {
+        "device_id": device_id,
+        "command_id": command_id,
+        "actions": req.actions,
+        "reason": req.reason.strip(),
+        "by": user.get("email") or user.get("id"),
+    })
+    await emit_platform_event(
+        subject="device.trust.changed",
+        client_id=agent.get("client_id"),
+        payload={
+            "device_id": device_id,
+            "state": "repair_queued",
+            "command_id": command_id,
+            "actions": req.actions,
+            "reason": req.reason.strip(),
+        },
+        source="nexus-agent",
+        actor={
+            "id": user.get("id") or user.get("email"),
+            "name": user.get("name") or user.get("email"),
+            "role": user.get("role") or "technician",
+        },
+    )
+    return {"ok": True, "command_id": command_id, "status": "pending"}
 
 
 @router.post("/nexus-agent/agents/{device_id}/command")
@@ -1110,6 +1600,7 @@ def _build_installer_zip(
         "heartbeat_secs": heartbeat_secs,
         "poll_secs": poll_secs,
         "nexus_shield": NEXUS_SHIELD_AGENT_PROFILE,
+        "nexus_dns": NEXUS_DNS_AGENT_PROFILE,
     }
     companion_copy_line = 'copy /Y "%~dp0nexus-client-chat.exe" "%INSTDIR%\\nexus-client-chat.exe" >nul\r\n' if chat_companion_bytes else ""
     companion_start_menu_lines = (
@@ -1193,6 +1684,11 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     includes_nexus_elevate = includes_client_chat
     includes_nexus_shield = True
     includes_nexus_canary = True
+    includes_nexus_dns = True
+    includes_device_identity = True
+    includes_signed_updates = True
+    includes_policy_cache = True
+    includes_self_repair = True
 
     # Mint an enrollment token bound to this client
     enrollment_token = secrets.token_urlsafe(28)
@@ -1206,6 +1702,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
         "note": req.note or "",
         "nexus_shield": NEXUS_SHIELD_AGENT_PROFILE,
+        "nexus_dns": NEXUS_DNS_AGENT_PROFILE,
     })
 
     # Build the ZIP
@@ -1242,6 +1739,11 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
+        "includes_nexus_dns": includes_nexus_dns,
+        "includes_device_identity": includes_device_identity,
+        "includes_signed_updates": includes_signed_updates,
+        "includes_policy_cache": includes_policy_cache,
+        "includes_self_repair": includes_self_repair,
         "heartbeat_secs": heartbeat_secs,
         "poll_secs": poll_secs,
         "is_deleted": False,
@@ -1255,6 +1757,11 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
+        "includes_nexus_dns": includes_nexus_dns,
+        "includes_device_identity": includes_device_identity,
+        "includes_signed_updates": includes_signed_updates,
+        "includes_policy_cache": includes_policy_cache,
+        "includes_self_repair": includes_self_repair,
         "heartbeat_secs": heartbeat_secs,
         "poll_secs": poll_secs,
         "by": manifest["created_by"],
@@ -1278,6 +1785,11 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
+        "includes_nexus_dns": includes_nexus_dns,
+        "includes_device_identity": includes_device_identity,
+        "includes_signed_updates": includes_signed_updates,
+        "includes_policy_cache": includes_policy_cache,
+        "includes_self_repair": includes_self_repair,
         "server_url": server_url,
         "heartbeat_secs": heartbeat_secs,
         "poll_secs": poll_secs,
@@ -1322,7 +1834,11 @@ async def list_installers(client_id: str | None = None, user=Depends(require_age
 
 
 @router.get("/nexus-agent/binary/latest")
-async def latest_binary():
+async def latest_binary(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
     if not AGENT_BINARY_PATH.exists():
         raise HTTPException(404, "agent binary not built; run `make windows` in /app/agent")
     return Response(
@@ -1336,7 +1852,17 @@ async def latest_binary():
 async def version_manifest():
     """Returns the current latest-binary version + SHA256 + size. Used by agents
     for auto-update verification (also embedded in heartbeat responses)."""
-    return _binary_info()
+    info = _binary_info()
+    if not info["exists"]:
+        return info
+    return {
+        **info,
+        **sign_update_manifest(
+            version=info["version"],
+            sha256=info["sha256"],
+            size=info["size"],
+        ),
+    }
 
 
 # ----------------------------------------------------------------------
@@ -1566,6 +2092,42 @@ async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)
             "cancelled_by": user.get("email") or user.get("id"),
         }},
     )
+    repair_command = await db.nexus_agent_commands.find_one(
+        {"id": res.id, "device_id": agent["id"], "kind": "agent_repair"},
+        {"_id": 0, "payload": 1},
+    )
+    if repair_command:
+        repair_evidence: dict[str, Any] = {}
+        if res.stdout:
+            try:
+                parsed = json.loads(res.stdout)
+                if isinstance(parsed, dict):
+                    repair_evidence = parsed
+            except json.JSONDecodeError:
+                repair_evidence = {}
+        repair_status = "healthy" if res.status == "ok" and repair_evidence.get("status") == "healthy" else "attention"
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+            "self_repair": {
+                "status": repair_status,
+                "checks": list(repair_evidence.get("checks") or [])[:20],
+                "repairs": list(repair_evidence.get("repairs") or [])[:20],
+                "details": repair_evidence.get("details") if isinstance(repair_evidence.get("details"), dict) else {},
+                "last_repair_at": _now(),
+                "command_id": res.id,
+            },
+        }})
+        await emit_platform_event(
+            subject="device.trust.changed",
+            source="nexus.agent.repair",
+            actor={"id": agent["id"], "name": agent.get("hostname") or "Nexus Agent", "role": "device"},
+            client_id=agent.get("client_id") or None,
+            payload={
+                "device_id": agent["id"],
+                "state": repair_status,
+                "command_id": res.id,
+                "actions": (repair_command.get("payload") or {}).get("actions") or [],
+            },
+        )
     await _audit(db, "fleet_script_cancel", {
         "batch_id": batch_id,
         "cancelled_count": result.modified_count,
@@ -1575,9 +2137,12 @@ async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)
 
 
 @router.get("/nexus-agent/companion/latest")
-async def latest_client_companion(x_agent_token: str | None = Header(None)):
+async def latest_client_companion(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
     """Authenticated companion download used only by an enrolled agent."""
-    await _verify_agent_token(db, x_agent_token)
+    await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
     if not CHAT_COMPANION_BINARY_PATH.exists():
         raise HTTPException(404, "Nexus Client Chat companion binary is not built")
     return Response(
@@ -1601,6 +2166,8 @@ async def get_settings(user=Depends(require_agent_admin)):
         "splashtop_enabled": s.get("splashtop_enabled", False),
         "splashtop_deploy_code_default": s.get("splashtop_deploy_code_default", ""),
         "auto_update_enabled": s.get("auto_update_enabled", True),
+        "self_repair_enabled": s.get("self_repair_enabled", True),
+        "require_signed_updates": s.get("require_signed_updates", True),
         "winget_enabled": s.get("winget_enabled", False),
         "winget_allowed_ids": s.get("winget_allowed_ids", []),
         "agent_version": AGENT_VERSION,
@@ -1610,6 +2177,9 @@ async def get_settings(user=Depends(require_agent_admin)):
         "client_companion_exists": _companion_binary_info()["exists"],
         "client_companion_sha256": _companion_binary_info()["sha256"],
         "client_companion_size": _companion_binary_info()["size"],
+        "transport_mode": "token-compatible-mtls-ready",
+        "mtls_proxy_header": "X-Client-Cert-Fingerprint",
+        "mtls_proxy_trust_enabled": MTLS_PROXY_TRUST_ENABLED,
     }
 
 
@@ -1624,6 +2194,8 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
             "splashtop_enabled": payload.splashtop_enabled,
             "splashtop_deploy_code_default": payload.splashtop_deploy_code_default,
             "auto_update_enabled": payload.auto_update_enabled,
+            "self_repair_enabled": payload.self_repair_enabled,
+            "require_signed_updates": payload.require_signed_updates,
             "winget_enabled": payload.winget_enabled,
             "winget_allowed_ids": [item.strip() for item in payload.winget_allowed_ids if item.strip()],
             "updated_at": _now(),
@@ -1635,6 +2207,8 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
         "heartbeat_secs": payload.heartbeat_secs,
         "poll_secs": payload.poll_secs,
         "auto_update_enabled": payload.auto_update_enabled,
+        "self_repair_enabled": payload.self_repair_enabled,
+        "require_signed_updates": payload.require_signed_updates,
         "winget_enabled": payload.winget_enabled,
         "by": user.get("email") or user.get("id"),
     })
@@ -1665,6 +2239,30 @@ async def stats(user=Depends(get_current_user)):
         {"_id": 0, "pending_patches": 1},
     ).to_list(5000)
     pending_updates = sum(int(row.get("pending_patches") or 0) for row in assessed_rows)
+    trust_rows = await db.nexus_agents.find(
+        {"is_active": True},
+        {
+            "_id": 0,
+            "device_identity": 1,
+            "policy_evidence": 1,
+            "self_repair": 1,
+            "update_evidence": 1,
+        },
+    ).to_list(length=10_000)
+    trust_counts = {
+        "certificate_issued": 0,
+        "mtls_verified": 0,
+        "policy_acknowledged": 0,
+        "self_repair_healthy": 0,
+        "signed_update_verified": 0,
+    }
+    for row in trust_rows:
+        trust_status = agent_trust_state(row)["status"]
+        trust_counts["certificate_issued"] += int(trust_status in {"certificate_issued", "mtls_verified"})
+        trust_counts["mtls_verified"] += int(trust_status == "mtls_verified")
+        trust_counts["policy_acknowledged"] += int((row.get("policy_evidence") or {}).get("status") == "acknowledged")
+        trust_counts["self_repair_healthy"] += int((row.get("self_repair") or {}).get("status") == "healthy")
+        trust_counts["signed_update_verified"] += int(bool((row.get("update_evidence") or {}).get("signature_verified")))
     by_client = await db.nexus_agents.aggregate([
         {"$match": {"is_active": True}},
         {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
@@ -1680,6 +2278,7 @@ async def stats(user=Depends(get_current_user)):
         "assessed_devices": assessed_devices,
         "managed_devices": managed_devices,
         "pending_updates": pending_updates,
+        **trust_counts,
         "by_client": [{"client_id": r["_id"], "count": r["count"]} for r in by_client],
         "agent_version": AGENT_VERSION,
     }

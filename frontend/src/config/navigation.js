@@ -17,7 +17,7 @@ import {
   HeartPulse, AlertTriangle, Banknote, MessageCircle,
   FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
   Building, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark,
-  Inbox, Briefcase, ShieldOff, KeySquare, BellRing
+  Inbox, Briefcase, ShieldOff, KeySquare, BellRing, Boxes
 } from "lucide-react";
 
 export const navGroups = [
@@ -83,7 +83,7 @@ export const navGroups = [
     items: [
       {
         path: "/clients", icon: Users, label: "Clients",
-        workspacePaths: ["/client-insights", "/client-compare", "/client-portal-admin", "/client-portal"],
+        workspacePaths: ["/client-insights", "/client-compare", "/client-portal"],
       },
       {
         // Leads is the single customer-growth workspace. Pipeline, campaigns and
@@ -165,6 +165,11 @@ export const navGroups = [
     id: "platform",
     title: "Platform",
     items: [
+      { path: "/nexus-suite", icon: Boxes, label: "Nexus Suite" },
+      {
+        path: "/control-plane", icon: Layers, label: "Nexus Control Plane",
+        workspacePaths: ["/cipp", "/m365"],
+      },
       { path: "/settings", icon: Settings, label: "Settings" },
       {
         path: "/benchmarking", icon: Radar, label: "Planning & Lifecycle",

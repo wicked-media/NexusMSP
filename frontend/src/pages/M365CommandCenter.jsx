@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,9 +16,9 @@ import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, CheckCircle2, Cloud, FileCheck2, KeyRound,
-  Layers, ListChecks, Lock, Plus, RefreshCw, Search, ShieldCheck,
-  Sparkles, Users, XCircle,
+  Activity, AlertTriangle, Building2, CheckCircle2, Cloud, ExternalLink,
+  FileCheck2, KeyRound, Layers, Link2, ListChecks, Loader2, Lock, Plus,
+  RefreshCw, Search, ShieldCheck, Sparkles, UserPlus, Users, XCircle,
 } from "lucide-react";
 
 const severityClasses = {
@@ -59,10 +60,10 @@ function EmptyEvidence({ title = "No verified Microsoft 365 evidence yet", descr
   );
 }
 
-export default function M365CommandCenter() {
+export default function M365CommandCenter({ embedded = false, initialTab = "overview" }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useState(initialTab);
   const [summary, setSummary] = useState(null);
   const [connection, setConnection] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -84,11 +85,12 @@ export default function M365CommandCenter() {
   }, [headers]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
 
   const hasEvidence = Boolean(summary?.telemetry_available);
   return (
-    <div className="space-y-5 p-6" data-testid="m365-page">
-      <OperationalPageHeader
+    <div className={embedded ? "space-y-5" : "space-y-5 p-6"} data-testid="m365-page">
+      {!embedded && <OperationalPageHeader
         eyebrow="Microsoft cloud operations"
         title="Microsoft 365"
         description="Provider-backed Microsoft 365 evidence, guardrail planning, and connection readiness in one auditable workspace."
@@ -101,9 +103,9 @@ export default function M365CommandCenter() {
           <Button size="sm" variant="outline" onClick={() => setTab("connection")}><Lock className="mr-1.5 h-3.5 w-3.5" />Connection</Button>
           <Button size="sm" variant="outline" onClick={load} disabled={loading} data-testid="m365-refresh"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
         </>}
-      />
+      />}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+      {!embedded && <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
         <HeroTile label="Tenants" value={valueOrDash(loading, summary, summary?.tenants)} icon={Cloud} glow="cyan" subtitle="Verified Graph inventory" />
         <HeroTile label="Users" value={valueOrDash(loading, summary, summary?.users)} icon={Users} glow="violet" subtitle="Provider-recorded identities" />
         <HeroTile label="MFA coverage" value={valueOrDash(loading, summary, summary?.avg_mfa_pct, "%")} icon={KeyRound} glow="emerald" subtitle="Verified evidence only" />
@@ -111,7 +113,7 @@ export default function M365CommandCenter() {
         <HeroTile label="Score trend" value={valueOrDash(loading, summary, summary?.secure_trend)} icon={Activity} glow="cyan" subtitle="Recorded snapshots" />
         <HeroTile label="Risky sign-ins" value={valueOrDash(loading, summary, summary?.risky_signins_30d)} icon={AlertTriangle} glow="amber" subtitle="Provider-recorded" />
         <HeroTile label="GDAP expiring" value={valueOrDash(loading, summary, summary?.gdap_expiring_30d)} icon={KeyRound} glow="rose" subtitle="Verified relationships" />
-      </div>
+      </div>}
 
       {!hasEvidence && <EmptyEvidence action={<Button size="sm" onClick={() => setTab("connection")}><Lock className="mr-1.5 h-3.5 w-3.5" />Set up connection</Button>} />}
 
@@ -264,10 +266,364 @@ function DetectionDraftsTab({ headers }) {
 }
 
 function ConnectionTab({ headers, connection, onSaved }) {
-  const [form, setForm] = useState({ app_id: "", tenant_id: "", app_secret: "", partner_center_account: "" });
+  const [form, setForm] = useState({
+    app_id: "",
+    partner_tenant_id: "",
+    app_secret: "",
+    partner_center_account: "",
+    admin_consent_redirect_uri: "",
+    connection_strategy: "partner_center",
+  });
+  const [manual, setManual] = useState({
+    tenant_id: "",
+    tenant_name: "",
+    default_domain: "",
+    client_id: "",
+    consent_method: "gdap",
+  });
+  const [onboarding, setOnboarding] = useState(null);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
-  const save = async () => { setBusy(true); try { const payload = Object.fromEntries(Object.entries(form).filter(([, value]) => value.trim())); const response = await axios.put(`${API}/m365/connection`, payload, { headers }); setResult(response.data); setForm({ app_id: "", tenant_id: "", app_secret: "", partner_center_account: "" }); onSaved?.(); toast.success("Connection details saved for verification"); } catch { toast.error("Unable to save Microsoft 365 connection details"); } finally { setBusy(false); } };
-  const test = async () => { setBusy(true); try { const response = await axios.post(`${API}/m365/connection/test`, {}, { headers }); setResult(response.data); } catch { toast.error("Connection check could not be completed"); } finally { setBusy(false); } };
-  return <div className="grid gap-4 xl:grid-cols-[1fr_1.15fr]"><Card className="border-cyan-500/25 bg-cyan-500/[0.04]"><CardContent className="p-5"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Technician setup path</p></div><ol className="mt-4 space-y-3 text-xs leading-5 text-muted-foreground"><li><span className="mr-2 font-semibold text-cyan-200">01</span>Create a dedicated Microsoft Entra app registration for the MSP integration.</li><li><span className="mr-2 font-semibold text-cyan-200">02</span>Grant only the Microsoft Graph application permissions required by the synchronisation provider, then obtain tenant admin consent.</li><li><span className="mr-2 font-semibold text-cyan-200">03</span>Create and securely store a client secret; record the App (client) ID and Directory (tenant) ID.</li><li><span className="mr-2 font-semibold text-cyan-200">04</span>Save the connection below, then install and verify the Nexus Microsoft Graph synchronisation provider.</li></ol><p className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3 text-xs leading-5 text-amber-100">Saving credentials does not establish a live connection. This workspace remains evidence-free until a provider can authenticate, retrieve data, and record its verification.</p></CardContent></Card><Card><CardContent className="space-y-4 p-5"><div className="flex flex-wrap items-center gap-2"><Lock className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Connection details</p><Badge variant="outline" className="border-amber-500/30 text-amber-100">{statusLabel(connection?.mode)}</Badge></div><div className="grid gap-3 md:grid-cols-2"><div><Label>App (client) ID</Label><Input value={form.app_id} onChange={(event) => setForm({ ...form, app_id: event.target.value })} placeholder={connection?.app_id || "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"} /></div><div><Label>Directory (tenant) ID</Label><Input value={form.tenant_id} onChange={(event) => setForm({ ...form, tenant_id: event.target.value })} placeholder={connection?.tenant_id || "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"} /></div><div><Label>Client secret</Label><Input type="password" value={form.app_secret} onChange={(event) => setForm({ ...form, app_secret: event.target.value })} placeholder={connection?.secret_configured ? "A secret is stored - enter a new value only to rotate it" : "Enter client secret"} /></div><div><Label>Partner Center account (optional)</Label><Input value={form.partner_center_account} onChange={(event) => setForm({ ...form, partner_center_account: event.target.value })} placeholder={connection?.partner_center_account || "operations@example.com"} /></div></div><div className="flex flex-wrap gap-2"><Button onClick={save} disabled={busy}>{busy ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Lock className="mr-1.5 h-3.5 w-3.5" />}Save for verification</Button><Button variant="outline" onClick={test} disabled={busy}>Check readiness</Button></div>{result && <div className={`rounded-lg border p-3 text-xs leading-5 ${result.ok ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-100" : "border-amber-500/30 bg-amber-500/[0.05] text-amber-100"}`}><p className="font-medium">{result.ok ? "Verification complete" : result.reason || result.message || "Verification pending"}</p>{result.next_steps?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-5">{result.next_steps.map((step) => <li key={step}>{step}</li>)}</ul>}</div>}</CardContent></Card></div>;
+
+  const loadOnboarding = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API}/m365/onboarding`, { headers });
+      setOnboarding(response.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Microsoft tenant onboarding could not be loaded");
+    }
+  }, [headers]);
+
+  useEffect(() => { loadOnboarding(); }, [loadOnboarding]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload = Object.fromEntries(
+        Object.entries(form).filter(([, value]) => typeof value === "string" && value.trim()),
+      );
+      const response = await axios.put(`${API}/m365/connection`, payload, { headers });
+      setResult(response.data);
+      setForm((current) => ({
+        ...current,
+        app_id: "",
+        partner_tenant_id: "",
+        app_secret: "",
+        partner_center_account: "",
+        admin_consent_redirect_uri: "",
+      }));
+      await loadOnboarding();
+      onSaved?.();
+      toast.success("Partner Center connection details saved");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to save Microsoft 365 connection details");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = async () => {
+    setBusy(true);
+    try {
+      const response = await axios.post(`${API}/m365/connection/test`, {}, { headers });
+      setResult(response.data);
+      if (response.data.ok) toast.success("Partner Center connection verified");
+      else toast.warning(response.data.reason || "Partner Center needs attention");
+      await loadOnboarding();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Connection check could not be completed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const discover = async () => {
+    setBusy(true);
+    try {
+      const response = await axios.post(`${API}/m365/onboarding/discover`, {}, { headers });
+      toast.success(response.data.message || "Partner Center tenants discovered");
+      setResult({ ok: true, message: `${response.data.discovered} tenants discovered; ${response.data.auto_mapped} mapped automatically.` });
+      await loadOnboarding();
+      onSaved?.();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Partner Center customer discovery failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addTenant = async () => {
+    if (!manual.tenant_id.trim() || !manual.tenant_name.trim()) {
+      toast.error("Tenant ID and tenant name are required");
+      return;
+    }
+    setBusy(true);
+    try {
+      await axios.post(`${API}/m365/onboarding/tenants`, manual, { headers });
+      toast.success("Individual Microsoft tenant added");
+      setManual({ tenant_id: "", tenant_name: "", default_domain: "", client_id: "", consent_method: "gdap" });
+      await loadOnboarding();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Tenant could not be added");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const mapTenant = async (tenant, clientId) => {
+    try {
+      await axios.put(
+        `${API}/m365/onboarding/tenants/${tenant.id}/mapping`,
+        { client_id: clientId === "__none__" ? "" : clientId },
+        { headers },
+      );
+      toast.success(clientId === "__none__" ? "Tenant mapping removed" : "Tenant mapped to Nexus client");
+      await loadOnboarding();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Tenant mapping could not be changed");
+    }
+  };
+
+  const summary = onboarding?.summary || {};
+  const savedConnection = onboarding?.connection || connection || {};
+
+  return (
+    <div className="space-y-4" data-testid="m365-multitenant-onboarding">
+      <Card className="overflow-hidden border-cyan-500/25 bg-gradient-to-br from-cyan-500/[0.07] via-card to-emerald-500/[0.025]">
+        <CardContent className="p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-cyan-300" />
+                <p className="text-sm font-semibold">Multi-tenant Microsoft onboarding</p>
+                <Badge variant="outline" className="border-cyan-500/30 text-cyan-100">Recommended</Badge>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Connect the MSP partner tenant once, discover the customer tenants visible in Partner Center, then map each tenant to its Nexus client. Add individual tenants only when they are outside your CSP relationship.
+              </p>
+              <p className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3 text-xs leading-5 text-amber-100">
+                Partner Center discovery identifies the tenants; it does not silently grant Microsoft Graph control. Nexus tracks GDAP or customer-admin consent separately and keeps actions blocked until access is verified.
+              </p>
+            </div>
+            <div className="grid min-w-full grid-cols-2 gap-2 sm:grid-cols-5 xl:min-w-[470px]">
+              <OnboardingMetric label="Discovered" value={summary.discovered ?? 0} />
+              <OnboardingMetric label="Mapped" value={summary.mapped ?? 0} />
+              <OnboardingMetric label="Graph ready" value={summary.graph_connected ?? 0} />
+              <OnboardingMetric label="Need mapping" value={summary.needs_mapping ?? 0} />
+              <OnboardingMetric label="Need access" value={summary.needs_access ?? 0} />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 2xl:grid-cols-[1.25fr_.75fr]">
+        <Card>
+          <CardContent className="space-y-4 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Cloud className="h-4 w-4 text-cyan-300" />
+                <div>
+                  <p className="text-sm font-semibold">Partner Center bulk discovery</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">One MSP connection, then import every eligible CSP customer tenant.</p>
+                </div>
+              </div>
+              <Badge variant="outline" className={savedConnection?.last_test_status === "success" ? "border-emerald-500/30 text-emerald-200" : "border-amber-500/30 text-amber-100"}>
+                {savedConnection?.last_test_status === "success" ? "Partner Center verified" : statusLabel(savedConnection?.mode)}
+              </Badge>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <Label>MSP partner tenant ID</Label>
+                <Input name="nexus-m365-partner-tenant-id" autoComplete="off" value={form.partner_tenant_id} onChange={(event) => setForm({ ...form, partner_tenant_id: event.target.value })} placeholder={savedConnection?.partner_tenant_id || "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"} />
+              </div>
+              <div>
+                <Label>App (client) ID</Label>
+                <Input name="nexus-m365-application-id" autoComplete="off" value={form.app_id} onChange={(event) => setForm({ ...form, app_id: event.target.value })} placeholder={savedConnection?.app_id || "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"} />
+              </div>
+              <div>
+                <Label>Client secret</Label>
+                <Input name="nexus-m365-client-secret" autoComplete="new-password" type="password" value={form.app_secret} onChange={(event) => setForm({ ...form, app_secret: event.target.value })} placeholder={savedConnection?.secret_configured ? "Stored — enter only to rotate" : "Enter client secret"} />
+              </div>
+              <div>
+                <Label>Partner operator account</Label>
+                <Input value={form.partner_center_account} onChange={(event) => setForm({ ...form, partner_center_account: event.target.value })} placeholder={savedConnection?.partner_center_account || "operations@example.com"} />
+              </div>
+              <div className="md:col-span-2">
+                <Label>Admin-consent redirect URI (individual fallback)</Label>
+                <Input value={form.admin_consent_redirect_uri} onChange={(event) => setForm({ ...form, admin_consent_redirect_uri: event.target.value })} placeholder={savedConnection?.admin_consent_redirect_uri || "https://nexus.example.com/api/m365/consent/callback"} />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={save} disabled={busy}>
+                {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Lock className="mr-1.5 h-3.5 w-3.5" />}
+                Save connection
+              </Button>
+              <Button variant="outline" onClick={test} disabled={busy || !savedConnection?.secret_configured}>Test Partner Center</Button>
+              <Button variant="outline" onClick={discover} disabled={busy || !savedConnection?.secret_configured}>
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Discover customers
+              </Button>
+            </div>
+            {result && (
+              <div className={`rounded-lg border p-3 text-xs leading-5 ${result.ok ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-100" : "border-amber-500/30 bg-amber-500/[0.05] text-amber-100"}`}>
+                <p className="font-medium">{result.message || result.reason || "Partner Center needs attention"}</p>
+                {result.next_steps?.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-5">{result.next_steps.map((step) => <li key={step}>{step}</li>)}</ul>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/70">
+          <CardContent className="space-y-4 p-5">
+            <div className="flex items-center gap-2">
+              <UserPlus className="h-4 w-4 text-emerald-300" />
+              <div>
+                <p className="text-sm font-semibold">Add one tenant</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">For non-CSP customers or staged onboarding.</p>
+              </div>
+            </div>
+            <div className="grid gap-3">
+              <div><Label>Tenant ID</Label><Input value={manual.tenant_id} onChange={(event) => setManual({ ...manual, tenant_id: event.target.value })} placeholder="Directory tenant GUID" /></div>
+              <div><Label>Tenant name</Label><Input value={manual.tenant_name} onChange={(event) => setManual({ ...manual, tenant_name: event.target.value })} placeholder="Contoso Australia" /></div>
+              <div><Label>Primary domain</Label><Input value={manual.default_domain} onChange={(event) => setManual({ ...manual, default_domain: event.target.value })} placeholder="contoso.com.au" /></div>
+              <div>
+                <Label>Nexus client</Label>
+                <Select value={manual.client_id || "__none__"} onValueChange={(value) => setManual({ ...manual, client_id: value === "__none__" ? "" : value })}>
+                  <SelectTrigger><SelectValue placeholder="Map later" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Map later</SelectItem>
+                    {(onboarding?.clients || []).map((client) => <SelectItem value={client.id} key={client.id}>{client.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Access path</Label>
+                <Select value={manual.consent_method} onValueChange={(value) => setManual({ ...manual, consent_method: value })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gdap">GDAP (recommended)</SelectItem>
+                    <SelectItem value="customer_admin">Customer admin consent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button className="w-full" onClick={addTenant} disabled={busy}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />Add tenant for verification
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <div className="flex flex-col gap-2 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Tenant onboarding registry</p>
+              <p className="mt-1 text-xs text-muted-foreground">Discovery, client ownership and Microsoft access are deliberately separate, auditable states.</p>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <a href="https://partner.microsoft.com/dashboard/commerce2/customers/list" target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open Partner Center
+              </a>
+            </Button>
+          </div>
+          {!onboarding ? (
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading tenant registry</div>
+          ) : onboarding.tenants.length === 0 ? (
+            <div className="py-12 text-center">
+              <Cloud className="mx-auto h-8 w-8 text-muted-foreground/60" />
+              <p className="mt-3 text-sm font-medium">No Microsoft tenants onboarded</p>
+              <p className="mt-1 text-xs text-muted-foreground">Save Partner Center credentials and discover customers, or add one tenant manually.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tenant</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Nexus client</TableHead>
+                  <TableHead>Microsoft access</TableHead>
+                  <TableHead className="text-right">Next step</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {onboarding.tenants.map((tenant) => (
+                  <TableRow key={tenant.id}>
+                    <TableCell>
+                      <p className="text-sm font-medium">{tenant.tenant_name || tenant.tenant_id}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{tenant.default_domain || tenant.tenant_id}</p>
+                    </TableCell>
+                    <TableCell><Badge variant="outline" className="capitalize">{String(tenant.source || "manual").replaceAll("_", " ")}</Badge></TableCell>
+                    <TableCell className="min-w-[220px]">
+                      <Select value={tenant.client_id || "__none__"} onValueChange={(value) => mapTenant(tenant, value)}>
+                        <SelectTrigger className="h-9"><SelectValue placeholder="Choose client" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Not mapped</SelectItem>
+                          {(onboarding.clients || []).map((client) => <SelectItem value={client.id} key={client.id}>{client.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell><AccessBadge status={tenant.access_status} /></TableCell>
+                    <TableCell className="text-right">
+                      {tenant.access_status === "connected" ? (
+                        <span className="inline-flex items-center text-xs text-emerald-200"><CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Ready</span>
+                      ) : tenant.access_status === "consent_required" ? (
+                        savedConnection?.app_id && savedConnection?.admin_consent_redirect_uri ? (
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={`https://login.microsoftonline.com/${encodeURIComponent(tenant.tenant_id)}/adminconsent?client_id=${encodeURIComponent(savedConnection.app_id)}&redirect_uri=${encodeURIComponent(savedConnection.admin_consent_redirect_uri)}`} target="_blank" rel="noreferrer">
+                              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Request consent
+                            </a>
+                          </Button>
+                        ) : <span className="text-xs text-amber-200">Configure consent URI</span>
+                      ) : (
+                        <Button variant="outline" size="sm" asChild>
+                          <a href="https://partner.microsoft.com/dashboard/commerce2/customers/list" target="_blank" rel="noreferrer">
+                            <Link2 className="mr-1.5 h-3.5 w-3.5" />Review GDAP
+                          </a>
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-cyan-500/20 bg-cyan-500/[0.035]">
+        <CardContent className="p-5">
+          <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Technician setup path</p></div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              ["01", "Register the partner app", "Create the app in your MSP partner tenant and grant only required Partner Center permissions."],
+              ["02", "Discover CSP customers", "Test the connection, then import the customer tenants Partner Center exposes."],
+              ["03", "Map client ownership", "Link each Microsoft tenant to the canonical Nexus client record."],
+              ["04", "Verify operational access", "Establish least-privilege GDAP or customer-admin consent before actions are enabled."],
+            ].map(([number, title, copy]) => (
+              <div key={number} className="rounded-xl border border-border/70 bg-black/10 p-4">
+                <p className="text-xs font-semibold text-cyan-200">{number}</p>
+                <p className="mt-2 text-sm font-medium">{title}</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{copy}</p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function OnboardingMetric({ label, value }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-black/15 px-3 py-2.5">
+      <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function AccessBadge({ status }) {
+  if (status === "connected") return <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-100">Graph verified</Badge>;
+  if (status === "consent_required") return <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-100">Admin consent required</Badge>;
+  return <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-100">GDAP required</Badge>;
 }

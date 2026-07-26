@@ -29,6 +29,7 @@ import {
   Server, Activity, Download, Plus, Terminal, Zap, FileDown,
   Settings as SettingsIcon, ShieldCheck, Loader2, Sparkles, Copy,
   CheckCircle2, WifiOff, Users, TrendingUp, AlertCircle, XCircle, ExternalLink, RefreshCw,
+  KeyRound, BadgeCheck, Wrench, LockKeyhole,
 } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
@@ -494,7 +495,7 @@ function InstallerBuilder({ open, onClose }) {
       <DialogContent className="max-w-lg" data-testid="installer-builder-dialog">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
-          <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield posture telemetry, automatic Nexus Canary provisioning, secure Client Chat, and Nexus Elevate support.</DialogDescription>
+          <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield, Nexus Canary, secure Client Chat, Nexus Elevate, and the staged Nexus DNS endpoint channel.</DialogDescription>
         </DialogHeader>
         {!result ? (
           <div className="space-y-3">
@@ -516,10 +517,12 @@ function InstallerBuilder({ open, onClose }) {
               </a>
               <p className="mt-2 text-[10px] text-zinc-400">Package cadence: heartbeat every {result.heartbeat_secs || 60}s; command poll every {result.poll_secs || 10}s.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               <div className="rounded border border-cyan-400/20 bg-cyan-400/[0.04] p-3 text-xs text-cyan-50"><div className="flex items-center gap-1.5 font-medium"><CheckCircle2 className="h-3.5 w-3.5 text-cyan-300" />Nexus Agent service</div><p className="mt-1 leading-relaxed text-cyan-100/70">Enrolment, telemetry, approved commands, and automatic updates.</p></div>
               <div className={`rounded border p-3 text-xs ${result.includes_nexus_shield ? "border-violet-500/25 bg-violet-500/[0.05] text-violet-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_shield ? <ShieldCheck className="h-3.5 w-3.5 text-violet-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_shield ? "Nexus Shield + Canary" : "Nexus Shield unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_shield ? "Posture telemetry starts at first check-in; one Canary sensor is automatically queued for each Windows endpoint." : "This installer predates the Nexus Shield deployment profile."}</p></div>
               <div className={`rounded border p-3 text-xs ${result.includes_nexus_elevate ? "border-emerald-500/25 bg-emerald-500/[0.05] text-emerald-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_elevate ? <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_elevate ? "Client Chat + Nexus Elevate" : "Client companion unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_elevate ? "Client chat and the auditable administrator-access request flow are bundled." : "Build the Nexus Client Chat companion before generating a deployment package."}</p></div>
+              <div className={`rounded border p-3 text-xs ${result.includes_nexus_dns ? "border-sky-500/25 bg-sky-500/[0.05] text-sky-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_nexus_dns ? <ShieldCheck className="h-3.5 w-3.5 text-sky-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_nexus_dns ? "Nexus DNS ready" : "Nexus DNS unavailable"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_nexus_dns ? "Visibility, resolver health and staged policy delivery are included. DNS is not changed until a technician approves deployment." : "Generate a current installer to include the Nexus DNS deployment channel."}</p></div>
+              <div className={`rounded border p-3 text-xs sm:col-span-2 ${result.includes_device_identity ? "border-emerald-500/25 bg-emerald-500/[0.05] text-emerald-50" : "border-amber-500/25 bg-amber-500/[0.05] text-amber-50"}`}><div className="flex items-center gap-1.5 font-medium">{result.includes_device_identity ? <LockKeyhole className="h-3.5 w-3.5 text-emerald-300" /> : <AlertCircle className="h-3.5 w-3.5 text-amber-300" />}{result.includes_device_identity ? "Device trust included" : "Legacy trust package"}</div><p className="mt-1 leading-relaxed opacity-75">{result.includes_device_identity ? "The endpoint creates its own private key, enrolls a short-lived certificate, caches checksummed policy, verifies Ed25519 update manifests and reports self-repair evidence." : "Generate a current installer to include Nexus Agent device identity."}</p></div>
             </div>
             {isLocalInstaller && (
               <div className="rounded border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-200">
@@ -554,10 +557,104 @@ function InstallerBuilder({ open, onClose }) {
 
 // ───────── Settings (kept) ─────────
 
+function AgentTrustCard({ canOperate }) {
+  const { token } = useAuth();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const [data, setData] = useState({ counts: {}, attention: [], transport: {} });
+  const [busyId, setBusyId] = useState("");
+  const [error, setError] = useState("");
+
+  const load = () => axios.get(`${API}/nexus-agent/trust/overview`, { headers })
+    .then(r => { setData(r.data || { counts: {}, attention: [] }); setError(""); })
+    .catch(() => setError("Agent trust evidence is unavailable."));
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 10000);
+    return () => clearInterval(timer);
+  }, [headers]);
+
+  const repair = async (deviceId) => {
+    setBusyId(deviceId);
+    try {
+      await axios.post(`${API}/nexus-agent/agents/${deviceId}/trust/remediate`, {
+        actions: ["identity", "policy", "config", "companion"],
+        reason: "Technician initiated trust repair from Agent Centre",
+      }, { headers });
+      toast.success("Trust repair queued");
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not queue trust repair");
+    } finally {
+      setBusyId("");
+    }
+  };
+
+  const counts = data.counts || {};
+  const metrics = [
+    { label: "mTLS verified", value: counts.mtls_verified || 0, icon: LockKeyhole, tone: "text-emerald-300" },
+    { label: "Certificates issued", value: counts.certificate_issued || 0, icon: KeyRound, tone: "text-cyan-300" },
+    { label: "Policy current", value: counts.policy_acknowledged || 0, icon: BadgeCheck, tone: "text-violet-300" },
+    { label: "Self-repair healthy", value: counts.self_repair_healthy || 0, icon: Wrench, tone: "text-amber-300" },
+    { label: "Signed update verified", value: counts.signed_update_verified || 0, icon: ShieldCheck, tone: "text-sky-300" },
+  ];
+
+  return (
+    <Card className="bg-zinc-950 border-zinc-800" data-testid="agent-trust-card">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <LockKeyhole className="h-4 w-4 text-emerald-300" />Endpoint trust & resilience
+          <Badge variant="outline" className="ml-auto text-[10px]">{counts.total || 0} enrolled</Badge>
+        </CardTitle>
+        <p className="text-[11px] leading-relaxed text-zinc-500">Private keys stay on the endpoint. Certificates become fully mTLS verified when your validating proxy supplies the verified fingerprint to NexusMSP. {data.transport?.proxy_trust_enabled ? "Verified proxy evidence is enabled." : "Verified proxy evidence is ready but not enabled on this local origin."}</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+          {metrics.map(item => (
+            <div key={item.label} className="rounded-lg border border-zinc-800 bg-zinc-900/45 p-3">
+              <item.icon className={`h-4 w-4 ${item.tone}`} />
+              <p className="mt-2 text-xl font-semibold font-mono text-zinc-100">{item.value}</p>
+              <p className="text-[10px] text-zinc-500">{item.label}</p>
+            </div>
+          ))}
+        </div>
+        <div className="overflow-hidden rounded-lg border border-zinc-800">
+          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/50 px-3 py-2">
+            <span className="text-xs font-medium">Needs attention</span>
+            <Badge variant="outline" className="text-[10px]">{data.attention?.length || 0}</Badge>
+          </div>
+          <div className="max-h-64 divide-y divide-zinc-900 overflow-y-auto">
+            {(data.attention || []).length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-zinc-500">Every reporting endpoint is current.</div>
+            ) : data.attention.map(row => (
+              <div key={row.device_id} className="flex items-start gap-3 px-3 py-2.5">
+                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${row.online ? "bg-emerald-400" : "bg-zinc-600"}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-xs font-medium text-zinc-200">{row.hostname}</span>
+                    <Badge variant="outline" className="text-[9px]">{row.trust_status?.replaceAll("_", " ")}</Badge>
+                  </div>
+                  <p className="mt-0.5 truncate text-[10px] text-zinc-500">{row.client_name} · {row.issues?.join(" · ")}</p>
+                </div>
+                {canOperate && row.online && (
+                  <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={busyId === row.device_id} onClick={() => repair(row.device_id)}>
+                    {busyId === row.device_id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Wrench className="mr-1 h-3 w-3" />}Repair
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+      {error && <InlineError>{error}</InlineError>}
+    </Card>
+  );
+}
+
 function SettingsCard({ canEdit }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, winget_enabled: false, winget_allowed_ids: [] });
+  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, self_repair_enabled: true, require_signed_updates: true, winget_enabled: false, winget_allowed_ids: [] });
   const [busy, setBusy] = useState(false);
   const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false, agent_binary_sha256: "", agent_binary_size: 0 });
   const [loadError, setLoadError] = useState("");
@@ -630,12 +727,22 @@ function SettingsCard({ canEdit }) {
               <div className="text-sm font-medium flex items-center gap-2">Auto-update on heartbeat
                 <Badge variant="outline" className="text-[10px]">{s.auto_update_enabled ? "ON" : "OFF"}</Badge>
               </div>
-              <p className="text-[11px] text-zinc-500 mt-0.5">SHA256-verified self-restart when versions mismatch.</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">Ed25519 manifest signature plus SHA-256 and size verification before self-restart.</p>
               {meta.agent_binary_sha256 && (
                 <p className="text-[10px] font-mono text-zinc-600 mt-1 truncate" title={meta.agent_binary_sha256}>sha256: {meta.agent_binary_sha256.slice(0, 24)}…</p>
               )}
             </div>
           </div>
+        </div>
+        <div className="grid gap-3 border-t border-zinc-800 pt-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left">
+            <div className="flex items-center gap-2 text-sm font-medium"><KeyRound className="h-4 w-4 text-cyan-300" />Signed updates enforced<Badge variant="outline" className="ml-auto text-[9px]">ON</Badge></div>
+            <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">The agent rejects any update without a valid Nexus Ed25519 signature.</p>
+          </div>
+          <button type="button" onClick={() => canEdit && setS({ ...s, self_repair_enabled: !s.self_repair_enabled })} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left disabled:opacity-60" disabled={!canEdit}>
+            <div className="flex items-center gap-2 text-sm font-medium"><Wrench className="h-4 w-4 text-amber-300" />Local self-repair<Badge variant="outline" className="ml-auto text-[9px]">{s.self_repair_enabled ? "ON" : "OFF"}</Badge></div>
+            <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">Verify identity files, policy cache and local configuration evidence.</p>
+          </button>
         </div>
         <div className="border-t border-zinc-800 pt-3">
           <div className="flex items-center gap-2 mb-2">
@@ -730,6 +837,8 @@ export default function NexusAgentCenterPage() {
         <HeroTile label="Commands Queued" value={stats.pending_commands || 0} icon={Terminal} glow={stats.pending_commands ? "amber" : "violet"} testId="hero-agents-pending" />
       </div>
       {statsError && <InlineError>{statsError}</InlineError>}
+
+      <AgentTrustCard canOperate={canOperate} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <VersionDonut />

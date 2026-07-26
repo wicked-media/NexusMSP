@@ -8,11 +8,15 @@ const page = (name) => lazy(() => import(`@/pages/${name}`));
 export const routeConfig = [
   // Core
   { path: "/", component: page("DashboardPage"), auth: true, layout: true },
+  { path: "/nexus-suite", component: page("NexusSuitePage"), auth: true, layout: true },
   { path: "/shadow-it", component: page("ShadowITPage"), auth: true, layout: true },
   { path: "/nexus-elevate", component: page("NexusElevatePage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
-  { path: "/cipp", component: page("CippCommandCenterPage"), auth: true, layout: true },
-  { path: "/m365", component: page("M365CommandCenter"), auth: true, layout: true },
+  { path: "/control-plane", component: page("NexusControlPlanePage"), auth: true, layout: true },
+  // Preserve historic bookmarks while keeping Microsoft tenant operations in
+  // one provider-agnostic Nexus Control Plane workspace.
+  { path: "/cipp", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=tenant-operations" },
+  { path: "/m365", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=security" },
   { path: "/unifi", component: page("UnifiCommandCenterPage"), auth: true, layout: true },
   { path: "/nexus-agent", component: page("NexusAgentCenterPage"), auth: true, layout: true },
   { path: "/warroom", component: page("WarRoomPage"), auth: true, layout: true },
@@ -161,10 +165,10 @@ export const routeConfig = [
   // Phase C new features
   { path: "/dns-monitor", component: page("DnsMonitorPage"), auth: true, layout: true },
   { path: "/patch-compliance", component: page("PatchCompliancePage"), auth: true, layout: true },
-  { path: "/client-portal-admin", component: page("ClientPortalAdminPage"), auth: true, layout: true },
+  { path: "/client-portal-admin", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/client-portal?view=access" },
   { path: "/backup-dashboard", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
   { path: "/backup-command-center", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center" },
-  { path: "/mfa-management", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/m365" },
+  { path: "/mfa-management", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=security" },
   // The former suppression screen only stored display rules; it never took part
   // in alert evaluation. Keep old links working, but route technicians to the
   // enforced Alert Rules Engine instead.
@@ -175,6 +179,7 @@ export const routeConfig = [
 
   // Phase D: Security Operations + Huntress-killers
   { path: "/security-dashboard", component: page("SecurityDashboardPage"), auth: true, layout: true },
+  { path: "/security-graph", component: page("SecurityGraphPage"), auth: true, layout: true },
   { path: "/nexus-shield", component: page("NexusShieldPage"), auth: true, layout: true },
   { path: "/endpoint-security", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-shield?tab=endpoints" },
   { path: "/threat-timeline", component: page("ThreatTimelinePage"), auth: true, layout: true },
@@ -214,7 +219,7 @@ export const routeConfig = [
   { path: "/comms-timeline", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/client-insights?tab=client-timeline" },
   // Legacy QBR generator bookmarks resolve to the unified QBR workspace.
   { path: "/qbr-generator", component: page("QBRRedirectPage"), auth: true, layout: true },
-  { path: "/zero-trust", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/m365" },
+  { path: "/zero-trust", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=security" },
   { path: "/webhook-builder", component: page("WebhookBuilderPage"), auth: true, layout: true },
   { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
   { path: "/late-payment", component: page("LatePaymentPage"), auth: true, layout: true },
@@ -312,7 +317,6 @@ export const routeConfig = [
 
   // Public routes (no auth, no layout)
   { path: "/pay/:token", component: page("PublicPaymentPage"), auth: false, layout: false },
-  { path: "/portal/:token", component: page("MagicPortalPage"), auth: false, layout: false },
-  { path: "/portal-app", component: page("TenantPortalApp"), auth: false, layout: false },
+  { path: "/portal-app", component: page("PortalLoginPage"), auth: false, layout: false },
   { path: "/status-board/:clientId", component: page("StatusBoardPage"), auth: false, layout: false },
 ];

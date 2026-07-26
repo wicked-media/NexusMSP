@@ -1,11 +1,14 @@
 import os
 import asyncio
 import logging
+import re
 import time
 import httpx
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
+from pymongo.errors import DuplicateKeyError
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlsplit, urlunsplit
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
@@ -19,8 +22,11 @@ logger = logging.getLogger(__name__)
 
 @router.get("/yeastar/status")
 async def get_yeastar_status(current_user: dict = Depends(get_current_user)):
-    settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
-    return {"configured": bool(settings and settings.get("client_id") and settings.get("pbx_url"))}
+    configured = await db.yeastar_pbxs.find_one(
+        {"enabled": {"$ne": False}, "pbx_url": {"$nin": ["", None]}, "client_api_id": {"$nin": ["", None]}, "client_secret": {"$nin": ["", None]}},
+        {"_id": 1},
+    )
+    return {"configured": bool(configured), "mode": "client_pbx"}
 
 @router.post("/yeastar/settings")
 async def save_yeastar_settings(settings: dict, current_user: dict = Depends(get_current_user)):
@@ -60,31 +66,79 @@ async def get_yeastar_settings(current_user: dict = Depends(get_current_user)):
 
 @router.get("/yeastar/test-connection")
 async def test_yeastar_connection(pbx_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    """Test either the default connection or a customer-specific PBX."""
-    if pbx_id and pbx_id != "primary":
-        settings = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
-        if not settings:
-            raise HTTPException(status_code=404, detail="PBX not found")
-    else:
-        settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
+    """Run a live test against one client-linked P-Series PBX."""
+    if not pbx_id or pbx_id == "primary":
+        raise HTTPException(status_code=400, detail="Choose a client-linked PBX to test")
+    settings = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
+    if not settings:
+        raise HTTPException(status_code=404, detail="PBX not found")
     if not settings or not _has_pbx_credentials(settings):
-        return {"success": False, "message": "This PBX needs a Cloud URL, Client ID, and Client Secret before it can be tested."}
+        return {"success": False, "message": "This PBX needs its base URL, Client ID, and Client Secret before it can be tested."}
     try:
-        token = await _yeastar_get_token(settings)
-        if token:
-            if pbx_id and pbx_id != "primary":
-                await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": {"status": "online", "last_test_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()}})
-            return {"success": True, "message": "Successfully connected to Yeastar PBX."}
-        return {"success": False, "message": "Authentication failed. This may be due to max token limit (8) — tokens auto-expire after 30 minutes. Try again shortly."}
-    except Exception as e:
-        return {"success": False, "message": f"Connection failed: {str(e)}"}
+        result = await _test_pbx_live(settings)
+        now = datetime.now(timezone.utc).isoformat()
+        await db.yeastar_pbxs.update_one(
+            {"id": pbx_id},
+            {"$set": {
+                "status": "online",
+                "last_test_at": now,
+                "last_test_error": "",
+                "api_latency_ms": result["api_latency_ms"],
+                "system_name": result.get("system_name", ""),
+                "model": result.get("model", ""),
+                "firmware_version": result.get("firmware_version", ""),
+                "serial_number": result.get("serial_number", ""),
+                "updated_at": now,
+            }},
+        )
+        return {
+            "success": True,
+            "message": f"Connected to {result.get('system_name') or settings.get('name') or 'Yeastar PBX'} in {result['api_latency_ms']} ms.",
+            **result,
+        }
+    except YeastarConnectionError as exc:
+        now = datetime.now(timezone.utc).isoformat()
+        status = "authentication_failed" if exc.kind == "authentication" else "offline"
+        await db.yeastar_pbxs.update_one(
+            {"id": pbx_id},
+            {"$set": {"status": status, "last_test_at": now, "last_test_error": str(exc), "updated_at": now}},
+        )
+        return {"success": False, "message": str(exc), "error_kind": exc.kind}
 
 _yeastar_token_lock = asyncio.Lock()
 _yeastar_token_cache: dict[str, dict[str, Any]] = {}
 
 
+class YeastarConnectionError(RuntimeError):
+    def __init__(self, message: str, kind: str = "connection"):
+        super().__init__(message)
+        self.kind = kind
+
+
+def _normalise_pbx_url(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("Enter the PBX URL or Yeastar FQDN")
+    if "://" not in raw:
+        raw = f"https://{raw}"
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Enter a valid PBX URL, for example https://customer.example.yeastarcloud.com")
+    path = parsed.path.rstrip("/")
+    marker = path.lower().find("/openapi/")
+    if marker >= 0:
+        path = path[:marker]
+    elif path.lower().endswith("/openapi"):
+        path = path[:-8]
+    return urlunsplit((parsed.scheme.lower(), parsed.netloc, path.rstrip("/"), "", ""))
+
+
 def _pbx_url(settings: dict) -> str:
-    return str(settings.get("pbx_url") or settings.get("url") or "").rstrip("/")
+    value = settings.get("pbx_url") or settings.get("url") or ""
+    try:
+        return _normalise_pbx_url(str(value))
+    except ValueError:
+        return str(value).strip().rstrip("/")
 
 
 def _pbx_client_id(settings: dict) -> str:
@@ -94,12 +148,28 @@ def _pbx_client_id(settings: dict) -> str:
 def _has_pbx_credentials(settings: dict) -> bool:
     return bool(_pbx_url(settings) and _pbx_client_id(settings) and settings.get("client_secret"))
 
-async def _yeastar_get_token(settings: dict) -> str | None:
-    """Get access token from Yeastar PBX with caching and lock"""
+def _yeastar_error_message(data: dict) -> YeastarConnectionError:
+    code = data.get("errcode")
+    message = str(data.get("errmsg") or "Authentication failed")
+    if code == 60002:
+        return YeastarConnectionError(
+            "Yeastar has reached its eight-token limit. Wait for an existing token to expire (up to 30 minutes), then test again.",
+            "authentication",
+        )
+    return YeastarConnectionError(
+        f"Yeastar rejected the Client ID or Client Secret ({message}, error {code}). Check Integrations > API on this PBX.",
+        "authentication",
+    )
+
+
+async def _yeastar_get_token(settings: dict, *, strict: bool = False) -> str | None:
+    """Get a P-Series API token with caching and actionable diagnostics."""
     pbx_url = _pbx_url(settings)
     client_id = _pbx_client_id(settings)
     client_secret = settings.get("client_secret", "")
     if not pbx_url or not client_id or not client_secret:
+        if strict:
+            raise YeastarConnectionError("PBX URL, Client ID, and Client Secret are required.", "configuration")
         return None
 
     cache_key = f"{pbx_url}|{client_id}"
@@ -114,29 +184,59 @@ async def _yeastar_get_token(settings: dict) -> str | None:
             verify_tls = settings.get("tls_validation", os.environ.get('ALLOW_SELF_SIGNED_CERTS', 'false').lower() != 'true')
             async with httpx.AsyncClient(verify=verify_tls, timeout=15) as http:
                 resp = await http.post(url, json={"username": client_id, "password": client_secret}, headers={"User-Agent": "OpenAPI", "Content-Type": "application/json"})
-                data = resp.json()
+                if resp.status_code >= 400:
+                    raise YeastarConnectionError(f"The PBX returned HTTP {resp.status_code} from its token endpoint.", "http")
+                try:
+                    data = resp.json()
+                except ValueError as exc:
+                    raise YeastarConnectionError(
+                        "The address responded, but it was not a Yeastar P-Series OpenAPI endpoint. Enter the PBX base URL without /openapi.",
+                        "endpoint",
+                    ) from exc
                 if data.get("errcode") == 0:
                     token = data.get("access_token")
+                    if not token:
+                        raise YeastarConnectionError("Yeastar returned success without an access token.", "authentication")
                     _yeastar_token_cache[cache_key] = {
                         "token": token,
                         "expires": now + data.get("access_token_expire_time", 1800) - 60,
                         "refresh_token": data.get("refresh_token"),
                     }
                     return token
-                if data.get("errcode") == 60002:
-                    logger.warning("Yeastar max tokens exceeded, waiting for auto-expiry")
-                logger.error(f"Yeastar auth: {data.get('errmsg', 'Unknown error')}")
-                return None
-        except Exception as e:
-            logger.error(f"Yeastar auth error: {e}")
+                raise _yeastar_error_message(data)
+        except YeastarConnectionError as exc:
+            logger.warning("Yeastar authentication failed for %s: %s", pbx_url, exc)
+            if strict:
+                raise
+            return None
+        except httpx.ConnectTimeout as exc:
+            error = YeastarConnectionError("Timed out connecting to the PBX. Check the FQDN, web port, firewall, and remote API access.", "timeout")
+            if strict:
+                raise error from exc
+            return None
+        except httpx.ConnectError as exc:
+            detail = str(exc).lower()
+            if "certificate" in detail or "ssl" in detail or "tls" in detail:
+                error = YeastarConnectionError("TLS validation failed. Install a valid certificate on the PBX, or disable TLS validation only for a trusted private endpoint.", "tls")
+            else:
+                error = YeastarConnectionError("Could not reach the PBX. Check the base URL, DNS, firewall, web port, and Yeastar remote API access.", "connection")
+            if strict:
+                raise error from exc
+            return None
+        except httpx.HTTPError as exc:
+            error = YeastarConnectionError(f"Yeastar API request failed: {exc.__class__.__name__}.", "http")
+            if strict:
+                raise error from exc
             return None
 
-async def _yeastar_api_get(path: str, params: dict = None, settings: dict | None = None) -> dict | list | None:
+async def _yeastar_api_get(path: str, params: dict = None, settings: dict | None = None, *, strict: bool = False) -> dict | list | None:
     """Make authenticated GET request to Yeastar PBX"""
     settings = settings or await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
     if not settings:
+        if strict:
+            raise YeastarConnectionError("PBX configuration was not found.", "configuration")
         return None
-    token = await _yeastar_get_token(settings)
+    token = await _yeastar_get_token(settings, strict=strict)
     if not token:
         return None
     pbx_url = _pbx_url(settings)
@@ -149,12 +249,50 @@ async def _yeastar_api_get(path: str, params: dict = None, settings: dict | None
         async with httpx.AsyncClient(verify=verify_tls, timeout=15) as http:
             resp = await http.get(url, params=query, headers={"User-Agent": "OpenAPI"})
             if resp.status_code == 200 and resp.text:
-                return resp.json()
+                try:
+                    data = resp.json()
+                except ValueError as exc:
+                    if strict:
+                        raise YeastarConnectionError("The PBX returned an invalid API response.", "endpoint") from exc
+                    return None
+                if strict and isinstance(data, dict) and data.get("errcode", 0) != 0:
+                    raise YeastarConnectionError(
+                        f"Yeastar API check failed ({data.get('errmsg') or 'unknown error'}, error {data.get('errcode')}).",
+                        "api",
+                    )
+                return data
             logger.error(f"Yeastar API {path}: status={resp.status_code}, body={resp.text[:200]}")
+            if strict:
+                raise YeastarConnectionError(f"The PBX returned HTTP {resp.status_code} for {path}.", "http")
             return None
+    except YeastarConnectionError:
+        raise
+    except httpx.ConnectTimeout as exc:
+        if strict:
+            raise YeastarConnectionError("The PBX API timed out during its live system check.", "timeout") from exc
+        return None
+    except httpx.ConnectError as exc:
+        if strict:
+            raise YeastarConnectionError("The PBX became unreachable during its live system check.", "connection") from exc
+        return None
     except Exception as e:
         logger.error(f"Yeastar API {path} error: {e}")
+        if strict:
+            raise YeastarConnectionError("The PBX API live check failed.", "api") from e
         return None
+
+
+async def _test_pbx_live(settings: dict) -> dict:
+    started = time.perf_counter()
+    data = await _yeastar_api_get("system/information", settings=settings, strict=True)
+    info = data.get("data", {}) if isinstance(data, dict) else {}
+    return {
+        "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
+        "system_name": info.get("device_name", ""),
+        "model": info.get("model_name", ""),
+        "firmware_version": info.get("firmware_version", ""),
+        "serial_number": info.get("sn", ""),
+    }
 
 @router.get("/yeastar/system-info")
 async def get_yeastar_system_info(current_user: dict = Depends(get_current_user)):
@@ -367,23 +505,10 @@ async def _voice_extensions_with_overrides(current_user: dict, pbx: dict | None 
 
 @router.get("/yeastar/voice-workspace")
 async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)):
-    settings = await get_yeastar_settings(current_user)
     sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
     billing_history = await db.yeastar_billing_snapshots.find({}, {"_id": 0}).sort("created_at", -1).to_list(24)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
     pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    if not pbx_records and (settings.get("pbx_url") or settings.get("client_id")):
-        pbx_records = [{
-            "id": "primary",
-            "name": settings.get("pbx_name") or "Primary Yeastar PBX",
-            "client_name": settings.get("client_name") or "Unassigned client",
-            "pbx_url": settings.get("pbx_url", ""),
-            "client_id": settings.get("linked_client_id", ""),
-            "client_api_id": settings.get("client_id", ""),
-            "client_secret": settings.get("client_secret", ""),
-            "enabled": settings.get("enabled", True),
-            "billing_policy": settings.get("billing_policy", "all_enabled"),
-        }]
 
     extensions = []
     for pbx in pbx_records:
@@ -400,10 +525,10 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
         "has_credentials": _has_pbx_credentials(record),
         "extension_count": record.get("extension_count", len([extension for extension in extensions if extension.get("pbx_id") == str(record.get("id") or "primary")])),
         "billable_extension_count": record.get("billable_extension_count", len([extension for extension in extensions if extension.get("pbx_id") == str(record.get("id") or "primary") and extension.get("included_in_billing")])),
-        "billing_policy": record.get("billing_policy", settings.get("billing_policy", "all_enabled")),
-        "agreement_mapping": record.get("agreement_mapping", settings.get("agreement_mapping", "")),
+        "billing_policy": record.get("billing_policy", "all_enabled"),
+        "agreement_mapping": record.get("agreement_mapping", ""),
         "last_sync": record.get("last_sync", last_success.get("completed_at") if last_success else None),
-        "next_sync": record.get("auto_sync_schedule", settings.get("auto_sync_schedule", "daily")),
+        "next_sync": record.get("auto_sync_schedule", "daily"),
         "alerts": record.get("alerts", 0),
     } for record in pbx_records]
     billing_by_pbx = []
@@ -426,7 +551,7 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
         })
     return {
         "provider": {"id": "yeastar", "name": "Yeastar", "connected": any(_has_pbx_credentials(pbx) and pbx.get("enabled", True) for pbx in pbx_records)},
-        "settings": settings,
+        "settings": {"mode": "client_pbx"},
         "pbxs": pbxs,
         "extensions": extensions,
         "billing": {"current_quantity": billable, "previous_quantity": previous_quantity, "pending_changes": abs(billable - previous_quantity), "history": billing_history, "by_pbx": billing_by_pbx},
@@ -443,16 +568,72 @@ async def list_yeastar_pbxs(current_user: dict = Depends(get_current_user)):
 
 @router.post("/yeastar/pbxs")
 async def create_yeastar_pbx(data: dict, current_user: dict = Depends(get_current_user)):
-    client_id = data.get("client_id", "")
-    if not client_id or not data.get("name", "").strip() or not data.get("pbx_url", "").strip():
-        raise HTTPException(status_code=400, detail="Client, PBX name, and Yeastar Cloud URL are required")
+    client_id = str(data.get("client_id") or "").strip()
+    name = str(data.get("name") or "").strip()
+    client_api_id = str(data.get("client_api_id") or "").strip()
+    client_secret = str(data.get("client_secret") or "")
+    if not client_id or not name or not data.get("pbx_url"):
+        raise HTTPException(status_code=400, detail="Client, PBX name, and PBX URL are required")
+    if not client_api_id or not client_secret:
+        raise HTTPException(status_code=400, detail="Client ID and Client Secret from Integrations > API on the PBX are required")
+    try:
+        pbx_url = _normalise_pbx_url(data.get("pbx_url"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    duplicate = await db.yeastar_pbxs.find_one(
+        {"client_id": client_id, "pbx_url": {"$regex": f"^{re.escape(pbx_url.rstrip('/'))}/?$", "$options": "i"}},
+        {"_id": 0, "id": 1, "name": 1},
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This PBX is already linked to {client.get('name', 'the client')}. Edit the existing {duplicate.get('name') or 'PBX'} record instead.",
+        )
+
     now = datetime.now(timezone.utc).isoformat()
-    record = {"id": str(uuid.uuid4()), "provider": "yeastar", "client_id": client_id, "client_name": client.get("name", "Client"), "name": data["name"].strip(), "pbx_url": data["pbx_url"].strip().rstrip("/"), "client_api_id": data.get("client_api_id", ""), "client_secret": data.get("client_secret", ""), "billing_policy": data.get("billing_policy", "all_enabled"), "agreement_mapping": data.get("agreement_mapping", ""), "product_mapping": data.get("product_mapping", ""), "auto_sync_schedule": data.get("auto_sync_schedule", "daily"), "automatic_billing": bool(data.get("automatic_billing", False)), "approval_threshold": int(data.get("approval_threshold", 0) or 0), "tls_validation": bool(data.get("tls_validation", True)), "notifications": bool(data.get("notifications", True)), "enabled": bool(data.get("enabled", True)), "status": "pending_configuration", "created_at": now, "updated_at": now, "created_by": current_user.get("email", "system")}
-    await db.yeastar_pbxs.insert_one(record)
-    return {key: value for key, value in record.items() if key != "client_secret"}
+    record = {"id": str(uuid.uuid4()), "provider": "yeastar", "client_id": client_id, "client_name": client.get("name", "Client"), "name": name, "pbx_url": pbx_url, "client_api_id": client_api_id, "client_secret": client_secret, "billing_policy": data.get("billing_policy", "all_enabled"), "agreement_mapping": data.get("agreement_mapping", ""), "product_mapping": data.get("product_mapping", ""), "auto_sync_schedule": data.get("auto_sync_schedule", "daily"), "automatic_billing": bool(data.get("automatic_billing", False)), "approval_threshold": int(data.get("approval_threshold", 0) or 0), "tls_validation": bool(data.get("tls_validation", True)), "notifications": bool(data.get("notifications", True)), "enabled": bool(data.get("enabled", True)), "status": "testing", "created_at": now, "updated_at": now, "created_by": current_user.get("email", "system")}
+
+    try:
+        live = await _test_pbx_live(record)
+        extensions = await _voice_extensions_with_overrides(current_user, record)
+    except YeastarConnectionError as exc:
+        raise HTTPException(status_code=400, detail=f"PBX was not linked: {exc}") from exc
+
+    completed_at = datetime.now(timezone.utc).isoformat()
+    record.update({
+        "status": "online",
+        "last_test_at": completed_at,
+        "last_sync": completed_at,
+        "last_test_error": "",
+        "extension_count": len(extensions),
+        "billable_extension_count": len([extension for extension in extensions if extension.get("included_in_billing")]),
+        **live,
+    })
+    try:
+        # Insert a copy so Motor cannot add MongoDB's internal ``_id`` to the
+        # object returned to the browser after a successful connection test.
+        await db.yeastar_pbxs.insert_one(dict(record))
+    except DuplicateKeyError as exc:
+        raise HTTPException(status_code=409, detail="This client PBX was linked by another request. Open the existing record instead.") from exc
+    await db.yeastar_sync_history.insert_one({
+        "id": str(uuid.uuid4()),
+        "pbx_id": record["id"],
+        "pbx_name": record["name"],
+        "client_id": client_id,
+        "started_at": now,
+        "completed_at": completed_at,
+        "status": "success",
+        "duration_ms": live["api_latency_ms"],
+        "api_latency_ms": live["api_latency_ms"],
+        "extensions_processed": len(extensions),
+        "source": "initial_link",
+        "created_by": current_user.get("email", "system"),
+    })
+    return {**{key: value for key, value in record.items() if key != "client_secret"}, "connection_verified": True}
 
 
 @router.put("/yeastar/pbxs/{pbx_id}")
@@ -473,7 +654,10 @@ async def update_yeastar_pbx(pbx_id: str, data: dict, current_user: dict = Depen
     }
     update = {key: data[key] for key in allowed if key in data}
     if "pbx_url" in update:
-        update["pbx_url"] = str(update["pbx_url"]).strip().rstrip("/")
+        try:
+            update["pbx_url"] = _normalise_pbx_url(update["pbx_url"])
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if "name" in update:
         update["name"] = str(update["name"]).strip()
     if data.get("client_secret"):
@@ -481,6 +665,28 @@ async def update_yeastar_pbx(pbx_id: str, data: dict, current_user: dict = Depen
     if client_id:
         update["client_id"] = client_id
         update["client_name"] = client.get("name", "Client")
+
+    candidate = {**existing, **update}
+    duplicate = await db.yeastar_pbxs.find_one(
+        {
+            "id": {"$ne": pbx_id},
+            "client_id": candidate.get("client_id"),
+            "pbx_url": {"$regex": f"^{re.escape(_pbx_url(candidate).rstrip('/'))}/?$", "$options": "i"},
+        },
+        {"_id": 0, "id": 1},
+    )
+    if duplicate:
+        raise HTTPException(status_code=409, detail="That PBX URL is already linked to this client")
+
+    connection_fields = {"pbx_url", "client_api_id", "client_secret", "tls_validation", "enabled"}
+    connection_changed = any(field in update for field in connection_fields)
+    if candidate.get("enabled", True) and connection_changed:
+        try:
+            live = await _test_pbx_live(candidate)
+            update.update({"status": "online", "last_test_error": "", "last_test_at": datetime.now(timezone.utc).isoformat(), **live})
+        except YeastarConnectionError as exc:
+            raise HTTPException(status_code=400, detail=f"PBX settings were not changed: {exc}") from exc
+
     update.update({"updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("email", "system")})
     await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": update})
     _yeastar_token_cache.clear()
@@ -495,20 +701,11 @@ async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: di
     pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
     if requested_pbx_id:
         pbx_records = [pbx for pbx in pbx_records if str(pbx.get("id")) == requested_pbx_id]
-        if not pbx_records and requested_pbx_id != "primary":
+        if not pbx_records:
             raise HTTPException(status_code=404, detail="PBX not found")
-    if not pbx_records:
-        legacy_settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0}) or {}
-        if requested_pbx_id in ("", "primary") and legacy_settings:
-            pbx_records = [{
-                **legacy_settings,
-                "id": "primary",
-                "name": legacy_settings.get("pbx_name") or "Primary Yeastar PBX",
-                "client_name": legacy_settings.get("client_name") or "Unassigned client",
-            }]
 
     if not pbx_records:
-        raise HTTPException(status_code=400, detail="Add a Yeastar PBX before running a synchronisation")
+        raise HTTPException(status_code=400, detail="Add a client-linked Yeastar PBX before running a synchronisation")
 
     successful_extensions = 0
     successful_pbxs = 0
@@ -538,17 +735,15 @@ async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: di
             entry.update({"status": "success", "completed_at": completed_at.isoformat(), "duration_ms": duration_ms, "extensions_processed": len(extensions), "token_refreshes": 0, "api_latency_ms": duration_ms})
             successful_extensions += len(extensions)
             successful_pbxs += 1
-            if pbx_id == "primary":
-                await db.settings.update_one({"type": "yeastar"}, {"$set": {"last_sync": completed_at.isoformat()}}, upsert=True)
-            else:
-                await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": {"status": "online", "last_sync": completed_at.isoformat(), "extension_count": len(extensions), "billable_extension_count": len([extension for extension in extensions if extension.get("included_in_billing")]), "updated_at": completed_at.isoformat()}})
+            await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": {"status": "online", "last_sync": completed_at.isoformat(), "extension_count": len(extensions), "billable_extension_count": len([extension for extension in extensions if extension.get("included_in_billing")]), "updated_at": completed_at.isoformat()}})
         except Exception as exc:
             completed_at = datetime.now(timezone.utc)
             entry.update({"status": "failed", "completed_at": completed_at.isoformat(), "duration_ms": int((completed_at - started_at).total_seconds() * 1000), "error": str(exc)})
             failed_pbxs.append({"id": pbx_id, "name": entry["pbx_name"], "error": str(exc)})
-            if pbx_id != "primary":
-                await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": {"status": "authentication_failed" if "Authentication" in str(exc) else "offline", "last_sync": completed_at.isoformat(), "updated_at": completed_at.isoformat()}})
-        await db.yeastar_sync_history.insert_one(entry)
+            await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": {"status": "authentication_failed" if "Authentication" in str(exc) else "offline", "last_sync": completed_at.isoformat(), "updated_at": completed_at.isoformat()}})
+        # Motor mutates the inserted mapping by adding MongoDB's ``_id``.
+        # Insert a copy so the API response remains JSON serialisable.
+        await db.yeastar_sync_history.insert_one(dict(entry))
         completed_entries.append(entry)
 
     if not successful_pbxs and failed_pbxs:
@@ -559,9 +754,6 @@ async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: di
 @router.post("/yeastar/billing/recalculate")
 async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_user)):
     pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).to_list(500)
-    if not pbx_records:
-        settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0}) or {}
-        pbx_records = [settings] if settings else []
     captured_at = datetime.now(timezone.utc).isoformat()
     per_pbx = []
     all_extensions = []
@@ -586,12 +778,12 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
             "agreement_mapping": pbx.get("agreement_mapping") or "",
             "source": "manual_recalculate", "created_by": current_user.get("email", "system"),
         }
-        await db.yeastar_billing_snapshots.insert_one(snapshot)
+        await db.yeastar_billing_snapshots.insert_one(dict(snapshot))
         per_pbx.append(snapshot)
 
     quantity = len([extension for extension in all_extensions if extension.get("included_in_billing")])
     summary = {"id": str(uuid.uuid4()), "created_at": captured_at, "billable_quantity": quantity, "pbx_count": len(per_pbx), "source": "manual_recalculate_summary", "created_by": current_user.get("email", "system")}
-    await db.yeastar_billing_snapshots.insert_one(summary)
+    await db.yeastar_billing_snapshots.insert_one(dict(summary))
     return {**summary, "by_pbx": per_pbx}
 
 

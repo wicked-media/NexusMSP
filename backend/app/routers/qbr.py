@@ -27,6 +27,7 @@ import jwt
 
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
+from app.services.nexus_document_pdf import render_nexus_document_pdf
 
 router = APIRouter()
 
@@ -330,6 +331,69 @@ def _safe(text) -> str:
 
 
 def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
+    branding = branding or {}
+    sections = qbr.get("sections") or {}
+    stats = qbr.get("stats") or {}
+    priorities = stats.get("by_priority") or {}
+    devices = stats.get("devices") or {}
+    backups = stats.get("backup") or {}
+    quarter_summary = {
+        "Ticket volume": stats.get("tix_total", 0),
+        "Critical tickets": priorities.get("critical", 0),
+        "High priority tickets": priorities.get("high", 0),
+        "SLA breaches": stats.get("sla_breaches", 0),
+        "Devices online": f"{devices.get('online', 0)}/{devices.get('total', 0)}",
+        "Backup health": f"{backups.get('healthy', 0)} healthy | {backups.get('failed', 0)} failed",
+        "Quarterly spend": f"${float(stats.get('spend') or 0):,.2f}",
+    }
+    recommendation_rows = []
+    for item in sections.get("risks_and_recommendations") or []:
+        if isinstance(item, dict):
+            recommendation_rows.append({
+                "Area": item.get("area") or "Opportunity",
+                "Risk": item.get("risk") or "Not recorded",
+                "Recommendation": item.get("recommendation") or "Not recorded",
+            })
+        else:
+            recommendation_rows.append({"Recommendation": item})
+    patterns = [
+        {
+            "Pattern": item.get("name") or "Pattern",
+            "This client": f"{item.get('client_tickets', 0)} tickets",
+            "MSP impact": f"{item.get('msp_clients', 0)} other clients",
+        }
+        for item in stats.get("pattern_hits") or []
+    ]
+    return render_nexus_document_pdf(
+        title="Quarterly Business Review",
+        document_kind="Client success report",
+        subtitle=f"{qbr.get('client_name') or 'Client'} | {qbr.get('quarter') or 'Quarterly review'}",
+        metadata=[
+            ("Client", qbr.get("client_name")),
+            ("Quarter", qbr.get("quarter")),
+            ("Prepared by", qbr.get("saved_by") or qbr.get("generated_by") or "NexusMSP"),
+            ("Generated", qbr.get("saved_at") or qbr.get("generated_at")),
+        ],
+        metric_cards=[
+            ("Tickets", stats.get("tix_total", 0)),
+            ("Resolved", stats.get("resolved_this_q", 0)),
+            ("Devices online", f"{devices.get('online', 0)}/{devices.get('total', 0)}"),
+            ("Healthy backups", backups.get("healthy", 0)),
+        ],
+        sections=[
+            ("Executive summary", sections.get("executive_summary") or "No executive summary was retained."),
+            ("Key wins", sections.get("key_wins") or []),
+            ("Quarter at a glance", quarter_summary),
+            ("Incident breakdown", sections.get("incident_breakdown") or "No incident narrative was retained."),
+            ("Infrastructure health", sections.get("infrastructure_health") or "No infrastructure health narrative was retained."),
+            ("Risks and recommendations", recommendation_rows or [{"Status": "No risks or recommendations recorded."}]),
+            ("MSP intelligence", patterns or [{"Status": sections.get("msp_intelligence") or "No cross-client pattern data recorded."}]),
+            ("Focus for next quarter", sections.get("next_quarter_focus") or []),
+        ],
+        branding=branding,
+        footer="This quarterly business review is a client-facing NexusMSP service evidence document.",
+    )
+
     from fpdf import FPDF
 
     branding = branding or {}
@@ -455,8 +519,12 @@ async def qbr_pdf(qbr_id: str, user: dict = Depends(_qbr_user_from_token)):
     qbr = await db.qbrs.find_one({"id": qbr_id}, {"_id": 0})
     if not qbr:
         raise HTTPException(404, "QBR not found")
-    branding = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
-    pdf_bytes = _render_qbr_pdf(qbr, (branding.get("value") or {}))
+    branding_document = (
+        await db.settings.find_one({"type": "branding"}, {"_id": 0})
+        or await db.settings.find_one({"key": "branding"}, {"_id": 0})
+        or {}
+    )
+    pdf_bytes = _render_qbr_pdf(qbr, (branding_document.get("value") or branding_document))
     safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", f"QBR_{qbr.get('client_name', 'client')}_{qbr.get('quarter', '')}")
     return Response(
         content=pdf_bytes,

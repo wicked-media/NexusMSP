@@ -29,7 +29,7 @@ import {
   Crown, Lock, Unlock, History, Target, ChevronRight, RefreshCw,
   TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
   Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Trophy,
-  CheckCircle2, XCircle, Clock, Upload,
+  CheckCircle2, XCircle, Clock, Upload, Building2, MapPin,
 } from "lucide-react";
 
 // ---------- Constants ----------
@@ -550,6 +550,9 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
   const [pendingRole, setPendingRole] = useState(null);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [scopeCatalog, setScopeCatalog] = useState({ clients: [], sites: [] });
+  const [scopeSearch, setScopeSearch] = useState("");
+  const [scopeLoading, setScopeLoading] = useState(false);
   const avatarInputRef = useRef(null);
 
   useEffect(() => {
@@ -558,6 +561,9 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
       job_title: tech.job_title || "L1 Technician", role: tech.role || "technician",
       hourly_rate: tech.hourly_rate || 75, is_admin: !!tech.is_admin,
       categories: tech.categories || [], specialties: tech.specialties || [],
+      client_scope_mode: tech.client_scope_mode || "all",
+      client_scope_ids: tech.client_scope_ids || [],
+      site_scope_ids: tech.site_scope_ids || [],
     });
     else setForm(null);
     setAdminConfirmOpen(false);
@@ -566,7 +572,26 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
     setPendingRole(null);
     setAvatarUrl(tech?.avatar || "");
     setAvatarUploading(false);
+    setScopeSearch("");
   }, [tech]);
+
+  useEffect(() => {
+    if (!tech) return;
+    let active = true;
+    setScopeLoading(true);
+    axios.get(`${API}/technicians/scope-catalog`, { headers })
+      .then(response => {
+        if (active) setScopeCatalog({
+          clients: response.data?.clients || [],
+          sites: response.data?.sites || [],
+        });
+      })
+      .catch(() => {
+        if (active) setScopeCatalog({ clients: [], sites: [] });
+      })
+      .finally(() => { if (active) setScopeLoading(false); });
+    return () => { active = false; };
+  }, [tech, headers]);
 
   if (!tech || !form) return null;
 
@@ -625,6 +650,27 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
     finally { setAvatarUploading(false); input.value = ""; }
   };
   const workload = tech.workload || {};
+  const selectedClientIds = new Set(form.client_scope_ids || []);
+  const selectedSiteIds = new Set(form.site_scope_ids || []);
+  const availableSites = scopeCatalog.sites.filter(site => selectedClientIds.has(site.client_id));
+  const filteredClients = scopeCatalog.clients.filter(client => {
+    const query = scopeSearch.trim().toLowerCase();
+    return !query || `${client.name || ""} ${client.id || ""}`.toLowerCase().includes(query);
+  });
+  const toggleScopedClient = clientId => {
+    const nextClients = new Set(form.client_scope_ids || []);
+    if (nextClients.has(clientId)) nextClients.delete(clientId); else nextClients.add(clientId);
+    const nextSites = (form.site_scope_ids || []).filter(siteId => {
+      const site = scopeCatalog.sites.find(item => item.id === siteId);
+      return site && nextClients.has(site.client_id);
+    });
+    setForm({ ...form, client_scope_ids: [...nextClients], site_scope_ids: nextSites });
+  };
+  const toggleScopedSite = siteId => {
+    const next = new Set(form.site_scope_ids || []);
+    if (next.has(siteId)) next.delete(siteId); else next.add(siteId);
+    setForm({ ...form, site_scope_ids: [...next] });
+  };
   const statusLabel = workload.state ? `${workload.state} · ${workload.utilisation ?? workload.utilization ?? 0}% utilised` : "No live workload signal";
 
   return (
@@ -668,6 +714,55 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
             </div>
             <div><Label className="text-xs">Billable rate (AUD / hr)</Label><Input type="number" min="0" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} /></div>
           </div>
+          <section className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.06] to-zinc-950/30 p-4" data-testid="technician-client-scope">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-cyan-300" />
+                  <p className="text-xs font-semibold text-zinc-100">Client &amp; site scope</p>
+                  <Badge variant="outline" className={form.client_scope_mode === "all" ? "border-emerald-500/30 text-emerald-300" : "border-cyan-500/30 text-cyan-300"}>
+                    {hasAdministratorAccess ? "All via administrator" : form.client_scope_mode === "all" ? "All clients" : `${form.client_scope_ids.length} selected`}
+                  </Badge>
+                </div>
+                <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-zinc-400">Limit which customer environments this technician can operate on. The API checks this boundary for remote, billing, identity, DNS, and automation actions.</p>
+              </div>
+              <Select value={form.client_scope_mode} onValueChange={value => setForm({ ...form, client_scope_mode: value, client_scope_ids: value === "all" ? [] : form.client_scope_ids, site_scope_ids: value === "all" ? [] : form.site_scope_ids })} disabled={hasAdministratorAccess}>
+                <SelectTrigger className="w-full sm:w-44" data-testid="client-scope-mode"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="all">All clients</SelectItem><SelectItem value="restricted">Selected clients</SelectItem></SelectContent>
+              </Select>
+            </div>
+            {hasAdministratorAccess && <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/[0.05] px-3 py-2 text-[11px] text-rose-100/80">Administrators always span every client and site. Remove administrator access before applying a narrower operational boundary.</div>}
+            {!hasAdministratorAccess && form.client_scope_mode === "restricted" && (
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/35 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2"><Label className="text-[11px] font-semibold text-zinc-200">Allowed clients</Label><span className="text-[10px] text-zinc-500">{form.client_scope_ids.length} selected</span></div>
+                  <div className="relative mb-2"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-600" /><Input className="h-8 pl-8 text-xs" value={scopeSearch} onChange={event => setScopeSearch(event.target.value)} placeholder="Search clients…" data-testid="client-scope-search" /></div>
+                  <ScrollArea className="h-40 pr-2">
+                    <div className="space-y-1.5">
+                      {scopeLoading ? <div className="flex items-center gap-2 px-2 py-4 text-xs text-zinc-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading clients…</div> : filteredClients.map(client => {
+                        const selected = selectedClientIds.has(client.id);
+                        return <button key={client.id} type="button" onClick={() => toggleScopedClient(client.id)} className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition ${selected ? "border-cyan-500/35 bg-cyan-500/10 text-cyan-50" : "border-zinc-800 bg-zinc-950/20 text-zinc-300 hover:border-zinc-700"}`}><span className={`flex h-4 w-4 items-center justify-center rounded border ${selected ? "border-cyan-400 bg-cyan-400 text-zinc-950" : "border-zinc-700"}`}>{selected && <CheckCircle2 className="h-3 w-3" />}</span><span className="min-w-0 flex-1 truncate">{client.name}</span></button>;
+                      })}
+                      {!scopeLoading && !filteredClients.length && <p className="px-2 py-4 text-xs text-zinc-500">No matching clients.</p>}
+                    </div>
+                  </ScrollArea>
+                </div>
+                <div className="rounded-lg border border-zinc-800 bg-zinc-950/35 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2"><Label className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-200"><MapPin className="h-3.5 w-3.5 text-cyan-300" />Optional site boundary</Label><span className="text-[10px] text-zinc-500">{form.site_scope_ids.length || "All"} sites</span></div>
+                  <p className="mb-2 text-[10px] leading-relaxed text-zinc-500">Select sites to narrow access further. Leave every site clear to allow all sites belonging to the selected clients.</p>
+                  <ScrollArea className="h-40 pr-2">
+                    <div className="space-y-1.5">
+                      {availableSites.map(site => {
+                        const selected = selectedSiteIds.has(site.id);
+                        return <button key={site.id} type="button" onClick={() => toggleScopedSite(site.id)} className={`flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left text-xs transition ${selected ? "border-violet-500/35 bg-violet-500/10 text-violet-50" : "border-zinc-800 bg-zinc-950/20 text-zinc-300 hover:border-zinc-700"}`}><span className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded border ${selected ? "border-violet-400 bg-violet-400 text-zinc-950" : "border-zinc-700"}`}>{selected && <CheckCircle2 className="h-3 w-3" />}</span><span className="min-w-0 flex-1"><span className="block truncate">{site.name}</span><span className="block truncate text-[10px] text-zinc-500">{site.client_name}</span></span></button>;
+                      })}
+                      {!availableSites.length && <p className="px-2 py-4 text-xs leading-relaxed text-zinc-500">{form.client_scope_ids.length ? "No managed sites are recorded for the selected clients. Client-level access will apply." : "Select a client to view its managed sites."}</p>}
+                    </div>
+                  </ScrollArea>
+                </div>
+              </div>
+            )}
+          </section>
           <div className="rounded-lg border border-violet-500/20 bg-violet-500/[0.05] p-3">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -867,10 +962,30 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
   const [roles, setRoles] = useState(roleOptions);
   const [busy, setBusy] = useState(false);
   const [newRole, setNewRole] = useState({ label: "", description: "" });
+  const [actionCatalog, setActionCatalog] = useState([]);
+  const [selectedRoleId, setSelectedRoleId] = useState("technician");
 
   useEffect(() => { setRoles(roleOptions); }, [roleOptions]);
+  useEffect(() => {
+    axios.get(`${API}/permissions/catalog`, { headers })
+      .then(response => setActionCatalog(response.data?.categories || []))
+      .catch(() => setActionCatalog([]));
+  }, [headers]);
+  useEffect(() => {
+    if (!roles.some(role => role.value === selectedRoleId) && roles.length) setSelectedRoleId(roles[0].value);
+  }, [roles, selectedRoleId]);
 
   const update = (value, field, nextValue) => setRoles(current => current.map(role => role.value === value ? { ...role, [field]: nextValue } : role));
+  const toggleAction = (roleId, permissionId) => {
+    if (roleId === "admin") return;
+    setRoles(current => current.map(role => {
+      if (role.value !== roleId) return role;
+      const permissions = new Set(role.action_permissions || []);
+      if (permissions.has(permissionId)) permissions.delete(permissionId);
+      else permissions.add(permissionId);
+      return { ...role, action_permissions: [...permissions].sort(), action_permissions_explicit: true };
+    }));
+  };
   const addRole = () => {
     const label = newRole.label.trim();
     const description = newRole.description.trim();
@@ -881,7 +996,9 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
     let value = `custom_${stem}`;
     let suffix = 2;
     while (roles.some(role => role.value === value)) { value = `custom_${stem.slice(0, 37)}_${suffix}`; suffix += 1; }
-    setRoles(current => [...current, { value, id: value, label, description, custom: true, protected: false }]);
+    const startingPermissions = roles.find(role => role.value === "technician")?.action_permissions || [];
+    setRoles(current => [...current, { value, id: value, label, description, custom: true, protected: false, action_permissions: [...startingPermissions], action_permissions_explicit: true }]);
+    setSelectedRoleId(value);
     setNewRole({ label: "", description: "" });
   };
   const retireRole = value => {
@@ -893,7 +1010,12 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
     setBusy(true);
     try {
       const response = await axios.put(`${API}/technicians/access-roles`, {
-        roles: roles.map(({ value, label, description }) => ({ id: value, label, description })),
+        roles: roles.map(({ value, label, description, action_permissions, action_permissions_explicit }) => ({
+          id: value,
+          label,
+          description,
+          ...(action_permissions_explicit ? { action_permissions } : {}),
+        })),
       }, { headers });
       const next = (response.data?.roles || []).map(role => ({ value: role.id, ...role }));
       setRoles(next);
@@ -902,32 +1024,107 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
     } catch (error) { toast.error(error.response?.data?.detail || "Could not save access roles"); }
     finally { setBusy(false); }
   };
+  const selectedRole = roles.find(role => role.value === selectedRoleId) || roles[0];
+  const selectedPermissions = new Set(selectedRole?.action_permissions || []);
+  const selectedCount = selectedRole?.value === "admin"
+    ? actionCatalog.reduce((total, category) => total + category.actions.length, 0)
+    : selectedPermissions.size;
 
   return (
-    <Card className="border-violet-500/20 bg-violet-500/[0.03]">
-      <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
-        <div><CardTitle className="flex items-center gap-2 text-base"><Shield className="h-4 w-4 text-violet-300" />Access role catalogue</CardTitle><p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-500">Rename standard roles or add your own operational roles. Role IDs stay stable for automation and auditing; only the protected administrator role can grant platform-wide administrator access.</p></div>
-        <Button size="sm" onClick={save} disabled={busy} className="shrink-0 bg-violet-500 text-white hover:bg-violet-400">{busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Save roles</Button>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 lg:grid-cols-2">
-          {roles.map(role => (
-            <div key={role.value} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
-              <div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">{role.value}</span><div className="flex items-center gap-1">{role.custom && <Badge variant="outline" className="border-cyan-500/35 text-[9px] text-cyan-200">Custom</Badge>}{role.value === "admin" && <Badge variant="outline" className="border-rose-500/35 text-[9px] text-rose-300">Protected</Badge>}</div></div>
-            <Label className="text-xs">Display name</Label>
-            <Input className="mt-1 h-8 text-sm" value={role.label} onChange={event => update(role.value, "label", event.target.value)} />
-            <Label className="mt-2 block text-xs">Purpose</Label>
-            <Input className="mt-1 h-8 text-xs" value={role.description || ""} onChange={event => update(role.value, "description", event.target.value)} placeholder="What this role is for" />
-              {role.custom && <div className="mt-3 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={() => retireRole(role.value)}><Trash2 className="mr-1 h-3 w-3" />Remove custom role</Button></div>}
+    <div className="space-y-4">
+      <Card className="border-violet-500/20 bg-violet-500/[0.03]">
+        <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
+          <div><CardTitle className="flex items-center gap-2 text-base"><Shield className="h-4 w-4 text-violet-300" />Access role catalogue</CardTitle><p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-500">Rename standard roles or add your own operational roles. Role IDs stay stable for automation and auditing; only the protected administrator role can grant platform-wide administrator access.</p></div>
+          <Button size="sm" onClick={save} disabled={busy} className="shrink-0 bg-violet-500 text-white hover:bg-violet-400">{busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Save roles & access</Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-2">
+            {roles.map(role => (
+              <div key={role.value} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2"><span className="text-[10px] font-mono uppercase tracking-widest text-zinc-500">{role.value}</span><div className="flex items-center gap-1">{role.custom && <Badge variant="outline" className="border-cyan-500/35 text-[9px] text-cyan-200">Custom</Badge>}{role.value === "admin" && <Badge variant="outline" className="border-rose-500/35 text-[9px] text-rose-300">Protected</Badge>}</div></div>
+                <Label className="text-xs">Display name</Label>
+                <Input className="mt-1 h-8 text-sm" value={role.label} onChange={event => update(role.value, "label", event.target.value)} />
+                <Label className="mt-2 block text-xs">Purpose</Label>
+                <Input className="mt-1 h-8 text-xs" value={role.description || ""} onChange={event => update(role.value, "description", event.target.value)} placeholder="What this role is for" />
+                {role.custom && <div className="mt-3 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={() => retireRole(role.value)}><Trash2 className="mr-1 h-3 w-3" />Remove custom role</Button></div>}
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl border border-dashed border-violet-500/35 bg-zinc-950/45 p-4">
+            <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Add organisation role</p><p className="mt-1 text-xs text-zinc-500">Use this for operational labels such as Project Delivery Lead, Account Manager or Field Engineer. New roles start from the Technician action policy and can be refined below.</p></div>
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] md:items-end"><div><Label className="text-xs">Role name</Label><Input className="mt-1" value={newRole.label} onChange={event => setNewRole(current => ({ ...current, label: event.target.value }))} placeholder="Field Engineer" data-testid="new-access-role-name" /></div><div><Label className="text-xs">Purpose <span className="text-zinc-500">(optional)</span></Label><Input className="mt-1" value={newRole.description} onChange={event => setNewRole(current => ({ ...current, description: event.target.value }))} placeholder="Owns onsite delivery and site handover work." data-testid="new-access-role-description" /></div><Button type="button" onClick={addRole} variant="outline" className="border-violet-500/40 text-violet-200 hover:bg-violet-500/10" data-testid="add-access-role"><UserPlus className="mr-1.5 h-4 w-4" />Add role</Button></div>
             </div>
-          ))}
-        </div>
-        <div className="rounded-xl border border-dashed border-violet-500/35 bg-zinc-950/45 p-4">
-          <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Add organisation role</p><p className="mt-1 text-xs text-zinc-500">Use this for operational labels such as Project Delivery Lead, Account Manager or Field Engineer. Choose a job title to apply the appropriate starting permissions.</p></div>
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] md:items-end"><div><Label className="text-xs">Role name</Label><Input className="mt-1" value={newRole.label} onChange={event => setNewRole(current => ({ ...current, label: event.target.value }))} placeholder="Field Engineer" data-testid="new-access-role-name" /></div><div><Label className="text-xs">Purpose <span className="text-zinc-500">(optional)</span></Label><Input className="mt-1" value={newRole.description} onChange={event => setNewRole(current => ({ ...current, description: event.target.value }))} placeholder="Owns onsite delivery and site handover work." data-testid="new-access-role-description" /></div><Button type="button" onClick={addRole} variant="outline" className="border-violet-500/40 text-violet-200 hover:bg-violet-500/10" data-testid="add-access-role"><UserPlus className="mr-1.5 h-4 w-4" />Add role</Button></div>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden border-cyan-500/20 bg-cyan-500/[0.025]" data-testid="action-permission-policy">
+        <CardHeader className="border-b border-zinc-800 bg-gradient-to-r from-cyan-500/[0.07] to-transparent pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base"><Lock className="h-4 w-4 text-cyan-300" />Protected action policy</CardTitle>
+              <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-500">Control the exact actions each role may perform. These stable subjects are enforced by the API for DNS, remote access, Microsoft identity, billing and automation—not just hidden in the interface.</p>
+            </div>
+            <Badge variant="outline" className="border-cyan-500/30 text-cyan-200">{selectedCount} actions granted</Badge>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {roles.map(role => (
+              <Button
+                key={role.value}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setSelectedRoleId(role.value)}
+                className={selectedRoleId === role.value ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-100" : "border-zinc-800 bg-zinc-950/60 text-zinc-400"}
+              >
+                {role.label}
+                {role.value === "admin" && <Crown className="ml-1.5 h-3 w-3 text-amber-300" />}
+              </Button>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent className="p-4">
+          {selectedRole?.value === "admin" && (
+            <div className="mb-4 rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 text-xs text-rose-200">Administrator access is protected and always includes every registered action. Assign this role sparingly; changes remain auditable.</div>
+          )}
+          {!actionCatalog.length ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Loading action catalogue…</div>
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {actionCatalog.map(category => (
+                <div key={category.name} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-2"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-300">{category.name}</p><span className="text-[10px] text-zinc-600">{category.actions.filter(action => selectedRole?.value === "admin" || selectedPermissions.has(action.id)).length}/{category.actions.length}</span></div>
+                  <div className="space-y-2">
+                    {category.actions.map(action => {
+                      const enabled = selectedRole?.value === "admin" || selectedPermissions.has(action.id);
+                      const impactClass = action.impact === "critical" ? "border-rose-500/30 text-rose-300" : action.impact === "high" ? "border-amber-500/30 text-amber-300" : action.impact === "medium" ? "border-violet-500/30 text-violet-300" : "border-cyan-500/30 text-cyan-300";
+                      return (
+                        <button
+                          type="button"
+                          key={action.id}
+                          disabled={selectedRole?.value === "admin"}
+                          onClick={() => toggleAction(selectedRole.value, action.id)}
+                          className={`w-full rounded-lg border p-3 text-left transition ${enabled ? "border-cyan-500/30 bg-cyan-500/[0.06]" : "border-zinc-800 bg-zinc-950/30 opacity-70"} ${selectedRole?.value === "admin" ? "cursor-default" : "hover:border-cyan-500/45"}`}
+                          data-testid={`action-permission-${action.id}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] font-bold ${enabled ? "border-cyan-400/50 bg-cyan-500/20 text-cyan-200" : "border-zinc-700 text-zinc-600"}`}>{enabled ? "✓" : "—"}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-center gap-1.5"><span className="text-xs font-medium text-zinc-100">{action.label}</span><Badge variant="outline" className={`h-4 px-1.5 text-[8px] uppercase ${impactClass}`}>{action.impact}</Badge>{action.approval_required && <Badge variant="outline" className="h-4 border-rose-500/30 px-1.5 text-[8px] uppercase text-rose-200">Approval boundary</Badge>}</span>
+                              <span className="mt-1 block text-[10px] leading-relaxed text-zinc-500">{action.description}</span>
+                              <span className="mt-1.5 block font-mono text-[9px] text-zinc-600">{action.id}</span>
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

@@ -4,10 +4,10 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, X, Monitor, Star, ExternalLink, Radio, Copy, Loader2 } from "lucide-react";
+import { Plus, X, Monitor, Star, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "@/App";
+import RemoteAccessButton from "@/components/devices/RemoteAccessButton";
 
 /**
  * Multi-device chip-list editor for a ticket (Syncro-style).
@@ -20,8 +20,6 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
   const navigate = useNavigate();
   const [picker, setPicker] = useState("");
   const [busy, setBusy] = useState(false);
-  const [remoteBusyId, setRemoteBusyId] = useState(null);
-  const [remoteSession, setRemoteSession] = useState(null);
   const headers = { Authorization: `Bearer ${token}` };
 
   // Normalize: device_ids array; ensure primary device_id is included
@@ -59,32 +57,6 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
       setPicker("");
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to link device"); }
     finally { setBusy(false); }
-  };
-
-  const launchNative = (connectionUrl) => {
-    if (!connectionUrl) return;
-    const anchor = document.createElement("a");
-    anchor.href = connectionUrl;
-    anchor.style.display = "none";
-    document.body.appendChild(anchor);
-    anchor.click();
-    window.setTimeout(() => document.body.removeChild(anchor), 100);
-  };
-
-  const handleRemote = async (device, event) => {
-    event?.preventDefault();
-    event?.stopPropagation();
-    if (remoteBusyId) return;
-    setRemoteBusyId(device.id);
-    try {
-      const { data } = await axios.post(`${API}/tickets/${ticket.id}/devices/${device.id}/remote-connect`, {}, { headers });
-      setRemoteSession(data);
-      toast.success(`Remote session prepared for ${data.device_name}`);
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Remote connection could not be prepared");
-    } finally {
-      setRemoteBusyId(null);
-    }
   };
 
   const handleRemove = async (deviceId) => {
@@ -154,9 +126,7 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
                 {d.name}
               </button>
               {isPrimary && <span className="rounded border border-cyan-400/25 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-cyan-200">Primary</span>}
-              <Button type="button" size="sm" variant="outline" className="h-7 border-cyan-400/25 bg-cyan-400/[0.04] px-2 text-[10px] text-cyan-100 hover:bg-cyan-400/15" onClick={(event) => handleRemote(d, event)} disabled={!!remoteBusyId || d._missing} data-testid={`linked-device-remote-${d.id}`}>
-                {remoteBusyId === d.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Radio className="mr-1 h-3 w-3" />}Remote
-              </Button>
+              {!d._missing && <RemoteAccessButton device={d} status={d.status} ticketId={ticket.id} compact testid={`linked-device-remote-${d.id}`} />}
               {!isPrimary && (
                 <button
                   type="button"
@@ -222,22 +192,6 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
         </Button>
       )}
 
-      <Dialog open={!!remoteSession} onOpenChange={(open) => !open && setRemoteSession(null)}>
-        <DialogContent className="max-w-md border-cyan-400/25 bg-[linear-gradient(145deg,rgba(10,24,32,0.98),rgba(11,14,20,0.98))]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-cyan-100"><span className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-400/25 bg-cyan-400/10"><Radio className="h-4 w-4 text-cyan-300" /></span>Remote session ready</DialogTitle>
-            <DialogDescription>Open the supported RustDesk session without leaving this ticket. This action is recorded in the ticket audit history.</DialogDescription>
-          </DialogHeader>
-          {remoteSession && <div className="space-y-3">
-            <div className="rounded-lg border border-white/[0.08] bg-black/20 p-3 text-xs"><p className="font-medium text-zinc-100">{remoteSession.device_name}</p><p className="mt-1 font-mono text-[11px] text-cyan-200">RustDesk ID: {remoteSession.rustdesk_id}</p></div>
-            <Button type="button" className="h-10 w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => launchNative(remoteSession.connection_url)} data-testid="ticket-remote-launch-native"><Radio className="mr-2 h-4 w-4" />Open in RustDesk</Button>
-            <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" className="h-9 text-xs" onClick={() => navigator.clipboard.writeText(remoteSession.rustdesk_id).then(() => toast.success("RustDesk ID copied"))}><Copy className="mr-1.5 h-3.5 w-3.5" />Copy ID</Button>
-              <Button type="button" variant="outline" className="h-9 text-xs" disabled={!remoteSession.web_client_url} onClick={() => window.open(remoteSession.web_client_url, "_blank", "noopener")}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Web console</Button>
-            </div>
-          </div>}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

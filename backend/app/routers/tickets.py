@@ -425,18 +425,114 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    content = str(comment_data.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Write an update before publishing")
+
+    visibility = str(comment_data.get("visibility") or "").strip().lower()
+    is_internal = bool(comment_data.get("is_internal", visibility != "public"))
+    if visibility not in {"internal", "public"}:
+        visibility = "internal" if is_internal else "public"
+    is_internal = visibility == "internal"
+    notify_client = bool(comment_data.get("notify_client", False)) and not is_internal
+
+    recipients = [
+        str(address or "").strip()
+        for address in (comment_data.get("to_addresses") or [])
+        if str(address or "").strip()
+    ]
+    if notify_client and not recipients:
+        contact_email = str(ticket.get("contact_email") or "").strip()
+        if contact_email:
+            recipients.append(contact_email)
+    if notify_client and not recipients and ticket.get("contact_id"):
+        client = await db.clients.find_one({"id": ticket.get("client_id")}, {"_id": 0, "contacts": 1})
+        contact = next(
+            (
+                item for item in ((client or {}).get("contacts") or [])
+                if str(item.get("id") or item.get("name") or "") == str(ticket.get("contact_id"))
+            ),
+            None,
+        )
+        if contact and str(contact.get("email") or "").strip():
+            recipients.append(str(contact["email"]).strip())
+    if notify_client and not recipients:
+        client = await db.clients.find_one({"id": ticket.get("client_id")}, {"_id": 0, "email": 1})
+        if client and str(client.get("email") or "").strip():
+            recipients.append(str(client["email"]).strip())
+    if notify_client and not recipients:
+        raise HTTPException(
+            status_code=400,
+            detail="This public update has no recipient. Add an email address or publish it to the client portal without email.",
+        )
+
+    subject_label = str(comment_data.get("subject_label") or "Update").strip() or "Update"
+    subject = str(comment_data.get("subject") or "").strip()
+    if not subject:
+        subject = f"{subject_label}: [{ticket.get('ticket_number', ticket_id)}] {ticket.get('title', 'Service request')}"
+
+    delivery = {}
+    if notify_client:
+        from app.routers.email_signatures import append_default_signature
+        from app.routers.email_utils import send_email
+
+        body, body_type, _ = await append_default_signature(
+            body=content,
+            body_type="html" if "<" in content else "text",
+            current_user=current_user,
+            subject=subject,
+            ticket_id=ticket_id,
+        )
+        delivery = await send_email(
+            recipients,
+            subject,
+            body if body_type == "html" else f"<pre>{body}</pre>",
+            category="ticket_comments",
+            client_id=ticket.get("client_id"),
+            related_type="ticket",
+            related_id=ticket_id,
+            initiated_by=current_user.get("id"),
+            initiated_by_name=current_user.get("name"),
+        )
+
     comment = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
         "user_id": current_user['id'],
         "user_name": current_user['name'],
         "avatar_url": current_user.get("avatar"),
-        "content": comment_data.get("content", ""),
-        "is_internal": comment_data.get("is_internal", False),
+        "content": content,
+        "is_internal": is_internal,
+        "visibility": visibility,
+        "portal_visible": not is_internal,
+        "client_notified": notify_client,
+        "to_addresses": recipients if notify_client else [],
+        "subject": subject if not is_internal else "",
+        "subject_label": subject_label if not is_internal else "",
+        "delivery_status": delivery.get("status") if notify_client else "portal_only" if not is_internal else "internal",
+        "delivery_message": delivery.get("message", "") if notify_client else "",
+        "delivery_id": (delivery.get("delivery_id") or delivery.get("email_id")) if notify_client else None,
+        "sender_mailbox": delivery.get("sender") if notify_client else None,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    await db.ticket_comments.insert_one(comment)
-    comment.pop("_id", None)
+    await db.ticket_comments.insert_one(dict(comment))
+    await ticket_audit(
+        ticket_id,
+        current_user,
+        "public_update_added" if not is_internal else "internal_note_added",
+        (
+            f"Published client update to {', '.join(recipients)} ({comment['delivery_status']})"
+            if notify_client
+            else "Published client-visible portal update"
+            if not is_internal
+            else "Added internal technician note"
+        ),
+    )
+
+    status_after = str(comment_data.get("status_after") or "").strip().lower()
+    if status_after in {"open", "in_progress", "on_hold", "resolved"}:
+        await update_ticket(ticket_id, {"status": status_after}, current_user)
+        comment["status_after"] = "closed" if status_after == "resolved" else status_after
     return comment
 
 # ============== TICKET CHILD/PARENT ENDPOINTS ==============
@@ -632,6 +728,7 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         from_name=current_user.get('name'),
         to_addresses=email_data.to_addresses,
         cc_addresses=email_data.cc_addresses,
+        bcc_addresses=email_data.bcc_addresses,
         subject=subject,
         body=body,
         body_type=body_type,
@@ -649,6 +746,7 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         ticket_email.body if ticket_email.body_type == "html" else f"<pre>{ticket_email.body}</pre>",
         category="ticket_replies",
         cc_addresses=ticket_email.cc_addresses,
+        bcc_addresses=ticket_email.bcc_addresses,
         client_id=ticket.get("client_id"),
         related_type="ticket",
         related_id=ticket_id,

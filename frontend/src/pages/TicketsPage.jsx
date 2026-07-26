@@ -162,7 +162,7 @@ export default function TicketsPage() {
   const [deviceStatus, setDeviceStatus] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
-  const [conversationType, setConversationType] = useState("note"); // "note" or "email"
+  const [conversationType, setConversationType] = useState("public");
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [emailSignature, setEmailSignature] = useState("");
   const [emailForm, setEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
@@ -217,7 +217,7 @@ export default function TicketsPage() {
   const [formData, setFormData] = useState({
     title: "", description: "", client_id: "", priority: "medium", category: "support",
     assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
-    source: "portal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+    source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
     device_id: "",
     cc: [], watchers: []
   });
@@ -232,7 +232,7 @@ export default function TicketsPage() {
   // Workshop enrichment state
   const [wsNotes, setWsNotes] = useState([]);
   const [wsNewNote, setWsNewNote] = useState("");
-  const [wsConversationType, setWsConversationType] = useState("note");
+  const [wsConversationType, setWsConversationType] = useState("public");
   const [wsConversation, setWsConversation] = useState({ notes: [], emails: [], sms: [] });
   const [wsConversationNote, setWsConversationNote] = useState("");
   const [wsEmailForm, setWsEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
@@ -260,7 +260,7 @@ export default function TicketsPage() {
   // Field job enrichment state
   const [fjNotes, setFjNotes] = useState([]);
   const [fjNewNote, setFjNewNote] = useState("");
-  const [fjConversationType, setFjConversationType] = useState("note");
+  const [fjConversationType, setFjConversationType] = useState("public");
   const [fjConversation, setFjConversation] = useState({ notes: [], emails: [], sms: [] });
   const [fjConversationNote, setFjConversationNote] = useState("");
   const [fjEmailForm, setFjEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
@@ -295,8 +295,25 @@ export default function TicketsPage() {
   const [triaging, setTriaging] = useState(false);
   const [enrichment, setEnrichment] = useState(null);
   const [clientContacts, setClientContacts] = useState([]);
+  const [createClientContacts, setCreateClientContacts] = useState([]);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+
+  useEffect(() => {
+    if (!isCreateOpen || !formData.client_id) {
+      setCreateClientContacts([]);
+      return;
+    }
+    let cancelled = false;
+    axios.get(`${API}/clients/${formData.client_id}/contacts`, { headers })
+      .then(response => {
+        if (!cancelled) setCreateClientContacts(collectionFromResponse(response.data, ["contacts"]));
+      })
+      .catch(() => {
+        if (!cancelled) setCreateClientContacts([]);
+      });
+    return () => { cancelled = true; };
+  }, [formData.client_id, headers, isCreateOpen]);
 
 
   const createRunbookFromTicket = async () => {
@@ -527,7 +544,15 @@ export default function TicketsPage() {
       });
       // Fetch client contacts for email auto-populate
       if (ticket.client_id) {
-        axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => setClientContacts(collectionFromResponse(r.data, ["contacts"]))).catch(() => {});
+        axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => {
+          const contacts = collectionFromResponse(r.data, ["contacts"]);
+          setClientContacts(contacts);
+          const selectedContact = contacts.find(contact =>
+            String(contact.id || contact.name || "") === String(ticket.contact_id || ticket.contact_name || "")
+          );
+          const preferredEmail = ticket.contact_email || selectedContact?.email || contacts.find(contact => contact.email)?.email || "";
+          if (preferredEmail) setEmailForm(previous => ({ ...previous, to: previous.to || preferredEmail }));
+        }).catch(() => {});
       }
       // Fetch worksheets
       try {
@@ -536,9 +561,18 @@ export default function TicketsPage() {
       } catch { setWorksheetItems([]); }
       const sig = user?.email_signature || "";
       setEmailSignature(sig);
-      setEmailForm({ to: "", cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`, body: "" });
-      // Auto-populate SMS recipient from the client's mobile/phone
       const clientRec = clients.find(c => c.id === ticket.client_id);
+      const embeddedContact = (clientRec?.contacts || []).find(contact =>
+        String(contact.id || contact.name || "") === String(ticket.contact_id || ticket.contact_name || "")
+      );
+      setEmailForm({
+        to: ticket.contact_email || embeddedContact?.email || clientRec?.email || clientRec?.contact_email || "",
+        cc: "",
+        bcc: "",
+        subject: `Re: ${ticket.ticket_number} - ${ticket.title}`,
+        body: "",
+      });
+      // Auto-populate SMS recipient from the client's mobile/phone
       const clientPhone = clientRec?.mobile || clientRec?.phone || "";
       setSmsForm({ to: clientPhone, message: "", template_key: "" });
       // Fetch device status if device linked
@@ -562,7 +596,10 @@ export default function TicketsPage() {
   const handleCreateTicket = async () => {
     if (!formData.title || !formData.client_id) { toast.error("Title and client are required"); return; }
     const selectedClient = clients.find(c => c.id === formData.client_id);
-    const selectedContact = selectedClient?.contacts?.find(ct => ct.id === formData.contact_id || ct.name === formData.contact_id);
+    const selectedContact = [
+      ...createClientContacts,
+      ...(selectedClient?.contacts || []),
+    ].find(ct => ct.id === formData.contact_id || ct.name === formData.contact_id);
     const payload = {
       ...formData,
       client_name: selectedClient?.name || "",
@@ -578,7 +615,7 @@ export default function TicketsPage() {
       setFormData({
         title: "", description: "", client_id: "", priority: "medium", category: "support",
         assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
-        source: "portal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+        source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
         device_id: "",
         cc: [], watchers: []
       });
@@ -624,15 +661,34 @@ export default function TicketsPage() {
     } catch { toast.error("Failed to update ticket"); }
   };
 
-  const handleAddNote = async () => {
+  const handleAddNote = async (options = {}) => {
     if (!newNote.trim()) return;
+    const visibility = options.visibility || (conversationType === "public" ? "public" : "internal");
     try {
-      await axios.post(`${API}/tickets/${viewingTicket.id}/comments`, { content: newNote, is_internal: conversationType === "note" }, { headers });
+      const response = await axios.post(`${API}/tickets/${viewingTicket.id}/comments`, {
+        content: newNote,
+        visibility,
+        is_internal: visibility === "internal",
+        notify_client: Boolean(options.notify_client),
+        to_addresses: options.to_addresses || [],
+        subject_label: options.subject_label || "Update",
+        status_after: options.status_after || "",
+      }, { headers });
       setNewNote("");
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers });
       setTicketNotes(collectionFromResponse(res.data, ["comments", "notes"]));
-      toast.success("Note added");
-    } catch { toast.error("Failed to add note"); }
+      if (response.data?.status_after) {
+        setViewingTicket(previous => ({ ...previous, status: response.data.status_after }));
+        await fetchTickets();
+      }
+      toast.success(
+        visibility === "public"
+          ? options.notify_client ? "Public update published and email delivery recorded" : "Public update published to the client portal"
+          : "Private technician note added"
+      );
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to publish update");
+    }
   };
 
   const handleSendEmail = async () => {
@@ -646,14 +702,14 @@ export default function TicketsPage() {
       await axios.post(`${API}/tickets/${viewingTicket.id}/emails`, {
         ticket_id: viewingTicket.id,
         to_addresses: emailForm.to.split(",").map(e => e.trim()).filter(Boolean),
-        cc: emailForm.cc ? emailForm.cc.split(",").map(e => e.trim()).filter(Boolean) : [],
-        bcc: emailForm.bcc ? emailForm.bcc.split(",").map(e => e.trim()).filter(Boolean) : [],
+        cc_addresses: emailForm.cc ? emailForm.cc.split(",").map(e => e.trim()).filter(Boolean) : [],
+        bcc_addresses: emailForm.bcc ? emailForm.bcc.split(",").map(e => e.trim()).filter(Boolean) : [],
         subject: emailForm.subject,
         body: emailForm.body,
         body_type: emailForm.body?.includes("<") ? "html" : "text",
       }, { headers });
       setIsEmailOpen(false);
-      setConversationType("note");
+      setConversationType("public");
       const [nRes, eRes] = await Promise.all([
         axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${viewingTicket.id}/emails`, { headers }),
@@ -990,14 +1046,26 @@ export default function TicketsPage() {
     else setFjConversation(conversation);
   };
 
-  const handleJobConversationNote = async (kind, job, content, setContent) => {
+  const handleJobConversationNote = async (kind, job, content, setContent, options = {}) => {
     if (!content.trim()) return;
+    const visibility = options.visibility || "internal";
     try {
-      await axios.post(`${API}/${kind}-jobs/${job.id}/conversation/note`, { content }, { headers });
+      await axios.post(`${API}/${kind}-jobs/${job.id}/conversation/note`, {
+        content,
+        visibility,
+        is_internal: visibility === "internal",
+        notify_client: Boolean(options.notify_client),
+        to_addresses: options.to_addresses || [],
+        subject_label: options.subject_label || "Update",
+      }, { headers });
       setContent("");
       await refreshJobConversation(kind, job.id);
-      toast.success("Internal note added");
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to add note"); }
+      toast.success(
+        visibility === "public"
+          ? options.notify_client ? "Public update published and emailed" : "Public update published"
+          : "Private technician note added"
+      );
+    } catch (e) { toast.error(e.response?.data?.detail || "Failed to publish update"); }
   };
 
   const handleJobConversationEmail = async (kind, job, form, setForm) => {
@@ -1039,7 +1107,7 @@ export default function TicketsPage() {
 
   const fetchWsJobDetail = async (job) => {
     setViewWsJob(job);
-    setWsConversationType("note");
+    setWsConversationType("public");
     setWsConversation({ notes: [], emails: [], sms: [] });
     setWsConversationNote("");
     setWsEmailForm({ to: job.customer_email || "", cc: "", bcc: "", subject: `Update: ${job.job_number || "Workshop job"}`, body: "" });
@@ -1266,7 +1334,7 @@ export default function TicketsPage() {
 
   const fetchFjJobDetail = async (job) => {
     setViewFjJob(job);
-    setFjConversationType("note");
+    setFjConversationType("public");
     setFjConversation({ notes: [], emails: [], sms: [] });
     setFjConversationNote("");
     setFjEmailForm({ to: job.customer_email || "", cc: "", bcc: "", subject: `Update: ${job.job_number || "Field job"}`, body: "" });
@@ -2483,11 +2551,12 @@ export default function TicketsPage() {
                 <TicketConversationTab
                   conversationType={wsConversationType} setConversationType={setWsConversationType}
                   newNote={wsConversationNote} setNewNote={setWsConversationNote}
-                  handleAddNote={() => handleJobConversationNote("workshop", viewWsJob, wsConversationNote, setWsConversationNote)} cannedResponses={cannedResponses}
+                  handleAddNote={(options) => handleJobConversationNote("workshop", viewWsJob, wsConversationNote, setWsConversationNote, options)} cannedResponses={cannedResponses}
                   emailForm={wsEmailForm} setEmailForm={setWsEmailForm} handleSendEmail={() => handleJobConversationEmail("workshop", viewWsJob, wsEmailForm, setWsEmailForm)} emailSignature={emailSignature} clientContacts={clientContacts}
                   smsForm={wsSmsForm} setSmsForm={setWsSmsForm} handleSendSms={() => handleJobConversationSms("workshop", viewWsJob, wsSmsForm, setWsSmsForm)} applySmsTemplate={(key) => applyJobSmsTemplate(key, setWsSmsForm)} smsTemplates={smsTemplates} smsConfig={smsConfig} smsSending={smsSending}
                   ticketNotes={wsConversation.notes} ticketEmails={wsConversation.emails} ticketSms={wsConversation.sms}
                   recordLabel="workshop job"
+                  allowStatusChange={false}
                 />
               </TabsContent>
 
@@ -3031,11 +3100,12 @@ export default function TicketsPage() {
                 <TicketConversationTab
                   conversationType={fjConversationType} setConversationType={setFjConversationType}
                   newNote={fjConversationNote} setNewNote={setFjConversationNote}
-                  handleAddNote={() => handleJobConversationNote("field", viewFjJob, fjConversationNote, setFjConversationNote)} cannedResponses={cannedResponses}
+                  handleAddNote={(options) => handleJobConversationNote("field", viewFjJob, fjConversationNote, setFjConversationNote, options)} cannedResponses={cannedResponses}
                   emailForm={fjEmailForm} setEmailForm={setFjEmailForm} handleSendEmail={() => handleJobConversationEmail("field", viewFjJob, fjEmailForm, setFjEmailForm)} emailSignature={emailSignature} clientContacts={clientContacts}
                   smsForm={fjSmsForm} setSmsForm={setFjSmsForm} handleSendSms={() => handleJobConversationSms("field", viewFjJob, fjSmsForm, setFjSmsForm)} applySmsTemplate={(key) => applyJobSmsTemplate(key, setFjSmsForm)} smsTemplates={smsTemplates} smsConfig={smsConfig} smsSending={smsSending}
                   ticketNotes={fjConversation.notes} ticketEmails={fjConversation.emails} ticketSms={fjConversation.sms}
                   recordLabel="field job"
+                  allowStatusChange={false}
                 />
               </TabsContent>
 
@@ -3907,7 +3977,7 @@ export default function TicketsPage() {
       <CreateTicketDialog
         open={isCreateOpen} onOpenChange={setIsCreateOpen}
         formData={formData} setFormData={setFormData}
-        clients={clients} devices={devices} users={users} tickets={tickets}
+        clients={clients} clientContacts={createClientContacts} devices={devices} users={users} tickets={tickets}
         services={services}
         handleAiTriage={handleAiTriage} triaging={triaging}
         triageResult={triageResult} applyTriage={applyTriage}
