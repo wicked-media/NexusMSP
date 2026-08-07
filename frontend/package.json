@@ -107,5 +107,5 @@
     "react-scripts": "5.0.1",
     "tailwindcss": "^3.4.17"
   },
-  "packageManager": "pnpm@11.7.0"
+  "packageManager": "pnpm@11.16.0"
 }

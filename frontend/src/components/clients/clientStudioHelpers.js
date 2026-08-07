@@ -1,10 +1,10 @@
 /* Shared client workspace display helpers. */
 export const TIER_META = {
-  diamond: { label: "Diamond", color: "from-cyan-400 to-indigo-500", chip: "bg-cyan-500/15 text-cyan-200 border-cyan-500/40", icon: "\u{1F48E}" },
-  platinum: { label: "Platinum", color: "from-fuchsia-500 to-indigo-500", chip: "bg-fuchsia-500/15 text-fuchsia-200 border-fuchsia-500/40", icon: "\u{1F3C5}" },
-  gold: { label: "Gold", color: "from-amber-400 to-orange-500", chip: "bg-amber-500/15 text-amber-200 border-amber-500/40", icon: "\u{1F3C6}" },
-  silver: { label: "Silver", color: "from-zinc-300 to-zinc-500", chip: "bg-zinc-500/15 text-zinc-200 border-zinc-500/40", icon: "\u{1F948}" },
-  bronze: { label: "Bronze", color: "from-orange-700 to-amber-800", chip: "bg-orange-500/10 text-orange-200 border-orange-500/30", icon: "\u{1F949}" },
+  diamond: { label: "Diamond", color: "from-cyan-400 to-indigo-500", chip: "bg-cyan-500/15 text-cyan-200 border-cyan-500/40", icon: "gem" },
+  platinum: { label: "Platinum", color: "from-fuchsia-500 to-indigo-500", chip: "bg-fuchsia-500/15 text-fuchsia-200 border-fuchsia-500/40", icon: "award" },
+  gold: { label: "Gold", color: "from-amber-400 to-orange-500", chip: "bg-amber-500/15 text-amber-200 border-amber-500/40", icon: "crown" },
+  silver: { label: "Silver", color: "from-zinc-300 to-zinc-500", chip: "bg-zinc-500/15 text-zinc-200 border-zinc-500/40", icon: "shield" },
+  bronze: { label: "Bronze", color: "from-orange-700 to-amber-800", chip: "bg-orange-500/10 text-orange-200 border-orange-500/30", icon: "shield" },
 };
 
 export function tierMeta(tier) {

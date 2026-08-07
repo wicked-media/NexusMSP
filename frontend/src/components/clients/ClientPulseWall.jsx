@@ -4,8 +4,9 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import Sparkline from "../devices/Sparkline";
-import { Loader2, Crown } from "lucide-react";
+import { Loader2, Crown, Award, Gem, Shield } from "lucide-react";
 import { healthColor, moneyShort, tierMeta } from "./clientStudioHelpers";
+import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 
 export default function ClientPulseWall({ search = "", tierFilter = "all" }) {
   const { token } = useAuth();
@@ -38,6 +39,8 @@ export default function ClientPulseWall({ search = "", tierFilter = "all" }) {
     <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(190px,1fr))]" data-testid="client-pulse-wall">
       {filtered.map(t => {
         const m = tierMeta(t.tier);
+        const TierIcon = { award: Award, crown: Crown, gem: Gem, shield: Shield }[m.icon] || Shield;
+        const tierVisual = getServiceTierVisual({ slug: t.tier, name: m.label });
         const assessed = Number.isFinite(t.health);
         const isHealthy = assessed && t.health >= 80;
         const bg = t.vip
@@ -55,7 +58,7 @@ export default function ClientPulseWall({ search = "", tierFilter = "all" }) {
           >
             <div className="flex items-start justify-between mb-1.5 gap-1">
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="text-base leading-none">{m.icon}</span>
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border bg-black/10" style={{ color: tierVisual.color, borderColor: `${tierVisual.color}55` }}><TierIcon className="h-3.5 w-3.5" /></span>
                 <p className="text-xs font-semibold text-zinc-100 truncate">{t.name}</p>
               </div>
               {t.vip && <Crown className="w-3 h-3 text-yellow-300 flex-shrink-0" />}

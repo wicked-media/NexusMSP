@@ -7,8 +7,9 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, Sparkles, TrendingUp, RefreshCw, Trophy, Flag, AlertTriangle, Crown, FileDown, Shield, Wand2, ChevronRight, Calendar, Activity as ActivityIcon, Save, Plus, Trash2 } from "lucide-react";
+import { Loader2, Sparkles, TrendingUp, RefreshCw, Trophy, Flag, AlertTriangle, Crown, FileDown, Shield, Wand2, ChevronRight, Calendar, Activity as ActivityIcon, Save, Plus, Trash2, Award, Gem } from "lucide-react";
 import { healthColor, moneyShort, tierMeta } from "./clientStudioHelpers";
+import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 import { toast } from "sonner";
 
 export function AccountBriefingDialog({ clientId, open, onClose }) {
@@ -577,9 +578,11 @@ export function MyAccountsTable({ onOpen }) {
       <div className="space-y-1">
         {accounts.map(a => {
           const m = tierMeta(a.tier);
+          const TierIcon = { award: Award, crown: Crown, gem: Gem, shield: Shield }[m.icon] || Shield;
+          const tierVisual = getServiceTierVisual({ slug: a.tier, name: m.label });
           return (
             <button key={a.id} onClick={() => onOpen && onOpen(a.id)} className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded hover:bg-violet-500/10 text-[11px]" data-testid={`my-account-${a.id}`}>
-              <span>{m.icon}</span>
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border bg-black/10" style={{ color: tierVisual.color, borderColor: `${tierVisual.color}55` }}><TierIcon className="h-3 w-3" /></span>
               <span className="text-zinc-100 flex-1 truncate flex items-center gap-1.5">
                 {a.name}
                 {a.vip && <Crown className="w-2.5 h-2.5 text-yellow-300" />}

@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
-import { Loader2, Crown } from "lucide-react";
+import { Loader2, Crown, Award, Gem, Shield } from "lucide-react";
 import { healthColor, moneyShort, tierMeta } from "./clientStudioHelpers";
+import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 
 export default function ClientUniverseMap() {
   const { token } = useAuth();
@@ -75,9 +76,11 @@ export default function ClientUniverseMap() {
         const n = positioned.find(p => p.id === hovered);
         if (!n) return null;
         const m = tierMeta(n.tier);
+        const TierIcon = { award: Award, crown: Crown, gem: Gem, shield: Shield }[m.icon] || Shield;
+        const tierVisual = getServiceTierVisual({ slug: n.tier, name: m.label });
         return (
           <div className="absolute bottom-3 left-3 right-3 bg-zinc-900/95 border border-violet-500/40 rounded-lg p-2.5 flex items-center gap-3 pointer-events-none">
-            <span className="text-2xl leading-none">{m.icon}</span>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-black/10" style={{ color: tierVisual.color, borderColor: `${tierVisual.color}55` }}><TierIcon className="h-4 w-4" /></span>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-zinc-100 truncate flex items-center gap-1.5">
                 {n.name} {n.vip && <Crown className="w-3 h-3 text-yellow-300" />}

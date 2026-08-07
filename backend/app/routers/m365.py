@@ -380,6 +380,18 @@ async def test_connection(
     try:
         customers = await _partner_center_customers(settings, max_pages=1)
     except HTTPException as exc:
+        # A provider outage means we have no trustworthy connection result to
+        # persist. In particular, never turn saved credentials into live
+        # telemetry merely because Partner Center is unavailable.
+        if exc.status_code >= 500:
+            return {
+                "ok": False,
+                "mode": mode,
+                "reason": exc.detail,
+                "next_steps": [
+                    "Check the Partner Center provider and try the connection test again.",
+                ],
+            }
         await db.settings.update_one(
             {"key": "m365_connection"},
             {"$set": {"value.last_test_status": "failed", "value.last_tested_at": now}},
