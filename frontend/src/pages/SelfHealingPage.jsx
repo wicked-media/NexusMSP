@@ -58,14 +58,15 @@ export default function SelfHealingPage({ embedded = false }) {
 
   const fetchData = useCallback(async () => {
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [dRes, rRes] = await Promise.all([
-        axios.get(`${API}/self-healing/dashboard`, { headers }),
-        axios.get(`${API}/self-healing/runbooks`, { headers }),
+        axios.get(`${API}/self-healing/dashboard`, { headers: requestHeaders }),
+        axios.get(`${API}/self-healing/runbooks`, { headers: requestHeaders }),
       ]);
       setData(dRes.data);
       setRunbooks(rRes.data);
     } catch (e) { toast.error(e.response?.data?.detail || "Could not load self-healing operations"); }
-  }, []);
+  }, [token]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -133,7 +134,17 @@ export default function SelfHealingPage({ embedded = false }) {
       </div>}
 
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/60 bg-card/60 px-3 py-2">
-        <p className="text-xs text-muted-foreground">Runbooks execute with visible step logs. Escalation creates technician-owned work instead of silently closing an event.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
+            Audited event ledger
+          </Badge>
+          {data.simulated_events > 0 && (
+            <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-300">
+              {data.simulated_events} simulated
+            </Badge>
+          )}
+          <p className="text-xs text-muted-foreground">Runbooks execute with visible step logs. Escalation creates technician-owned work instead of silently closing an event.</p>
+        </div>
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={fetchData}><RotateCcw className="mr-1 h-3.5 w-3.5" />Refresh</Button>
           <Button size="sm" onClick={() => setShowSimulator(true)} data-testid="simulate-btn"><Zap className="mr-1 h-3.5 w-3.5" />Simulate issue</Button>

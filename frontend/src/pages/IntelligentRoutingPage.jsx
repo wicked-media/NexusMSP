@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -9,13 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
-  Brain, Users, Zap, Target, ArrowRight, RefreshCw, Loader2, Plus, Trash2,
-  Shield, AlertCircle, CheckCircle, TrendingUp, BarChart3, Gauge, Edit
+  Brain, Users, Zap, RefreshCw, Loader2, Plus, Trash2, AlertCircle, CheckCircle, Gauge
 } from "lucide-react";
 
 const methodLabels = { highest_skill: "Highest Skill", skill_match: "Skill Match", least_loaded: "Least Loaded", round_robin: "Round Robin" };

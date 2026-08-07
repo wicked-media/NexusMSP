@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { Send, MessageSquare, Mail, PhoneCall, Loader2, Zap, LockKeyhole, Globe2, MailCheck, CircleAlert } from "lucide-react";
+import { Send, Mail, PhoneCall, Loader2, Zap, LockKeyhole, Globe2, MailCheck, CircleAlert } from "lucide-react";
 import DOMPurify from "dompurify";
 import { formatDistanceToNow } from "date-fns";
 

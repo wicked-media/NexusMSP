@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock, FileText, Building2, ShieldCheck, Sparkles, Check, ChevronsUpDown, CircleCheck, CircleDashed } from "lucide-react";

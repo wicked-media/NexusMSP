@@ -13,9 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import {
-  Bot, CheckCircle, Clock, XCircle, Zap, ThumbsUp, ThumbsDown, Filter,
-  Search, Shield, HardDrive, Network, Cpu, RefreshCw, Eye, Play,
-  AlertTriangle, Settings, Activity, BarChart3, Loader2, Terminal
+  Bot, CheckCircle, Clock, XCircle, Zap, ThumbsUp, ThumbsDown,
+  Search, Shield, HardDrive, Network, Cpu, RefreshCw, Activity, Loader2, Terminal
 } from "lucide-react";
 
 const CATEGORY_ICONS = { disk: HardDrive, service: RefreshCw, certificate: Shield, network: Network, performance: Cpu, backup: HardDrive, security: Shield };
@@ -40,7 +39,7 @@ export default function AIResolutionPage({ embedded = false }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/ai-resolution/suggestions`, { headers });
+      const res = await axios.get(`${API}/ai-resolution/suggestions`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
     } catch { toast.error("Failed to fetch AI resolution data"); }
     finally { setLoading(false); }

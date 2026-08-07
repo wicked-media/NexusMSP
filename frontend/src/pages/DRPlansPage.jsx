@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, ClipboardCheck, Plus, ShieldOff } from "lucide-react";
+import { CheckCircle2, Plus, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 
 const initialPlan = { client_id: "", name: "", rto_hours: 4, rpo_hours: 1, primary_contact: "", after_hours_contact: "", test_interval_days: 180 };

@@ -57,6 +57,24 @@ def _confirmed_rule(rule: dict) -> bool:
     return str(rule.get("source") or "").lower() == "manual" and bool(rule.get("confirmed_at"))
 
 
+def _dedupe_technicians(rows: list[dict]) -> list[dict]:
+    """Collapse legacy duplicate user documents before calculating capacity.
+
+    Several older seed/import paths could leave repeated documents with the
+    same Nexus user ID. Routing must treat one human as one technician or both
+    workload totals and assignment candidates become misleading.
+    """
+    unique = {}
+    for row in rows:
+        identifier = str(row.get("id") or "").strip()
+        email = str(row.get("email") or "").strip().lower()
+        key = identifier or email
+        if not key:
+            continue
+        unique.setdefault(key, row)
+    return list(unique.values())
+
+
 def _ticket_category(ticket: dict) -> str:
     return str(ticket.get("category") or ticket.get("issue_category") or ticket.get("service_category") or "").strip().lower()
 
@@ -92,7 +110,12 @@ def _route_scores(candidates: list[dict], *, category: str, method: str) -> list
 
 
 async def _technician_candidates() -> list[dict]:
-    technicians = await db.users.find({"role": {"$in": ["technician", "admin"]}}, {"_id": 0, "id": 1, "name": 1, "email": 1}).to_list(100)
+    technicians = _dedupe_technicians(
+        await db.users.find(
+            {"role": {"$in": ["technician", "admin"]}},
+            {"_id": 0, "id": 1, "name": 1, "email": 1},
+        ).to_list(100)
+    )
     candidates = []
     for technician in technicians:
         settings = await db.user_settings.find_one({"user_id": technician["id"]}, {"_id": 0}) or {}

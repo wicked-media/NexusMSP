@@ -3,10 +3,10 @@ import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, ArrowRight, BarChart3, Bot, Boxes, Building2, CheckCircle2, CircuitBoard, Cloud,
-  Database, ExternalLink, FileText, GitBranch, HardDrive, Loader2,
+  Activity, AlertTriangle, BarChart3, Bot, Boxes, Building2, CheckCircle2, CircuitBoard, Cloud,
+  Database, ExternalLink, FileText, GitBranch, HardDrive, Lightbulb, Loader2,
   Link2, LockKeyhole, Network, Phone, Radio, Receipt, RefreshCw, Search, Server,
-  Settings, ShieldCheck, Sparkles, Ticket, Users, Waypoints, Workflow, XCircle,
+  Plus, Send, Settings, ShieldCheck, Sparkles, Ticket, Users, Waypoints, Workflow, XCircle,
 } from "lucide-react";
 
 import { API, useAuth } from "@/App";
@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 
@@ -57,6 +58,33 @@ function timeAgo(value) {
   if (Number.isNaN(date.getTime())) return "No verified sync";
   return date.toLocaleString();
 }
+
+const ROADMAP_TONES = {
+  planned: {
+    column: "border-zinc-700/80 bg-zinc-900/35",
+    badge: "border-zinc-600 bg-zinc-800/70 text-zinc-200",
+    icon: GitBranch,
+    iconClass: "text-zinc-300",
+  },
+  in_progress: {
+    column: "border-cyan-500/20 bg-cyan-500/[0.025]",
+    badge: "border-cyan-500/30 bg-cyan-500/10 text-cyan-100",
+    icon: Waypoints,
+    iconClass: "text-cyan-300",
+  },
+  testing: {
+    column: "border-amber-500/20 bg-amber-500/[0.025]",
+    badge: "border-amber-500/30 bg-amber-500/10 text-amber-100",
+    icon: Activity,
+    iconClass: "text-amber-300",
+  },
+  released: {
+    column: "border-emerald-500/20 bg-emerald-500/[0.025]",
+    badge: "border-emerald-500/30 bg-emerald-500/10 text-emerald-100",
+    icon: CheckCircle2,
+    iconClass: "text-emerald-300",
+  },
+};
 
 export default function NexusControlPlanePage() {
   const { token } = useAuth();
@@ -306,6 +334,7 @@ export default function NexusControlPlanePage() {
             reload={loadFoundation}
             rebuildCore={rebuildCore}
             coreRebuilding={coreRebuilding}
+            headers={headers}
           />
         </TabsContent>
 
@@ -332,7 +361,160 @@ export default function NexusControlPlanePage() {
   );
 }
 
-function FoundationPanel({ data, loading, reload, rebuildCore, coreRebuilding }) {
+function ProductRoadmapBoard({ roadmap }) {
+  if (!roadmap?.items?.length) return null;
+  const summary = roadmap.summary || {};
+  const releasedPct = summary.total
+    ? Math.round(((summary.released || 0) / summary.total) * 100)
+    : 0;
+
+  return (
+    <Card className="overflow-hidden border-violet-500/20 bg-gradient-to-br from-violet-500/[0.045] via-card to-cyan-500/[0.025]" data-testid="foundation-roadmap">
+      <CardHeader className="border-b border-border/70">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-base"><GitBranch className="h-4 w-4 text-violet-300" />{roadmap.name}</CardTitle>
+              <Badge variant="outline" className="border-violet-500/25 bg-violet-500/[0.08] text-violet-100">Source of truth · v{roadmap.version}</Badge>
+            </div>
+            <CardDescription className="mt-1 max-w-4xl">Major product work is sequenced behind declared Nexus Core dependencies. Live evidence is shown on every item, but release promotion remains a deliberate product decision.</CardDescription>
+          </div>
+          <div className="min-w-52 rounded-xl border border-border/70 bg-black/10 p-3">
+            <div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">Released baseline</span><span className="font-semibold text-emerald-200">{summary.released || 0} / {summary.total || 0}</span></div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-emerald-400" style={{ width: `${releasedPct}%` }} /></div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 p-4">
+        <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
+          {(roadmap.columns || []).map((column) => {
+            const tone = ROADMAP_TONES[column.id] || ROADMAP_TONES.planned;
+            const ColumnIcon = tone.icon;
+            const items = roadmap.items.filter((item) => item.status === column.id);
+            return (
+              <section key={column.id} className={`min-w-0 rounded-2xl border p-3 ${tone.column}`} data-testid={`roadmap-${column.id}`}>
+                <div className="mb-3 flex items-start gap-2">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-black/10"><ColumnIcon className={`h-3.5 w-3.5 ${tone.iconClass}`} /></div>
+                  <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold">{column.label}</p><Badge variant="outline" className={tone.badge}>{items.length}</Badge></div><p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{column.description}</p></div>
+                </div>
+                <div className="space-y-2">
+                  {items.map((item) => (
+                    <Link key={item.id} to={item.route} className="group block rounded-xl border border-border/70 bg-card/70 p-3 transition hover:border-cyan-500/30 hover:bg-cyan-500/[0.035]">
+                      <div className="flex items-start justify-between gap-2">
+                        <div><p className="text-sm font-semibold">{item.name}</p><p className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Phase {item.phase} · {item.owner}</p></div>
+                        <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition group-hover:text-cyan-200" />
+                      </div>
+                      <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{item.summary}</p>
+                      <div className={`mt-2 rounded-lg border p-2 ${item.evidence?.verified ? "border-emerald-500/20 bg-emerald-500/[0.04]" : "border-border/70 bg-black/10"}`}>
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Live evidence</p>
+                        <p className="mt-1 text-[10px] leading-4">{item.evidence?.summary}</p>
+                      </div>
+                      <p className="mt-2 text-[10px] leading-4"><span className="font-semibold text-cyan-200">Release gate:</span> <span className="text-muted-foreground">{item.release_gate}</span></p>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {(roadmap.policy || []).map((item) => <div key={item} className="flex gap-2 rounded-lg border border-border/70 bg-muted/15 p-2.5"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300" /><p className="text-[10px] leading-4 text-muted-foreground">{item}</p></div>)}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const IDEA_AXIS_LABELS = {
+  saves_time: "Save time",
+  reduces_stress: "Reduce stress",
+  increases_confidence: "Increase confidence",
+  creates_opportunity: "Create opportunity",
+};
+
+function IdeaVault({ registry, headers, onChanged }) {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
+  const [capturing, setCapturing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    title: "", summary: "", category: "general", horizon: "explore",
+    value_axes: { saves_time: true, reduces_stress: false, increases_confidence: true, creates_opportunity: false },
+  });
+  const ideas = registry?.items || [];
+  const filtered = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return ideas.filter((idea) => {
+      if (status !== "all" && idea.status !== status) return false;
+      return !needle || `${idea.number || ""} ${idea.title} ${idea.summary} ${idea.category}`.toLowerCase().includes(needle);
+    });
+  }, [ideas, search, status]);
+
+  const captureIdea = async () => {
+    if (form.title.trim().length < 3 || form.summary.trim().length < 10) {
+      toast.info("Add a clear title and a short explanation of the idea");
+      return;
+    }
+    setSaving(true);
+    try {
+      await axios.post(`${API}/core/ideas`, form, { headers });
+      toast.success("Idea captured in Nexus Foundation");
+      setForm({ title: "", summary: "", category: "general", horizon: "explore", value_axes: { saves_time: true, reduces_stress: false, increases_confidence: true, creates_opportunity: false } });
+      setCapturing(false);
+      await onChanged();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "The idea could not be captured");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!registry) return null;
+  return (
+    <Card className="overflow-hidden border-amber-500/20 bg-gradient-to-br from-amber-500/[0.04] via-card to-violet-500/[0.025]" data-testid="nexus-idea-vault">
+      <CardHeader className="border-b border-border/70">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-500/10 text-amber-300"><Lightbulb className="h-4 w-4" /></span>
+            <div><div className="flex flex-wrap items-center gap-2"><CardTitle className="text-base">Nexus Ideas</CardTitle><Badge variant="outline">{registry.summary?.total || 0} retained</Badge></div><CardDescription className="mt-1 max-w-3xl">A durable product inbox. Capturing an idea does not approve, schedule, or release it; promotion into the roadmap remains a deliberate decision.</CardDescription></div>
+          </div>
+          <Button size="sm" className="gap-1.5" onClick={() => setCapturing((value) => !value)}><Plus className="h-3.5 w-3.5" />Capture idea</Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 p-4">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {Object.entries(IDEA_AXIS_LABELS).map(([axis, label]) => <div key={axis} className="rounded-xl border border-border/65 bg-background/25 p-3"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p><p className="mt-1 font-mono text-xl font-semibold text-amber-200">{registry.summary?.axis_counts?.[axis] || 0}</p><p className="mt-0.5 text-[9px] text-muted-foreground">ideas pass this filter</p></div>)}
+        </div>
+
+        {capturing && <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4" data-testid="idea-capture-form">
+          <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-cyan-300" /><div><p className="text-sm font-semibold">Capture the opportunity</p><p className="text-[10px] text-muted-foreground">Keep the idea concise; validation and roadmap decisions happen later.</p></div></div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <div><label className="mb-1 block text-[10px] font-medium">Idea title</label><Input value={form.title} onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))} placeholder="What should Nexus make possible?" data-testid="idea-title" /></div>
+            <div><label className="mb-1 block text-[10px] font-medium">Category</label><Input value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))} placeholder="foundation, automation, experience…" data-testid="idea-category" /></div>
+            <div className="lg:col-span-2"><label className="mb-1 block text-[10px] font-medium">Why it matters</label><Textarea value={form.summary} onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value }))} rows={3} placeholder="Describe the user problem and the outcome, without prescribing unnecessary implementation." data-testid="idea-summary" /></div>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {Object.entries(IDEA_AXIS_LABELS).map(([axis, label]) => <label key={axis} className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-xs transition ${form.value_axes[axis] ? "border-emerald-400/25 bg-emerald-500/[0.06] text-emerald-100" : "border-border/60 bg-background/25 text-muted-foreground"}`}><input type="checkbox" checked={form.value_axes[axis]} onChange={(event) => setForm((current) => ({ ...current, value_axes: { ...current.value_axes, [axis]: event.target.checked } }))} className="h-3.5 w-3.5 accent-emerald-500" />{label}</label>)}
+          </div>
+          <div className="mt-4 flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => setCapturing(false)}>Cancel</Button><Button size="sm" className="gap-1.5" onClick={captureIdea} disabled={saving}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}Save to idea vault</Button></div>
+        </section>}
+
+        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+          <div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="Search ideas by number, title, category, or outcome…" data-testid="idea-search" /></div>
+          <div className="flex flex-wrap gap-1.5">{["all", ...(registry.statuses || [])].map((value) => <button key={value} type="button" onClick={() => setStatus(value)} className={`rounded-lg border px-2.5 py-2 text-[10px] capitalize transition ${status === value ? "border-amber-400/30 bg-amber-500/[0.08] text-amber-100" : "border-border/60 bg-background/25 text-muted-foreground hover:text-foreground"}`}>{value.replaceAll("_", " ")}</button>)}</div>
+        </div>
+
+        <div className="grid max-h-[540px] gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3" data-testid="idea-list">
+          {filtered.map((idea) => <article key={idea.id} className="rounded-xl border border-border/65 bg-background/25 p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[9px] font-semibold uppercase tracking-[0.13em] text-amber-300">{idea.number ? `Idea ${idea.number}` : "Team idea"} · {idea.category}</p><h4 className="mt-1 truncate text-sm font-semibold">{idea.title}</h4></div><Badge variant="outline" className="shrink-0 capitalize text-[9px]">{idea.status}</Badge></div><p className="mt-2 line-clamp-3 text-[10px] leading-4 text-muted-foreground">{idea.summary}</p><div className="mt-3 flex flex-wrap gap-1">{Object.entries(idea.value_axes || {}).filter(([, enabled]) => enabled).map(([axis]) => <span key={axis} className="rounded-md border border-emerald-400/15 bg-emerald-500/[0.04] px-1.5 py-1 text-[8px] text-emerald-200">{IDEA_AXIS_LABELS[axis]}</span>)}</div></article>)}
+          {!filtered.length && <div className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-xs text-muted-foreground">No ideas match this filter.</div>}
+        </div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">{(registry.policy || []).map((item) => <div key={item} className="flex gap-2 rounded-lg border border-border/60 bg-muted/10 p-2.5"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" /><p className="text-[9px] leading-4 text-muted-foreground">{item}</p></div>)}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FoundationPanel({ data, loading, reload, rebuildCore, coreRebuilding, headers }) {
   if (loading && !data) {
     return <Card><CardContent className="flex min-h-72 items-center justify-center"><Loader2 className="mr-2 h-5 w-5 animate-spin text-cyan-300" />Inspecting the shared Nexus platform contracts…</CardContent></Card>;
   }
@@ -377,6 +559,10 @@ function FoundationPanel({ data, loading, reload, rebuildCore, coreRebuilding })
         <HeroTile label="Governed event subjects" value={summary.event_subjects ?? 0} icon={Radio} glow="cyan" subtitle={`Schema v${summary.schema_version || 1}`} />
       </div>
 
+      <ProductRoadmapBoard roadmap={data.roadmap} />
+
+      <IdeaVault registry={data.idea_registry} headers={headers} onChanged={reload} />
+
       <EventBackbonePanel contract={data.event_contract} />
 
       <Card className="overflow-hidden border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.055] via-card to-cyan-500/[0.035]" data-testid="nexus-core-model">
@@ -398,13 +584,16 @@ function FoundationPanel({ data, loading, reload, rebuildCore, coreRebuilding })
           </div>
         </CardHeader>
         <CardContent className="space-y-4 p-4">
-          <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-black/10 p-3">
-            {(coreSchema.canonical_path || []).map((entity, index, values) => (
-              <div className="flex items-center gap-1.5" key={entity}>
-                <Badge variant="outline" className="border-cyan-500/20 bg-cyan-500/[0.04] capitalize text-cyan-100">{entity}</Badge>
-                {index < values.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
-              </div>
-            ))}
+          <div className="grid gap-3 rounded-xl border border-border/70 bg-black/10 p-3 lg:grid-cols-[180px_1fr]">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] p-3">
+              <Building2 className="h-4 w-4 text-emerald-300" />
+              <div><p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-emerald-300">Canonical root</p><p className="mt-0.5 text-sm font-semibold capitalize">{coreSchema.canonical_tree?.root || "client"}</p></div>
+            </div>
+            <div className="flex flex-wrap content-center gap-1.5">
+              {(coreSchema.canonical_tree?.children || (coreSchema.canonical_path || []).filter((entity) => entity !== "client")).map((entity) => (
+                <Badge key={entity} variant="outline" className="border-cyan-500/20 bg-cyan-500/[0.04] px-2.5 py-1.5 capitalize text-cyan-100">{entity}</Badge>
+              ))}
+            </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             <ContractField label="Canonical entities" value={core.entities ?? 0} />

@@ -4,7 +4,7 @@ The current application remains the source of truth while this compatibility
 layer gives every module one stable vocabulary:
 
 Client -> Site -> Contact/User -> Device -> Service -> Contract -> Ticket ->
-Invoice -> Integration.
+Project -> Invoice -> Documentation -> Integration.
 
 The index is derived, versioned and rebuildable. Source collections are never
 deleted or renamed by this service, which lets domains migrate to the shared
@@ -25,10 +25,11 @@ from pymongo import ReplaceOne
 from app.database import db
 
 
-CORE_SCHEMA_VERSION = 1
+CORE_SCHEMA_VERSION = 2
 CORE_ENTITY_ORDER = (
     "client", "site", "contact", "user", "device", "service",
-    "contract", "ticket", "invoice", "integration",
+    "contract", "ticket", "project", "invoice", "documentation",
+    "integration",
 )
 
 CORE_ENTITY_TYPES = (
@@ -89,10 +90,24 @@ CORE_ENTITY_TYPES = (
         "required_parent": "client",
     },
     {
+        "id": "project",
+        "label": "Project",
+        "description": "A governed body of client work containing tasks, milestones and linked service records.",
+        "sources": ["projects", "project_tasks"],
+        "required_parent": "client",
+    },
+    {
         "id": "invoice",
         "label": "Invoice",
         "description": "A financial record or recurring billing plan linked to its client and contract.",
         "sources": ["invoices", "recurring_invoices"],
+        "required_parent": "client",
+    },
+    {
+        "id": "documentation",
+        "label": "Documentation",
+        "description": "Client-owned operational knowledge, generated evidence and technical records.",
+        "sources": ["documentation", "kb_articles", "auto_generated_docs"],
         "required_parent": "client",
     },
     {
@@ -105,13 +120,16 @@ CORE_ENTITY_TYPES = (
 )
 
 CORE_RELATION_TYPES = (
-    {"id": "client.owns", "from": "client", "to": ["site", "contact", "user", "device", "service", "contract", "ticket", "invoice", "integration"]},
+    {"id": "client.owns", "from": "client", "to": ["site", "contact", "user", "device", "service", "contract", "ticket", "project", "invoice", "documentation", "integration"]},
     {"id": "site.contains", "from": "site", "to": ["device", "service"]},
     {"id": "user.uses", "from": "user", "to": ["device"]},
     {"id": "service.governed_by", "from": "service", "to": ["contract"]},
     {"id": "integration.provides", "from": "integration", "to": ["service"]},
     {"id": "ticket.concerns", "from": "ticket", "to": ["device", "contact", "user"]},
+    {"id": "project.includes", "from": "project", "to": ["ticket"]},
     {"id": "invoice.bills", "from": "invoice", "to": ["contract", "ticket", "service"]},
+    {"id": "documentation.describes", "from": "documentation", "to": ["device", "ticket", "project"]},
+    {"id": "context.explains", "from": list(CORE_ENTITY_ORDER), "to": list(CORE_ENTITY_ORDER)},
 )
 
 CLIENT_INTEGRATION_FIELDS = {
@@ -150,6 +168,10 @@ def core_schema() -> dict[str, Any]:
         "name": "Nexus Core",
         "schema_version": CORE_SCHEMA_VERSION,
         "canonical_path": list(CORE_ENTITY_ORDER),
+        "canonical_tree": {
+            "root": "client",
+            "children": [entity for entity in CORE_ENTITY_ORDER if entity != "client"],
+        },
         "entity_types": list(CORE_ENTITY_TYPES),
         "relationship_types": list(CORE_RELATION_TYPES),
         "rules": [
@@ -172,8 +194,9 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
     source_names = [
         "clients", "network_sites", "contacts", "m365_users",
         "client_portal_users", "devices", "nexus_agents", "core_services",
-        "usage_billing", "contracts", "tickets", "invoices",
-        "recurring_invoices", "yeastar_pbxs",
+        "usage_billing", "contracts", "tickets", "projects", "project_tasks",
+        "invoices", "recurring_invoices", "documentation", "kb_articles",
+        "auto_generated_docs", "yeastar_pbxs", "context_relationships",
     ]
     results = await asyncio.gather(*(_rows(name) for name in source_names))
     source = dict(zip(source_names, results))
@@ -251,6 +274,7 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
         evidence: str,
         source_collection: str,
         source_id: str,
+        context: dict | None = None,
     ) -> None:
         if from_ref not in entities or to_ref not in entities:
             anomalies.append({
@@ -271,6 +295,7 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
             "client_id": client_id,
             "evidence": evidence,
             "source": {"collection": source_collection, "id": _safe_id(source_id)},
+            "context": context or {},
             "schema_version": CORE_SCHEMA_VERSION,
             "generation": generation,
             "active": True,
@@ -410,7 +435,25 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
     for item in source["tickets"]:
         tid = _safe_id(item.get("id"))
         client_id = resolve_client(item)
-        ref = add_entity("ticket", "tickets", tid, name=item.get("title") or item.get("subject") or item.get("ticket_number") or tid, client_id=client_id, status=item.get("status"), external_refs={"ticket_number": item.get("ticket_number")}, metadata={"priority": item.get("priority"), "category": item.get("category")})
+        ref = add_entity(
+            "ticket",
+            "tickets",
+            tid,
+            name=item.get("title") or item.get("subject") or item.get("ticket_number") or tid,
+            client_id=client_id,
+            status=item.get("status"),
+            external_refs={"ticket_number": item.get("ticket_number")},
+            metadata={
+                "priority": item.get("priority"),
+                "category": item.get("category"),
+                "assigned_to": item.get("assigned_to"),
+                "assigned_to_name": item.get("assigned_to_name"),
+                "resolution": item.get("resolution") or item.get("resolution_summary"),
+                "resolved_at": item.get("resolved_at"),
+                "closed_at": item.get("closed_at"),
+                "updated_at": item.get("updated_at"),
+            },
+        )
         client_owner(ref, client_id, "tickets", tid)
         linked_devices = {_safe_id(value) for value in (item.get("device_ids") or []) if _safe_id(value)}
         if _safe_id(item.get("device_id")):
@@ -419,6 +462,55 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
             add_relation("ticket.concerns", ref, core_ref("device", did), client_id=client_id, evidence="tickets.device_id/device_ids", source_collection="tickets", source_id=tid)
         if _safe_id(item.get("contact_id")):
             add_relation("ticket.concerns", ref, core_ref("contact", _safe_id(item.get("contact_id"))), client_id=client_id, evidence="tickets.contact_id", source_collection="tickets", source_id=tid)
+
+    # Projects and their linked service records.
+    project_refs: dict[str, str] = {}
+    for item in source["projects"]:
+        pid = _safe_id(item.get("id"))
+        client_id = resolve_client(item)
+        ref = add_entity(
+            "project",
+            "projects",
+            pid,
+            name=item.get("name") or item.get("title") or pid,
+            client_id=client_id,
+            status=item.get("status"),
+            metadata={
+                "priority": item.get("priority"),
+                "project_manager": item.get("project_manager_name") or item.get("project_manager"),
+                "target_end_date": item.get("target_end_date"),
+            },
+        )
+        project_refs[pid] = ref
+        client_owner(ref, client_id, "projects", pid)
+        linked_ticket_id = _safe_id(item.get("ticket_id") or item.get("parent_ticket_id"))
+        if linked_ticket_id:
+            add_relation(
+                "project.includes",
+                ref,
+                core_ref("ticket", linked_ticket_id),
+                client_id=client_id,
+                evidence="projects.ticket_id/parent_ticket_id",
+                source_collection="projects",
+                source_id=pid,
+            )
+
+    for item in source["project_tasks"]:
+        pid = _safe_id(item.get("project_id"))
+        ticket_id = _safe_id(item.get("ticket_id"))
+        project_ref = project_refs.get(pid)
+        if not project_ref or not ticket_id:
+            continue
+        project = entities.get(project_ref) or {}
+        add_relation(
+            "project.includes",
+            project_ref,
+            core_ref("ticket", ticket_id),
+            client_id=project.get("client_id"),
+            evidence="project_tasks.ticket_id",
+            source_collection="project_tasks",
+            source_id=_safe_id(item.get("id")) or _digest(pid, ticket_id),
+        )
 
     # Invoices and recurring billing plans.
     for collection in ("invoices", "recurring_invoices"):
@@ -431,6 +523,49 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
                 add_relation("invoice.bills", ref, core_ref("contract", _safe_id(item.get("contract_id"))), client_id=client_id, evidence=f"{collection}.contract_id", source_collection=collection, source_id=iid)
             if _safe_id(item.get("ticket_id")):
                 add_relation("invoice.bills", ref, core_ref("ticket", _safe_id(item.get("ticket_id"))), client_id=client_id, evidence=f"{collection}.ticket_id", source_collection=collection, source_id=iid)
+
+    # Client-owned documentation. Shared templates and global technician
+    # knowledge remain tenant resources and are deliberately excluded from a
+    # client graph until they are explicitly assigned.
+    for collection in ("documentation", "kb_articles", "auto_generated_docs"):
+        for item in source[collection]:
+            client_id = resolve_client(item)
+            if not client_id:
+                continue
+            source_id = _safe_id(item.get("id") or item.get("document_id"))
+            document_id = f"{collection}:{source_id or _digest(client_id, item.get('title'), item.get('name'))}"
+            ref = add_entity(
+                "documentation",
+                collection,
+                document_id,
+                name=item.get("title") or item.get("name") or "Client documentation",
+                client_id=client_id,
+                status=item.get("status") or ("published" if item.get("is_public") else "internal"),
+                external_refs={"source_document_id": source_id},
+                metadata={
+                    "category": item.get("category") or item.get("document_type"),
+                    "content_format": item.get("content_format"),
+                    "generated": collection == "auto_generated_docs",
+                },
+            )
+            client_owner(ref, client_id, collection, source_id or document_id)
+            linked_targets = (
+                ("device", item.get("device_id") or item.get("asset_id")),
+                ("ticket", item.get("ticket_id") or item.get("source_ticket_id")),
+                ("project", item.get("project_id")),
+            )
+            for target_type, target_id in linked_targets:
+                target_id = _safe_id(target_id)
+                if target_id:
+                    add_relation(
+                        "documentation.describes",
+                        ref,
+                        core_ref(target_type, target_id),
+                        client_id=client_id,
+                        evidence=f"{collection}.{target_type}_id",
+                        source_collection=collection,
+                        source_id=source_id or document_id,
+                    )
 
     # Provider integrations and provider-backed services.
     for item in source["yeastar_pbxs"]:
@@ -454,6 +589,49 @@ async def build_core_index(*, persist: bool, actor: dict | None = None, correlat
             iid = f"{provider}:{client_id}"
             ref = add_entity("integration", "clients", iid, name=f"{label} connection", client_id=client_id, status="linked", external_refs={"provider": provider, "external_id": external_id}, metadata={"link_field": field})
             client_owner(ref, client_id, "clients", iid)
+
+    # Human-attested context is a governed source record, not a graph-only
+    # annotation. Only approved records whose endpoints resolve inside the same
+    # client boundary become visible in Nexus Fabric.
+    for item in source["context_relationships"]:
+        context_id = _safe_id(item.get("id"))
+        client_id = _safe_id(item.get("client_id"))
+        source_totals["context_relationships"] += 1
+        if item.get("status") != "approved":
+            continue
+        from_ref = _safe_id(item.get("from_ref"))
+        to_ref = _safe_id(item.get("to_ref"))
+        left = entities.get(from_ref) or {}
+        right = entities.get(to_ref) or {}
+        if not left or not right or left.get("client_id") != client_id or right.get("client_id") != client_id:
+            anomalies.append({
+                "type": "invalid_context_relationship",
+                "severity": "high",
+                "source_collection": "context_relationships",
+                "source_id": context_id,
+                "message": "Approved context did not resolve to two canonical objects in the declared client boundary.",
+            })
+            continue
+        source_linked["context_relationships"] += 1
+        add_relation(
+            "context.explains",
+            from_ref,
+            to_ref,
+            client_id=client_id,
+            evidence=f"Approved context: {item.get('purpose') or 'Recorded operational purpose'}",
+            source_collection="context_relationships",
+            source_id=context_id,
+            context={
+                "purpose": item.get("purpose"),
+                "business_process": item.get("business_process"),
+                "requested_by": item.get("requested_by"),
+                "approved_by": item.get("approved_by"),
+                "approval_evidence": item.get("approval_evidence"),
+                "decision_record": item.get("decision_record"),
+                "recorded_by": item.get("created_by_name"),
+                "recorded_at": item.get("created_at"),
+            },
+        )
 
     # Calculate coverage and integrity.
     coverage = []

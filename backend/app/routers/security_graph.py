@@ -43,6 +43,40 @@ def _matches_client(record: dict, client_id: str, client_name: str) -> bool:
     )
 
 
+def _group_canary_triggers(triggers: list[dict]) -> list[dict]:
+    """Collapse repeated unresolved Canary signals into one endpoint exposure.
+
+    Security Graph represents relationships, not an event log. Repeated signals
+    from the same endpoint therefore enrich a single path instead of inflating
+    the critical-path count. The underlying events remain available in Shield.
+    """
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for trigger in triggers:
+        client_key = _normal(trigger.get("client_id") or trigger.get("client_name") or "unassigned")
+        device_key = _normal(trigger.get("device_id") or trigger.get("device_name") or "unknown-device")
+        grouped.setdefault((client_key, device_key), []).append(trigger)
+
+    result: list[dict] = []
+    for records in grouped.values():
+        ordered = sorted(records, key=lambda item: str(item.get("triggered_at") or ""))
+        latest = dict(ordered[-1])
+        latest["_event_count"] = len(ordered)
+        latest["_first_triggered_at"] = ordered[0].get("triggered_at")
+        latest["_last_triggered_at"] = ordered[-1].get("triggered_at")
+        latest["_file_paths"] = list(dict.fromkeys(
+            str(item.get("file_path") or "").strip()
+            for item in ordered
+            if str(item.get("file_path") or "").strip()
+        ))
+        latest["_trigger_types"] = list(dict.fromkeys(
+            str(item.get("trigger_type") or "").strip()
+            for item in ordered
+            if str(item.get("trigger_type") or "").strip()
+        ))
+        result.append(latest)
+    return result
+
+
 def _node(node_id: str, node_type: str, label: str, detail: str, state: str = "observed") -> dict:
     return {"id": node_id, "type": node_type, "label": label, "detail": detail, "state": state}
 
@@ -148,15 +182,24 @@ async def security_graph_overview(
         if path:
             paths.append(path)
 
-    for trigger in canary_triggers:
+    for trigger in _group_canary_triggers(canary_triggers):
         if not _matches_client(trigger, client_id, client_name):
             continue
         device_id = str(trigger.get("device_id") or "unknown-device")
         device_name = str(trigger.get("device_name") or "Recorded endpoint")
         trigger_client_name = str(trigger.get("client_name") or client_name or "Unassigned client")
         trigger_client_id = str(trigger.get("client_id") or client_id or "")
+        event_count = int(trigger.get("_event_count") or 1)
+        file_paths = trigger.get("_file_paths") or []
+        trigger_types = trigger.get("_trigger_types") or []
+        signal_label = f"{event_count} unresolved Canary signal{'s' if event_count != 1 else ''}"
+        evidence = [signal_label]
+        if trigger_types:
+            evidence.append(f"Trigger types: {', '.join(trigger_types[:4])}")
+        if file_paths:
+            evidence.append(f"Affected files: {', '.join(file_paths[:4])}")
         paths.append({
-            "id": f"path-canary-{trigger.get('id') or device_id}",
+            "id": f"path-canary-{trigger_client_id or 'unassigned'}-{device_id}",
             "title": f"Nexus Canary trip · {device_name}",
             "severity": "critical",
             "confidence": "observed",
@@ -164,19 +207,21 @@ async def security_graph_overview(
             "client_name": trigger_client_name,
             "summary": "A live deception-file trigger is recorded on this endpoint and requires containment review.",
             "nodes": [
-                _node(f"detection:{trigger.get('id') or device_id}", "detection", "Nexus Canary triggered", str(trigger.get("file_path") or trigger.get("trigger_type") or "Deception file event")),
+                _node(f"detection:{device_id}", "detection", "Nexus Canary triggered", signal_label),
                 _node(f"endpoint:{device_id}", "endpoint", device_name, "Endpoint linked by the canary record"),
                 _node(f"client:{trigger_client_id or trigger_client_name}", "client", trigger_client_name, "Recorded client relationship"),
             ],
             "edges": [
-                _edge(f"detection:{trigger.get('id') or device_id}", f"endpoint:{device_id}", "triggered on", "Persisted Nexus Canary event"),
+                _edge(f"detection:{device_id}", f"endpoint:{device_id}", "triggered on", signal_label),
                 _edge(f"endpoint:{device_id}", f"client:{trigger_client_id or trigger_client_name}", "belongs to", "Persisted canary client association"),
             ],
-            "evidence": [f"Trigger type: {trigger.get('trigger_type') or 'recorded canary event'}", f"File: {trigger.get('file_path') or 'path retained in source record'}"],
+            "evidence": evidence,
             "recommended_action": "Open Nexus Shield, validate isolation state, preserve evidence, and start the ransomware response playbook.",
             "source": "Nexus Canary",
             "source_route": "/nexus-shield?tab=canary",
-            "observed_at": trigger.get("triggered_at"),
+            "event_count": event_count,
+            "first_observed_at": trigger.get("_first_triggered_at"),
+            "observed_at": trigger.get("_last_triggered_at") or trigger.get("triggered_at"),
         })
 
     for alert in alerts:

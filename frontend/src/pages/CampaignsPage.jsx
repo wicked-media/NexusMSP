@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Mail, Plus, Send, Trash2, Loader2, RefreshCw, FileText, Users, Copy, Eye } from "lucide-react";
+import { Mail, Plus, Send, Trash2, Loader2, RefreshCw, Copy } from "lucide-react";
 
 export default function CampaignsPage({ embedded = false }) {
   const { token } = useAuth();
@@ -26,8 +26,8 @@ export default function CampaignsPage({ embedded = false }) {
     setLoading(true);
     try {
       const [cRes, tRes] = await Promise.all([
-        axios.get(`${API}/campaigns`, { headers }),
-        axios.get(`${API}/campaigns/templates`, { headers }),
+        axios.get(`${API}/campaigns`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/campaigns/templates`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       setCampaigns(cRes.data);
       setTemplates(tRes.data);

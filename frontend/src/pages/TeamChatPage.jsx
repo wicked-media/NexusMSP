@@ -22,9 +22,11 @@ import { toast } from "sonner";
 import {
   Activity,
   AlertCircle,
+  ArrowRightLeft,
   ArrowLeft,
   AtSign,
   Check,
+  CheckCircle2,
   ChevronDown,
   CornerDownRight,
   Download,
@@ -49,14 +51,19 @@ import {
   Smile,
   Sparkles,
   Trash2,
+  UserRoundCheck,
   Users,
   X,
+  XCircle,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
+  chatAuthorName,
   channelDisplayName,
+  extractOperationalContext,
   filterChatChannels,
   groupChatMessages,
+  isLivePresence,
   PRESENCE_META,
   repairDisplayText,
   totalUnread,
@@ -509,25 +516,13 @@ export default function TeamChatPage() {
 
   const unread = totalUnread(channels);
   const activePresence = activeChannel?.other_user_id ? presenceFor(activeChannel.other_user_id) : null;
-  const activeTeammates = users.filter(candidate => candidate.id !== user?.id && ["active", "busy", "dnd"].includes(presenceFor(candidate.id))).length;
+  const activeTeammates = users.filter(candidate => candidate.id !== user?.id && isLivePresence(presenceFor(candidate.id))).length;
+  const activePeople = activeTeammates + (isLivePresence(myPresence) ? 1 : 0);
   const activeChannelTechnicians = useMemo(() => {
     const memberIds = activeChannel?.member_ids?.length ? new Set(activeChannel.member_ids) : null;
-    return users.filter(candidate => candidate.id !== user?.id && (!memberIds || memberIds.has(candidate.id)) && ["active", "busy", "dnd"].includes(presenceFor(candidate.id)));
-  }, [activeChannel?.member_ids, presence, user?.id, users]);
-  const operationalContext = useMemo(() => {
-    const references = { tickets: new Set(), invoices: new Set(), purchaseOrders: new Set() };
-    messages.forEach(message => {
-      const body = repairDisplayText(message.body || "");
-      (body.match(/\bTKT(?:-CHAT)?-[A-Z0-9-]+\b/gi) || []).forEach(reference => references.tickets.add(reference.toUpperCase()));
-      (body.match(/\bINV-[A-Z0-9-]+\b/gi) || []).forEach(reference => references.invoices.add(reference.toUpperCase()));
-      (body.match(/\bPO-[A-Z0-9-]+\b/gi) || []).forEach(reference => references.purchaseOrders.add(reference.toUpperCase()));
-    });
-    return {
-      tickets: references.tickets.size,
-      invoices: references.invoices.size,
-      purchaseOrders: references.purchaseOrders.size,
-    };
-  }, [messages]);
+    return users.filter(candidate => (!memberIds || memberIds.has(candidate.id)) && isLivePresence(presence[candidate.id]?.led || "offline"));
+  }, [activeChannel?.member_ids, presence, users]);
+  const operationalContext = useMemo(() => extractOperationalContext(messages), [messages]);
   const draftOperationalCommand = command => {
     setInput(current => current.trim() ? `${current}\n${command}` : command);
     window.requestAnimationFrame(() => composerRef.current?.focus());
@@ -536,13 +531,13 @@ export default function TeamChatPage() {
   return (
     <div className="space-y-4" data-testid="team-chat-page">
       <OperationalPageHeader
-        eyebrow="Collaboration workspace · real-time technician coordination"
-        title="Team Chat"
-        description="Bring operational conversations, work references, handovers and files into one live, auditable space."
+        eyebrow="Nexus Connect · conversation that performs the work"
+        title="Nexus Connect"
+        description="Coordinate technicians, pass ownership, act on live Nexus objects and preserve every operational decision in one auditable workspace."
         icon={MessageCircle}
         tone="emerald"
         actions={<>
-          <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>{activeTeammates} online</span>
+          <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>{activePeople} active</span>
           <Button variant="outline" size="sm" onClick={() => { loadWorkspace({ quiet: true }); refreshChannel({ quiet: true }); }} disabled={loading || channelLoading} data-testid="refresh-team-chat-btn"><RefreshCw className={`mr-1.5 h-4 w-4 ${(loading || channelLoading) ? "animate-spin" : ""}`} />Refresh</Button>
           <Button size="sm" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn"><MessageSquarePlus className="mr-1.5 h-4 w-4" />New conversation</Button>
         </>}
@@ -557,6 +552,7 @@ export default function TeamChatPage() {
         <RailButton icon={Activity} label="Inbox" active={mode === "activity"} badge={unread} onClick={() => setMode("activity")} />
         <RailButton icon={MessageCircle} label="Direct" active={mode === "chat"} onClick={() => setMode("chat")} />
         <RailButton icon={Users} label="Channels" active={mode === "teams"} onClick={() => setMode("teams")} />
+        <RailButton icon={FileText} label="Work rooms" active={mode === "work"} onClick={() => setMode("work")} />
         <div className="mt-auto px-2 text-center text-[9px] uppercase tracking-[0.16em] text-zinc-600">Nexus<br />Chat</div>
       </nav>
 
@@ -565,7 +561,7 @@ export default function TeamChatPage() {
           <div className="mb-3 flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Nexus collaboration</p>
-              <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : "Direct messages"}</h1>
+              <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct messages"}</h1>
             </div>
             <div className="flex items-center gap-1.5">
               <DropdownMenu>
@@ -583,7 +579,7 @@ export default function TeamChatPage() {
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-500">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>{activeTeammates} online now</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>{activePeople} active now</span>
             {unread > 0 && <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-cyan-200">{unread} need attention</span>}
           </div>
           <div className="relative">
@@ -596,7 +592,18 @@ export default function TeamChatPage() {
               className="h-9 border-white/5 bg-black/20 pl-9 pr-9 text-sm placeholder:text-zinc-600 focus-visible:ring-emerald-500/50"
               data-testid="chat-search"
             />
-            {searching && <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-emerald-400" />}
+            {searching ? (
+              <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-emerald-400" />
+            ) : query ? (
+              <button
+                type="button"
+                onClick={() => { setQuery(""); setSearchResults(null); }}
+                className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-zinc-500 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                aria-label="Clear chat search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -615,7 +622,7 @@ export default function TeamChatPage() {
               <div className="px-6 py-16 text-center">
                 <MessageCircle className="mx-auto mb-3 h-9 w-9 text-zinc-700" />
                 <p className="text-sm font-medium text-zinc-300">{mode === "activity" ? "You’re all caught up" : "No conversations found"}</p>
-                <p className="mt-1 text-xs text-zinc-600">{mode === "activity" ? "New mentions and unread chats appear here." : "Start a chat or create a team channel."}</p>
+                <p className="mt-1 text-xs text-zinc-600">{mode === "activity" ? "New mentions and unread chats appear here." : mode === "work" ? "Ticket Pass creates a secure room around the work." : "Start a chat or create a team channel."}</p>
               </div>
             ) : visibleChannels.map(channel => (
               <ConversationRow
@@ -880,7 +887,7 @@ export default function TeamChatPage() {
         headers={headers}
         onCreated={channel => {
           setChannels(current => [channel, ...current.filter(existing => existing.id !== channel.id)]);
-          setMode(channel.kind === "team" ? "teams" : "chat");
+          setMode(channel.kind === "team" ? "teams" : channel.kind === "object" ? "work" : "chat");
           setActiveId(channel.id);
           setSearchParams({ channel: channel.id }, { replace: true });
           setMobileConversationOpen(true);
@@ -952,7 +959,7 @@ function ConversationRow({ channel, active, presence, onClick }) {
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <p className={`truncate text-xs ${channel.unread_count ? "text-zinc-300" : "text-zinc-600"}`}>
-            {channel.last_message ? `${channel.last_message.user_name ? `${channel.last_message.user_name.split(" ")[0]}: ` : ""}${repairDisplayText(channel.last_message.body || "Attachment")}` : channel.kind === "team" ? channel.description || "Team channel" : "Start a conversation"}
+            {channel.last_message ? `${channel.last_message.user_name ? `${chatAuthorName(channel.last_message.user_name, channel.last_message.is_system).split(" ")[0]}: ` : ""}${repairDisplayText(channel.last_message.body || "Attachment")}` : channel.kind === "team" ? channel.description || "Team channel" : "Start a conversation"}
           </p>
           {channel.unread_count > 0 && <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500 px-1.5 text-[10px] font-semibold text-white">{channel.unread_count > 99 ? "99+" : channel.unread_count}</span>}
         </div>
@@ -970,6 +977,10 @@ function ChannelAvatar({ channel, presence, size = "sm" }) {
       {channel.kind === "team" ? (
         <Avatar className={dimension}>
           <AvatarFallback style={avatarStyle(name)}><Hash className="h-4 w-4" /></AvatarFallback>
+        </Avatar>
+      ) : channel.kind === "object" ? (
+        <Avatar className={dimension}>
+          <AvatarFallback className="border border-emerald-500/25 bg-emerald-500/10 text-emerald-200"><FileText className="h-4 w-4" /></AvatarFallback>
         </Avatar>
       ) : <TechnicianAvatar name={name} avatarUrl={channel.avatar} className={dimension} />}
       {statusMeta && <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[#1d1f26] ${statusMeta.dot}`} />}
@@ -994,9 +1005,14 @@ function PresenceLabel({ status, detail }) {
 function MessageRow({ message, compact, own, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload }) {
   const [hovered, setHovered] = useState(false);
   if (message.is_system) {
+    const text = repairDisplayText(message.body);
+    const isWarning = /unknown command|not found|could not|couldn't|invalid|failed|error/i.test(text);
     return (
       <div className="my-3 flex justify-center">
-        <div className="max-w-2xl rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-center text-xs text-cyan-100">{repairDisplayText(message.body)}</div>
+        <div className={`flex max-w-2xl items-start gap-2 rounded-lg border px-4 py-2 text-left text-xs ${isWarning ? "border-amber-500/25 bg-amber-500/[0.08] text-amber-100" : "border-cyan-500/20 bg-cyan-500/10 text-cyan-100"}`}>
+          {isWarning ? <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" /> : <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />}
+          <div><span className="mr-1.5 font-semibold">{isWarning ? "Command notice" : "Nexus Automation"}</span>{" "}{text}</div>
+        </div>
       </div>
     );
   }
@@ -1009,8 +1025,9 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
           <div className="flex gap-2"><Input value={editingText} onChange={event => onEditingText(event.target.value)} onKeyDown={event => event.key === "Enter" && onSaveEdit()} autoFocus className="h-9 border-white/10 bg-black/20" /><Button size="sm" onClick={onSaveEdit}>Save</Button><Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button></div>
         ) : (
           <div className={`text-sm leading-6 ${message.deleted ? "italic text-zinc-600" : "text-zinc-300"}`}>
-            <MessageBody body={message.body} headers={headers} presence={presence} />
+            <MessageBody body={message.body} headers={headers} presence={presence} currentUserId={currentUserId} channelId={message.channel_id} />
             {message.attachment && <AttachmentCard attachment={message.attachment} headers={headers} onDownload={() => onDownload(message.attachment)} />}
+            {message.action_card?.kind === "ticket_pass" && <TicketPassCard handoffId={message.action_card.id} headers={headers} currentUserId={currentUserId} />}
           </div>
         )}
         {onReact && message.reactions && Object.keys(message.reactions).length > 0 && (
@@ -1049,7 +1066,7 @@ function MessageAction({ icon: Icon, label, onClick, destructive }) {
   return <button onClick={onClick} title={label} aria-label={label} className={`rounded-md p-1.5 transition hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 ${destructive ? "text-rose-400 focus-visible:ring-rose-400/60" : "text-zinc-400 hover:text-zinc-100"}`}><Icon className="h-3.5 w-3.5" /></button>;
 }
 
-function MessageBody({ body, headers, presence }) {
+function MessageBody({ body, headers, presence, currentUserId, channelId }) {
   const text = repairDisplayText(body);
   const tickets = [...new Set([...text.matchAll(TICKET_REGEX)].map(match => match[1]))];
   const invoices = [...new Set([...text.matchAll(INVOICE_REGEX)].map(match => match[1]))];
@@ -1058,9 +1075,9 @@ function MessageBody({ body, headers, presence }) {
   return (
     <>
       <RichMessageText text={text} />
-      {tickets.map(ticketNumber => <TicketCard key={ticketNumber} ticketNumber={ticketNumber} headers={headers} presence={presence} />)}
+      {tickets.map(ticketNumber => <TicketCard key={ticketNumber} ticketNumber={ticketNumber} headers={headers} presence={presence} currentUserId={currentUserId} channelId={channelId} />)}
       {invoices.map(invoiceNumber => <InvoiceCard key={invoiceNumber} invoiceNumber={invoiceNumber} headers={headers} presence={presence} />)}
-      {purchaseOrders.map(poNumber => <div key={poNumber}><PurchaseOrderCard poNumber={poNumber} headers={headers} presence={presence} /><WorkPresence kind="po" reference={poNumber} presence={presence} headers={headers} /></div>)}
+      {purchaseOrders.map(poNumber => <div key={poNumber}><PurchaseOrderCard poNumber={poNumber} headers={headers} /><WorkPresence kind="po" reference={poNumber} presence={presence} headers={headers} /></div>)}
     </>
   );
 }
@@ -1069,8 +1086,9 @@ function RichMessageText({ text }) {
   return <span className="whitespace-pre-wrap break-words">{String(text || "").split(/(@[\w.-]+)/g).map((part, index) => part.startsWith("@") ? <span key={`${part}-${index}`} className={`rounded px-1 py-0.5 text-xs font-medium ${["@channel", "@here", "@everyone"].includes(part.toLowerCase()) ? "bg-amber-500/15 text-amber-200" : "bg-cyan-500/15 text-cyan-100"}`}>{part}</span> : part)}</span>;
 }
 
-function TicketCard({ ticketNumber, headers, presence }) {
+function TicketCard({ ticketNumber, headers, presence, currentUserId, channelId }) {
   const [ticket, setTicket] = useState(null);
+  const [passOpen, setPassOpen] = useState(false);
   useEffect(() => {
     let active = true;
     axios.get(`${API}/chat/ticket-card/${ticketNumber}`, { headers }).then(response => active && setTicket(response.data)).catch(() => {});
@@ -1078,11 +1096,177 @@ function TicketCard({ ticketNumber, headers, presence }) {
   }, [headers, ticketNumber]);
   if (!ticket) return null;
   return (
-    <Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`} className="mt-2 block max-w-lg rounded-lg border border-white/10 bg-black/20 p-3 transition hover:border-cyan-500/40">
-      <div className="mb-1 flex items-center gap-2"><code className="text-xs text-cyan-200">{ticket.ticket_number}</code><Badge variant="outline" className="text-[9px] capitalize">{ticket.priority}</Badge><Badge variant="outline" className="text-[9px] capitalize">{ticket.status?.replace(/_/g, " ")}</Badge></div>
-      <p className="text-sm font-medium text-zinc-200">{ticket.title}</p><p className="mt-1 text-xs text-zinc-500">{ticket.client_name}{ticket.assigned_to_name ? ` · ${ticket.assigned_to_name}` : ""}</p>
-      <WorkPresence kind="ticket" reference={ticket.ticket_number} presence={presence} headers={headers} />
-    </Link>
+    <div className="mt-2 max-w-lg overflow-hidden rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.08] to-black/20 shadow-lg shadow-black/10">
+      <Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`} className="block p-3 transition hover:bg-cyan-500/[0.05]">
+        <div className="mb-1 flex items-center gap-2"><code className="text-xs text-cyan-200">{ticket.ticket_number}</code><Badge variant="outline" className="text-[9px] capitalize">{ticket.priority}</Badge><Badge variant="outline" className="text-[9px] capitalize">{ticket.status?.replace(/_/g, " ")}</Badge></div>
+        <p className="text-sm font-medium text-zinc-100">{ticket.title}</p><p className="mt-1 text-xs text-zinc-500">{ticket.client_name}{ticket.assigned_to_name ? ` · ${ticket.assigned_to_name}` : ""}</p>
+      </Link>
+      <div className="flex items-center gap-2 border-t border-white/5 px-3 py-2">
+        <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-cyan-200"><Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`}>Open ticket</Link></Button>
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-200" onClick={() => setPassOpen(true)}><ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />Pass ticket</Button>
+      </div>
+      <div className="px-3 pb-2"><WorkPresence kind="ticket" reference={ticket.ticket_number} presence={presence} headers={headers} /></div>
+      <TicketPassDialog open={passOpen} onOpenChange={setPassOpen} ticket={ticket} headers={headers} currentUserId={currentUserId} channelId={channelId} />
+    </div>
+  );
+}
+
+function TicketPassDialog({ open, onOpenChange, ticket, headers, currentUserId, channelId }) {
+  const [technicians, setTechnicians] = useState([]);
+  const [toUserId, setToUserId] = useState("");
+  const [mode, setMode] = useState("take_over");
+  const [reason, setReason] = useState("");
+  const [workCompleted, setWorkCompleted] = useState("");
+  const [nextAction, setNextAction] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    axios.get(`${API}/users`, { headers })
+      .then(response => {
+        const rows = Array.isArray(response.data) ? response.data : response.data?.users || [];
+        setTechnicians(rows.filter(row => row.id !== currentUserId && row.is_active !== false && row.archived !== true));
+      })
+      .catch(() => setTechnicians([]));
+  }, [currentUserId, headers, open]);
+
+  const submit = async () => {
+    if (!toUserId || reason.trim().length < 3 || submitting) return;
+    setSubmitting(true);
+    try {
+      const response = await axios.post(`${API}/nexus-connect/ticket-passes`, {
+        ticket_ref: ticket.id || ticket.ticket_number,
+        to_user_id: toUserId,
+        mode,
+        reason: reason.trim(),
+        work_completed: workCompleted.split("\n").map(value => value.trim()).filter(Boolean),
+        suggested_next_action: nextAction.trim(),
+        channel_id: channelId || undefined,
+      }, { headers });
+      toast.success("Ticket pass sent", { description: `${response.data?.handoff?.to_user_name} must accept before ownership changes.` });
+      onOpenChange(false);
+      setToUserId("");
+      setReason("");
+      setWorkCompleted("");
+      setNextAction("");
+      setMode("take_over");
+    } catch (requestError) {
+      toast.error("Ticket pass could not be sent", { description: requestError?.response?.data?.detail || "Review the handover and try again." });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl overflow-hidden border-cyan-500/20 bg-[#121b24] p-0 text-zinc-100">
+        <DialogHeader className="border-b border-cyan-500/10 bg-gradient-to-r from-emerald-500/[0.09] to-cyan-500/[0.06] px-6 py-5 text-left">
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300"><ArrowRightLeft className="h-4 w-4" />Nexus Ticket Pass</div>
+          <DialogTitle>Hand over {ticket.ticket_number}</DialogTitle>
+          <DialogDescription className="text-zinc-400">The recipient must explicitly accept. Nexus preserves both technicians, the reason, work completed and the live assignment trail.</DialogDescription>
+        </DialogHeader>
+        <div className="grid max-h-[65vh] gap-5 overflow-y-auto px-6 py-5 md:grid-cols-2">
+          <label className="space-y-2 text-xs font-medium text-zinc-300">Receiving technician
+            <select value={toUserId} onChange={event => setToUserId(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none focus:border-emerald-500/60">
+              <option value="">Choose a technician</option>
+              {technicians.map(technician => <option key={technician.id} value={technician.id}>{technician.name || technician.email}</option>)}
+            </select>
+          </label>
+          <label className="space-y-2 text-xs font-medium text-zinc-300">Pass mode
+            <select value={mode} onChange={event => setMode(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none focus:border-emerald-500/60">
+              <option value="take_over">Take over - transfer ownership</option>
+              <option value="assist">Assist - join without transfer</option>
+              <option value="escalate">Escalate - higher-level ownership</option>
+              <option value="consult">Consult - specialist advice</option>
+              <option value="cover">Cover - temporary ownership</option>
+              <option value="return">Return - send back with outcome</option>
+              <option value="swarm">Swarm - collaborate as a group</option>
+            </select>
+          </label>
+          <label className="space-y-2 text-xs font-medium text-zinc-300 md:col-span-2">Why are you passing this ticket?
+            <Textarea value={reason} onChange={event => setReason(event.target.value)} placeholder="Explain why this technician is the right next owner..." className="mt-2 min-h-20 border-white/10 bg-black/25" />
+          </label>
+          <label className="space-y-2 text-xs font-medium text-zinc-300">Work completed
+            <Textarea value={workCompleted} onChange={event => setWorkCompleted(event.target.value)} placeholder={"One completed action per line\nRestarted workstation\nCleared print queue"} className="mt-2 min-h-28 border-white/10 bg-black/25" />
+          </label>
+          <label className="space-y-2 text-xs font-medium text-zinc-300">Suggested next action
+            <Textarea value={nextAction} onChange={event => setNextAction(event.target.value)} placeholder="Check the print server spooler and driver deployment." className="mt-2 min-h-28 border-white/10 bg-black/25" />
+          </label>
+        </div>
+        <DialogFooter className="border-t border-white/5 bg-black/15 px-6 py-4">
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={!toUserId || reason.trim().length < 3 || submitting} className="bg-emerald-600 hover:bg-emerald-500">{submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRightLeft className="mr-2 h-4 w-4" />}Send ticket pass</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TicketPassCard({ handoffId, headers, currentUserId }) {
+  const [handoff, setHandoff] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState("");
+  const [declineOpen, setDeclineOpen] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+
+  const load = useCallback(() => {
+    setLoading(true);
+    axios.get(`${API}/nexus-connect/ticket-passes/${handoffId}`, { headers })
+      .then(response => setHandoff(response.data))
+      .catch(() => setHandoff(null))
+      .finally(() => setLoading(false));
+  }, [handoffId, headers]);
+  useEffect(load, [load]);
+
+  const decide = async (decision, reason = "") => {
+    setProcessing(decision);
+    try {
+      const response = await axios.post(
+        `${API}/nexus-connect/ticket-passes/${handoffId}/${decision}`,
+        decision === "decline" ? { reason } : {},
+        { headers },
+      );
+      setHandoff(response.data?.handoff || handoff);
+      setDeclineOpen(false);
+      setDeclineReason("");
+      toast.success(decision === "accept" ? "Ticket pass accepted" : "Ticket pass declined");
+    } catch (requestError) {
+      toast.error("Ticket pass could not be updated", { description: requestError?.response?.data?.detail || "Refresh the live ticket state and try again." });
+      load();
+    } finally {
+      setProcessing("");
+    }
+  };
+
+  if (loading) return <div className="mt-3 flex max-w-xl items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-4 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Loading live ticket pass...</div>;
+  if (!handoff) return null;
+  const pendingForMe = handoff.status === "pending" && handoff.to_user_id === currentUserId;
+  const statusTone = handoff.status === "accepted"
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+    : handoff.status === "declined" || handoff.status === "stale"
+      ? "border-rose-500/25 bg-rose-500/10 text-rose-200"
+      : "border-amber-500/25 bg-amber-500/10 text-amber-100";
+  return (
+    <div className="mt-3 max-w-xl overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-[#12231f] to-[#111923] shadow-xl shadow-black/20">
+      <div className="flex items-start justify-between gap-4 border-b border-white/5 px-4 py-3">
+        <div><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300"><UserRoundCheck className="h-3.5 w-3.5" />Nexus Ticket Pass</div><p className="mt-1 text-sm font-semibold text-white">{handoff.mode_label} to {handoff.to_user_name}</p></div>
+        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusTone}`}>{handoff.status}</span>
+      </div>
+      <div className="space-y-3 px-4 py-4">
+        <div><code className="text-xs text-cyan-200">{handoff.ticket?.ticket_number}</code><p className="mt-1 text-sm font-medium text-zinc-100">{handoff.ticket?.title}</p><p className="mt-1 text-xs text-zinc-500">{handoff.ticket?.client_name} · {handoff.ticket?.priority} priority · {handoff.ticket?.status?.replace(/_/g, " ")}</p></div>
+        <div className="rounded-lg border border-white/5 bg-black/20 p-3"><p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Reason</p><p className="mt-1 text-sm text-zinc-300">{handoff.reason}</p></div>
+        {handoff.work_completed?.length > 0 && <div><p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Work completed</p><ul className="mt-1.5 space-y-1">{handoff.work_completed.map(item => <li key={item} className="flex gap-2 text-xs text-zinc-300"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />{item}</li>)}</ul></div>}
+        {handoff.suggested_next_action && <div className="border-l-2 border-cyan-500/50 pl-3"><p className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400">Suggested next action</p><p className="mt-1 text-xs text-zinc-300">{handoff.suggested_next_action}</p></div>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-white/5 bg-black/10 px-4 py-3">
+        <Button asChild variant="ghost" size="sm" className="h-8 text-xs"><Link to={`/tickets?ticket=${encodeURIComponent(handoff.ticket?.ticket_number || handoff.ticket_id)}`}>View context</Link></Button>
+        {handoff.status === "pending" && !pendingForMe && <span className="ml-auto text-[11px] text-amber-200">Awaiting {handoff.to_user_name}</span>}
+        {pendingForMe && <><Button size="sm" className="ml-auto h-8 bg-emerald-600 text-xs hover:bg-emerald-500" disabled={Boolean(processing)} onClick={() => decide("accept")}>{processing === "accept" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Accept</Button><Button variant="outline" size="sm" className="h-8 text-xs" disabled={Boolean(processing)} onClick={() => setDeclineOpen(true)}><XCircle className="mr-1.5 h-3.5 w-3.5" />Decline</Button></>}
+      </div>
+      <Dialog open={declineOpen} onOpenChange={setDeclineOpen}>
+        <DialogContent className="border-rose-500/20 bg-[#121b24] text-zinc-100"><DialogHeader><DialogTitle>Decline ticket pass?</DialogTitle><DialogDescription className="text-zinc-400">Give {handoff.from_user_name} enough context to choose the right next step.</DialogDescription></DialogHeader><Textarea value={declineReason} onChange={event => setDeclineReason(event.target.value)} placeholder="Why can you not accept this ticket?" className="min-h-24 border-white/10 bg-black/25" /><DialogFooter><Button variant="ghost" onClick={() => setDeclineOpen(false)}>Cancel</Button><Button variant="destructive" disabled={declineReason.trim().length < 3 || Boolean(processing)} onClick={() => decide("decline", declineReason.trim())}>Decline pass</Button></DialogFooter></DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -1103,7 +1287,7 @@ function InvoiceCard({ invoiceNumber, headers, presence }) {
   );
 }
 
-function PurchaseOrderCard({ poNumber, headers, presence }) {
+function PurchaseOrderCard({ poNumber, headers }) {
   const [purchaseOrder, setPurchaseOrder] = useState(null);
   useEffect(() => {
     let active = true;
@@ -1177,15 +1361,18 @@ function PinnedView({ messages, onOpenThread }) {
 }
 
 function SearchResults({ results, onSelect, onClose }) {
-  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-cyan-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{result.user_name}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{repairDisplayText(result.body)}</p></button>)}</div>}</div></div>;
+  return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose} aria-label="Close search results"><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-cyan-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{chatAuthorName(result.user_name, result.is_system)}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{repairDisplayText(result.body)}</p></button>)}</div>}</div></div>;
 }
 
 function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpdated, onClose }) {
-  const memberIds = channel.kind === "team" && !channel.is_private ? users.map(user => user.id) : channel.member_ids || [];
+  const memberIds = useMemo(
+    () => channel.kind === "team" && !channel.is_private ? users.map(user => user.id) : channel.member_ids || [],
+    [channel.is_private, channel.kind, channel.member_ids, users],
+  );
   const [draftMemberIds, setDraftMemberIds] = useState(memberIds);
   const [savingMembers, setSavingMembers] = useState(false);
   const canManageMembers = channel.kind === "team" && channel.is_private && channel.created_by === currentUserId;
-  useEffect(() => { setDraftMemberIds(memberIds); }, [channel.id]);
+  useEffect(() => { setDraftMemberIds(memberIds); }, [channel.id, memberIds]);
   const addMember = userId => {
     if (userId && !draftMemberIds.includes(userId)) setDraftMemberIds(current => [...current, userId]);
   };
@@ -1206,7 +1393,7 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpda
   };
   return (
     <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
-      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close conversation details"><X className="h-4 w-4" /></Button></div>
       {canManageMembers && <div className="border-b border-white/5 bg-cyan-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-cyan-100">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
       <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div></ScrollArea>
     </aside>
@@ -1216,7 +1403,7 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpda
 function ThreadPanel({ thread, currentUserId, headers, input, onInput, onSend, onClose }) {
   return (
     <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="thread-panel">
-      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><div><h3 className="font-semibold">Thread</h3><p className="text-xs text-zinc-600">{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</p></div><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}><X className="h-4 w-4" /></Button></div>
+      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><div><h3 className="font-semibold">Thread</h3><p className="text-xs text-zinc-600">{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</p></div><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close thread"><X className="h-4 w-4" /></Button></div>
       <div className="flex-1 overflow-y-auto p-3"><MessageRow message={thread.parent} own={thread.parent.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />{thread.replies.length > 0 && <div className="my-3 border-t border-white/5" />}{thread.replies.map(reply => <MessageRow key={reply.id} message={reply} own={reply.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />)}</div>
       <div className="border-t border-white/5 p-3"><div className="flex gap-2 rounded-lg border border-white/10 bg-black/20 p-2"><Input value={input} onChange={event => onInput(event.target.value)} onKeyDown={event => event.key === "Enter" && onSend()} placeholder="Reply to thread" className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" data-testid="thread-input" /><Button size="sm" onClick={onSend} disabled={!input.trim()} className="h-8 w-8 bg-emerald-600 p-0 hover:bg-emerald-500"><Send className="h-3.5 w-3.5" /></Button></div></div>
     </aside>
@@ -1250,15 +1437,21 @@ function NewConversationDialog({ open, onOpenChange, users, currentUserId, heade
   const invalid = tab === "dm" ? selected.length !== 1 : tab === "group" ? selected.length < 2 : name.trim().length < 2;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg border-white/10 bg-[#1d1f26]">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><MessageSquarePlus className="h-5 w-5 text-emerald-400" />Start collaborating</DialogTitle><DialogDescription>Start a private message, bring a group together, or create an operational channel.</DialogDescription></DialogHeader>
-        <Tabs value={tab} onValueChange={value => { setTab(value); setSelected([]); setName(""); }}>
-          <TabsList className="grid w-full grid-cols-3"><TabsTrigger value="dm">Direct</TabsTrigger><TabsTrigger value="group">Group chat</TabsTrigger><TabsTrigger value="channel">Channel</TabsTrigger></TabsList>
-          <TabsContent value="dm" className="space-y-3"><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={id => setSelected([id])} /></TabsContent>
-          <TabsContent value="group" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.slice(0, 80))} placeholder="Group name (optional)" className="border-white/10 bg-black/20" /><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></TabsContent>
-          <TabsContent value="channel" className="space-y-3"><Input value={name} onChange={event => setName(event.target.value.replace(/\s+/g, "-").toLowerCase().slice(0, 50))} placeholder="Channel name" className="border-white/10 bg-black/20" data-testid="channel-name-new" /><Textarea value={description} onChange={event => setDescription(event.target.value.slice(0, 240))} placeholder="What is this channel for?" className="min-h-20 border-white/10 bg-black/20" /><label className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/5 p-3"><input type="checkbox" checked={privateChannel} onChange={event => setPrivateChannel(event.target.checked)} className="accent-emerald-500" /><div><p className="text-sm font-medium">Private channel</p><p className="text-xs text-zinc-500">Only selected members can find and read it.</p></div></label>{privateChannel && <><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></>}</TabsContent>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-cyan-500/20 bg-[#0e161e] p-0 shadow-2xl shadow-cyan-950/40">
+        <DialogHeader className="border-b border-cyan-500/10 bg-gradient-to-r from-emerald-500/[0.10] via-cyan-500/[0.06] to-transparent px-6 py-5 text-left">
+          <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Audited collaboration workflow</div>
+          <DialogTitle className="flex items-center gap-3 text-xl"><span className="grid h-10 w-10 place-items-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><MessageSquarePlus className="h-5 w-5 text-emerald-300" /></span>Start collaborating</DialogTitle>
+          <DialogDescription className="max-w-xl text-zinc-400">Open a private conversation, assemble an operational group, or create a governed channel with a clear purpose and access boundary.</DialogDescription>
+        </DialogHeader>
+        <Tabs value={tab} onValueChange={value => { setTab(value); setSelected([]); setName(""); }} className="px-6 pt-5">
+          <TabsList className="grid h-11 w-full grid-cols-3 rounded-xl border border-white/5 bg-black/25 p-1"><TabsTrigger value="dm" className="rounded-lg">Direct</TabsTrigger><TabsTrigger value="group" className="rounded-lg">Group chat</TabsTrigger><TabsTrigger value="channel" className="rounded-lg">Channel</TabsTrigger></TabsList>
+          <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.02] p-4">
+            <TabsContent value="dm" className="mt-0 space-y-3"><p className="text-xs text-zinc-500">Choose one technician. Existing conversations reopen instead of creating duplicates.</p><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={id => setSelected([id])} /></TabsContent>
+            <TabsContent value="group" className="mt-0 space-y-3"><p className="text-xs text-zinc-500">Bring at least two technicians into a focused handover or working group.</p><Input value={name} onChange={event => setName(event.target.value.slice(0, 80))} placeholder="Group name (optional)" className="border-white/10 bg-black/20" /><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></TabsContent>
+            <TabsContent value="channel" className="mt-0 space-y-3"><p className="text-xs text-zinc-500">Create a durable workspace for a service, project, incident stream, or technical discipline.</p><Input value={name} onChange={event => setName(event.target.value.replace(/\s+/g, "-").toLowerCase().slice(0, 50))} placeholder="Channel name" className="border-white/10 bg-black/20" data-testid="channel-name-new" /><Textarea value={description} onChange={event => setDescription(event.target.value.slice(0, 240))} placeholder="Purpose, scope, and what belongs in this channel" className="min-h-24 border-white/10 bg-black/20" /><label className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/5 bg-black/15 p-3 transition hover:border-cyan-500/20"><input type="checkbox" checked={privateChannel} onChange={event => setPrivateChannel(event.target.checked)} className="accent-emerald-500" /><div><p className="text-sm font-medium">Private channel</p><p className="text-xs text-zinc-500">Only selected members can discover and read this channel.</p></div></label>{privateChannel && <><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></>}</TabsContent>
+          </div>
         </Tabs>
-        <DialogFooter><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="bg-emerald-600 hover:bg-emerald-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/5 bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="min-w-32 bg-emerald-600 hover:bg-emerald-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

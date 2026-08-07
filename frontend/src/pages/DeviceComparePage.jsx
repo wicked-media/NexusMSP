@@ -7,9 +7,8 @@ import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, BarChart3, X, Plus } from "lucide-react";
+import { Loader2, BarChart3, X } from "lucide-react";
 
 const ROW = (label, fn, fmt = (v) => v ?? "—") => ({ label, fn, fmt });
 

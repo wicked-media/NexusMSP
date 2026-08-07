@@ -4,7 +4,9 @@ package commands
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,9 +26,12 @@ import (
 )
 
 type Loop struct {
-	tr    *transport.Client
-	cfg   *config.Config
-	every time.Duration
+	tr          *transport.Client
+	cfg         *config.Config
+	every       time.Duration
+	seenNonces  map[string]time.Time
+	replayPath  string
+	replayLimit int
 }
 
 func NewLoop(tr *transport.Client, cfg *config.Config, fallback time.Duration) *Loop {
@@ -34,32 +39,87 @@ func NewLoop(tr *transport.Client, cfg *config.Config, fallback time.Duration) *
 	if every <= 0 {
 		every = fallback
 	}
-	return &Loop{tr: tr, cfg: cfg, every: every}
+	loop := &Loop{
+		tr:          tr,
+		cfg:         cfg,
+		every:       every,
+		seenNonces:  map[string]time.Time{},
+		replayPath:  filepath.Join(cfg.BaseDir(), "command-replay.json"),
+		replayLimit: commandReplayLimit(cfg),
+	}
+	loop.loadReplayCache()
+	return loop
+}
+
+type commandPayload struct {
+	Script        string   `json:"script,omitempty"`
+	Shell         string   `json:"shell,omitempty"` // powershell | cmd | bash
+	Timeout       int      `json:"timeout_sec,omitempty"`
+	PID           int      `json:"pid,omitempty"`
+	Delay         int      `json:"delay_sec,omitempty"`
+	ProgramPath   string   `json:"program_path,omitempty"`
+	Arguments     []string `json:"arguments,omitempty"`
+	SHA256        string   `json:"sha256,omitempty"`
+	ApprovedUntil string   `json:"approved_until,omitempty"`
+	CanaryID      string   `json:"canary_id,omitempty"`
+	CanaryPath    string   `json:"canary_path,omitempty"`
+	Actions       []string `json:"actions,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+}
+
+type commandAuthorization struct {
+	SchemaVersion    int    `json:"schema_version"`
+	CommandID        string `json:"command_id"`
+	DeviceID         string `json:"device_id"`
+	ClientID         string `json:"client_id"`
+	Kind             string `json:"kind"`
+	PayloadSHA256    string `json:"payload_sha256"`
+	IssuedAt         string `json:"issued_at"`
+	ExpiresAt        string `json:"expires_at"`
+	Nonce            string `json:"nonce"`
+	QueuedBy         string `json:"queued_by"`
+	ApprovalID       string `json:"approval_id"`
+	Privilege        string `json:"privilege"`
+	SignatureAlg     string `json:"signature_algorithm"`
+	Signature        string `json:"signature"`
+	SigningPublicKey string `json:"signing_public_key"`
+	SigningKeyID     string `json:"signing_key_id"`
+	SignedPayload    string `json:"signed_payload"`
 }
 
 type cmdItem struct {
-	ID      string `json:"id"`
-	Kind    string `json:"kind"` // run_script, reboot, shutdown, run_powershell, run_cmd, kill_process, elevate_launch, install_companion, canary_deploy, remote_repair
-	Payload struct {
-		Script        string   `json:"script,omitempty"`
-		Shell         string   `json:"shell,omitempty"` // powershell | cmd | bash
-		Timeout       int      `json:"timeout_sec,omitempty"`
-		PID           int      `json:"pid,omitempty"`
-		Delay         int      `json:"delay_sec,omitempty"`
-		ProgramPath   string   `json:"program_path,omitempty"`
-		Arguments     []string `json:"arguments,omitempty"`
-		SHA256        string   `json:"sha256,omitempty"`
-		ApprovedUntil string   `json:"approved_until,omitempty"`
-		CanaryID      string   `json:"canary_id,omitempty"`
-		CanaryPath    string   `json:"canary_path,omitempty"`
-		Actions       []string `json:"actions,omitempty"`
-		Reason        string   `json:"reason,omitempty"`
-		Provider      string   `json:"provider,omitempty"`
-	} `json:"payload"`
+	ID            string               `json:"id"`
+	Kind          string               `json:"kind"` // run_script, reboot, shutdown, run_powershell, run_cmd, kill_process, elevate_launch, install_companion, canary_deploy, remote_repair
+	Payload       commandPayload       `json:"payload"`
+	PayloadRaw    json.RawMessage      `json:"-"`
+	Authorization commandAuthorization `json:"authorization"`
+}
+
+func (c *cmdItem) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		ID            string               `json:"id"`
+		Kind          string               `json:"kind"`
+		Payload       json.RawMessage      `json:"payload"`
+		Authorization commandAuthorization `json:"authorization"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	c.ID = wire.ID
+	c.Kind = wire.Kind
+	c.Authorization = wire.Authorization
+	c.PayloadRaw = append(c.PayloadRaw[:0], wire.Payload...)
+	if len(wire.Payload) == 0 || string(wire.Payload) == "null" {
+		c.PayloadRaw = json.RawMessage("{}")
+		return nil
+	}
+	return json.Unmarshal(wire.Payload, &c.Payload)
 }
 
 type cmdResult struct {
 	ID         string `json:"id"`
+	Nonce      string `json:"nonce"`
 	Status     string `json:"status"` // ok | error | timeout
 	ExitCode   int    `json:"exit_code"`
 	Stdout     string `json:"stdout"`
@@ -89,10 +149,256 @@ func (l *Loop) pollOnce() {
 		return
 	}
 	for _, c := range resp.Commands {
+		if err := l.authorize(c, time.Now()); err != nil {
+			log.Printf("[cmd] rejected command %s: %v", c.ID, err)
+			res := cmdResult{
+				ID:     c.ID,
+				Nonce:  c.Authorization.Nonce,
+				Status: "error",
+				Stderr: "command authorization rejected: " + err.Error(),
+			}
+			if reportErr := l.tr.Do("POST", "/api/nexus-agent/command-result", res, nil); reportErr != nil {
+				log.Printf("[cmd] rejection report error: %v", reportErr)
+			}
+			continue
+		}
 		res := l.execute(c)
+		res.Nonce = c.Authorization.Nonce
 		if err := l.tr.Do("POST", "/api/nexus-agent/command-result", res, nil); err != nil {
 			log.Printf("[cmd] report error: %v", err)
 		}
+	}
+}
+
+func (l *Loop) authorize(c cmdItem, now time.Time) error {
+	if err := verifyAuthorization(l.cfg, c, now); err != nil {
+		return err
+	}
+	if l.seenNonces == nil {
+		l.seenNonces = map[string]time.Time{}
+	}
+	if _, exists := l.seenNonces[c.Authorization.Nonce]; exists {
+		return fmt.Errorf("authorization nonce has already been used")
+	}
+	expiresAt, _ := time.Parse(time.RFC3339, c.Authorization.ExpiresAt)
+	l.seenNonces[c.Authorization.Nonce] = expiresAt
+	l.pruneReplayCache(now)
+	l.saveReplayCache()
+	return nil
+}
+
+func verifyAuthorization(cfg *config.Config, c cmdItem, now time.Time) error {
+	if cfg == nil || cfg.PlatformPolicy == nil {
+		return fmt.Errorf("signed command policy is unavailable")
+	}
+	policy := cfg.PlatformPolicy.Commands
+	if !mapBool(policy, "signed_envelope_required") {
+		return fmt.Errorf("signed command policy is not enabled")
+	}
+	a := c.Authorization
+	if a.SchemaVersion != 1 || a.CommandID == "" || a.Nonce == "" {
+		return fmt.Errorf("authorization envelope is incomplete")
+	}
+	if a.CommandID != c.ID || a.Kind != c.Kind {
+		return fmt.Errorf("command identity does not match authorization")
+	}
+	if a.DeviceID != cfg.DeviceID || a.ClientID != cfg.ClientID {
+		return fmt.Errorf("command is not authorized for this endpoint")
+	}
+	if a.SignatureAlg != "ed25519" {
+		return fmt.Errorf("unsupported command signature algorithm")
+	}
+	pinnedKey := mapString(policy, "signing_public_key")
+	if pinnedKey == "" || a.SigningPublicKey != pinnedKey {
+		return fmt.Errorf("command signing key does not match pinned policy")
+	}
+	if expectedKeyID := mapString(policy, "signing_key_id"); expectedKeyID != "" && a.SigningKeyID != expectedKeyID {
+		return fmt.Errorf("command signing key identity does not match policy")
+	}
+
+	issuedAt, err := time.Parse(time.RFC3339, a.IssuedAt)
+	if err != nil {
+		return fmt.Errorf("invalid command issue time")
+	}
+	expiresAt, err := time.Parse(time.RFC3339, a.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("invalid command expiry time")
+	}
+	skew := time.Duration(mapInt(policy, "maximum_clock_skew_seconds", 300)) * time.Second
+	if issuedAt.After(now.Add(skew)) {
+		return fmt.Errorf("command issue time is in the future")
+	}
+	if !expiresAt.After(now) {
+		return fmt.Errorf("command authorization has expired")
+	}
+	if !expiresAt.After(issuedAt) || expiresAt.Sub(issuedAt) > 15*time.Minute {
+		return fmt.Errorf("command authorization lifetime is invalid")
+	}
+
+	payloadHash, err := hashCanonicalJSON(c.PayloadRaw)
+	if err != nil {
+		return fmt.Errorf("invalid command payload: %w", err)
+	}
+	if payloadHash != a.PayloadSHA256 {
+		return fmt.Errorf("command payload integrity check failed")
+	}
+	expectedPayload := strings.Join([]string{
+		fmt.Sprintf("%d", a.SchemaVersion),
+		a.CommandID,
+		a.DeviceID,
+		a.ClientID,
+		a.Kind,
+		a.PayloadSHA256,
+		a.IssuedAt,
+		a.ExpiresAt,
+		a.Nonce,
+		a.QueuedBy,
+		a.ApprovalID,
+		a.Privilege,
+	}, "|")
+	if a.SignedPayload != expectedPayload {
+		return fmt.Errorf("signed command fields do not match authorization")
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(pinnedKey)
+	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("pinned command signing key is invalid")
+	}
+	signature, err := base64.StdEncoding.DecodeString(a.Signature)
+	if err != nil || len(signature) != ed25519.SignatureSize {
+		return fmt.Errorf("command signature is invalid")
+	}
+	if !ed25519.Verify(ed25519.PublicKey(publicKey), []byte(expectedPayload), signature) {
+		return fmt.Errorf("command signature verification failed")
+	}
+	return nil
+}
+
+func hashCanonicalJSON(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		raw = json.RawMessage("{}")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	var canonical bytes.Buffer
+	encoder := json.NewEncoder(&canonical)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return "", err
+	}
+	data := bytes.TrimSuffix(canonical.Bytes(), []byte("\n"))
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func mapString(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
+}
+
+func mapBool(values map[string]any, key string) bool {
+	value, _ := values[key].(bool)
+	return value
+}
+
+func mapInt(values map[string]any, key string, fallback int) int {
+	switch value := values[key].(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return int(parsed)
+		}
+	}
+	return fallback
+}
+
+func commandReplayLimit(cfg *config.Config) int {
+	if cfg == nil || cfg.PlatformPolicy == nil {
+		return 500
+	}
+	limit := mapInt(cfg.PlatformPolicy.Commands, "replay_cache_entries", 500)
+	if limit < 100 {
+		return 100
+	}
+	if limit > 5000 {
+		return 5000
+	}
+	return limit
+}
+
+func (l *Loop) pruneReplayCache(now time.Time) {
+	for nonce, expiresAt := range l.seenNonces {
+		if !expiresAt.After(now) {
+			delete(l.seenNonces, nonce)
+		}
+	}
+	limit := l.replayLimit
+	if limit <= 0 {
+		limit = 500
+	}
+	for len(l.seenNonces) > limit {
+		var oldestNonce string
+		var oldestExpiry time.Time
+		for nonce, expiresAt := range l.seenNonces {
+			if oldestNonce == "" || expiresAt.Before(oldestExpiry) {
+				oldestNonce = nonce
+				oldestExpiry = expiresAt
+			}
+		}
+		delete(l.seenNonces, oldestNonce)
+	}
+}
+
+func (l *Loop) loadReplayCache() {
+	if l.replayPath == "" {
+		return
+	}
+	data, err := os.ReadFile(l.replayPath)
+	if err != nil {
+		return
+	}
+	var stored map[string]string
+	if err := json.Unmarshal(data, &stored); err != nil {
+		log.Printf("[cmd] ignored invalid replay cache: %v", err)
+		return
+	}
+	now := time.Now()
+	for nonce, rawExpiry := range stored {
+		expiresAt, parseErr := time.Parse(time.RFC3339, rawExpiry)
+		if parseErr == nil && expiresAt.After(now) {
+			l.seenNonces[nonce] = expiresAt
+		}
+	}
+	l.pruneReplayCache(now)
+}
+
+func (l *Loop) saveReplayCache() {
+	if l.replayPath == "" {
+		return
+	}
+	stored := make(map[string]string, len(l.seenNonces))
+	for nonce, expiresAt := range l.seenNonces {
+		stored[nonce] = expiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	data, err := json.Marshal(stored)
+	if err != nil {
+		log.Printf("[cmd] replay cache encode error: %v", err)
+		return
+	}
+	tmp := l.replayPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		log.Printf("[cmd] replay cache write error: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, l.replayPath); err != nil {
+		log.Printf("[cmd] replay cache commit error: %v", err)
 	}
 }
 

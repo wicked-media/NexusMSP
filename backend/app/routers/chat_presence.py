@@ -41,6 +41,7 @@ from app.services.chat_access import (
     require_channel_access,
 )
 from app.services.avatar_enrichment import attach_user_avatars
+from app.services.scope_permissions import assert_client_scope
 
 router = APIRouter()
 
@@ -509,10 +510,11 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         }[cmd]
         item = await collection.find_one(
             {"$or": [{number_field: reference}, {"id": reference}]},
-            {"_id": 0, "id": 1, number_field: 1},
+            {"_id": 0, "id": 1, number_field: 1, "client_id": 1},
         )
         if not item:
             return await _post_system_msg(channel_id, f"{label} {reference} not found")
+        await assert_client_scope(current_user, item.get("client_id"), operation=f"chat:link_{cmd}", mask_not_found=True)
         canonical_reference = item.get(number_field) or item.get("id")
         return await _post_system_msg(
             channel_id,
@@ -526,6 +528,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         u = await db.users.find_one({"$or": [{"name": {"$regex": who, "$options": "i"}}, {"email": {"$regex": who, "$options": "i"}}]}, {"_id": 0})
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if u and t:
+            await assert_client_scope(current_user, t.get("client_id"), operation="chat:assign_ticket", mask_not_found=True)
             await db.tickets.update_one({"id": t["id"]}, {"$set": {
                 "assigned_to": u["id"], "assigned_name": u.get("name"),
                 # Retain these aliases for older integrations that still read them.
@@ -552,6 +555,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
             return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await assert_client_scope(current_user, t.get("client_id"), operation="chat:update_ticket", mask_not_found=True)
         await db.tickets.update_one({"id": t["id"]}, {"$set": {field: value, "updated_at": _now_iso()}})
         await ticket_audit(t["id"], current_user, "updated", f"{field.replace('_', ' ')} changed to {value} from Team Chat")
         emoji = {"closed": "🔒", "resolved": "✅", "in_progress": "🟡", "on_hold": "⏸️", "open": "🔓", "pending": "⏳",
@@ -563,6 +567,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
             return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await assert_client_scope(current_user, t.get("client_id"), operation="chat:close_ticket", mask_not_found=True)
         await db.tickets.update_one({"id": t["id"]}, {"$set": {"status": "closed", "updated_at": _now_iso()}})
         await ticket_audit(t["id"], current_user, "updated", "Status changed to closed from Team Chat")
         return await _post_system_msg(channel_id, f"🔒 {ticket_no} closed by {current_user.get('name')}")
@@ -572,6 +577,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
             return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await assert_client_scope(current_user, t.get("client_id"), operation="chat:view_ticket_sla", mask_not_found=True)
         from datetime import datetime, timezone as _tz
         def _fmt_left(due_iso):
             if not due_iso:
@@ -603,6 +609,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
         t = await db.tickets.find_one({"ticket_number": ticket_no}, {"_id": 0})
         if not t:
             return await _post_system_msg(channel_id, f"❌ Ticket {ticket_no} not found")
+        await assert_client_scope(current_user, t.get("client_id"), operation="chat:add_ticket_note", mask_not_found=True)
         await db.ticket_notes.insert_one({
             "id": uuid.uuid4().hex,
             "ticket_id": t["id"],
@@ -675,7 +682,7 @@ async def _post_system_msg(channel_id: str, body: str) -> dict:
         "id": uuid.uuid4().hex,
         "channel_id": channel_id,
         "user_id": "system",
-        "user_name": "NexusOps",
+        "user_name": "Nexus Automation",
         "body": body,
         "is_system": True,
         "ts": _now_iso(),

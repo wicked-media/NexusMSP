@@ -13,6 +13,8 @@ export const routeConfig = [
   { path: "/nexus-elevate", component: page("NexusElevatePage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/control-plane", component: page("NexusControlPlanePage"), auth: true, layout: true },
+  { path: "/production-readiness", component: page("ProductionReadinessPage"), auth: true, layout: true },
+  { path: "/executive", component: page("ExecutivePage"), auth: true, layout: true },
   // Preserve historic bookmarks while keeping Microsoft tenant operations in
   // one provider-agnostic Nexus Control Plane workspace.
   { path: "/cipp", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=tenant-operations" },
@@ -32,7 +34,9 @@ export const routeConfig = [
   { path: "/growth", component: page("GrowthPage"), auth: true, layout: true },
   { path: "/suped", component: page("SupedCommandCenterPage"), auth: true, layout: true },
   { path: "/integrations", component: page("IntegrationsOverviewPage"), auth: true, layout: true },
-  { path: "/morning-checks", component: page("MorningChecksPage"), auth: true, layout: true },
+  // Morning Checks is now the audited Daily NOC sign-off inside Dashboard.
+  // Preserve historic bookmarks without exposing a duplicate workspace.
+  { path: "/morning-checks", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/" },
   { path: "/workspace", component: page("WorkspacePage"), auth: true, layout: true },
   { path: "/tickets", component: page("TicketsPage"), auth: true, layout: true },
   { path: "/devices", component: page("DevicesPage"), auth: true, layout: true },
@@ -173,7 +177,10 @@ export const routeConfig = [
   // in alert evaluation. Keep old links working, but route technicians to the
   // enforced Alert Rules Engine instead.
   { path: "/alert-suppression", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/alert-rules" },
-  { path: "/license-management", component: page("LicenseManagementPage"), auth: true, layout: true },
+  { path: "/services-subscriptions", component: page("LicenseManagementPage"), auth: true, layout: true },
+  // Licences are one recurring-service category, not a second billing workspace.
+  // Keep old bookmarks valid while consolidating the register under Billing & Finance.
+  { path: "/license-management", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/services-subscriptions?view=licences" },
   { path: "/maintenance-scheduler", component: page("MaintenanceSchedulerPage"), auth: true, layout: true },
   { path: "/bandwidth-monitor", component: page("BandwidthMonitorPage"), auth: true, layout: true },
 

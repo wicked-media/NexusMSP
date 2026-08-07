@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,21 +10,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import { toast } from "sonner";
 import { 
   Network,
-  Server,
   Monitor,
   Wifi,
   AlertTriangle,
   RefreshCw,
   Loader2,
   Settings,
-  Activity,
   Router
 } from "lucide-react";
 

@@ -109,16 +109,40 @@ SUPPORTED_PROVIDERS = [
     },
 ]
 
+
+async def _rustdesk_provider_config() -> dict:
+    """Return the one effective RustDesk configuration across legacy storage shapes."""
+
+    generic = await db.settings.find_one({"type": "remote_rustdesk"}, {"_id": 0}) or {}
+    typed = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0}) or {}
+    legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
+    legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
+    return {
+        **generic,
+        **legacy_value,
+        **{key: value for key, value in typed.items() if key != "_id" and value not in (None, "")},
+    }
+
+
 @router.get("/remote-providers")
 async def get_remote_providers(current_user: dict = Depends(get_current_user)):
     """Get all supported remote access providers with their config status"""
     result = []
     for provider in SUPPORTED_PROVIDERS:
-        config = await db.settings.find_one({"type": f"remote_{provider['id']}"}, {"_id": 0})
+        config = (
+            await _rustdesk_provider_config()
+            if provider["id"] == "rustdesk"
+            else await db.settings.find_one({"type": f"remote_{provider['id']}"}, {"_id": 0})
+        )
         configured = False
         if config:
             configured = any(config.get(f["key"]) for f in provider["config_fields"] if f["type"] in ("password", "url"))
-        result.append({**provider, "configured": configured, "active": config.get("active", False) if config else False})
+        active = (
+            bool(configured and config.get("enabled", config.get("active", True)))
+            if provider["id"] == "rustdesk"
+            else bool(config.get("active", False) if config else False)
+        )
+        result.append({**provider, "configured": configured, "active": active})
     return result
 
 
@@ -185,7 +209,11 @@ async def get_active_remote_providers(current_user: dict = Depends(get_current_u
 
 @router.get("/remote-providers/{provider_id}/settings")
 async def get_provider_settings(provider_id: str, current_user: dict = Depends(get_current_user)):
-    config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
+    config = (
+        await _rustdesk_provider_config()
+        if provider_id == "rustdesk"
+        else await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
+    )
     if not config:
         return {"type": f"remote_{provider_id}", "active": False}
     # Mask passwords
@@ -195,6 +223,8 @@ async def get_provider_settings(provider_id: str, current_user: dict = Depends(g
             if field["type"] == "password" and config.get(field["key"]):
                 val = config[field["key"]]
                 config[field["key"]] = f"{'*' * max(0, len(val) - 4)}{val[-4:]}" if len(val) > 4 else "****"
+    if provider_id == "rustdesk":
+        config["active"] = bool(config.get("enabled", config.get("active", True)))
     return config
 
 @router.put("/remote-providers/{provider_id}/settings")
@@ -203,6 +233,32 @@ async def save_provider_settings(provider_id: str, data: dict, current_user: dic
     provider = next((p for p in SUPPORTED_PROVIDERS if p["id"] == provider_id), None)
     if not provider:
         return {"message": "Unknown provider"}
+    if provider_id == "rustdesk":
+        current = await _rustdesk_provider_config()
+        value = {
+            "server_url": current.get("server_url", ""),
+            "api_key": current.get("api_key", ""),
+            "relay_server": current.get("relay_server", ""),
+            "enabled": bool(current.get("enabled", current.get("active", True))),
+            "auto_sync": current.get("auto_sync", True),
+        }
+        for field in provider["config_fields"]:
+            incoming = data.get(field["key"])
+            if incoming is not None and not str(incoming).startswith("****"):
+                value[field["key"]] = incoming
+        if "active" in data:
+            value["enabled"] = bool(data["active"])
+        await db.settings.update_one(
+            {"key": "rustdesk_config"},
+            {"$set": {
+                "key": "rustdesk_config",
+                "value": value,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_by": current_user.get("id"),
+            }},
+            upsert=True,
+        )
+        return {"message": "RustDesk settings saved"}
     for field in provider["config_fields"]:
         if field["key"] in data and not data[field["key"]].startswith("****"):
             updates[field["key"]] = data[field["key"]]
@@ -213,7 +269,11 @@ async def save_provider_settings(provider_id: str, data: dict, current_user: dic
 
 @router.post("/remote-providers/{provider_id}/test")
 async def test_provider_connection(provider_id: str, current_user: dict = Depends(get_current_user)):
-    config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
+    config = (
+        await _rustdesk_provider_config()
+        if provider_id == "rustdesk"
+        else await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
+    )
     if not config:
         return {"success": False, "message": "Provider not configured"}
     provider = next((p for p in SUPPORTED_PROVIDERS if p["id"] == provider_id), None)
@@ -227,6 +287,22 @@ async def test_provider_connection(provider_id: str, current_user: dict = Depend
 
 @router.put("/remote-providers/{provider_id}/toggle")
 async def toggle_provider(provider_id: str, current_user: dict = Depends(get_current_user)):
+    if provider_id == "rustdesk":
+        current = await _rustdesk_provider_config()
+        current_active = bool(current.get("enabled", current.get("active", True))) if current else False
+        legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
+        value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
+        await db.settings.update_one(
+            {"key": "rustdesk_config"},
+            {"$set": {
+                "key": "rustdesk_config",
+                "value": {**value, "enabled": not current_active},
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_by": current_user.get("id"),
+            }},
+            upsert=True,
+        )
+        return {"active": not current_active, "message": f"Provider {'activated' if not current_active else 'deactivated'}"}
     config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0})
     current_active = config.get("active", False) if config else False
     await db.settings.update_one({"type": f"remote_{provider_id}"}, {"$set": {"active": not current_active, "type": f"remote_{provider_id}"}}, upsert=True)

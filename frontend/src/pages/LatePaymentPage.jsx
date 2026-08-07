@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { DollarSign, AlertTriangle, Clock, Send, Loader2, Mail, History, TrendingDown, CheckCircle } from "lucide-react";
+import { DollarSign, AlertTriangle, Clock, Send, Loader2, Mail, History, TrendingDown } from "lucide-react";
 
 export default function LatePaymentPage() {
   const { token } = useAuth();
@@ -25,16 +25,17 @@ export default function LatePaymentPage() {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
+    const requestHeaders = { Authorization: `Bearer ${token}` };
     Promise.all([
-      axios.get(`${API}/late-payment/predictions`, { headers }),
-      axios.get(`${API}/late-payment/overdue-invoices`, { headers }),
-      axios.get(`${API}/late-payment/reminder-history`, { headers }).catch(() => ({ data: [] })),
+      axios.get(`${API}/late-payment/predictions`, { headers: requestHeaders }),
+      axios.get(`${API}/late-payment/overdue-invoices`, { headers: requestHeaders }),
+      axios.get(`${API}/late-payment/reminder-history`, { headers: requestHeaders }).catch(() => ({ data: [] })),
     ]).then(([pRes, oRes, hRes]) => {
       setPredictions(pRes.data);
       setOverdue(oRes.data);
       setHistory(hRes.data || []);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   const sendReminder = async () => {
     if (!sendDialog || !sendEmail) return;

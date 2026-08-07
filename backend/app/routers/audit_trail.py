@@ -68,7 +68,8 @@ async def _events() -> list[dict]:
             "user": log.get("user_name") or "System", "category": _category(entity_type, action),
             "action": action, "severity": _severity(action),
             "description": log.get("details") or f"{entity_type.replace('_', ' ')} activity recorded",
-            "target": log.get("entity_name") or log.get("entity_id") or "", "ip_address": None,
+            "target": log.get("entity_name") or log.get("entity_id") or "",
+            "ip_address": (log.get("metadata") or {}).get("ip_address"),
             "source": "activity_log", "entity_type": entity_type, "entity_id": log.get("entity_id") or "",
             "changes": log.get("changes") or {}, "metadata": log.get("metadata") or {},
         })

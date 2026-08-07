@@ -6,6 +6,7 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
+from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
 
 router = APIRouter()
 
@@ -24,9 +25,7 @@ async def upload_avatar(tech_id: str, file: UploadFile = File(...), current_user
         if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
             raise HTTPException(status_code=403, detail="Can only update your own avatar or admin required")
     
-    ext = file.filename.split(".")[-1].lower() if file.filename else "png"
-    if ext not in ["jpg", "jpeg", "png", "webp", "gif"]:
-        raise HTTPException(status_code=400, detail="Invalid file type. Allowed: jpg, jpeg, png, webp, gif")
+    ext = safe_upload_extension(file.filename, allowed=IMAGE_EXTENSIONS, default="png")
     
     filename = f"{tech_id}.{ext}"
     filepath = AVATARS_DIR / filename

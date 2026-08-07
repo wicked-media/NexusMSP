@@ -9,11 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, ClipboardList, FileWarning, Flame, HardDrive, Loader2, MoreHorizontal, Plus, RefreshCw, ShieldAlert, ShieldCheck, Siren, XCircle } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ClipboardList, FileWarning, Flame, HardDrive, Loader2, MoreHorizontal, Plus, RefreshCw, Search, ShieldAlert, ShieldCheck, Siren } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 
@@ -31,6 +30,90 @@ const displayTime = (value) => {
   return date && !Number.isNaN(date.valueOf()) ? date.toLocaleString() : "Not recorded";
 };
 
+const agentLabel = (agent) => `${agent.hostname || agent.id} | ${agent.client_name || agent.client_id || "Unassigned"}`;
+
+function CanaryAgentPicker({ agents, value, query, onQueryChange, onChange, disabled, loading, onlineCount }) {
+  const [focused, setFocused] = useState(false);
+  const normalizedQuery = query.trim().toLowerCase();
+  const selected = agents.find((agent) => agent.id === value);
+  const matches = agents.filter((agent) => {
+    if (!normalizedQuery) return true;
+    return [
+      agent.hostname,
+      agent.id,
+      agent.client_name,
+      agent.client_id,
+    ].some((field) => String(field || "").toLowerCase().includes(normalizedQuery));
+  });
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor="canary-agent-search">Online unprotected endpoint</Label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          id="canary-agent-search"
+          className="pl-9"
+          value={query}
+          onChange={(event) => {
+            onQueryChange(event.target.value);
+            setFocused(true);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => window.setTimeout(() => setFocused(false), 120)}
+          placeholder={loading ? "Loading online endpoints..." : "Search by endpoint, client or agent ID"}
+          autoComplete="off"
+          disabled={disabled || loading || agents.length === 0}
+          data-testid="canary-agent-search"
+        />
+        {focused && !disabled && !loading && agents.length > 0 && (
+          <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-white/10 bg-slate-950 p-1.5 shadow-2xl shadow-black/50">
+            {matches.length === 0 ? (
+              <p className="px-3 py-6 text-center text-xs text-muted-foreground">No matching unprotected endpoints</p>
+            ) : matches.map((agent) => (
+              <button
+                key={agent.id}
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-zinc-100 transition hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/60"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(agent.id);
+                  onQueryChange(agentLabel(agent));
+                  setFocused(false);
+                }}
+                data-testid={`canary-agent-option-${agent.id}`}
+              >
+                <span>
+                  <span className="block font-medium">{agent.hostname || agent.id}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{agent.client_name || agent.client_id || "Unassigned client"}</span>
+                </span>
+                {agent.id === value && <Check className="h-4 w-4 shrink-0 text-emerald-300" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {selected ? (
+        <div className="flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] px-3 py-2.5" data-testid="canary-selected-agent">
+          <div>
+            <p className="text-sm font-medium text-emerald-100">{selected.hostname || selected.id}</p>
+            <p className="mt-0.5 text-xs text-emerald-100/65">{selected.client_name || selected.client_id || "Unassigned client"} · Agent online</p>
+          </div>
+          <CheckCircle2 className="h-5 w-5 text-emerald-300" />
+        </div>
+      ) : !loading && agents.length === 0 ? (
+        <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.05] p-3 text-sm text-sky-100" data-testid="canary-no-eligible-agents">
+          {onlineCount > 0
+            ? "Every online Windows endpoint is already protected by Nexus Canary."
+            : "No online Windows Nexus Agents are currently eligible for deployment."}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">Choose the client endpoint that should receive the protected decoy.</p>
+      )}
+    </div>
+  );
+}
+
 export function NexusCanaryPanel({ embedded = false }) {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -40,6 +123,8 @@ export function NexusCanaryPanel({ embedded = false }) {
   const [deployOpen, setDeployOpen] = useState(false);
   const [agents, setAgents] = useState([]);
   const [agentId, setAgentId] = useState("");
+  const [agentQuery, setAgentQuery] = useState("");
+  const [onlineAgentCount, setOnlineAgentCount] = useState(0);
   const [filePath, setFilePath] = useState("");
   const [deploying, setDeploying] = useState(false);
   const [resolving, setResolving] = useState(null);
@@ -63,16 +148,26 @@ export function NexusCanaryPanel({ embedded = false }) {
   const openDeploy = async () => {
     setDeployOpen(true);
     setDeploying(true);
+    setAgentId("");
+    setAgentQuery("");
     try {
       const response = await axios.get(`${API}/nexus-agent/agents`, { headers });
-      const eligible = (response.data || []).filter((agent) => {
+      const onlineWindows = (response.data || []).filter((agent) => {
         const platform = String(agent.os_name || agent.os || "").toLowerCase();
         return agent.online && agent.is_active !== false && (!platform || platform.includes("windows"));
       });
+      const protectedAgentIds = new Set(
+        (data.canaries || [])
+          .filter((canary) => ["queued", "active", "healthy", "triggered"].includes(canary.status))
+          .map((canary) => canary.agent_id),
+      );
+      const eligible = onlineWindows.filter((agent) => !protectedAgentIds.has(agent.id));
+      setOnlineAgentCount(onlineWindows.length);
       setAgents(eligible);
-      if (!agentId && eligible[0]?.id) setAgentId(eligible[0].id);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Online Nexus Agents could not be loaded");
+      setAgents([]);
+      setOnlineAgentCount(0);
     } finally {
       setDeploying(false);
     }
@@ -149,7 +244,35 @@ export function NexusCanaryPanel({ embedded = false }) {
 
       <Card className="border-sky-500/15 bg-sky-500/[0.025]"><CardContent className="p-4 text-sm text-muted-foreground"><p><strong className="text-sky-100">Operational boundary.</strong> A canary is an early-warning signal, not a substitute for EDR, immutable backups or an incident-response plan. A changed canary creates an audited signal; technicians choose and record the appropriate containment action from the response playbook.</p></CardContent></Card>
 
-      <Dialog open={deployOpen} onOpenChange={setDeployOpen}><DialogContent className="max-w-xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Flame className="h-5 w-5 text-rose-300" />Deploy Nexus Canary</DialogTitle></DialogHeader><div className="space-y-4"><p className="text-sm text-muted-foreground">Nexus Agent creates a small decoy text file, stores its expected fingerprint locally, and reports changes every 30 seconds. The file contents never leave the endpoint.</p><div><Label htmlFor="canary-agent">Online Nexus Agent</Label><Select value={agentId} onValueChange={setAgentId} disabled={deploying || acting}><SelectTrigger id="canary-agent" className="mt-1"><SelectValue placeholder={deploying ? "Loading agents..." : "Choose an endpoint"} /></SelectTrigger><SelectContent>{agents.length === 0 ? <SelectItem value="none" disabled>No online agents found</SelectItem> : agents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.hostname || agent.id} | {agent.client_name || agent.client_id || "Unassigned"}</SelectItem>)}</SelectContent></Select></div><div><Label htmlFor="canary-path">Canary path (optional)</Label><Input id="canary-path" className="mt-1 font-mono text-xs" value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="Default: C:\\Users\\Public\\Documents\\NexusMSP-[id]-Canary.txt" /><p className="mt-1 text-xs text-muted-foreground">Use an absolute Windows .txt path. Leave blank for the protected public-documents default.</p></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setDeployOpen(false)} disabled={acting}>Cancel</Button><Button onClick={deploy} disabled={acting || deploying || !agentId}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue protected canary</Button></div></div></DialogContent></Dialog>
+      <Dialog open={deployOpen} onOpenChange={setDeployOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Flame className="h-5 w-5 text-rose-300" />Deploy Nexus Canary</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">Nexus Agent creates a small decoy text file, stores its expected fingerprint locally, and reports changes every 30 seconds. The file contents never leave the endpoint.</p>
+            <CanaryAgentPicker
+              agents={agents}
+              value={agentId}
+              query={agentQuery}
+              onQueryChange={setAgentQuery}
+              onChange={setAgentId}
+              disabled={acting}
+              loading={deploying}
+              onlineCount={onlineAgentCount}
+            />
+            <div>
+              <Label htmlFor="canary-path">Canary path (optional)</Label>
+              <Input id="canary-path" className="mt-1 font-mono text-xs" value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="Default: C:\\Users\\Public\\Documents\\NexusMSP-[id]-Canary.txt" />
+              <p className="mt-1 text-xs text-muted-foreground">Use an absolute Windows .txt path. Leave blank for the protected public-documents default.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeployOpen(false)} disabled={acting}>Cancel</Button>
+              <Button onClick={deploy} disabled={acting || deploying || !agentId}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue protected canary</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!resolving} onOpenChange={(open) => !open && setResolving(null)}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>Resolve ransomware response signal</DialogTitle></DialogHeader><div className="space-y-4"><p className="text-sm text-muted-foreground">Resolution closes the current investigation record; it does not overwrite the endpoint canary fingerprint or suppress future integrity changes.</p><div><Label htmlFor="canary-resolution-note">Investigation and containment note</Label><Textarea id="canary-resolution-note" className="mt-1" rows={4} value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} placeholder="Record what changed, checks performed, containment action and outcome." /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setResolving(null)} disabled={acting}>Cancel</Button><Button onClick={resolveTrigger} disabled={acting || resolutionNote.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Resolve and audit</Button></div></div></DialogContent></Dialog>
     </div>

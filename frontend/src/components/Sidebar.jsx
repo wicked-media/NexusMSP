@@ -1,14 +1,14 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth, useTheme } from "@/App";
-import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Zap, Sun, Moon, Search, X, AlertTriangle, CheckCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Sun, Moon, Search, X, AlertTriangle, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API } from "@/App";
-import { navGroups, getAllNavItems } from "@/config/navigation";
+import { navGroups, getAllNavItems, taskShortcuts } from "@/config/navigation";
 import { useNavCounts, NavBadge } from "@/hooks/useNavCounts";
 
 // Notification Bell Component
@@ -19,7 +19,7 @@ function NotificationBell({ token, collapsed }) {
   const [isOpen, setIsOpen] = useState(false);
   const [panelView, setPanelView] = useState("attention");
   const ref = useRef(null);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const getNotificationLink = (n) => {
     const refType = n.ref_type;
@@ -49,7 +49,7 @@ function NotificationBell({ token, collapsed }) {
     }
   };
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       const [nRes, cRes] = await Promise.all([
         axios.get(`${API}/notifications`, { headers }),
@@ -58,14 +58,14 @@ function NotificationBell({ token, collapsed }) {
       setNotifications(nRes.data.slice(0, 15));
       setUnreadCount(cRes.data.count);
     } catch {}
-  };
+  }, [headers]);
 
   useEffect(() => {
     fetchNotifications();
     axios.post(`${API}/notifications/generate`, {}, { headers }).then(() => fetchNotifications()).catch(() => {});
     const iv = setInterval(fetchNotifications, 60000);
     return () => clearInterval(iv);
-  }, []);
+  }, [fetchNotifications, headers]);
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setIsOpen(false); };
@@ -257,14 +257,27 @@ function SidebarSearch() {
   const navigate = useNavigate();
 
   const allItems = getAllNavItems();
-  const filtered = query.trim()
-    ? allItems.filter(item =>
-        item.label.toLowerCase().includes(query.toLowerCase()) ||
-        item.group.toLowerCase().includes(query.toLowerCase()) ||
-        item.path.toLowerCase().includes(query.toLowerCase()) ||
-        (item.parentLabel || "").toLowerCase().includes(query.toLowerCase())
-      ).slice(0, 8)
+  const normalisedQuery = query.trim().toLowerCase();
+  const taskMatches = normalisedQuery
+    ? taskShortcuts.filter(item => [item.label, item.description, ...item.keywords].join(" ").toLowerCase().includes(normalisedQuery))
     : [];
+  const moduleMatches = normalisedQuery
+    ? allItems.filter(item =>
+        item.label.toLowerCase().includes(normalisedQuery) ||
+        item.group.toLowerCase().includes(normalisedQuery) ||
+        item.path.toLowerCase().includes(normalisedQuery) ||
+        (item.parentLabel || "").toLowerCase().includes(normalisedQuery)
+      )
+    : [];
+  const filtered = [...taskMatches.map(item => ({ ...item, group: "Suggested task", isTask: true })), ...moduleMatches]
+    .filter((item, index, items) => items.findIndex(candidate => candidate.path === item.path) === index)
+    .slice(0, 8);
+
+  const openEverythingSearch = () => {
+    setFocused(false);
+    setQuery("");
+    window.dispatchEvent(new CustomEvent("nexus:open-command-palette"));
+  };
 
   return (
     <div className="px-3 py-1 relative">
@@ -275,19 +288,19 @@ function SidebarSearch() {
           onChange={e => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 200)}
-          placeholder="Search modules..."
+          placeholder="What do you need to do?"
           className="bg-transparent text-[12px] w-full outline-none placeholder:text-muted-foreground/50"
           data-testid="sidebar-search-input"
         />
         {query ? (
           <button onClick={() => setQuery("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
         ) : (
-          <span className="hidden text-[9px] uppercase tracking-wider text-muted-foreground/50 sm:inline">Local</span>
+          <button type="button" onMouseDown={openEverythingSearch} className="hidden rounded px-1 text-[9px] uppercase tracking-wider text-muted-foreground/60 transition hover:bg-background hover:text-primary sm:inline" title="Search everything (Ctrl + K)">Ctrl K</button>
         )}
       </div>
-      {focused && filtered.length > 0 && (
+      {focused && (
         <div className="absolute left-3 right-3 top-full mt-1 bg-card border rounded-lg shadow-xl z-50 overflow-hidden" data-testid="sidebar-search-results">
-          {filtered.map((item, i) => (
+          {filtered.length > 0 ? filtered.map((item, i) => (
             <button
               key={`${item.path}-${i}`}
               onMouseDown={() => { navigate(item.path); setQuery(""); }}
@@ -297,17 +310,26 @@ function SidebarSearch() {
               {item.icon && <item.icon className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />}
               <div className="min-w-0">
                 <p className="text-[12px] font-medium truncate">{item.label}</p>
-                <p className="text-[10px] text-muted-foreground/60 truncate">{item.parentLabel ? `${item.parentLabel} > ` : ''}{item.group}</p>
+                <p className="text-[10px] text-muted-foreground/60 truncate">{item.isTask ? item.description : `${item.parentLabel ? `${item.parentLabel} > ` : ''}${item.group}`}</p>
               </div>
             </button>
-          ))}
+          )) : normalisedQuery ? (
+            <div className="p-3">
+              <p className="text-[11px] font-medium">No workspace matched that phrase</p>
+              <button type="button" onMouseDown={openEverythingSearch} className="mt-2 flex w-full items-center justify-between rounded-md bg-primary/10 px-2.5 py-2 text-left text-[11px] font-medium text-primary hover:bg-primary/15">
+                Search records, people and actions <span>Ctrl K</span>
+              </button>
+            </div>
+          ) : (
+            <div className="p-3 text-[10px] leading-relaxed text-muted-foreground">Try “remote into a device”, “invoice a client” or “investigate a threat”.</div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
+export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle, onCopilotToggle }) => {
   const { user, logout, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { counts: navCounts } = useNavCounts();
@@ -317,7 +339,18 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   const [sidebarBrand, setSidebarBrand] = useState(null);
 
   useEffect(() => {
-    axios.get(`${API}/settings/branding/public`).then(r => { if (r.data?.company_name) setSidebarBrand(r.data); }).catch(() => {});
+    axios.get(`${API}/settings/branding/public`).then(r => {
+      if (r.data?.company_name) setSidebarBrand(r.data);
+      document.title = r.data?.company_name || "NexusMSP";
+      const iconHref = r.data?.favicon_url || r.data?.company_icon_url || "/brand/nexus-mark.png";
+      let favicon = document.querySelector("link[rel='icon']");
+      if (!favicon) {
+        favicon = document.createElement("link");
+        favicon.rel = "icon";
+        document.head.appendChild(favicon);
+      }
+      favicon.href = iconHref;
+    }).catch(() => {});
   }, []);
 
   // Get user's enabled modules (default: all enabled)
@@ -362,43 +395,47 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
   return (
     <TooltipProvider delayDuration={0}>
       <aside 
-        className={`fixed left-0 top-0 h-screen bg-card border-r border-border flex flex-col z-40 transition-all duration-300 ${
-          collapsed ? 'w-[72px]' : 'w-[260px]'
+        className={`fixed left-0 top-0 z-40 flex h-dvh w-[min(86vw,320px)] flex-col border-r border-border bg-card transition-all duration-300 md:translate-x-0 ${
+          mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
+        } ${
+          collapsed ? 'md:w-[72px]' : 'md:w-[260px]'
         }`}
+        style={{ backgroundColor: "var(--theme-sidebar, hsl(var(--card)))" }}
         data-testid="sidebar"
       >
         {/* Logo */}
         <div className={`h-16 flex items-center border-b border-border px-4 ${collapsed ? 'justify-center' : 'justify-between'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
-              {sidebarBrand?.company_icon_url ? (
-                <img src={sidebarBrand.company_icon_url.startsWith("http") ? sidebarBrand.company_icon_url : sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" onError={e => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'flex'); }} />
-              ) : null}
-              {!sidebarBrand?.company_icon_url && (
-                <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-primary-foreground" />
-                </div>
-              )}
-              <span className="font-bold text-lg tracking-tight">{sidebarBrand?.company_name || "NexusOps"}</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/70 bg-background/40 p-0.5 shadow-sm">
+                <img src={sidebarBrand?.company_icon_url || "/brand/nexus-mark.png"} alt="" className="h-full w-full object-contain" />
+              </span>
+              <span className="font-bold text-lg tracking-tight">{sidebarBrand?.company_name || "NexusMSP"}</span>
             </div>
           )}
           {collapsed && (
-            sidebarBrand?.company_icon_url ? (
-              <img src={sidebarBrand.company_icon_url.startsWith("http") ? sidebarBrand.company_icon_url : sidebarBrand.company_icon_url} alt="" className="w-8 h-8 rounded-lg object-contain" onError={e => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'flex'); }} />
-            ) : (
-              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                <Zap className="w-5 h-5 text-primary-foreground" />
-              </div>
-            )
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/70 bg-background/40 p-0.5 shadow-sm">
+              <img src={sidebarBrand?.company_icon_url || "/brand/nexus-mark.png"} alt={sidebarBrand?.company_name ? `${sidebarBrand.company_name} icon` : "NexusMSP icon"} className="h-full w-full object-contain" />
+            </span>
           )}
           <Button
             variant="ghost"
             size="icon"
             onClick={onToggle}
-            className={`h-8 w-8 ${collapsed ? 'hidden' : ''}`}
+            className={`hidden h-8 w-8 md:inline-flex ${collapsed ? 'md:hidden' : ''}`}
             data-testid="sidebar-toggle"
+            aria-label="Collapse navigation"
           >
             <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onMobileClose}
+            className="h-9 w-9 md:hidden"
+            aria-label="Close navigation"
+          >
+            <X className="h-4 w-4" />
           </Button>
         </div>
 
@@ -416,7 +453,7 @@ export const Sidebar = ({ collapsed, onToggle, onCopilotToggle }) => {
                   <Search className="w-[18px] h-[18px]" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">Search modules (expand sidebar)</TooltipContent>
+              <TooltipContent side="right">Find a task or workspace</TooltipContent>
             </Tooltip>
           </div>
         )}

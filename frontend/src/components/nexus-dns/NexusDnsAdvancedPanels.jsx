@@ -11,10 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Activity, AlertTriangle, AppWindow, ArrowRight, BarChart3, CheckCircle2, CircleDollarSign,
-  Clock3, Database, FileSearch, Fingerprint, Gauge, Globe2, History, Laptop2, Network,
-  PlayCircle, Radar, RefreshCw, Search, ServerCog, ShieldAlert, ShieldCheck, Sparkles,
-  TestTube2, Users2, XCircle,
+  Activity, AlertTriangle, AppWindow, ArrowRight, BarChart3, CheckCircle2, CircleDollarSign, Database, FileSearch, Fingerprint, Gauge, Globe2, History, Network,
+  PlayCircle, Radar, RefreshCw, Search, ServerCog, ShieldAlert, ShieldCheck,
+  TestTube2, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";

@@ -163,7 +163,7 @@ export function TicketDetailHeader({
           <Button
             variant="outline" size="sm"
             className="text-blue-400 border-blue-500/30 hover:bg-blue-500/10 h-8"
-            onClick={() => window.open(`/remote-access?device=${viewingTicket.device_id}`, "_blank")}
+            onClick={() => window.open(`/remote-access?device=${viewingTicket.device_id}&ticket=${viewingTicket.id}`, "_blank")}
             data-testid="remote-connect-btn"
           >
             <ExternalLink className="w-3 h-3 mr-1" />Remote

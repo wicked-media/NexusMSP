@@ -129,6 +129,10 @@ func (l *Loop) sendOnce() {
 	}
 
 	if response.Update != nil && response.Update.Version != "" && response.Update.Version != l.version {
+		if shouldApply, reason := updater.ShouldApplyVersion(l.version, response.Update.Version); !shouldApply {
+			log.Printf("[updater] ignored target %s from current %s: %s", response.Update.Version, l.version, reason)
+			return
+		}
 		log.Printf("[updater] server advertises new version %s (current %s) - applying", response.Update.Version, l.version)
 		l.cfg.UpdateEvidence = &config.UpdateEvidence{
 			Version:   response.Update.Version,
@@ -136,7 +140,8 @@ func (l *Loop) sendOnce() {
 			Status:    "verification_failed",
 			CheckedAt: time.Now().UTC().Format(time.RFC3339),
 		}
-		if err := updater.VerifyManifest(*response.Update); err != nil {
+		pinnedUpdateKey := policyString(l.cfg, "signing_public_key")
+		if err := updater.VerifyManifestWithKey(*response.Update, pinnedUpdateKey); err != nil {
 			log.Printf("[updater] signed manifest rejected: %v", err)
 			_ = config.Save(l.cfg)
 			return
@@ -144,10 +149,18 @@ func (l *Loop) sendOnce() {
 		l.cfg.UpdateEvidence.SignatureVerified = true
 		l.cfg.UpdateEvidence.Status = "verified"
 		_ = config.Save(l.cfg)
-		if err := updater.Apply(*response.Update, l.cfg.ServerURL, l.version, l.cfg.AgentToken); err != nil {
+		if err := updater.Apply(*response.Update, l.cfg.ServerURL, l.version, l.cfg.AgentToken, pinnedUpdateKey); err != nil {
 			log.Printf("[updater] apply failed: %v", err)
 		}
 	}
+}
+
+func policyString(cfg *config.Config, key string) string {
+	if cfg == nil || cfg.PlatformPolicy == nil || cfg.PlatformPolicy.Updates == nil {
+		return ""
+	}
+	value, _ := cfg.PlatformPolicy.Updates[key].(string)
+	return value
 }
 
 func selfRepairEnabled(cfg *config.Config) bool {

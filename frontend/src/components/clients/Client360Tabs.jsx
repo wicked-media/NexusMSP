@@ -3,7 +3,7 @@ import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import { API } from "@/App";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Package, Boxes, Server, Cloud, ShieldCheck, ShieldAlert, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Users, KeyRound, Percent, ListChecks, ReceiptText, Activity } from "lucide-react";
+import { Loader2, Package, Boxes, Server, Cloud, ShieldCheck, ShieldAlert, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Users, KeyRound, ListChecks, ReceiptText, Activity } from "lucide-react";
 import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";

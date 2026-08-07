@@ -97,11 +97,11 @@ export default function TechRosterPage() {
 
   return (
     <div className="space-y-4" data-testid="tech-roster-page">
-      <div className="flex flex-col gap-4 rounded-xl border border-rose-500/20 bg-gradient-to-r from-rose-500/[0.08] via-zinc-950 to-zinc-950 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-xl border border-rose-500/20 bg-gradient-to-r from-rose-500/[0.08] via-background to-background p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-500/25 bg-rose-500/10"><Radio className="h-5 w-5 text-rose-300" /></div>
           <div>
-          <h2 className="text-base font-semibold tracking-tight text-zinc-100">On-call coverage and escalation</h2>
+          <h2 className="text-base font-semibold tracking-tight text-foreground">On-call coverage and escalation</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Technicians available for War Room paging. Tiered escalation fires Tier 1 → 2 → 3 with ack tracking.
           </p>
@@ -114,7 +114,7 @@ export default function TechRosterPage() {
 
       <div className="grid gap-3 md:grid-cols-3">
         {[1, 2, 3].map((tier) => (
-          <Card key={tier} className={`overflow-hidden border-zinc-800 bg-zinc-950/60 ${tier === 1 ? "border-t-2 border-t-rose-400" : tier === 2 ? "border-t-2 border-t-amber-400" : "border-t-2 border-t-cyan-400"}`}>
+          <Card key={tier} className={`overflow-hidden border-border bg-card/70 shadow-sm ${tier === 1 ? "border-t-2 border-t-rose-400" : tier === 2 ? "border-t-2 border-t-amber-400" : "border-t-2 border-t-cyan-400"}`}>
             <CardContent className="p-4">
               <div className={`text-[10px] uppercase tracking-widest font-semibold mb-3 flex items-center gap-2 ${tier === 1 ? "text-rose-400" : tier === 2 ? "text-amber-400" : "text-sky-400"}`}>
                 <Users className="w-3 h-3" /> Tier {tier} · {tiers[tier].length}
@@ -122,7 +122,7 @@ export default function TechRosterPage() {
               {tiers[tier].length === 0 ? (
                 <div className="text-xs text-zinc-500 py-6 text-center">No techs in this tier</div>
               ) : tiers[tier].map((t) => (
-                <div key={t.id} className="flex items-center justify-between py-2 border-b border-zinc-800 last:border-0">
+                <div key={t.id} className="flex items-center justify-between border-b border-border py-2 last:border-0">
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium flex items-center gap-2">
                       {t.name}
@@ -185,44 +185,44 @@ export default function TechRosterPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-rose-500/25 bg-zinc-950 p-0" data-testid="tech-roster-dialog">
-          <DialogHeader className="border-b border-rose-500/20 bg-gradient-to-br from-rose-500/[0.13] via-zinc-950 to-zinc-950 p-5 sm:p-6"><DialogTitle className="flex items-center gap-2 text-xl"><Radio className="h-5 w-5 text-rose-300" />{editing ? "Edit roster contact" : "Add roster contact"}</DialogTitle><DialogDescription>Configure escalation position, active on-call status and the notification channels used for paging. This controls on-call coverage, not the technician’s NexusMSP account access.</DialogDescription></DialogHeader>
+        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-rose-500/25 bg-background p-0" data-testid="tech-roster-dialog">
+          <DialogHeader className="border-b border-rose-500/20 bg-gradient-to-br from-rose-500/[0.13] via-background to-background p-5 sm:p-6"><DialogTitle className="flex items-center gap-2 text-xl"><Radio className="h-5 w-5 text-rose-700 dark:text-rose-300" />{editing ? "Edit roster contact" : "Add roster contact"}</DialogTitle><DialogDescription>Configure escalation position, active on-call status and the notification channels used for paging. This controls on-call coverage, not the technician’s NexusMSP account access.</DialogDescription></DialogHeader>
           <div className="space-y-4 p-5 sm:p-6">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Name *</Label>
-                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="tech-form-name" />
+                <Label htmlFor="roster-name">Name *</Label>
+                <Input id="roster-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="tech-form-name" />
               </div>
               <div>
-                <Label>Role</Label>
-                <Input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="L2 Engineer" />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Email</Label>
-                <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="tech@msp.com" />
-              </div>
-              <div>
-                <Label>Mobile</Label>
-                <Input value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+61 4…" />
+                <Label htmlFor="roster-role">Role</Label>
+                <Input id="roster-role" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="L2 Engineer" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Slack handle</Label>
-                <Input value={form.slack_handle} onChange={(e) => setForm({ ...form, slack_handle: e.target.value })} placeholder="U012ABC" />
+                <Label htmlFor="roster-email">Email</Label>
+                <Input id="roster-email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="tech@msp.com" />
               </div>
               <div>
-                <Label>Teams email</Label>
-                <Input value={form.teams_email} onChange={(e) => setForm({ ...form, teams_email: e.target.value })} />
+                <Label htmlFor="roster-mobile">Mobile</Label>
+                <Input id="roster-mobile" value={form.mobile} onChange={(e) => setForm({ ...form, mobile: e.target.value })} placeholder="+61 4…" />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Escalation tier</Label>
+                <Label htmlFor="roster-slack">Slack handle</Label>
+                <Input id="roster-slack" value={form.slack_handle} onChange={(e) => setForm({ ...form, slack_handle: e.target.value })} placeholder="U012ABC" />
+              </div>
+              <div>
+                <Label htmlFor="roster-teams">Teams email</Label>
+                <Input id="roster-teams" value={form.teams_email} onChange={(e) => setForm({ ...form, teams_email: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="roster-tier">Escalation tier</Label>
                 <Select value={String(form.escalation_tier || 2)} onValueChange={(v) => setForm({ ...form, escalation_tier: parseInt(v) })}>
-                  <SelectTrigger data-testid="tech-form-tier"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="roster-tier" aria-label="Escalation tier" data-testid="tech-form-tier"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="1">Tier 1 — first responders</SelectItem>
                     <SelectItem value="2">Tier 2 — backup</SelectItem>
@@ -232,12 +232,12 @@ export default function TechRosterPage() {
               </div>
               <div className="flex items-end gap-6 pb-1">
                 <div className="flex items-center gap-2">
-                  <Switch checked={form.on_call} onCheckedChange={(v) => setForm({ ...form, on_call: v })} data-testid="tech-form-oncall" />
-                  <Label className="text-xs">On-call</Label>
+                  <Switch id="roster-on-call" aria-label="On-call" checked={form.on_call} onCheckedChange={(v) => setForm({ ...form, on_call: v })} data-testid="tech-form-oncall" />
+                  <Label htmlFor="roster-on-call" className="text-xs">On-call</Label>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Switch checked={form.active !== false} onCheckedChange={(v) => setForm({ ...form, active: v })} />
-                  <Label className="text-xs">Active</Label>
+                  <Switch id="roster-active" aria-label="Active" checked={form.active !== false} onCheckedChange={(v) => setForm({ ...form, active: v })} />
+                  <Label htmlFor="roster-active" className="text-xs">Active</Label>
                 </div>
               </div>
             </div>
@@ -251,7 +251,7 @@ export default function TechRosterPage() {
                       key={key}
                       type="button"
                       onClick={() => toggleChannel(key)}
-                      className={`px-3 py-1.5 rounded-md border text-xs flex items-center gap-1.5 transition-colors ${on ? "bg-sky-500/10 border-sky-500/40 text-sky-300" : "border-zinc-700 text-zinc-400 hover:border-zinc-500"}`}
+                      className={`px-3 py-1.5 rounded-md border text-xs flex items-center gap-1.5 transition-colors ${on ? "bg-sky-500/10 border-sky-500/40 text-sky-700 dark:text-sky-300" : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"}`}
                       data-testid={`tech-channel-${key}`}
                     >
                       <Icon className="w-3 h-3" /> {label}
@@ -261,7 +261,7 @@ export default function TechRosterPage() {
               </div>
             </div>
           </div>
-          <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
+          <DialogFooter className="border-t border-border bg-muted/20 px-5 py-4 sm:px-6">
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
             <Button onClick={save} disabled={saving || !form.name.trim()} className="bg-rose-500 text-white hover:bg-rose-400" data-testid="tech-form-save">
               {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
@@ -271,10 +271,10 @@ export default function TechRosterPage() {
         </DialogContent>
       </Dialog>
       <Dialog open={!!deleteCandidate} onOpenChange={(isOpen) => !isOpen && setDeleteCandidate(null)}>
-        <DialogContent className="max-w-md border-rose-500/25 bg-zinc-950" data-testid="delete-roster-contact-dialog">
+        <DialogContent className="max-w-md border-rose-500/25 bg-background" data-testid="delete-roster-contact-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-rose-300" />Remove roster contact?</DialogTitle>
-            <DialogDescription><span className="font-medium text-zinc-100">{deleteCandidate?.name}</span> will no longer be selected for War Room paging. This does not delete their NexusMSP team account or historic activity.</DialogDescription>
+            <DialogDescription><span className="font-medium text-foreground">{deleteCandidate?.name}</span> will no longer be selected for War Room paging. This does not delete their NexusMSP team account or historic activity.</DialogDescription>
           </DialogHeader>
           <div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/85">Use this only when the contact should no longer be part of the escalation chain. The removal is retained in the organisation audit history.</div>
           <DialogFooter>

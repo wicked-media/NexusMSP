@@ -1,13 +1,12 @@
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Plus, CheckCircle, Circle, Loader2, Paperclip, FileText, Download, Trash2,
+  Plus, CheckCircle, Loader2, Paperclip, FileText, Download, Trash2,
   ShoppingCart, Receipt, History, Boxes, Clock,
   BellRing, Building2, CalendarClock, GitPullRequest, MonitorCog, Tags, UserCheck,
 } from "lucide-react";
@@ -279,7 +278,7 @@ export function TicketAuditTab({ auditLog }) {
 }
 
 /* Optional default re-export for convenience */
-export default {
+const TicketSecondaryTabs = {
   TicketWorksheetTab,
   TicketAttachmentsTab,
   TicketItemsTab,
@@ -287,3 +286,5 @@ export default {
   TicketTimeTab,
   TicketAuditTab,
 };
+
+export default TicketSecondaryTabs;

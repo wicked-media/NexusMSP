@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Calculator, DollarSign } from "lucide-react";
+import { Calculator } from "lucide-react";
 
 export default function PricingCalcPage() {
   const { token } = useAuth();

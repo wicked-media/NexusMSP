@@ -9,10 +9,22 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.avatar_enrichment import attach_user_avatars
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 from app.models import *
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation=operation,
+        resource_name="Ticket",
+    )
+
 
 # ============== TICKETS ENDPOINTS ==============
 
@@ -40,7 +52,7 @@ async def get_tickets(
             {"status": "closed", "updated_at": {"$gte": cutoff}}
         ]
     
-    tickets = await db.tickets.find(query, {"_id": 0}).to_list(1000)
+    tickets = await db.tickets.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     await attach_user_avatars(tickets, id_fields=("assigned_to",), output_field="assignee_avatar")
     for t in tickets:
         for field in ['created_at', 'updated_at', 'sla_due']:
@@ -50,7 +62,10 @@ async def get_tickets(
 
 @router.get("/tickets/note-counts")
 async def get_ticket_note_counts(current_user: dict = Depends(get_current_user)):
-    open_tickets = await db.tickets.find({"status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1}).to_list(10000)
+    open_tickets = await db.tickets.find(
+        scoped_query(current_user, {"status": {"$in": ["open", "in_progress"]}}),
+        {"_id": 0, "id": 1},
+    ).to_list(10000)
     result = {}
     for t in open_tickets:
         nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
@@ -63,22 +78,28 @@ from app.routers.event_bus import _ticket_viewers
 @router.get("/tickets/active-viewers")
 async def get_active_viewers_proxy(current_user: dict = Depends(get_current_user)):
     """Get all tickets currently being viewed and by whom"""
+    allowed = {
+        ticket["id"]
+        for ticket in await db.tickets.find(
+            scoped_query(current_user),
+            {"_id": 0, "id": 1},
+        ).to_list(10000)
+    }
     result = {}
     for ticket_id, viewers in _ticket_viewers.items():
-        if viewers:
+        if viewers and ticket_id in allowed:
             result[ticket_id] = list(viewers.values())
     return result
 
 @router.get("/tickets/{ticket_id}")
 async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.read")
     await attach_user_avatars([ticket], id_fields=("assigned_to",), output_field="assignee_avatar")
     return ticket
 
 @router.post("/tickets", response_model=Ticket)
 async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, ticket_data.client_id, operation="ticket.create")
     client = await db.clients.find_one({"id": ticket_data.client_id}, {"_id": 0})
     client_name = client['name'] if client else None
     if ticket_data.client_id and not client:
@@ -124,9 +145,11 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     # Resolve device name(s)
     device_name = None
     if ticket_data.device_id:
-        device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1})
+        device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1, "client_id": 1})
         if not device:
             raise HTTPException(status_code=404, detail="Device not found")
+        if device.get("client_id") != ticket_data.client_id:
+            raise HTTPException(status_code=400, detail="Linked devices must belong to the ticket client")
         device_name = device['name'] if device else None
 
     # Multi-device: ensure device_id is included in device_ids, and resolve device_names parallel array
@@ -135,9 +158,17 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         device_ids.insert(0, ticket_data.device_id)
     device_names = []
     if device_ids:
-        cursor = db.devices.find({"id": {"$in": device_ids}}, {"_id": 0, "id": 1, "name": 1})
-        async for d in cursor:
-            device_names.append(d.get("name") or d.get("id"))
+        found_devices = await db.devices.find(
+            {"id": {"$in": device_ids}, "client_id": ticket_data.client_id},
+            {"_id": 0, "id": 1, "name": 1},
+        ).to_list(500)
+        if len({device.get("id") for device in found_devices}) != len(set(device_ids)):
+            raise HTTPException(status_code=400, detail="Every linked device must belong to the ticket client")
+        devices_by_id = {device["id"]: device for device in found_devices}
+        device_names = [
+            devices_by_id[device_id].get("name") or device_id
+            for device_id in device_ids
+        ]
     
     # Generate ticket number using configurable scheme
     from app.routers.ticket_suggestions import generate_ticket_number
@@ -230,7 +261,14 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
 
 @router.put("/tickets/{ticket_id}")
 async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
-    old_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    old_ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.update")
+    target_client_id = ticket_data.get("client_id", old_ticket.get("client_id"))
+    await assert_client_scope(current_user, target_client_id, operation="ticket.move")
+    if target_client_id != old_ticket.get("client_id"):
+        target_client = await db.clients.find_one({"id": target_client_id}, {"_id": 0, "name": 1})
+        if not target_client:
+            raise HTTPException(status_code=404, detail="Client not found")
+        ticket_data["client_name"] = target_client.get("name")
     now_iso = datetime.now(timezone.utc).isoformat()
     ticket_data['updated_at'] = now_iso
     # Auto-close: when marked as resolved, automatically set to closed
@@ -266,12 +304,29 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
             )
     # Resolve device name if device_id changed
     if 'device_id' in ticket_data and ticket_data['device_id']:
-        device = await db.devices.find_one({"id": ticket_data['device_id']}, {"_id": 0, "name": 1})
+        device = await db.devices.find_one(
+            {"id": ticket_data['device_id'], "client_id": target_client_id},
+            {"_id": 0, "name": 1},
+        )
         if not device:
-            raise HTTPException(status_code=404, detail="Device not found")
+            raise HTTPException(status_code=400, detail="Linked devices must belong to the ticket client")
         ticket_data['device_name'] = device['name'] if device else None
     elif 'device_id' in ticket_data and not ticket_data['device_id']:
         ticket_data['device_name'] = None
+    if "device_ids" in ticket_data:
+        requested_device_ids = list(dict.fromkeys(ticket_data.get("device_ids") or []))
+        found_devices = await db.devices.find(
+            {"id": {"$in": requested_device_ids}, "client_id": target_client_id},
+            {"_id": 0, "id": 1, "name": 1},
+        ).to_list(500) if requested_device_ids else []
+        devices_by_id = {device["id"]: device for device in found_devices}
+        if len(devices_by_id) != len(requested_device_ids):
+            raise HTTPException(status_code=400, detail="Every linked device must belong to the ticket client")
+        ticket_data["device_ids"] = requested_device_ids
+        ticket_data["device_names"] = [
+            devices_by_id[device_id].get("name") or device_id
+            for device_id in requested_device_ids
+        ]
     if 'assigned_to' in ticket_data:
         if ticket_data['assigned_to']:
             assignee = await db.users.find_one({"id": ticket_data['assigned_to']}, {"_id": 0, "name": 1})
@@ -328,12 +383,13 @@ async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Dep
     device_id = (body or {}).get("device_id")
     if not device_id:
         raise HTTPException(status_code=400, detail="device_id required")
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "name": 1, "id": 1})
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.device.link")
+    device = await db.devices.find_one(
+        {"id": device_id, "client_id": ticket.get("client_id")},
+        {"_id": 0, "name": 1, "id": 1},
+    )
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=400, detail="Linked devices must belong to the ticket client")
     device_ids = list(ticket.get("device_ids") or [])
     # Backfill from legacy device_id field
     if ticket.get("device_id") and ticket["device_id"] not in device_ids:
@@ -364,9 +420,7 @@ async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Dep
 @router.delete("/tickets/{ticket_id}/devices/{device_id}")
 async def remove_ticket_device(ticket_id: str, device_id: str, current_user: dict = Depends(get_current_user)):
     """Unlink a device from a ticket."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.device.unlink")
     device_ids = list(ticket.get("device_ids") or [])
     if ticket.get("device_id") and ticket["device_id"] not in device_ids:
         device_ids.append(ticket["device_id"])
@@ -399,10 +453,9 @@ async def remove_ticket_device(ticket_id: str, device_id: str, current_user: dic
 
 @router.delete("/tickets/{ticket_id}")
 async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if ticket:
-        await db.clients.update_one({"id": ticket['client_id']}, {"$inc": {"ticket_count": -1}})
-        await log_activity(current_user, "deleted", "ticket", ticket_id, ticket.get("title", ""), f"Deleted ticket {ticket.get('ticket_number', '')}")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.delete")
+    await db.clients.update_one({"id": ticket['client_id']}, {"$inc": {"ticket_count": -1}})
+    await log_activity(current_user, "deleted", "ticket", ticket_id, ticket.get("title", ""), f"Deleted ticket {ticket.get('ticket_number', '')}")
     result = await db.tickets.delete_one({"id": ticket_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -412,9 +465,7 @@ async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current
 
 @router.get("/tickets/{ticket_id}/comments")
 async def get_ticket_comments(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    await _ticket_in_scope(ticket_id, current_user, "ticket.comment.read")
     comments = await db.ticket_comments.find(
         {"ticket_id": ticket_id}, {"_id": 0}
     ).sort("created_at", -1).to_list(500)
@@ -422,9 +473,7 @@ async def get_ticket_comments(ticket_id: str, current_user: dict = Depends(get_c
 
 @router.post("/tickets/{ticket_id}/comments")
 async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.comment.create")
     content = str(comment_data.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="Write an update before publishing")
@@ -539,14 +588,16 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
 
 @router.get("/tickets/{ticket_id}/children")
 async def get_child_tickets(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    children = await db.tickets.find({"parent_id": ticket_id}, {"_id": 0}).to_list(100)
+    parent = await _ticket_in_scope(ticket_id, current_user, "ticket.children.read")
+    children = await db.tickets.find(
+        {"parent_id": ticket_id, "client_id": parent.get("client_id")},
+        {"_id": 0},
+    ).to_list(100)
     return children
 
 @router.post("/tickets/{ticket_id}/children")
 async def create_child_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
-    parent = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not parent:
-        raise HTTPException(status_code=404, detail="Parent ticket not found")
+    parent = await _ticket_in_scope(ticket_id, current_user, "ticket.child.create")
     from app.routers.ticket_suggestions import generate_ticket_number
     child_number = await generate_ticket_number(ticket_data.get("ticket_type", parent.get("ticket_type", "incident")))
     child = Ticket(
@@ -576,9 +627,11 @@ async def link_ticket(ticket_id: str, link_data: dict, current_user: dict = Depe
     child_id = link_data.get("child_id")
     if not child_id:
         raise HTTPException(status_code=400, detail="child_id required")
-    result = await db.tickets.update_one({"id": child_id}, {"$set": {"parent_id": ticket_id}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Child ticket not found")
+    parent = await _ticket_in_scope(ticket_id, current_user, "ticket.link")
+    child = await _ticket_in_scope(child_id, current_user, "ticket.link")
+    if child.get("client_id") != parent.get("client_id"):
+        raise HTTPException(status_code=400, detail="Linked tickets must belong to the same client")
+    await db.tickets.update_one({"id": child_id}, {"$set": {"parent_id": ticket_id}})
     await ticket_audit(ticket_id, current_user, "ticket_linked", f"Linked ticket {child_id}")
     return {"message": "Tickets linked"}
 
@@ -589,31 +642,32 @@ async def merge_tickets(ticket_id: str, merge_data: dict, current_user: dict = D
     merge_ids = merge_data.get("merge_ids", [])
     if not merge_ids:
         raise HTTPException(status_code=400, detail="merge_ids required")
-    target = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not target:
-        raise HTTPException(status_code=404, detail="Target ticket not found")
+    target = await _ticket_in_scope(ticket_id, current_user, "ticket.merge")
     for mid in merge_ids:
-        source = await db.tickets.find_one({"id": mid}, {"_id": 0})
-        if source:
-            await db.tickets.update_one({"id": mid}, {"$set": {"status": "closed", "merged_into": ticket_id}})
-            src_comments = await db.ticket_comments.find({"ticket_id": mid}, {"_id": 0}).to_list(500)
-            for c in src_comments:
-                c["ticket_id"] = ticket_id
-                c["content"] = f"[Merged from {source.get('ticket_number', mid)}] {c.get('content', '')}"
-                c["id"] = str(uuid.uuid4())
-                await db.ticket_comments.insert_one(c)
-            await ticket_audit(ticket_id, current_user, "ticket_merged", f"Merged {source.get('ticket_number', mid)} into this ticket")
+        source = await _ticket_in_scope(mid, current_user, "ticket.merge")
+        if source.get("client_id") != target.get("client_id"):
+            raise HTTPException(status_code=400, detail="Merged tickets must belong to the same client")
+        await db.tickets.update_one({"id": mid}, {"$set": {"status": "closed", "merged_into": ticket_id}})
+        src_comments = await db.ticket_comments.find({"ticket_id": mid}, {"_id": 0}).to_list(500)
+        for c in src_comments:
+            c["ticket_id"] = ticket_id
+            c["content"] = f"[Merged from {source.get('ticket_number', mid)}] {c.get('content', '')}"
+            c["id"] = str(uuid.uuid4())
+            await db.ticket_comments.insert_one(c)
+        await ticket_audit(ticket_id, current_user, "ticket_merged", f"Merged {source.get('ticket_number', mid)} into this ticket")
     return {"message": f"Merged {len(merge_ids)} tickets"}
 
 # ============== TICKET TIME TRACKING ==============
 
 @router.get("/tickets/{ticket_id}/time-entries")
 async def get_ticket_time_entries(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    await _ticket_in_scope(ticket_id, current_user, "ticket.time.read")
     entries = await db.ticket_time_entries.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return entries
 
 @router.post("/tickets/{ticket_id}/time-entries")
 async def add_ticket_time_entry(ticket_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
+    await _ticket_in_scope(ticket_id, current_user, "ticket.time.create")
     entry = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
@@ -649,6 +703,7 @@ async def ticket_audit(ticket_id: str, user: dict, action: str, details: str):
 
 @router.get("/tickets/{ticket_id}/audit-log")
 async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    await _ticket_in_scope(ticket_id, current_user, "ticket.audit.read")
     # ``ticket_audit`` was used by early workflow/device features.  Merge it
     # once at read time so existing history remains visible while all new
     # records are written to ``ticket_audit_log``.
@@ -692,9 +747,7 @@ async def delete_canned_response(response_id: str, current_user: dict = Depends(
 @router.get("/tickets/{ticket_id}/emails")
 async def get_ticket_emails(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Get all emails associated with a ticket"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    await _ticket_in_scope(ticket_id, current_user, "ticket.email.read")
     
     emails = await db.ticket_emails.find(
         {"ticket_id": ticket_id}, {"_id": 0}
@@ -704,9 +757,7 @@ async def get_ticket_emails(ticket_id: str, current_user: dict = Depends(get_cur
 @router.post("/tickets/{ticket_id}/emails")
 async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, current_user: dict = Depends(get_current_user)):
     """Send an email from a ticket"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.email.send")
     
     subject = email_data.subject or f"Re: [{ticket.get('ticket_number', '')}] {ticket.get('title', '')}"
 

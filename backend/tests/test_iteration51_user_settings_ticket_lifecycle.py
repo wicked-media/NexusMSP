@@ -390,6 +390,7 @@ class TestDisplayPrefs:
         assert "compact_mode" in data
         assert "timezone" in data
         assert "language" in data
+        assert data.get("motion") in {"system", "full", "minimal", "none"}
         print(f"Display prefs fetched: accent={data.get('accent_color')}, compact={data.get('compact_mode')}")
     
     def test_save_display_prefs(self, headers):
@@ -397,7 +398,8 @@ class TestDisplayPrefs:
         new_prefs = {
             "accent_color": "purple",
             "compact_mode": True,
-            "timezone": "UTC"
+            "timezone": "UTC",
+            "motion": "minimal",
         }
         response = requests.put(f"{BASE_URL}/api/user-settings/display", 
                               json=new_prefs, headers=headers)
@@ -407,6 +409,7 @@ class TestDisplayPrefs:
         # Verify
         verify = requests.get(f"{BASE_URL}/api/user-settings/display", headers=headers)
         assert verify.json().get("accent_color") == "purple"
+        assert verify.json().get("motion") == "minimal"
         print("Display preferences saved and verified")
 
 

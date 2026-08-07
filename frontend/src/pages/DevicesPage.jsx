@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, Cpu, MemoryStick, HardDrive, AlertTriangle, CheckCircle, XCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Import, Eye, Users, Terminal, Play, Cloud, Sparkles, BarChart3, Zap, Activity, Flame, Command, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, CheckCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Trash2, Edit, Radar, Eye, Users, Terminal, Cloud, Sparkles, BarChart3, Zap, Flame, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock } from "lucide-react";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
@@ -29,9 +29,9 @@ import QuickScriptDialog from "../components/devices/QuickScriptDialog";
 import RiskHeatmapCanvas from "../components/devices/RiskHeatmapCanvas";
 import LifecycleTimeline from "../components/devices/LifecycleTimeline";
 import AnomalyInbox from "../components/devices/AnomalyInbox";
-import DeviceCommandPalette from "../components/devices/DeviceCommandPalette";
 import Sparkline from "../components/devices/Sparkline";
 import StatusOrb from "../components/devices/StatusOrb";
+import NexusPageSkeleton from "../components/feedback/NexusPageSkeleton";
 import DeviceThumbnail from "../components/devices/DeviceThumbnail";
 import { toast } from "sonner";
 
@@ -312,7 +312,7 @@ export default function DevicesPage() {
     setSelectedDiscovered(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <NexusPageSkeleton label="Loading managed assets" tiles={6} showSidebar={false} />;
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
@@ -964,7 +964,6 @@ export default function DevicesPage() {
       <QuickScriptDialog open={quickScriptOpen} onClose={() => setQuickScriptOpen(false)} deviceIds={selectedDevices} />
 
       {/* Cmd+K command palette */}
-      <DeviceCommandPalette devices={devices} />
       </div>
     </PageShell>
   );

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Mic, MicOff, Send, Loader2, AlertCircle, CheckCircle, Ticket, MessageSquare, Plus } from "lucide-react";
+import { Mic, MicOff, Send, Loader2, AlertCircle, CheckCircle, MessageSquare, Plus } from "lucide-react";
 
 export default function VoiceTicketPage() {
   const { token } = useAuth();

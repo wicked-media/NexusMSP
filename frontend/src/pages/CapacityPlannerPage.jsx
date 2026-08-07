@@ -10,22 +10,20 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import {
-  Users, TrendingUp, AlertTriangle, Target, RefreshCw, Loader2,
-  BarChart3, Clock, Monitor, Zap, ArrowUp, ArrowDown
+  Users, AlertTriangle, Target, RefreshCw, Loader2,
+  BarChart3, Monitor, Zap, ArrowUp, ArrowDown
 } from "lucide-react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid, LineChart, Line, Legend } from "recharts";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid, Legend } from "recharts";
 
 export default function CapacityPlannerPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("overview");
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/capacity-planner/overview`, { headers });
+      const res = await axios.get(`${API}/capacity-planner/overview`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
     } catch { toast.error("Failed to load capacity data"); }
     finally { setLoading(false); }

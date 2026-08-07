@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { DollarSign, Monitor, TrendingUp, TrendingDown, AlertTriangle, Target } from "lucide-react";
+import { DollarSign, Monitor, TrendingDown, AlertTriangle, Target } from "lucide-react";
 
 const statusColors = { above_target: "text-green-500", at_target: "text-blue-500", below_target: "text-red-500", no_devices: "text-slate-400" };
 const statusLabels = { above_target: "Above Target", at_target: "At Target", below_target: "Below Target", no_devices: "No Devices" };
@@ -14,14 +14,12 @@ export default function RpeDashboardPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
-    axios.get(`${API}/rpe/dashboard`, { headers })
+    axios.get(`${API}/rpe/dashboard`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
   if (!data) return null;

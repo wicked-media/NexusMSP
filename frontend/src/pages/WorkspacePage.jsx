@@ -12,12 +12,22 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Bookmark, Eye, Activity, Save, Loader2, Pin, X, Wifi, WifiOff,
   Ticket as TicketIcon, Monitor, Flame, Clock, History, RefreshCw,
-  AlertTriangle,
+  AlertTriangle, Search,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { priorityConfig } from "@/config/ticketConfig";
 import SavedViewsBar from "@/components/SavedViewsBar";
+import { taskShortcuts } from "@/config/navigation";
+
+const taskAccentClasses = {
+  emerald: "border-emerald-500/20 bg-emerald-500/[0.045] text-emerald-300 hover:border-emerald-400/40 hover:bg-emerald-500/[0.075]",
+  amber: "border-amber-500/20 bg-amber-500/[0.045] text-amber-300 hover:border-amber-400/40 hover:bg-amber-500/[0.075]",
+  cyan: "border-cyan-500/20 bg-cyan-500/[0.045] text-cyan-300 hover:border-cyan-400/40 hover:bg-cyan-500/[0.075]",
+  rose: "border-rose-500/20 bg-rose-500/[0.045] text-rose-300 hover:border-rose-400/40 hover:bg-rose-500/[0.075]",
+  violet: "border-violet-500/20 bg-violet-500/[0.045] text-violet-300 hover:border-violet-400/40 hover:bg-violet-500/[0.075]",
+  blue: "border-blue-500/20 bg-blue-500/[0.045] text-blue-300 hover:border-blue-400/40 hover:bg-blue-500/[0.075]",
+};
 
 export default function WorkspacePage() {
   const { token, user } = useAuth();
@@ -27,6 +37,7 @@ export default function WorkspacePage() {
   const [loadError, setLoadError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [scratchDraft, setScratchDraft] = useState("");
+  const [taskQuery, setTaskQuery] = useState("");
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchWorkspace = useCallback(async () => {
@@ -102,6 +113,12 @@ export default function WorkspacePage() {
   }
 
   const stats = data.stats || {};
+  const matchingTasks = taskShortcuts.filter(task => {
+    const query = taskQuery.trim().toLowerCase();
+    return !query || [task.label, task.description, ...task.keywords].join(" ").toLowerCase().includes(query);
+  });
+
+  const openCommandPalette = () => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"));
 
   return (
     <PageShell data-testid="workspace-page">
@@ -116,7 +133,7 @@ export default function WorkspacePage() {
               My Workspace
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Your personal cockpit — pinned tickets, watched devices, and scratchpad notes.
+              Your personal cockpit — find the right action, then keep important work close.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} data-testid="workspace-refresh">
@@ -157,6 +174,47 @@ export default function WorkspacePage() {
             testid="ws-stat-critical"
           />
         </MetricStrip>
+
+        <section className="overflow-hidden rounded-2xl border border-primary/20 bg-card/70 shadow-[0_18px_55px_-38px_hsl(var(--primary)/0.7)]" aria-labelledby="nexus-navigator-title" data-testid="nexus-navigator">
+          <div className="flex flex-col gap-4 border-b border-border/70 bg-[radial-gradient(circle_at_top_left,hsl(var(--primary)/0.13),transparent_42%)] p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">Nexus Navigator</p>
+              <h2 id="nexus-navigator-title" className="mt-1 text-lg font-semibold">What do you need to get done?</h2>
+              <p className="mt-1 text-xs text-muted-foreground">Use plain language. Nexus will take you to the right workspace without making you learn the menu.</p>
+            </div>
+            <div className="flex w-full max-w-xl flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+              <label className="relative flex-1">
+                <span className="sr-only">Find a task</span>
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input value={taskQuery} onChange={event => setTaskQuery(event.target.value)} placeholder="Try ‘remote into a device’ or ‘bill a client’" className="h-10 w-full rounded-lg border border-border bg-background/75 pl-9 pr-3 text-sm outline-none transition placeholder:text-muted-foreground/60 focus:border-primary/50 focus:ring-2 focus:ring-primary/15" data-testid="workspace-task-search" />
+              </label>
+              <Button variant="outline" className="h-10 shrink-0" onClick={openCommandPalette} title="Search all Nexus records and actions">
+                <Search className="mr-2 h-4 w-4" />Everything <span className="ml-2 rounded border border-border bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">Ctrl K</span>
+              </Button>
+            </div>
+          </div>
+          <div className="grid gap-2 p-4 sm:grid-cols-2 xl:grid-cols-3">
+            {matchingTasks.map(task => {
+              const TaskIcon = task.icon;
+              return (
+                <button key={task.id} type="button" onClick={() => navigate(task.path)} className={`group flex min-h-[92px] items-start gap-3 rounded-xl border p-3.5 text-left transition duration-200 hover:-translate-y-0.5 ${taskAccentClasses[task.accent]}`} data-testid={`workspace-task-${task.id}`}>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-current/20 bg-background/55"><TaskIcon className="h-4 w-4" /></span>
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-sm font-semibold text-foreground">{task.label}<span aria-hidden="true" className="translate-x-0 text-current opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100">→</span></span>
+                    <span className="mt-1 block text-[11px] leading-relaxed text-muted-foreground">{task.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+            {matchingTasks.length === 0 && (
+              <div className="col-span-full flex flex-col items-center justify-center rounded-xl border border-dashed border-border px-5 py-7 text-center">
+                <p className="text-sm font-medium">No quick task matched “{taskQuery}”</p>
+                <p className="mt-1 text-xs text-muted-foreground">Search everything to find clients, users, assets, invoices, knowledge and actions.</p>
+                <Button className="mt-3" size="sm" onClick={openCommandPalette}><Search className="mr-2 h-3.5 w-3.5" />Search everything</Button>
+              </div>
+            )}
+          </div>
+        </section>
 
         <Tabs defaultValue="pinned" className="w-full">
           <TabsList className="grid w-full grid-cols-5 max-w-2xl">

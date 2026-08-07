@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.nexus_timeline import TIMELINE_CATEGORIES, build_client_timeline
+from app.services.scope_permissions import assert_global_scope, assert_record_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -13,7 +15,10 @@ router = APIRouter()
 
 @router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: dict = Depends(get_current_user)):
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    clients = await db.clients.find(
+        scoped_query(current_user, field="id", site_field=None),
+        {"_id": 0},
+    ).to_list(1000)
     for c in clients:
         if isinstance(c.get('created_at'), str):
             c['created_at'] = datetime.fromisoformat(c['created_at'])
@@ -21,13 +26,18 @@ async def get_clients(current_user: dict = Depends(get_current_user)):
 
 @router.get("/clients/{client_id}")
 async def get_client(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return client
+    return await assert_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        client_field="id",
+        operation="client.read",
+        resource_name="Client",
+    )
 
 @router.post("/clients", response_model=Client)
 async def create_client(client_data: ClientCreate, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="client.create")
     client = Client(**client_data.model_dump())
     doc = client.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
@@ -36,6 +46,10 @@ async def create_client(client_data: ClientCreate, current_user: dict = Depends(
 
 @router.put("/clients/{client_id}")
 async def update_client(client_id: str, client_data: ClientCreate, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.clients, client_id,
+        client_field="id", operation="client.update", resource_name="Client",
+    )
     result = await db.clients.update_one({"id": client_id}, {"$set": client_data.model_dump()})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -43,6 +57,10 @@ async def update_client(client_id: str, client_data: ClientCreate, current_user:
 
 @router.delete("/clients/{client_id}")
 async def delete_client(client_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.clients, client_id,
+        client_field="id", operation="client.delete", resource_name="Client",
+    )
     result = await db.clients.delete_one({"id": client_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -53,15 +71,19 @@ async def delete_client(client_id: str, current_user: dict = Depends(get_current
 @router.get("/clients/{client_id}/health")
 async def get_client_health(client_id: str, current_user: dict = Depends(get_current_user)):
     """Calculate client health score (0-100) based on multiple factors"""
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = await assert_record_scope(
+        current_user, db.clients, client_id,
+        client_field="id", operation="client.health.read", resource_name="Client",
+    )
     return await _calc_health(client)
 
 @router.get("/clients/health/all")
 async def get_all_client_health(current_user: dict = Depends(get_current_user)):
     """Get health scores for all clients"""
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    clients = await db.clients.find(
+        scoped_query(current_user, field="id", site_field=None),
+        {"_id": 0},
+    ).to_list(1000)
     results = []
     for c in clients:
         h = await _calc_health(c)
@@ -72,7 +94,10 @@ async def get_all_client_health(current_user: dict = Depends(get_current_user)):
 async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
     """Rich one-shot dataset powering the revamped Clients page."""
     now = datetime.now(timezone.utc)
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    clients = await db.clients.find(
+        scoped_query(current_user, field="id", site_field=None),
+        {"_id": 0},
+    ).to_list(1000)
     client_ids = [c["id"] for c in clients]
 
     open_tix_map = {}
@@ -228,9 +253,45 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
 
     return {"summary": summary, "clients": results}
 
+@router.get("/clients/{client_id}/timeline")
+async def get_client_nexus_timeline(
+    client_id: str,
+    categories: Optional[str] = Query(None, description="Comma-separated timeline categories"),
+    before: Optional[str] = Query(None, description="Return evidence recorded before this ISO timestamp"),
+    q: Optional[str] = Query(None, max_length=160),
+    limit: int = Query(200, ge=1, le=500),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the canonical, cross-module Nexus Timeline for one client."""
+    await assert_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        client_field="id",
+        operation="client.timeline.read",
+        resource_name="Client",
+    )
+    selected = [
+        value.strip().lower()
+        for value in str(categories or "").split(",")
+        if value.strip().lower() in TIMELINE_CATEGORIES
+    ]
+    return await build_client_timeline(
+        client_id,
+        categories=selected,
+        before=before,
+        search=q,
+        limit=limit,
+    )
+
+
 @router.get("/clients/{client_id}/activity-timeline")
 async def get_client_activity_timeline(client_id: str, current_user: dict = Depends(get_current_user)):
     """Get combined activity timeline for a client"""
+    await assert_record_scope(
+        current_user, db.clients, client_id,
+        client_field="id", operation="client.timeline.read", resource_name="Client",
+    )
     timeline = []
     client_devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
     device_names = {device.get("id"): device.get("name") or device.get("id") for device in client_devices}

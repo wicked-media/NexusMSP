@@ -4,15 +4,13 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Heart, AlertTriangle, TrendingUp, TrendingDown, Users, RefreshCw,
-  Loader2, ArrowLeft, Zap, Shield, SmilePlus, Frown, Meh, ThumbsUp,
-  BarChart3, Eye, ChevronRight
+  Heart, AlertTriangle, TrendingUp, Users, RefreshCw,
+  Loader2, ArrowLeft, Zap, SmilePlus, Frown, Meh, ThumbsUp,
+  BarChart3, ChevronRight
 } from "lucide-react";
 
 const STATUS_CONFIG = {
@@ -72,10 +70,11 @@ export default function SentimentDashboardPage({ embedded = false }) {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [dRes, cRes, rRes] = await Promise.all([
-        axios.get(`${API}/sentiment/dashboard`, { headers }),
-        axios.get(`${API}/sentiment/clients`, { headers }),
-        axios.get(`${API}/sentiment/at-risk`, { headers }),
+        axios.get(`${API}/sentiment/dashboard`, { headers: requestHeaders }),
+        axios.get(`${API}/sentiment/clients`, { headers: requestHeaders }),
+        axios.get(`${API}/sentiment/at-risk`, { headers: requestHeaders }),
       ]);
       setDashboard(dRes.data);
       setClients(cRes.data);

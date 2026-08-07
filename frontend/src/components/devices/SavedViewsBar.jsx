@@ -1,5 +1,5 @@
 /* SavedViewsBar.jsx — pinned filter combinations as named tabs. */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
@@ -17,11 +17,11 @@ export default function SavedViewsBar({ currentFilters, onApply }) {
 
   const headers = { Authorization: `Bearer ${token}` };
 
-  const load = () => axios.get(`${API}/devices/saved-views`, { headers })
+  const load = useCallback(() => axios.get(`${API}/devices/saved-views`, { headers: { Authorization: `Bearer ${token}` } })
     .then(r => setViews(r.data || []))
-    .catch(() => setViews([]));
+    .catch(() => setViews([])), [token]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
+  useEffect(() => { load(); }, [load]);
 
   const create = async () => {
     if (!name.trim()) return;

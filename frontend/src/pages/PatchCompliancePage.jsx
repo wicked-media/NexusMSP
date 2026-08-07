@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Clock3, Layers3, Loader2, Monitor, Plus, RefreshCw, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Layers3, Loader2, Monitor, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 const blankPolicy = { name: "", os_filter: "All operating systems", severity_filter: "security", ring: "", delay_days: 7, auto_approve: false, enabled: true, notes: "" };
 const statusTone = (status) => ({ current: "border-emerald-500/30 text-emerald-200", needs_attention: "border-amber-500/30 text-amber-200", not_assessed: "border-slate-500/30 text-slate-200" }[status] || "border-slate-500/30 text-slate-200");

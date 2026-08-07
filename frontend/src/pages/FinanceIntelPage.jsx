@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, Package, Boxes, DollarSign, Percent, AlertTriangle, TrendingDown, Sparkles, Plus, ShieldAlert, Zap } from "lucide-react";
+import { Loader2, Package, Boxes, DollarSign, Percent, AlertTriangle, TrendingDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 function useApi(token) {

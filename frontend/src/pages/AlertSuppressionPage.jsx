@@ -10,11 +10,9 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  BellOff, Plus, Clock, Shield, Trash2, RefreshCw, Loader2,
-  Zap, Search, Filter, BarChart3, Activity, Settings, Power
+  BellOff, Plus, Clock, Shield, Trash2, RefreshCw, Loader2, Search, Settings
 } from "lucide-react";
 
 export default function AlertSuppressionPage() {
@@ -33,8 +31,8 @@ export default function AlertSuppressionPage() {
     setLoading(true);
     try {
       const [rRes, sRes] = await Promise.all([
-        axios.get(`${API}/alert-suppression/rules`, { headers }),
-        axios.get(`${API}/alert-suppression/stats`, { headers }),
+        axios.get(`${API}/alert-suppression/rules`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/alert-suppression/stats`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       setRules(rRes.data);
       setStats(sRes.data);
@@ -53,7 +51,7 @@ export default function AlertSuppressionPage() {
   };
 
   const deleteRule = async (ruleId) => {
-    if (!confirm("Delete this suppression rule?")) return;
+    if (!window.confirm("Delete this suppression rule?")) return;
     try {
       await axios.delete(`${API}/alert-suppression/rules/${ruleId}`, { headers });
       setRules(prev => prev.filter(r => r.id !== ruleId));

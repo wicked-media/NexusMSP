@@ -9,7 +9,7 @@ from app.services.core_relationships import (
 def test_core_schema_preserves_the_canonical_operational_path():
     schema = core_schema()
 
-    assert schema["schema_version"] == 1
+    assert schema["schema_version"] == 2
     assert schema["canonical_path"] == list(CORE_ENTITY_ORDER)
     assert schema["canonical_path"] == [
         "client",
@@ -20,9 +20,27 @@ def test_core_schema_preserves_the_canonical_operational_path():
         "service",
         "contract",
         "ticket",
+        "project",
         "invoice",
+        "documentation",
         "integration",
     ]
+    assert schema["canonical_tree"] == {
+        "root": "client",
+        "children": [
+            "site",
+            "contact",
+            "user",
+            "device",
+            "service",
+            "contract",
+            "ticket",
+            "project",
+            "invoice",
+            "documentation",
+            "integration",
+        ],
+    }
 
 
 def test_core_references_are_stable_and_readable():

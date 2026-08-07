@@ -4,6 +4,7 @@ import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -19,14 +20,13 @@ import { PageShell } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
-  Plus, Search, FileText, Loader2, DollarSign, Send, Check, ArrowLeft,
+  Plus, Search, FileText, Loader2, Send, Check, ArrowLeft,
   AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
-  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield,
-  Calendar, ChevronRight, MessageSquare, Timer, Users, PieChart, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown
+  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Timer, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown
 } from "lucide-react";
 import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
@@ -425,8 +425,6 @@ export default function InvoicesPage() {
   };
 
   const removeLineItem = (idx) => setForm(f => ({ ...f, line_items: f.line_items.filter((_, i) => i !== idx) }));
-  const calcSubtotal = () => form.line_items.reduce((s, li) => s + ((li.quantity || 0) * (li.unit_price || 0)), 0);
-
   const handleBulkAction = async (action) => {
     if (selectedIds.size === 0) return;
     const confirmMsg = action === "delete" ? `Delete ${selectedIds.size} invoice(s)? This cannot be undone.` :
@@ -1262,9 +1260,9 @@ export default function InvoicesPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep Invoice</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-invoice">
-              Delete Draft
-            </AlertDialogAction>
+            <HoldToConfirmButton onComplete={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-invoice">
+              Hold to delete draft
+            </HoldToConfirmButton>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -1707,7 +1705,7 @@ export default function InvoicesPage() {
   // ========== LIST VIEW ==========
   return (
     <PageShell data-testid="invoices-page">
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 space-y-6 overflow-y-auto">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_16px_42px_rgba(0,0,0,0.18)]">
         <div>
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Finance operations</p>
@@ -1716,7 +1714,7 @@ export default function InvoicesPage() {
             <div><h1 className="text-2xl font-bold tracking-tight">Invoices</h1><p className="text-sm text-muted-foreground">Billing command centre · {invoices.length} invoices</p></div>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
           <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Zap className="w-3.5 h-3.5 mr-1.5" />Billing Command</Button>
           <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="invoice-xero-button"><Building2 className="w-3.5 h-3.5 mr-1.5" />{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
           <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/reports?tab=commercial")} data-testid="aging-report-btn">
@@ -1729,7 +1727,7 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <HeroTile label="All invoices" value={stats.total || 0} icon={FileText} glow="cyan" testId="stat-total" />
         <HeroTile label="Paid" value={stats.paid || 0} icon={CheckCircle} glow="emerald" testId="stat-paid" />
         <HeroTile label="Unpaid" value={stats.unpaid || 0} icon={XCircle} glow={stats.unpaid > 0 ? "rose" : "emerald"} testId="stat-unpaid" />
@@ -1737,7 +1735,7 @@ export default function InvoicesPage() {
         <HeroTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={AlertTriangle} glow={stats.total_outstanding > 0 ? "amber" : "emerald"} animated={false} testId="stat-outstanding" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <HeroTile label="Xero finance link" value={xeroStatus.connected ? "Connected" : xeroStatus.configured ? "Finish setup" : "Not connected"} subtitle={xeroStatus.connected ? (xeroStatus.org_name || "Open reconciliation hub") : "Configure OAuth before sync"} icon={Building2} glow="sky" animated={false} onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} testId="xero-finance-tile" />
         <HeroTile label="Reconciliation queue" value={`$${Number(reconciliation.pending_total || 0).toFixed(2)}`} subtitle={`${reconciliation.pending_count} payment${reconciliation.pending_count === 1 ? "" : "s"} awaiting Xero match`} icon={Wallet} glow="amber" animated={false} onClick={() => reconciliation.pending_count ? setSettlementOpen(true) : toast.info("No payments are ready to settle")} testId="reconciliation-tile" />
         <HeroTile label="Client billing controls" value={clients.length} subtitle="Terms, PO and billing contact defaults" icon={Users} glow="emerald" onClick={() => openBillingProfile()} testId="billing-profile-tile" />

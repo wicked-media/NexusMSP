@@ -451,6 +451,12 @@ async def end_remote_session_record(
         if existing_entry:
             time_entry_doc = existing_entry
         else:
+            technician = await db.users.find_one(
+                {"id": str(session.get("user_id") or user.get("id"))},
+                {"_id": 0, "hourly_rate": 1},
+            )
+            hourly_rate = float((technician or {}).get("hourly_rate") or 75.0)
+            billable = bool(data.get("billable", True))
             entry = TimeEntry(
                 ticket_id=ticket["id"],
                 ticket_title=ticket.get("title"),
@@ -460,7 +466,10 @@ async def end_remote_session_record(
                 user_name=session.get("user_name") or user.get("name"),
                 description=notes or f"Remote support on {session.get('device_name') or 'managed endpoint'}",
                 minutes=duration,
-                billable=bool(data.get("billable", True)),
+                hourly_rate=hourly_rate,
+                total_amount=round((duration / 60) * hourly_rate, 2) if billable else 0.0,
+                billable=billable,
+                invoiced=False,
             )
             time_entry_doc = entry.model_dump()
             time_entry_doc["created_at"] = entry.created_at.isoformat()

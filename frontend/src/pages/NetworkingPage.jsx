@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import {
   Wifi, Network, Router, Server, Monitor, Globe, Search, Loader2, RefreshCw, ChevronRight,
   Plus, Users, Smartphone, Download, Upload, Shield, AlertTriangle, CheckCircle2,
-  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap, BarChart3, Lock,
+  Edit, Trash2, Plug, Settings, Link2, Activity, Radio, Zap, Lock,
   MoreHorizontal, ChevronDown, GitBranch, FileSearch
 } from "lucide-react";
 import {

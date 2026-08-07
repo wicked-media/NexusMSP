@@ -1,13 +1,12 @@
 /* AccountBriefingDialog.jsx + ExpansionEngineTile + RenewalForecastTile + ChurnRadar + Lifecycle + ActivityHeatmap + HoursBurndown + Achievements + ContractWatch + ScorecardCard + ComplianceCard + AccountPlanCanvas + StakeholderMap + RenewalWatchTable + MyAccountsTable
    One file for fast wiring. */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Sparkles, TrendingUp, RefreshCw, Trophy, Flag, AlertTriangle, Crown, FileDown, Shield, Wand2, ChevronRight, Calendar, Activity as ActivityIcon, Save, Plus, Trash2 } from "lucide-react";
 import { healthColor, moneyShort, tierMeta } from "./clientStudioHelpers";
 import { toast } from "sonner";
@@ -454,9 +453,9 @@ export function StakeholderMapCard({ clientId }) {
   const [list, setList] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ name: "", title: "", email: "", role: "influencer", relationship_strength: 50, sentiment: null });
-  const reload = () => axios.get(`${API}/client-studio/${clientId}/stakeholders`, { headers: { Authorization: `Bearer ${token}` } })
-    .then(r => setList(r.data || [])).catch(() => setList([]));
-  useEffect(() => { if (clientId) reload(); /* eslint-disable-next-line */ }, [clientId, token]);
+  const reload = useCallback(() => axios.get(`${API}/client-studio/${clientId}/stakeholders`, { headers: { Authorization: `Bearer ${token}` } })
+    .then(r => setList(r.data || [])).catch(() => setList([])), [clientId, token]);
+  useEffect(() => { if (clientId) reload(); }, [clientId, reload]);
   const add = async () => {
     if (!form.name.trim()) return;
     try {

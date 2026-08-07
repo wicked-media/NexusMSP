@@ -2,20 +2,25 @@ from fastapi import FastAPI, Request as FastAPIRequest
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
+import asyncio
 import os
 import logging
 import importlib
 import pkgutil
 import re
+import time
 import uuid
 
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
+from app.services.runtime_config import background_workers_enabled, cors_origins
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NexusOps API", version="3.0.0")
+_background_tasks: set[asyncio.Task] = set()
+_warmup_complete = False
 
 _CORRELATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
@@ -26,8 +31,32 @@ async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
     supplied = str(request.headers.get("X-Correlation-ID") or "").strip()
     correlation_id = supplied if _CORRELATION_ID_RE.fullmatch(supplied) else str(uuid.uuid4())
     request.state.correlation_id = correlation_id
-    response = await call_next(request)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.exception(
+            "request_failed correlation_id=%s method=%s path=%s elapsed_ms=%s",
+            correlation_id,
+            request.method,
+            request.url.path,
+            elapsed_ms,
+        )
+        raise
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     response.headers["X-Correlation-ID"] = correlation_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    logger.info(
+        "request_complete correlation_id=%s method=%s path=%s status=%s elapsed_ms=%s",
+        correlation_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
     return response
 
 # Static files for uploads
@@ -88,6 +117,48 @@ async def root():
 async def health_check():
     return {"status": "ok", "service": "nexusops-api", "version": "3.0.0"}
 
+
+@app.get("/ready")
+@app.get("/api/ready")
+async def readiness_check():
+    """Only advertise readiness after boot reconciliation and a live DB ping."""
+    from fastapi import HTTPException
+
+    if not _warmup_complete:
+        raise HTTPException(status_code=503, detail="NexusMSP is still warming up")
+    try:
+        await db.command("ping")
+    except Exception as exc:
+        logger.error("Readiness database ping failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database is unavailable") from exc
+    return {"status": "ready", "service": "nexusops-api", "version": "3.0.0"}
+
+
+def _start_background_task(coro, name: str) -> asyncio.Task:
+    task = asyncio.create_task(coro, name=name)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+def background_worker_specs():
+    """Return the durable-loop catalogue shared by API-dev and worker deployments."""
+    from app.routers.maintenance_windows import maintenance_window_scheduler
+
+    return (
+        ("rustdesk-sync", _rustdesk_auto_sync_loop),
+        ("recurring-invoices", _recurring_invoice_scheduler),
+        ("standup-digest", _standup_digest_scheduler),
+        ("warroom-escalation", _warroom_escalation_loop),
+        ("chain-reactions", _chain_reactions_loop),
+        ("m365-mail-sync", _microsoft365_mail_sync_loop),
+        ("scheduled-scripts", _scheduled_script_loop),
+        ("event-delivery", _event_delivery_loop),
+        ("event-retention", _event_retention_loop),
+        ("automation-runtime", _automation_runtime_loop),
+        ("maintenance-windows", maintenance_window_scheduler),
+    )
+
 # Stripe webhook
 @app.post("/api/webhook/stripe")
 async def stripe_webhook(request: FastAPIRequest):
@@ -130,32 +201,45 @@ async def stripe_webhook(request: FastAPIRequest):
 async def startup_event():
     # Kick heavy DB seeding + ticket backfill off to a background task so uvicorn
     # completes startup fast and production readiness probes (/health) pass on time.
-    import asyncio
-    asyncio.create_task(_boot_warmup())
-    # Start RustDesk auto-sync background task
-    asyncio.create_task(_rustdesk_auto_sync_loop())
-    # Start recurring invoice auto-generation scheduler
-    asyncio.create_task(_recurring_invoice_scheduler())
-    # Start 7am morning standup-digest delivery scheduler
-    asyncio.create_task(_standup_digest_scheduler())
-    asyncio.create_task(_warroom_escalation_loop())
-    asyncio.create_task(_chain_reactions_loop())
-    asyncio.create_task(_microsoft365_mail_sync_loop())
-    asyncio.create_task(_scheduled_script_loop())
-    asyncio.create_task(_event_delivery_loop())
-    asyncio.create_task(_event_retention_loop())
-    asyncio.create_task(_automation_runtime_loop())
+    try:
+        from app.routers.ai_service import hydrate_openai_connection
+
+        if await hydrate_openai_connection():
+            logger.info("OpenAI API connection is available")
+    except Exception as e:
+        logger.warning(f"OpenAI connection hydration skipped: {e}")
+    _start_background_task(_boot_warmup(), "nexus-boot-warmup")
+    if background_workers_enabled():
+        workers = background_worker_specs()
+        for name, worker in workers:
+            _start_background_task(worker(), f"nexus-{name}")
+        logger.info("Started %s in-process background workers", len(workers))
+    else:
+        logger.info("In-process background workers disabled; run the dedicated worker deployment")
     logger.info("NexusOps API v3.0.0 started successfully")
 
 
 async def _boot_warmup():
     """Run seed + ticket-number backfill without blocking app startup."""
+    global _warmup_complete
     try:
-        from app.services.event_backbone import backfill_legacy_event_metadata, ensure_event_backbone_indexes
+        from app.services.request_throttling import ensure_request_throttle_indexes
+        await ensure_request_throttle_indexes()
+    except Exception as e:
+        logger.error(f"Request throttle index initialization failed: {e}")
+    try:
+        from app.services.event_backbone import (
+            backfill_event_integrity,
+            backfill_legacy_event_metadata,
+            ensure_event_backbone_indexes,
+        )
         await ensure_event_backbone_indexes()
         migrated_events = await backfill_legacy_event_metadata()
         if migrated_events:
             logger.info(f"Backfilled durable metadata for {migrated_events} platform events")
+        sealed_events = await backfill_event_integrity()
+        if sealed_events:
+            logger.info(f"Sealed {sealed_events} platform events into the Nexus Black Box chain")
     except Exception as e:
         logger.error(f"Event backbone index initialization failed: {e}")
     try:
@@ -168,6 +252,11 @@ async def _boot_warmup():
         await initialize_chat_storage()
     except Exception as e:
         logger.error(f"Chat index initialization failed: {e}")
+    try:
+        from app.services.time_machine import ensure_time_machine_indexes
+        await ensure_time_machine_indexes(db)
+    except Exception as e:
+        logger.error(f"Time Machine index initialization failed: {e}")
     try:
         await db.yeastar_pbxs.create_index(
             [("client_id", 1), ("pbx_url", 1)],
@@ -193,6 +282,8 @@ async def _boot_warmup():
             logger.info(f"Assigned ticket numbers to {len(tickets_without_number)} tickets")
     except Exception as e:
         logger.error(f"Ticket number backfill failed: {e}")
+    _warmup_complete = True
+    logger.info("NexusMSP boot reconciliation complete")
 
 
 async def _event_delivery_loop():
@@ -473,6 +564,10 @@ async def _recurring_invoice_scheduler():
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    for task in tuple(_background_tasks):
+        task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*tuple(_background_tasks), return_exceptions=True)
     client.close()
 
 async def _standup_digest_scheduler():
@@ -593,7 +688,7 @@ async def _standup_digest_scheduler():
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

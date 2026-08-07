@@ -131,9 +131,10 @@ export default function SettingsPage() {
   }, []);
   const [users, setUsers] = useState([]);
   const [branding, setBranding] = useState({
-    company_name: "NexusOps", company_logo_url: "", company_icon_url: "",
+    company_name: "NexusMSP", company_logo_url: "", company_icon_url: "",
     primary_color: "#10b981", secondary_color: "#8b5cf6", accent_color: "#06b6d4",
     login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"],
+    login_experience: "classic",
     powered_by_visible: true, sidebar_style: "default",
     invoice_logo_url: "", invoice_header_text: "", invoice_footer_text: "",
     email_sender_name: "", email_footer_text: "", favicon_url: "",
@@ -185,6 +186,9 @@ export default function SettingsPage() {
   const [syncroSaving, setSyncroSaving] = useState(false);
   const [aiConfig, setAiConfig] = useState({ provider: "openai", model: "gpt-5.6-terra", reasoning_effort: "medium", connection: { configured: false, method: "environment" } });
   const [aiSaving, setAiSaving] = useState(false);
+  const [openaiForm, setOpenaiForm] = useState({ api_key: "", key_label: "NexusMSP production", organization_id: "", project_id: "" });
+  const [openaiBusy, setOpenaiBusy] = useState("");
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [jobNumbering, setJobNumbering] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
   const [jnSaving, setJnSaving] = useState(false);
   const [emailSig, setEmailSig] = useState("");
@@ -209,6 +213,61 @@ export default function SettingsPage() {
   const [nexusElevateSaving, setNexusElevateSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  const openaiErrorMessage = (error, fallback) => {
+    const detail = error?.response?.data?.detail;
+    return typeof detail === "string" ? detail : fallback;
+  };
+
+  const saveOpenaiConnection = async () => {
+    if (!openaiForm.api_key.trim()) {
+      toast.error("Enter an OpenAI API key first");
+      return;
+    }
+    setOpenaiBusy("save");
+    try {
+      const response = await axios.put(`${API}/ai/connection`, openaiForm, { headers });
+      setAiConfig(prev => ({ ...prev, connection: response.data.connection }));
+      setOpenaiForm(prev => ({ ...prev, api_key: "" }));
+      setShowOpenaiKey(false);
+      toast.success(`OpenAI connected · ${response.data.model_count || 0} models available`);
+    } catch (error) {
+      toast.error(openaiErrorMessage(error, "OpenAI connection could not be saved"));
+    } finally {
+      setOpenaiBusy("");
+    }
+  };
+
+  const testOpenaiConnection = async () => {
+    setOpenaiBusy("test");
+    try {
+      const response = await axios.post(`${API}/ai/connection/test`, {
+        organization_id: openaiForm.organization_id,
+        project_id: openaiForm.project_id,
+      }, { headers });
+      setAiConfig(prev => ({ ...prev, connection: response.data.connection || prev.connection }));
+      toast.success(`OpenAI connection verified · ${response.data.model_count || 0} models available`);
+    } catch (error) {
+      toast.error(openaiErrorMessage(error, "OpenAI connection test failed"));
+    } finally {
+      setOpenaiBusy("");
+    }
+  };
+
+  const disconnectOpenai = async () => {
+    if (!window.confirm("Remove the OpenAI API key stored by NexusMSP? AI features will stop unless OPENAI_API_KEY is configured on the server.")) return;
+    setOpenaiBusy("delete");
+    try {
+      const response = await axios.delete(`${API}/ai/connection`, { headers });
+      setAiConfig(prev => ({ ...prev, connection: response.data.connection }));
+      setOpenaiForm(prev => ({ ...prev, api_key: "", key_label: "NexusMSP production", organization_id: "", project_id: "" }));
+      toast.success("Stored OpenAI connection removed");
+    } catch (error) {
+      toast.error(openaiErrorMessage(error, "OpenAI connection could not be removed"));
+    } finally {
+      setOpenaiBusy("");
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -256,7 +315,15 @@ export default function SettingsPage() {
         setSuped(supedRes.data);
         setSplynx(splynxRes.data);
         setHudu(huduRes.data);
-        if (aiRes.data.provider) setAiConfig(aiRes.data);
+        if (aiRes.data.provider) {
+          setAiConfig(aiRes.data);
+          setOpenaiForm(prev => ({
+            ...prev,
+            key_label: aiRes.data.connection?.key_label || prev.key_label,
+            organization_id: aiRes.data.connection?.organization_id || "",
+            project_id: aiRes.data.connection?.project_id || "",
+          }));
+        }
         setSyncro(syncroRes.data);
         if (jnRes.data) setJobNumbering(jnRes.data);
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data, client_secret: "" }));
@@ -326,7 +393,7 @@ export default function SettingsPage() {
   };
 
   const handleMailboxDisconnect = async () => {
-    if (!confirm("Disconnect Office 365 mailbox?")) return;
+    if (!window.confirm("Disconnect Office 365 mailbox?")) return;
     try {
       await axios.post(`${API}/o365/disconnect`, {}, { headers });
       toast.success("Disconnected"); setMailbox(prev => ({ ...prev, connected: false }));
@@ -562,35 +629,35 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Company / Platform Name</Label><Input value={branding.company_name || ""} onChange={e => setBranding(p => ({ ...p, company_name: e.target.value }))} placeholder="Your Company Name" data-testid="branding-company-name" /><p className="text-[10px] text-muted-foreground mt-1">Replaces "NexusOps" in sidebar, login page, and browser tab</p></div>
+              <div><Label>Company / Platform Name</Label><Input value={branding.company_name || ""} onChange={e => setBranding(p => ({ ...p, company_name: e.target.value }))} placeholder="Your Company Name" data-testid="branding-company-name" /><p className="text-[10px] text-muted-foreground mt-1">Replaces "NexusMSP" in the sidebar, login page, and browser tab</p></div>
               <div><Label>Email Sender Name</Label><Input value={branding.email_sender_name || ""} onChange={e => setBranding(p => ({ ...p, email_sender_name: e.target.value }))} placeholder="Your Company IT Support" /><p className="text-[10px] text-muted-foreground mt-1">Used as the "From" name in outgoing emails</p></div>
             </div>
 
             <Separator />
-            <Label className="text-sm font-semibold">Logo & Icon</Label>
+            <div><Label className="text-sm font-semibold">Logo & Icon</Label><p className="mt-1 text-xs text-muted-foreground">Purchasing MSPs can replace the Nexus identity with their own wordmark and square icon. Transparent PNG or WebP files work best.</p></div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label className="text-xs">Company Logo (sidebar)</Label>
+                <Label className="text-xs">Company Wordmark (login)</Label>
                 <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
-                  {branding.company_logo_url ? <img src={branding.company_logo_url} alt="Logo" className="h-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} /> : <Building className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  {branding.company_logo_url ? <img src={branding.company_logo_url} alt="Logo" className="h-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} /> : <div className="mb-2 flex items-center justify-center gap-2"><img src="/brand/nexus-mark.png" alt="" className="h-9 w-9 object-contain" /><span className="font-semibold">NexusMSP</span></div>}
                   <input type="file" accept="image/*" className="hidden" id="logo-upload" onChange={async (e) => {
                     const file = e.target.files?.[0]; if (!file) return;
                     const formData = new FormData(); formData.append("file", file);
                     try { const res = await axios.post(`${API}/settings/branding/upload-logo?logo_type=company`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } }); setBranding(p => ({ ...p, company_logo_url: res.data.url })); toast.success("Logo uploaded"); } catch { toast.error("Upload failed"); }
                   }} />
-                  <Button size="sm" variant="outline" onClick={() => document.getElementById("logo-upload").click()} data-testid="upload-logo-btn"><Upload className="w-3 h-3 mr-1" />Upload Logo</Button>
+                  <div className="flex flex-wrap justify-center gap-2"><Button size="sm" variant="outline" onClick={() => document.getElementById("logo-upload").click()} data-testid="upload-logo-btn"><Upload className="w-3 h-3 mr-1" />Upload Wordmark</Button>{branding.company_logo_url && <Button size="sm" variant="ghost" onClick={() => setBranding(p => ({ ...p, company_logo_url: "" }))}>Use Nexus default</Button>}</div>
                 </div>
               </div>
               <div className="space-y-2">
-                <Label className="text-xs">Sidebar Icon (small)</Label>
+                <Label className="text-xs">App / Sidebar Icon</Label>
                 <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
-                  {branding.company_icon_url ? <img src={branding.company_icon_url} alt="Icon" className="h-10 w-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} /> : <Image className="w-8 h-8 mx-auto text-muted-foreground mb-2" />}
+                  <img src={branding.company_icon_url || "/brand/nexus-mark.png"} alt={branding.company_icon_url ? "Uploaded company icon" : "NexusMSP default icon"} className="h-10 w-10 mx-auto mb-2 object-contain" onError={e => { e.target.style.display = 'none'; }} />
                   <input type="file" accept="image/*" className="hidden" id="icon-upload" onChange={async (e) => {
                     const file = e.target.files?.[0]; if (!file) return;
                     const formData = new FormData(); formData.append("file", file);
                     try { const res = await axios.post(`${API}/settings/branding/upload-logo?logo_type=icon`, formData, { headers: { ...headers, "Content-Type": "multipart/form-data" } }); setBranding(p => ({ ...p, company_icon_url: res.data.url })); toast.success("Icon uploaded"); } catch { toast.error("Upload failed"); }
                   }} />
-                  <Button size="sm" variant="outline" onClick={() => document.getElementById("icon-upload").click()}><Upload className="w-3 h-3 mr-1" />Upload Icon</Button>
+                  <div className="flex flex-wrap justify-center gap-2"><Button size="sm" variant="outline" onClick={() => document.getElementById("icon-upload").click()}><Upload className="w-3 h-3 mr-1" />Upload Icon</Button>{branding.company_icon_url && <Button size="sm" variant="ghost" onClick={() => setBranding(p => ({ ...p, company_icon_url: "" }))}>Use Nexus default</Button>}</div>
                 </div>
               </div>
               <div className="space-y-2">
@@ -620,9 +687,45 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Globe className="w-5 h-5" />Login Page Customization</CardTitle>
-            <CardDescription>Customize the text and features shown on the login page</CardDescription>
+            <CardDescription>Choose the entrance experience, then customize the text and features shown on the login page</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-3">
+              <div>
+                <Label>Login experience</Label>
+                <p className="mt-1 text-xs text-muted-foreground">Choose the immersive entrance shown to every technician. The sign-in and security workflow stays identical.</p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="login-experience-picker">
+                {[
+                  { id: "classic", name: "Classic Nexus", description: "The current clean command-centre layout." },
+                  { id: "constellation", name: "Constellation", description: "Connected operations above a living horizon." },
+                  { id: "theatre", name: "Operations Theatre", description: "A cinematic global operations view." },
+                  { id: "calm", name: "Calm Command", description: "Quiet depth with a focused assurance path." },
+                ].map(option => {
+                  const selected = (branding.login_experience || "classic") === option.id;
+                  return (
+                    <div
+                      key={option.id}
+                      className={`group overflow-hidden rounded-xl border text-left transition-all ${selected ? "border-emerald-400/70 ring-2 ring-emerald-400/15" : "border-border/70 hover:border-emerald-400/35"}`}
+                    >
+                      <button type="button" onClick={() => setBranding(p => ({ ...p, login_experience: option.id }))} aria-pressed={selected} data-testid={`login-experience-${option.id}`} className="relative block aspect-[16/9] w-full overflow-hidden bg-zinc-950 text-left">
+                        <img src={`/login-experiences/${option.id}.png`} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                        {selected && <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full border border-emerald-300/30 bg-emerald-400/15 px-2 py-1 text-[10px] font-semibold text-emerald-100 backdrop-blur"><CheckCircle className="h-3 w-3" />Selected</span>}
+                      </button>
+                      <div className="p-3">
+                        <p className="text-sm font-semibold">{option.name}</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</p>
+                        <button type="button" onClick={() => window.open(`/login?preview=1&experience=${option.id}`, "_blank", "noopener,noreferrer")} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-emerald-400 hover:text-emerald-300">
+                          <Eye className="h-3.5 w-3.5" />Open preview
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <Separator />
             <div><Label>Login Tagline</Label><Input value={branding.login_tagline || ""} onChange={e => setBranding(p => ({ ...p, login_tagline: e.target.value }))} placeholder="Unified RMM & PSA platform for modern managed service providers" /><p className="text-[10px] text-muted-foreground mt-1">Shown below the main heading on the login page</p></div>
             <div><Label>Feature Pills (comma-separated)</Label><Input value={(branding.login_features || []).join(", ")} onChange={e => setBranding(p => ({ ...p, login_features: e.target.value.split(",").map(s => s.trim()).filter(Boolean) }))} placeholder="RMM, Ticketing, Invoicing, Networking, Assets, Reporting" /><p className="text-[10px] text-muted-foreground mt-1">Tags shown at the bottom of the login hero section</p></div>
           </CardContent>
@@ -1304,7 +1407,7 @@ export default function SettingsPage() {
       <SetupGuideCallout title="Connect integrations safely" source="Every provider has its own credential source and permission model. Use the setup guidance shown in each connection dialog, save only the required credentials, then run its connection test before enabling sync or billing automation." steps={["Create a dedicated service account or API key where the provider supports it.", "Use the minimum permissions needed for the NexusMSP workflow.", "Record the owner and renewal/expiry date in your credential process, then test the connection."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />
 
       {/* Xero Integration */}
-      <Card data-testid="xero-settings-card">
+      <Card id="xero-settings-card" data-testid="xero-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-blue-500" />
@@ -1344,7 +1447,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Stripe Integration */}
-      <Card>
+      <Card id="stripe-settings-card" data-testid="stripe-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-green-500" />
@@ -1387,7 +1490,7 @@ export default function SettingsPage() {
       </Card>
 
 
-      <Card data-testid="microsoft365-delivery-card">
+      <Card id="microsoft365-delivery-card" data-testid="microsoft365-delivery-card">
         <CardHeader>
           <div className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-500" /><CardTitle>Microsoft 365 Email Delivery</CardTitle></div>
           <CardDescription>The shared Microsoft 365 mailbox is used for leads, tickets, invoices, reminders, and platform notifications.</CardDescription>
@@ -1399,7 +1502,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* SMS - MobileMessage Integration */}
-      <Card data-testid="sms-settings-card">
+      <Card id="sms-settings-card" data-testid="sms-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Smartphone className="w-5 h-5 text-blue-500" />
@@ -1644,7 +1747,7 @@ export default function SettingsPage() {
 
 
       {/* Acronis Cyber Cloud Integration */}
-      <Card data-testid="acronis-settings-card">
+      <Card id="acronis-settings-card" data-testid="acronis-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-cyan-500" />
@@ -1688,7 +1791,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Pax8 Integration */}
-      <Card data-testid="pax8-settings-card">
+      <Card id="pax8-settings-card" data-testid="pax8-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Cloud className="w-5 h-5 text-indigo-400" />
@@ -1906,7 +2009,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Suped DMARC Integration */}
-      <Card data-testid="suped-settings-card">
+      <Card id="suped-settings-card" data-testid="suped-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-blue-500" />
@@ -2259,7 +2362,7 @@ export default function SettingsPage() {
 
 
       {/* Splynx ISP Billing Integration */}
-      <Card data-testid="splynx-settings-card">
+      <Card id="splynx-settings-card" data-testid="splynx-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Wifi className="w-5 h-5 text-cyan-500" />
@@ -2340,22 +2443,89 @@ export default function SettingsPage() {
       {/* ==================== AI TAB ==================== */}
       {activeTab === "ai" && (<>
 
-      {/* AI Model Configuration */}
-      <Card data-testid="ai-config-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Zap className="w-5 h-5 text-purple-500" />
-            <CardTitle>AI Model Configuration</CardTitle>
+      <Card data-testid="ai-config-card" className="overflow-hidden border-violet-500/20">
+        <div className="border-b border-violet-500/15 bg-gradient-to-r from-violet-500/[0.10] via-cyan-500/[0.04] to-transparent px-6 py-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex gap-3">
+              <div className="rounded-xl border border-violet-400/20 bg-violet-500/10 p-2.5"><Brain className="h-5 w-5 text-violet-300" /></div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">Nexus intelligence provider</p>
+                <h2 className="mt-1 text-xl font-semibold">OpenAI API connection</h2>
+                <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Connect one protected project key for Copilot, ticket intelligence, documentation, automation, and every server-side Nexus AI workflow.</p>
+              </div>
+            </div>
+            <Badge className={aiConfig.connection?.configured ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"} data-testid="openai-connection-status">
+              <span className={`mr-2 h-2 w-2 rounded-full ${aiConfig.connection?.configured ? "bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,.85)]" : "bg-amber-400"}`} />
+              {aiConfig.connection?.configured ? "Connected" : "Setup required"}
+            </Badge>
           </div>
-          <CardDescription>Set the single OpenAI model and reasoning level used by NexusMSP AI features.</CardDescription>
+        </div>
+        <CardHeader>
+          <CardTitle className="text-base">Secure credentials</CardTitle>
+          <CardDescription>The key is encrypted before storage, used only by the backend, and never returned to the browser.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {aiConfig.connection?.configured && (
+            <div className="grid gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div><p className="text-[11px] uppercase tracking-wide text-muted-foreground">Credential</p><p className="mt-1 font-mono text-sm">{aiConfig.connection.key_preview || "Protected"}</p></div>
+              <div><p className="text-[11px] uppercase tracking-wide text-muted-foreground">Source</p><p className="mt-1 text-sm font-medium">{aiConfig.connection.method === "encrypted_settings" ? "Nexus encrypted vault" : "Server environment"}</p></div>
+              <div><p className="text-[11px] uppercase tracking-wide text-muted-foreground">Last verified</p><p className="mt-1 text-sm font-medium">{aiConfig.connection.last_tested_at ? new Date(aiConfig.connection.last_tested_at).toLocaleString() : "Not tested yet"}</p></div>
+              <div><p className="text-[11px] uppercase tracking-wide text-muted-foreground">Changed by</p><p className="mt-1 text-sm font-medium">{aiConfig.connection.updated_by_name || "Deployment administrator"}</p></div>
+            </div>
+          )}
+
+          <SetupGuideCallout
+            title="Create a dedicated OpenAI project API key"
+            source="Use an OpenAI Platform project created for NexusMSP. A ChatGPT subscription or ChatGPT sign-in is not an API credential."
+            steps={[
+              "Open the OpenAI API key page and create a new secret key for the NexusMSP project.",
+              "Paste the key below once; optionally add the project or organisation ID if your account requires explicit scoping.",
+              "Select Save & test. NexusMSP validates the key before encrypting it and enabling AI workflows.",
+            ]}
+            securityNote="Keep a recovery record in your approved password manager. Rotate or disconnect this credential immediately if it is exposed."
+          />
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="lg:col-span-2">
+              <div className="mb-1.5 flex items-center justify-between"><Label htmlFor="openai-api-key">OpenAI API key</Label><span className="text-[11px] text-muted-foreground">Required to connect or rotate</span></div>
+              <div className="relative">
+                <Input
+                  id="openai-api-key"
+                  type={showOpenaiKey ? "text" : "password"}
+                  value={openaiForm.api_key}
+                  onChange={event => setOpenaiForm({ ...openaiForm, api_key: event.target.value })}
+                  placeholder={aiConfig.connection?.configured ? "Enter a new key to rotate the current connection" : "sk-proj-…"}
+                  autoComplete="new-password"
+                  className="pr-11 font-mono"
+                  data-testid="openai-api-key-input"
+                />
+                <button type="button" onClick={() => setShowOpenaiKey(value => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showOpenaiKey ? "Hide API key" : "Show API key"}>
+                  {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+            <div><Label htmlFor="openai-key-label">Credential label</Label><Input id="openai-key-label" className="mt-1.5" value={openaiForm.key_label} onChange={event => setOpenaiForm({ ...openaiForm, key_label: event.target.value })} placeholder="NexusMSP production" /></div>
+            <div><Label htmlFor="openai-project-id">Project ID <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="openai-project-id" className="mt-1.5 font-mono" value={openaiForm.project_id} onChange={event => setOpenaiForm({ ...openaiForm, project_id: event.target.value })} placeholder="proj_…" /></div>
+            <div><Label htmlFor="openai-organization-id">Organisation ID <span className="font-normal text-muted-foreground">(optional)</span></Label><Input id="openai-organization-id" className="mt-1.5 font-mono" value={openaiForm.organization_id} onChange={event => setOpenaiForm({ ...openaiForm, organization_id: event.target.value })} placeholder="org-…" /></div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={saveOpenaiConnection} disabled={Boolean(openaiBusy) || !openaiForm.api_key.trim()} data-testid="save-openai-connection-btn">
+              {openaiBusy === "save" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}Save & test connection
+            </Button>
+            {aiConfig.connection?.configured && <Button variant="outline" onClick={testOpenaiConnection} disabled={Boolean(openaiBusy)} data-testid="test-openai-connection-btn">{openaiBusy === "test" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}Test current key</Button>}
+            <Button asChild variant="outline"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Open OpenAI keys<Globe className="ml-2 h-4 w-4" /></a></Button>
+            {aiConfig.connection?.method === "encrypted_settings" && <Button variant="ghost" className="text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" onClick={disconnectOpenai} disabled={Boolean(openaiBusy)}><Trash2 className="mr-2 h-4 w-4" />Disconnect</Button>}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4 border-cyan-500/15">
+        <CardHeader>
+          <div className="flex items-center gap-2"><Zap className="h-5 w-5 text-cyan-400" /><CardTitle>Global AI runtime</CardTitle></div>
+          <CardDescription>Set the model and reasoning policy applied consistently across NexusMSP AI features.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className={`rounded-xl border p-3 ${aiConfig.connection?.configured ? "border-emerald-500/25 bg-emerald-500/[0.06]" : "border-amber-500/25 bg-amber-500/[0.06]"}`} data-testid="openai-connection-status">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="text-sm font-semibold">OpenAI API connection</p><p className="mt-1 text-xs text-muted-foreground">{aiConfig.connection?.configured ? "A server-side OpenAI API key is available to NexusMSP." : "No server-side API key is available yet. ChatGPT sign-in cannot be used as an API credential."}</p></div>
-              <Button asChild size="sm" variant="outline"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">{aiConfig.connection?.configured ? "Manage API project" : "Create API key"}<Globe className="ml-1.5 h-3.5 w-3.5" /></a></Button>
-            </div>
-          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <Label>AI provider</Label>
@@ -2380,13 +2550,14 @@ export default function SettingsPage() {
               </Select>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">For your setup choose <strong>GPT-5.6 Terra</strong> with <strong>Medium</strong> reasoning. Reasoning is sent with Responses API calls for GPT-5 models; the key stays server-side in <code>OPENAI_API_KEY</code>.</p>
+          <p className="text-xs text-muted-foreground">For your setup choose <strong>GPT-5.6 Terra</strong> with <strong>Medium</strong> reasoning. The credential remains server-side whether it is held in the Nexus encrypted vault or injected through <code>OPENAI_API_KEY</code>.</p>
           <Button onClick={async () => {
             setAiSaving(true);
             try {
-              await axios.put(`${API}/ai/config`, aiConfig, { headers });
+              const response = await axios.put(`${API}/ai/config`, { model: aiConfig.model, reasoning_effort: aiConfig.reasoning_effort }, { headers });
+              setAiConfig(prev => ({ ...prev, ...response.data }));
               toast.success(`Global OpenAI model saved: ${aiConfig.model}`);
-            } catch { toast.error("Failed to save AI config"); }
+            } catch (error) { toast.error(openaiErrorMessage(error, "Failed to save AI config")); }
             finally { setAiSaving(false); }
           }} data-testid="save-ai-config-btn" disabled={aiSaving}>
             {aiSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}Save global AI settings
@@ -2399,7 +2570,7 @@ export default function SettingsPage() {
       {activeTab === "integrations" && (<>
 
       {/* Hudu Integration */}
-      <Card data-testid="hudu-settings-card">
+      <Card id="hudu-settings-card" data-testid="hudu-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-cyan-500" />
@@ -2465,7 +2636,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* Syncro RMM Integration */}
-      <Card data-testid="syncro-settings-card">
+      <Card id="syncro-settings-card" data-testid="syncro-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Zap className="w-5 h-5 text-orange-500" />
@@ -2526,7 +2697,7 @@ export default function SettingsPage() {
                   Test Connection
                 </Button>
                 <Button variant="default" onClick={async () => {
-                  if (!confirm("Import all clients from Syncro? This may take a moment.")) return;
+                  if (!window.confirm("Import all clients from Syncro? This may take a moment.")) return;
                   try {
                     toast.info("Importing clients from Syncro...");
                     const res = await axios.post(`${API}/syncro/import-clients`, {}, { headers });

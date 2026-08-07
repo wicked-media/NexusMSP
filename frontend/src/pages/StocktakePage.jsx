@@ -11,15 +11,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, ClipboardCheck, BarChart3, ArrowLeft,
-  CheckCircle, XCircle, AlertTriangle, Package, Scan, RefreshCw,
-  TrendingDown, TrendingUp, DollarSign, Hash, ChevronRight,
-  History, Trash2, Eye
+  Plus, Search, Loader2, ClipboardCheck, ArrowLeft,
+  CheckCircle, AlertTriangle, Scan, RefreshCw,
+  TrendingDown, TrendingUp, DollarSign, ChevronRight,
+  History, Trash2
 } from "lucide-react";
 import { format } from "date-fns";
 import HeroTile from "@/components/HeroTile";

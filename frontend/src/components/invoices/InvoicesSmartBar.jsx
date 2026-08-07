@@ -10,24 +10,21 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
-  Sparkles, Wand2, Mail, AlertCircle, TrendingDown, Calendar, DollarSign,
-  Receipt, Loader2, Zap, ChevronRight, FileText, Percent, Ban, Send, RefreshCw,
+  Sparkles, Wand2, Mail, TrendingDown, Calendar, DollarSign,
+  Receipt, Loader2, Zap, Percent, Send, RefreshCw,
 } from "lucide-react";
 
 const STAGE_LABELS = { first: "Friendly Nudge", second: "Polite Reminder", third: "Firm Notice", final: "Final Notice" };
 
-export default function InvoicesSmartBar({ invoices = [], selectedIds = new Set(), onReload }) {
+export default function InvoicesSmartBar({ selectedIds = new Set(), onReload }) {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
   const [showAiDraft, setShowAiDraft] = useState(false);
   const [showAged, setShowAged] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
-  const [showPlan, setShowPlan] = useState(null); // invoice
-  const [showReminder, setShowReminder] = useState(null);
   const [aged, setAged] = useState(null);
   const [agedLoading, setAgedLoading] = useState(false);
   const [clients, setClients] = useState([]);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,10 +17,10 @@ export default function ClientNotesTab({ client }) {
   const [pinned, setPinned] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const fetchNotes = async () => {
+  const fetchNotes = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/clients/${client.id}/notes`, { headers });
+      const res = await axios.get(`${API}/clients/${client.id}/notes`, { headers: { Authorization: `Bearer ${token}` } });
       const data = res.data || [];
       // Pinned first, then newest
       data.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || new Date(b.created_at) - new Date(a.created_at));
@@ -30,9 +30,9 @@ export default function ClientNotesTab({ client }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [client?.id, token]);
 
-  useEffect(() => { if (client?.id) fetchNotes(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [client?.id]);
+  useEffect(() => { if (client?.id) fetchNotes(); }, [client?.id, fetchNotes]);
 
   const addNote = async () => {
     if (!body.trim()) return;

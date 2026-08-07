@@ -31,6 +31,8 @@ from app.database import JWT_SECRET, db
 DEFAULT_RETENTION_DAYS = max(30, int(os.environ.get("NEXUS_EVENT_RETENTION_DAYS", "90")))
 MAX_DELIVERY_ATTEMPTS = max(3, int(os.environ.get("NEXUS_EVENT_MAX_ATTEMPTS", "6")))
 DELIVERY_BACKOFF_SECONDS = (15, 60, 300, 900, 3600, 14400)
+EVENT_INTEGRITY_VERSION = 1
+EVENT_CHAIN_GENESIS = "0" * 64
 _INDEX_LOCK = asyncio.Lock()
 _INDEXES_READY = False
 
@@ -52,6 +54,100 @@ def subject_matches(subject: str, patterns: list[str] | tuple[str, ...]) -> bool
 def retry_delay_seconds(attempt: int) -> int:
     index = max(0, min(int(attempt or 1) - 1, len(DELIVERY_BACKOFF_SECONDS) - 1))
     return DELIVERY_BACKOFF_SECONDS[index]
+
+
+def canonical_event_evidence(event: dict) -> dict:
+    """Return only the immutable envelope fields protected by the event seal."""
+    return {
+        "id": event.get("id"),
+        "subject": event.get("subject"),
+        "schema_version": event.get("schema_version"),
+        "source": event.get("source"),
+        "tenant_id": event.get("tenant_id"),
+        "client_id": event.get("client_id"),
+        "correlation_id": event.get("correlation_id"),
+        "causation_id": event.get("causation_id"),
+        "actor": event.get("actor") or {},
+        "payload": event.get("payload") or {},
+        "occurred_at": event.get("occurred_at"),
+        "partition_key": event.get("partition_key"),
+        "sequence": event.get("sequence"),
+        "published_at": event.get("published_at"),
+    }
+
+
+def event_content_hash(event: dict) -> str:
+    payload = json.dumps(
+        canonical_event_evidence(event),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def previous_event_hash(previous: dict | None) -> str:
+    if not previous:
+        return EVENT_CHAIN_GENESIS
+    sealed = (previous.get("integrity") or {}).get("chain_hash")
+    return sealed or f"legacy:{event_content_hash(previous)}"
+
+
+def build_event_integrity(event: dict, previous: dict | None = None, *, origin: str = "native") -> dict:
+    content_hash = event_content_hash(event)
+    previous_hash = previous_event_hash(previous)
+    chain_hash = hashlib.sha256(f"{previous_hash}:{content_hash}".encode("utf-8")).hexdigest()
+    return {
+        "version": EVENT_INTEGRITY_VERSION,
+        "algorithm": "sha256",
+        "content_hash": content_hash,
+        "previous_hash": previous_hash,
+        "chain_hash": chain_hash,
+        "origin": origin,
+        "sealed_at": utc_now(),
+    }
+
+
+def verify_event_integrity(event: dict, previous: dict | None = None) -> dict:
+    """Verify one event's content seal and its link to the previous partition event."""
+    integrity = event.get("integrity") or {}
+    if not integrity:
+        return {
+            "status": "legacy",
+            "content_verified": False,
+            "chain_verified": False,
+            "link_verified": None,
+        }
+
+    expected_content = event_content_hash(event)
+    content_verified = hmac.compare_digest(
+        str(integrity.get("content_hash") or ""),
+        expected_content,
+    )
+    recorded_previous = str(integrity.get("previous_hash") or "")
+    expected_chain = hashlib.sha256(
+        f"{recorded_previous}:{expected_content}".encode("utf-8")
+    ).hexdigest()
+    chain_verified = hmac.compare_digest(
+        str(integrity.get("chain_hash") or ""),
+        expected_chain,
+    )
+    if previous is None:
+        link_verified = True if recorded_previous == EVENT_CHAIN_GENESIS else None
+    else:
+        link_verified = hmac.compare_digest(recorded_previous, previous_event_hash(previous))
+
+    if content_verified and chain_verified and link_verified is not False:
+        status = "verified" if link_verified is True else "partial"
+    else:
+        status = "compromised"
+    return {
+        "status": status,
+        "content_verified": content_verified,
+        "chain_verified": chain_verified,
+        "link_verified": link_verified,
+        "origin": integrity.get("origin") or "unknown",
+    }
 
 
 def validate_subject_patterns(patterns: Any) -> list[str]:
@@ -174,6 +270,37 @@ async def backfill_legacy_event_metadata(limit: int = 10000) -> int:
     return migrated
 
 
+async def backfill_event_integrity(limit: int = 50000) -> int:
+    """Seal legacy events in partition order without rewriting an existing seal."""
+    await ensure_event_backbone_indexes()
+    events = await db.platform_events.find(
+        {},
+        {"_id": 0},
+    ).sort([("partition_key", 1), ("sequence", 1)]).to_list(
+        max(1, min(int(limit or 50000), 100000))
+    )
+    previous_by_partition: dict[str, dict] = {}
+    sealed = 0
+    for event in events:
+        partition = str(event.get("partition_key") or event.get("client_id") or event.get("tenant_id") or "nexus-local")
+        previous = previous_by_partition.get(partition)
+        if not event.get("integrity"):
+            integrity = build_event_integrity(event, previous, origin="backfill")
+            result = await db.platform_events.update_one(
+                {"id": event["id"], "integrity": {"$exists": False}},
+                {"$set": {"integrity": integrity}},
+            )
+            if result.modified_count:
+                event["integrity"] = integrity
+                sealed += 1
+            else:
+                refreshed = await db.platform_events.find_one({"id": event["id"]}, {"_id": 0, "integrity": 1})
+                if refreshed and refreshed.get("integrity"):
+                    event["integrity"] = refreshed["integrity"]
+        previous_by_partition[partition] = event
+    return sealed
+
+
 async def _next_partition_sequence(partition_key: str) -> int:
     document = await db.platform_event_sequences.find_one_and_update(
         {"partition_key": partition_key},
@@ -278,6 +405,15 @@ async def persist_platform_event(
         "retention_until": (now + timedelta(days=retained_days)).isoformat(),
         "retention_days": retained_days,
     }
+    previous = await db.platform_events.find_one(
+        {
+            "partition_key": resolved_partition,
+            "sequence": {"$lt": stored["sequence"]},
+        },
+        {"_id": 0},
+        sort=[("sequence", -1)],
+    )
+    stored["integrity"] = build_event_integrity(stored, previous)
     try:
         await db.platform_events.insert_one({**stored})
     except DuplicateKeyError:

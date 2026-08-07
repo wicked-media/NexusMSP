@@ -6,6 +6,7 @@ import { Keyboard } from "lucide-react";
 const SHORTCUTS = [
   { group: "Global", items: [
     { keys: ["Cmd/Ctrl", "K"], label: "Open command palette" },
+    { keys: ["Cmd/Ctrl", "."], label: "Open Nexus Quick Dock" },
     { keys: ["Cmd/Ctrl", "/"], label: "Open this shortcut palette" },
     { keys: ["/"], label: "Focus search (Clients / Tickets)" },
     { keys: ["j"], label: "Next row in dense lists" },
@@ -19,6 +20,7 @@ const SHORTCUTS = [
     { keys: ["A"], label: "Apply blueprint" },
   ]},
   { group: "Chat", items: [
+    { keys: ["Cmd/Ctrl", "Shift", "C"], label: "Open quick team chat" },
     { keys: ["/"], label: "Show slash commands" },
     { keys: ["Shift", "Enter"], label: "New line" },
     { keys: ["Enter"], label: "Send message" },

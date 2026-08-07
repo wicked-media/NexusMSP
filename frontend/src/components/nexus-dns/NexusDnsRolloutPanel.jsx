@@ -7,7 +7,6 @@ import {
   ChevronUp,
   Clock3,
   History,
-  Laptop2,
   RefreshCw,
   RotateCcw,
   ShieldCheck,

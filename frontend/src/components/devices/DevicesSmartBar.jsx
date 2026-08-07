@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Sparkles, BrainCircuit, Activity, RefreshCw, Loader2, ChevronRight, ShieldCheck, AlertTriangle, Wrench, History } from "lucide-react";
+import { Sparkles, BrainCircuit, RefreshCw, Loader2, ChevronRight, ShieldCheck, Wrench, History } from "lucide-react";
 import MaintenanceWindowDialog, { MaintenanceWindowHistory } from "./MaintenanceWindowDialog";
 
 const BAND = {

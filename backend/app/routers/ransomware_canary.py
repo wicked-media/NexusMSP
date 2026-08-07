@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.auth import get_current_user
 from app.database import db
-from app.routers.nexus_agent import _audit, _verify_agent_token
+from app.routers.nexus_agent import _audit, _is_online, _verify_agent_token
 
 router = APIRouter()
 
@@ -72,9 +72,22 @@ async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(get_c
     agent = await db.nexus_agents.find_one({"id": agent_id, "is_active": True}, {"_id": 0})
     if not agent:
         raise HTTPException(404, "Nexus Agent not found")
+    if not _is_online(agent.get("last_seen")):
+        raise HTTPException(409, "Nexus Agent is offline; wait for a fresh heartbeat before deploying a canary")
     platform = str(agent.get("os_name") or agent.get("os") or "").lower()
     if platform and "windows" not in platform:
         raise HTTPException(400, "Ransomware canaries are currently supported on Windows Nexus Agents only")
+    existing = await db.ransomware_canaries.find_one({
+        "agent_id": agent_id,
+        "deployment_source": "nexus-agent",
+        "status": {"$in": ["queued", "active", "healthy", "triggered"]},
+    }, {"_id": 0, "id": 1, "device_name": 1, "status": 1})
+    if existing:
+        device_name = existing.get("device_name") or agent.get("hostname") or agent_id
+        raise HTTPException(
+            409,
+            f"{device_name} already has an active Nexus Canary ({existing.get('status') or 'registered'})",
+        )
     canary_id = f"canary-{uuid.uuid4().hex[:12]}"
     requested_path = str(data.get("file_path") or "").strip() or _default_canary_path(canary_id)
     path = PureWindowsPath(requested_path)

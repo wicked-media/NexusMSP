@@ -1,0 +1,104 @@
+name: NexusMSP quality gates
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Unit tests
+        run: pnpm test --watchAll=false --runInBand
+        env:
+          CI: "true"
+      - name: Hook and lint regression budget
+        run: pnpm lint:ci
+      - name: Production build
+        run: pnpm build
+        env:
+          CI: "false"
+      - name: Production dependency security
+        run: pnpm audit:production
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      JWT_SECRET: ci-only-not-for-production
+      MONGO_URL: mongodb://127.0.0.1:27017
+      DB_NAME: nexusmsp-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - name: Deterministic unit tests
+        run: python scripts/run_unit_tests.py
+      - name: Python compile gate
+        run: python -m compileall -q app
+
+  agent:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache-dependency-path: agent/go.sum
+      - run: go test ./...
+      - run: go vet ./...
+      - name: Build Windows agent artifact
+        run: mkdir -p dist && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o dist/nexus-agent-windows-amd64.exe ./cmd/nexus-agent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-agent-windows-amd64
+          path: agent/dist/nexus-agent-windows-amd64.exe
+          if-no-files-found: error
+
+  container-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build --tag nexusmsp-api:ci ./backend
+      - name: Build web image
+        run: docker build --tag nexusmsp-web:ci ./frontend
+      - name: Validate production compose model
+        env:
+          MONGO_USERNAME: ci-user
+          MONGO_PASSWORD: ci-password
+          JWT_SECRET: ci-only-not-for-production
+          NEXUS_SECRET_ENCRYPTION_KEY: ci-only-encryption-key
+          CORS_ORIGINS: https://nexus.example.invalid
+        run: docker compose -f docker-compose.production.yml config --quiet

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { toast } from "sonner";
 import {
   Terminal, Plus, Search, Play, Clock, RefreshCw, Loader2, Code, Cpu,
-  CheckCircle, XCircle, MoreVertical, Copy, Trash2, BookOpen, Calendar,
+  CheckCircle, XCircle, MoreVertical, Trash2, BookOpen, Calendar,
   Shield, Download, Zap, Settings, AlertTriangle, Server, Check, Clipboard, Wrench, Eye
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -56,6 +56,26 @@ const categories = {
   general: "General", maintenance: "Maintenance", security: "Security",
   monitoring: "Monitoring", remediation: "Remediation"
 };
+
+function getApiErrorMessage(error, fallback) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item?.msg) {
+          const location = Array.isArray(item.loc) ? item.loc.filter((part) => part !== "body").join(" → ") : "";
+          return location ? `${location}: ${item.msg}` : item.msg;
+        }
+        return item?.message || null;
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join("; ");
+  }
+  if (detail && typeof detail === "object") return detail.message || detail.msg || fallback;
+  return error?.message || fallback;
+}
 
 function ScriptAutocomplete({ scripts, selectedScript, onSelect, onImport }) {
   const [open, setOpen] = useState(false);
@@ -239,12 +259,12 @@ export default function ScriptingPage() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this script?")) return;
+    if (!window.confirm("Delete this script?")) return;
     try {
       await axios.delete(`${API}/scripts/${id}`, { headers });
       toast.success("Script deleted");
       fetchData();
-    } catch (error) { toast.error(error.response?.data?.detail || "Failed to delete script"); }
+    } catch (error) { toast.error(getApiErrorMessage(error, "Failed to delete script")); }
   };
 
   const handleRunScript = async () => {
@@ -294,7 +314,7 @@ export default function ScriptingPage() {
       await fetchData();
       setActiveTab("history");
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Could not queue the scheduled task");
+      toast.error(getApiErrorMessage(error, "Could not queue the scheduled task"));
     } finally {
       setRunningScheduleId(null);
     }
@@ -431,7 +451,11 @@ export default function ScriptingPage() {
         return;
       }
       throw new Error("Timed out waiting for endpoint result");
-    } catch (error) { toast.error(error.response?.data?.detail || error.message || "Execution failed"); setLiveOutput(prev => [...prev, { time: new Date().toISOString(), type: "error", text: error.response?.data?.detail || error.message || "Execution failed - check endpoint connection and try again" }]); }
+    } catch (error) {
+      const message = getApiErrorMessage(error, "Execution failed - check endpoint connection and try again");
+      toast.error(message);
+      setLiveOutput(prev => [...prev, { time: new Date().toISOString(), type: "error", text: message }]);
+    }
     finally { setLiveRunning(false); }
   };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,8 +22,9 @@ export default function DocScannerPage() {
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
-    axios.get(`${API}/doc-scanner/history`, { headers }).then(r => setHistory(r.data)).catch(() => {});
-    axios.get(`${API}/clients`, { headers }).then(r => {
+    const requestHeaders = { Authorization: `Bearer ${token}` };
+    axios.get(`${API}/doc-scanner/history`, { headers: requestHeaders }).then(r => setHistory(r.data)).catch(() => {});
+    axios.get(`${API}/clients`, { headers: requestHeaders }).then(r => {
       const list = Array.isArray(r.data) ? r.data : r.data.clients || [];
       setClients(list);
     }).catch(() => {});

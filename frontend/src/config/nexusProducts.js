@@ -1,6 +1,5 @@
 import {
   Activity,
-  BadgeCheck,
   Bot,
   Boxes,
   CloudCog,
@@ -8,7 +7,6 @@ import {
   DatabaseBackup,
   FolderKanban,
   Gauge,
-  KeyRound,
   Lightbulb,
   Network,
   PackageOpen,
@@ -17,7 +15,6 @@ import {
   Receipt,
   Rocket,
   ShieldCheck,
-  Store,
 } from "lucide-react";
 
 /**
@@ -25,8 +22,8 @@ import {
  *
  * Existing routes remain the compatibility contract. Product names can evolve
  * without forcing a risky route, API, or database rename across the platform.
- * Vault and Verify deliberately orchestrate approved providers instead of
- * becoming duplicate password or MFA stores.
+ * External authorities such as Keeper, Hudu and Microsoft remain integrations,
+ * not duplicate Nexus products.
  */
 export const NEXUS_PRODUCTS = [
   {
@@ -117,13 +114,13 @@ export const NEXUS_PRODUCTS = [
     id: "monitor",
     name: "Nexus Monitor",
     strapline: "Managed endpoint observability",
-    description: "Live device health, signals, software, compliance, maintenance and technician actions from the Nexus Agent.",
+    description: "Live device health, signals, software, compliance, maintenance, Time Machine evidence and technician actions from the Nexus Agent.",
     route: "/devices",
     category: "Infrastructure",
     icon: Gauge,
     tone: "cyan",
     delivery: "native",
-    capabilities: ["Device health", "Signals", "Agent actions"],
+    capabilities: ["Device health", "Time Machine", "Agent actions"],
   },
   {
     id: "deploy",
@@ -160,32 +157,6 @@ export const NEXUS_PRODUCTS = [
     tone: "violet",
     delivery: "native",
     capabilities: ["DNS health", "Domains", "Change history"],
-  },
-  {
-    id: "vault",
-    name: "Nexus Vault",
-    strapline: "Provider-backed secret context",
-    description: "Securely routes technicians to Keeper and approved Hudu records without duplicating passwords inside NexusMSP.",
-    route: "/hudu",
-    category: "Security & trust",
-    icon: KeyRound,
-    tone: "amber",
-    delivery: "provider",
-    capabilities: ["Keeper references", "Hudu context", "Access audit"],
-    boundary: "NexusMSP does not store a second password vault.",
-  },
-  {
-    id: "verify",
-    name: "Nexus Verify",
-    strapline: "Microsoft-backed identity assurance",
-    description: "Identity posture, MFA coverage, conditional access evidence and reviewed actions through Microsoft.",
-    route: "/control-plane?module=microsoft365&view=security",
-    category: "Security & trust",
-    icon: BadgeCheck,
-    tone: "emerald",
-    delivery: "provider",
-    capabilities: ["MFA posture", "Conditional access", "Identity evidence"],
-    boundary: "Microsoft remains the MFA and identity source of truth.",
   },
   {
     id: "projects",
@@ -234,18 +205,6 @@ export const NEXUS_PRODUCTS = [
     tone: "violet",
     delivery: "native",
     capabilities: ["AI triage", "Recommendations", "Simulation"],
-  },
-  {
-    id: "store",
-    name: "Nexus Store",
-    strapline: "Connectors and automation packs",
-    description: "A governed catalogue of integrations, automation packs, scripts and reusable operational capabilities.",
-    route: "/nexus-suite?view=store",
-    category: "Control & intelligence",
-    icon: Store,
-    tone: "cyan",
-    delivery: "native",
-    capabilities: ["Integrations", "Automation packs", "Script library"],
   },
 ];
 export const NEXUS_PRODUCT_CATEGORIES = [

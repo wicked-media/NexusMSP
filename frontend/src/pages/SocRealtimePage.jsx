@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import {
   Loader2, Settings, Zap, MessageSquare, Clock, DollarSign, CheckCircle,
-  AlertTriangle, RefreshCw, Search, ArrowRightLeft
+  AlertTriangle, RefreshCw
 } from "lucide-react";
 
 export default function SocRealtimePage() {

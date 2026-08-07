@@ -5,6 +5,8 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import assert_client_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -123,25 +125,63 @@ async def get_weekly_time_summary(current_user: dict = Depends(get_current_user)
     }
 
 
-@router.post("/time-entries/generate-invoice")
+@router.post(
+    "/time-entries/generate-invoice",
+    dependencies=[Depends(require_action("billing.invoice.create"))],
+)
 async def generate_invoice_from_time(data: dict, current_user: dict = Depends(get_current_user)):
-    """Generate an invoice from billable time entries for a client"""
+    """Generate one auditable draft invoice from previously uninvoiced time."""
     client_name = data.get("client_name", "")
     entry_ids = data.get("entry_ids", [])
     if not client_name and not entry_ids:
         raise HTTPException(status_code=400, detail="Provide client_name or entry_ids")
 
-    query = {"billable": True}
+    query = {"billable": True, "invoiced": {"$ne": True}}
     if entry_ids:
         query["id"] = {"$in": entry_ids}
     elif client_name:
         query["client_name"] = client_name
-    entries = await db.time_entries.find(query, {"_id": 0}).to_list(500)
+    entries = await db.time_entries.find(
+        scoped_query(current_user, query, site_field=None),
+        {"_id": 0},
+    ).to_list(500)
     if not entries:
-        raise HTTPException(status_code=404, detail="No billable time entries found")
+        raise HTTPException(status_code=404, detail="No uninvoiced billable time entries found")
+
+    client_ids = {str(e.get("client_id") or "").strip() for e in entries}
+    if "" in client_ids or len(client_ids) != 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Selected time entries must belong to one identified client",
+        )
+    client_id = next(iter(client_ids))
+    await assert_client_scope(current_user, client_id, operation="time.invoice.generate")
+
+    invoice_id = f"INV-{uuid.uuid4().hex[:6].upper()}"
+    claimed_entries = []
+    for entry in entries:
+        result = await db.time_entries.update_one(
+            {"id": entry["id"], "billable": True, "invoiced": {"$ne": True}},
+            {"$set": {
+                "invoiced": True,
+                "invoice_id": invoice_id,
+                "invoiced_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        if result.modified_count == 1:
+            claimed_entries.append(entry)
+    entries = claimed_entries
+    if not entries:
+        raise HTTPException(status_code=409, detail="The selected time entries were already invoiced")
 
     total_minutes = sum(e.get("minutes", 0) for e in entries)
-    total_amount = sum(e.get("total_amount", 0) for e in entries)
+    def entry_amount(entry: dict) -> float:
+        stored = entry.get("total_amount")
+        if stored is not None and float(stored) > 0:
+            return round(float(stored), 2)
+        return round((float(entry.get("minutes") or 0) / 60) * float(entry.get("hourly_rate") or 75), 2)
+
+    total_amount = sum(entry_amount(e) for e in entries)
     line_items = []
     for e in entries:
         hrs = round(e.get("minutes", 0) / 60, 2)
@@ -149,13 +189,14 @@ async def generate_invoice_from_time(data: dict, current_user: dict = Depends(ge
             "description": f'{e.get("ticket_title", "N/A")} - {e.get("description", "")}',
             "hours": hrs,
             "rate": e.get("hourly_rate", 75),
-            "amount": e.get("total_amount", 0),
+            "amount": entry_amount(e),
             "date": e.get("date", ""),
             "tech": e.get("user_name", ""),
         })
 
     invoice = {
-        "id": f"INV-{uuid.uuid4().hex[:6].upper()}",
+        "id": invoice_id,
+        "client_id": client_id,
         "client_name": client_name or entries[0].get("client_name", "Unknown"),
         "status": "draft",
         "total_hours": round(total_minutes / 60, 2),
@@ -163,15 +204,43 @@ async def generate_invoice_from_time(data: dict, current_user: dict = Depends(ge
         "line_items": line_items,
         "entry_count": len(entries),
         "generated_from": "time_tracking",
+        "ticket_ids": sorted({e.get("ticket_id") for e in entries if e.get("ticket_id")}),
+        "source_refs": [
+            {
+                "type": "time_entry",
+                "id": e["id"],
+                "ticket_id": e.get("ticket_id"),
+                "remote_session_id": e.get("remote_session_id"),
+            }
+            for e in entries
+        ],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("name", "Admin"),
     }
-    await db.invoices.insert_one(invoice)
+    try:
+        await db.invoices.insert_one(invoice)
+    except Exception:
+        await db.time_entries.update_many(
+            {"id": {"$in": [e["id"] for e in entries]}, "invoice_id": invoice_id},
+            {"$set": {"invoiced": False}, "$unset": {"invoice_id": "", "invoiced_at": ""}},
+        )
+        raise
     invoice.pop("_id", None)
 
-    # Mark time entries as invoiced
-    for e in entries:
-        await db.time_entries.update_one({"id": e["id"]}, {"$set": {"invoiced": True, "invoice_id": invoice["id"]}})
+    await log_activity(
+        current_user,
+        "invoice_generated_from_time",
+        "invoice",
+        invoice_id,
+        invoice_id,
+        f"Generated draft invoice from {len(entries)} billable time entr{'y' if len(entries) == 1 else 'ies'}.",
+        metadata={
+            "client_id": client_id,
+            "time_entry_ids": [e["id"] for e in entries],
+            "ticket_ids": invoice["ticket_ids"],
+            "total_amount": invoice["total_amount"],
+        },
+    )
 
     return invoice
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import { API, useAuth } from "@/App";
+import { API } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  Sparkles, Settings, Hash, TrendingUp, Calendar, Warehouse, ShoppingCart,
-  Layers, FileCheck, Receipt, DollarSign, Percent, Plus, Trash2,
-  ArrowRightLeft, Save, Upload, Download, Loader2, CheckCircle, XCircle, Calculator
+  Sparkles, Hash, Warehouse, ShoppingCart, FileCheck, Receipt, Plus, Trash2, Save, Upload, Loader2, CheckCircle, XCircle
 } from "lucide-react";
 
 export default function BillingProPage() {

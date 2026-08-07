@@ -12,19 +12,16 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
-  DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuSub,
-  DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuPortal,
+  DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   MoreVertical, Monitor, Terminal, FolderOpen, Power, Wifi, RefreshCw,
   Download, MessageSquareWarning, Wrench, Cpu, MemoryStick, HardDrive,
-  Loader2, Activity, Zap, Search, Play, Square, RotateCcw, Skull, ChevronRight,
-  Keyboard, Sparkles, Gauge, Camera, BrainCircuit, X,
+  Loader2, Activity, Zap, Search, Play, Square, RotateCcw, Skull, ChevronRight, Sparkles, Gauge, Camera, BrainCircuit,
 } from "lucide-react";
 import { API } from "@/App";
 
@@ -40,7 +37,7 @@ function MiniGauge({ value, label, icon: Icon }) {
   const v = Math.min(100, Math.max(0, Number(value) || 0));
   const tone = v > 90 ? "bg-rose-500" : v > 75 ? "bg-amber-500" : "bg-emerald-500";
   return (
-    <div className="flex items-center gap-1 min-w-0">
+    <div className="flex items-center gap-1 min-w-0" aria-label={`${label}: ${v.toFixed(0)} percent`}>
       {Icon && <Icon className="w-3 h-3 text-zinc-500 shrink-0" />}
       <div className="flex-1 min-w-[40px] max-w-[80px] h-1.5 rounded-full bg-zinc-800 overflow-hidden">
         <div className={`h-full ${tone}`} style={{ width: `${v}%` }} />

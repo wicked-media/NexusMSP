@@ -10,7 +10,7 @@ import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
 import {
   CreditCard, DollarSign, Users, Send, ExternalLink, Bell,
-  CheckCircle, AlertTriangle, Loader2, TrendingUp, Copy, RefreshCw
+  CheckCircle, AlertTriangle, Loader2, TrendingUp, RefreshCw
 } from "lucide-react";
 
 export default function StripeBillingPortalPage() {

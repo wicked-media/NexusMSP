@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,26 +11,37 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import {
-  Laptop, Monitor, Server, Wifi, WifiOff, Settings, Plus, RefreshCw, Loader2,
-  ExternalLink, Copy, Search, Play, Clock, Shield, Download, ChevronRight,
-  Link2, Unlink, Eye, EyeOff, Pencil, Check, X, History, Zap, Globe,
-  Terminal, Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle,
-  Plug, Power, TestTube, Save, BookOpen
+  Laptop, Monitor, Server, Wifi, WifiOff, Settings, RefreshCw, Loader2,
+  Copy, Search, Play, Shield,
+  Link2, Unlink, Eye, EyeOff, Pencil, Check, History, Zap, Globe,
+  Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle,
+  Plug, TestTube, Save, BookOpen
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
+import RemoteAccessButton from "@/components/devices/RemoteAccessButton";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
+function getRemoteMessage(value, fallback) {
+  if (typeof value === "string" && value.trim()) return value;
+  if (Array.isArray(value)) {
+    const messages = value.map((item) => typeof item === "string" ? item : item?.msg || item?.message).filter(Boolean);
+    if (messages.length) return messages.join("; ");
+  }
+  if (value && typeof value === "object") return value.message || value.msg || fallback;
+  return fallback;
+}
+
 export default function RemoteAccessPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { token } = useAuth();
   const [devices, setDevices] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -49,12 +60,9 @@ export default function RemoteAccessPage() {
   const [connecting, setConnecting] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [selectedDevices, setSelectedDevices] = useState(new Set());
-  const [deployments, setDeployments] = useState(null);
-  const [deployingDevice, setDeployingDevice] = useState(null);
-  const [deployCmd, setDeployCmd] = useState("");
-  const [showDeployDialog, setShowDeployDialog] = useState(false);
+  const [focusedDevice, setFocusedDevice] = useState(null);
+  const [focusedTicketId, setFocusedTicketId] = useState(null);
   const [connectDialog, setConnectDialog] = useState(null);
-  const [showBulkDeploy, setShowBulkDeploy] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState(null);
@@ -68,6 +76,11 @@ export default function RemoteAccessPage() {
   const [providerTestResult, setProviderTestResult] = useState({});
   const [remotePolicy, setRemotePolicy] = useState({ default_provider: "rustdesk", allow_fallback: true, require_consent: true, require_ticket_reference: false });
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [managedLimit, setManagedLimit] = useState(30);
+  const [registryLimit, setRegistryLimit] = useState(30);
+  const [linkPeer, setLinkPeer] = useState(null);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkingDevice, setLinkingDevice] = useState(null);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
@@ -99,11 +112,43 @@ export default function RemoteAccessPage() {
       const res = await axios.put(`${API}/remote-access/policy`, remotePolicy, { headers });
       setRemotePolicy(res.data);
       toast.success("Remote access policy saved");
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to save remote policy"); }
+    } catch (e) { toast.error(getRemoteMessage(e.response?.data?.detail, "Failed to save remote policy")); }
     finally { setSavingPolicy(false); }
   };
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    const assignDeviceId = searchParams.get("assignDevice");
+    const connectDeviceId = searchParams.get("device");
+    const requestedDeviceId = assignDeviceId || connectDeviceId;
+    if (!requestedDeviceId || loading || devices.length === 0) return;
+    const requestedDevice = devices.find((device) => device.id === requestedDeviceId);
+    if (requestedDevice) {
+      setTab("devices");
+      const remoteId = requestedDevice.rustdesk_id || requestedDevice.rd_id;
+      if (assignDeviceId || !remoteId) {
+        setShowAssign(requestedDevice);
+        setAssignForm({ rustdesk_id: remoteId || "", rustdesk_password: "" });
+      } else {
+        setFocusedDevice(requestedDevice);
+        setFocusedTicketId(searchParams.get("ticket"));
+        setSearch(requestedDevice.name || requestedDevice.hostname || requestedDevice.client_name || "");
+        setFilterType("all");
+        setFilterRegistered("all");
+      }
+    } else {
+      toast.error("The selected device is not available in Remote Access");
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("assignDevice");
+    nextParams.delete("device");
+    nextParams.delete("ticket");
+    setSearchParams(nextParams, { replace: true });
+  }, [devices, loading, searchParams, setSearchParams]);
+  useEffect(() => {
+    setManagedLimit(30);
+    setRegistryLimit(30);
+  }, [search, filterType, filterRegistered, tab]);
 
   // Provider functions
   const openProviderConfig = async (provider) => {
@@ -181,32 +226,7 @@ export default function RemoteAccessPage() {
       });
       setQuickId("");
       fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || "Connection failed"); }
-    finally { setConnecting(null); }
-  };
-
-  // Connect to registered device
-  const connectDevice = async (device) => {
-    const rdId = device.rd_id;
-    if (!rdId) { toast.error("No RustDesk ID assigned to this device"); return; }
-    setConnecting(device.id);
-    try {
-      let res;
-      if (device.rd_entry_id) {
-        res = await axios.post(`${API}/rustdesk/devices/${device.rd_entry_id}/connect`, {}, { headers });
-      } else {
-        res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: rdId }, { headers });
-      }
-      setConnectDialog({
-        rustdesk_id: rdId,
-        rustdesk_password: res.data.rustdesk_password,
-        connection_url: res.data.connection_url,
-        web_client_url: res.data.web_client_url,
-        relay_server: res.data.relay_server,
-        device_name: device.name || device.hostname || rdId,
-      });
-      fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || "Connection failed"); }
+    } catch (e) { toast.error(getRemoteMessage(e.response?.data?.detail, "Connection failed")); }
     finally { setConnecting(null); }
   };
 
@@ -221,7 +241,7 @@ export default function RemoteAccessPage() {
       setShowAssign(null);
       setAssignForm({ rustdesk_id: "", rustdesk_password: "" });
       fetchData();
-    } catch (err) { toast.error(err.response?.data?.detail || "Failed to assign"); }
+    } catch (err) { toast.error(getRemoteMessage(err.response?.data?.detail, "Failed to assign")); }
     finally { setSubmitting(false); }
   };
 
@@ -240,41 +260,6 @@ export default function RemoteAccessPage() {
 
   const copyToClipboard = (text) => { navigator.clipboard.writeText(text); toast.success("Copied to clipboard"); };
 
-  // Deploy agent to single device
-  const deployAgent = async (device) => {
-    setDeployingDevice(device.id);
-    try {
-      const res = await axios.post(`${API}/rustdesk/devices/${device.id}/deploy-agent`, {}, { headers });
-      setDeployCmd(res.data.deployment.deploy_command);
-      setShowDeployDialog(true);
-      toast.success(`Agent deployment queued for ${device.name || device.hostname}`);
-      fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to queue deployment"); }
-    finally { setDeployingDevice(null); }
-  };
-
-  // Mark agent as deployed (tech confirms)
-  const markDeployed = async (deviceId) => {
-    try {
-      await axios.post(`${API}/rustdesk/devices/${deviceId}/deploy-agent/complete`, {}, { headers });
-      toast.success("Agent marked as deployed");
-      fetchData();
-    } catch { toast.error("Failed to mark as deployed"); }
-  };
-
-  // Bulk deploy agent
-  const bulkDeployAgent = async () => {
-    const ids = [...selectedDevices];
-    if (!ids.length) { toast.error("Select devices first"); return; }
-    try {
-      const res = await axios.post(`${API}/rustdesk/deploy-agent/bulk`, { device_ids: ids }, { headers });
-      toast.success(res.data.message);
-      setSelectedDevices(new Set());
-      setShowBulkDeploy(false);
-      fetchData();
-    } catch (e) { toast.error(e.response?.data?.detail || "Bulk deploy failed"); }
-  };
-
   const toggleDeviceSelect = (id) => {
     setSelectedDevices(prev => {
       const n = new Set(prev);
@@ -291,7 +276,7 @@ export default function RemoteAccessPage() {
       toast.success(res.data.message);
       fetchData();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Sync failed - check server settings");
+      toast.error(getRemoteMessage(e.response?.data?.detail, "Sync failed - check server settings"));
     }
     finally { setSyncing(false); }
   };
@@ -306,7 +291,7 @@ export default function RemoteAccessPage() {
       if (settingsForm.api_key) params.set("api_key", settingsForm.api_key);
       const res = await axios.get(`${API}/rustdesk/live/test-connection?${params.toString()}`, { headers });
       setConnectionResult(res.data);
-      if (res.data.connected) {
+      if (res.data.authorized ?? res.data.connected) {
         toast.success(res.data.message);
       } else {
         toast.error(res.data.message || "Connection failed");
@@ -321,29 +306,63 @@ export default function RemoteAccessPage() {
     return livePeers.peers.find(p => String(p.id) === String(rdId));
   };
 
-  const getDeployStatus = (deviceId) => {
-    if (!deployments?.deployments) return null;
-    return deployments.deployments.find(d => d.device_id === deviceId);
-  };
-
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
 
+  const managedDevices = devices.filter(d => d.managed_asset !== false);
+  const providerOnlyDevices = devices.filter(d => d.managed_asset === false);
   const registered = devices.filter(d => d.rd_registered);
-  const unregistered = devices.filter(d => !d.rd_registered);
-  const online = devices.filter(d => d.status === "online");
+  const managedRegistered = managedDevices.filter(d => d.rd_registered);
+  const managedUnregistered = managedDevices.filter(d => !d.rd_registered);
+  const online = managedDevices.filter(d => d.status === "online");
   const serverConfigured = config?.enabled && config?.server_url;
+  const activeProviders = providers.filter(provider => provider.active || (provider.id === "rustdesk" && serverConfigured));
 
-  const filtered = devices.filter(d => {
+  const matchesSearch = d => {
     if (search) {
       const q = search.toLowerCase();
       if (!(d.name || "").toLowerCase().includes(q) && !(d.hostname || "").toLowerCase().includes(q) &&
           !(d.rd_id || "").toLowerCase().includes(q) && !(d.client_name || "").toLowerCase().includes(q)) return false;
     }
+    return true;
+  };
+
+  const linkProviderPeer = async (device) => {
+    if (!linkPeer?.rd_entry_id || !device?.id) return;
+    setLinkingDevice(device.id);
+    try {
+      const { data } = await axios.put(
+        `${API}/rustdesk/devices/${linkPeer.rd_entry_id}/link`,
+        { managed_device_id: device.id },
+        { headers },
+      );
+      toast.success(data.message || "RustDesk record linked");
+      setLinkPeer(null);
+      setLinkSearch("");
+      await fetchData();
+    } catch (error) {
+      toast.error(getRemoteMessage(error.response?.data?.detail, "Unable to link this provider record"));
+    } finally {
+      setLinkingDevice(null);
+    }
+  };
+
+  const filtered = managedDevices.filter(d => {
+    if (!matchesSearch(d)) return false;
     if (filterType !== "all" && d.device_type !== filterType) return false;
     if (filterRegistered === "registered" && !d.rd_registered) return false;
     if (filterRegistered === "unregistered" && d.rd_registered) return false;
     return true;
   });
+  const registryFiltered = registered.filter(matchesSearch);
+  const linkCandidates = managedDevices
+    .filter(device => !device.rd_registered)
+    .filter(device => {
+      const query = linkSearch.trim().toLowerCase();
+      if (!query) return true;
+      return [device.name, device.hostname, device.client_name, device.ip_address]
+        .some(value => String(value || "").toLowerCase().includes(query));
+    })
+    .slice(0, 10);
 
   return (
     <div className="space-y-5" data-testid="remote-access-page">
@@ -391,22 +410,42 @@ export default function RemoteAccessPage() {
             </div>
           </div>
           {connectionResult && (
-            <div className={`mt-2 p-2 rounded text-xs ${connectionResult.connected ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
+            <div className={`mt-2 p-2 rounded text-xs ${(connectionResult.authorized ?? connectionResult.connected) ? "bg-emerald-500/10 text-emerald-400" : connectionResult.connected ? "bg-amber-500/10 text-amber-300" : "bg-red-500/10 text-red-400"}`}>
               {connectionResult.message}
               {connectionResult.peer_count !== null && connectionResult.peer_count !== undefined && <span className="ml-2 font-medium">&middot; {connectionResult.peer_count} peer(s) found</span>}
               {connectionResult.endpoints_available?.length > 0 && (
-                <span className="ml-2 text-muted-foreground">Endpoints: {connectionResult.endpoints_available.map(e => e.path).join(", ")}</span>
+                <span className="ml-2 text-muted-foreground">Endpoints: {connectionResult.endpoints_available.map(e => `${e.path} (${e.status})`).join(", ")}</span>
               )}
             </div>
           )}
         </CardContent>
       </Card>
 
+      {focusedDevice && (
+        <Card className="overflow-hidden border-cyan-400/30 bg-[linear-gradient(110deg,rgba(8,145,178,0.12),rgba(15,23,42,0.88)_48%,rgba(14,116,144,0.08))]" data-testid="remote-device-context">
+          <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Monitor className="h-5 w-5 text-cyan-300" /></div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold">{focusedDevice.name || focusedDevice.hostname}</p><Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-[10px] text-cyan-200">Remote-ready focus</Badge>{focusedTicketId && <Badge variant="outline" className="text-[10px]">Ticket {focusedTicketId}</Badge>}</div>
+                <p className="mt-1 text-xs text-muted-foreground">{focusedDevice.client_name || "Unassigned client"} · {focusedDevice.os || focusedDevice.operating_system || "Operating system not reported"} · Remote ID {focusedDevice.rustdesk_id || focusedDevice.rd_id}</p>
+                <p className="mt-1 text-[11px] text-cyan-100/70">Opened from operational context. Technician authorisation, consent, provider handoff and session evidence remain in one governed workflow.</p>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => navigate(`/devices/${focusedDevice.id}`)}><Eye className="mr-1.5 h-4 w-4" />Device record</Button>
+              <RemoteAccessButton device={{ ...focusedDevice, rustdesk_id: focusedDevice.rustdesk_id || focusedDevice.rd_id }} status={focusedDevice.status} ticketId={focusedTicketId} testid="focused-device-remote" />
+              <Button variant="ghost" size="icon" aria-label="Clear focused device" onClick={() => { setFocusedDevice(null); setFocusedTicketId(null); setSearch(""); }}><XCircle className="h-4 w-4" /></Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quick Connect Bar */}
       <Card className="border-sky-500/20 bg-sky-500/[0.03]">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-3 sm:min-w-[190px]"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10"><Zap className="w-4 h-4 text-sky-300" /></div><div><p className="text-sm font-semibold">Quick connect</p><p className="text-xs text-muted-foreground">Use a RustDesk ID</p></div></div>
+            <div className="flex items-center gap-3 sm:min-w-[220px]"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10"><Zap className="w-4 h-4 text-sky-300" /></div><div><p className="text-sm font-semibold">Unlinked quick connect</p><p className="text-xs text-muted-foreground">Break-glass access by RustDesk ID</p></div></div>
             <Input placeholder="Enter RustDesk ID (for example 842931675)" value={quickId} onChange={e => setQuickId(e.target.value)} onKeyDown={e => e.key === "Enter" && quickConnect()} className="flex-1 font-mono" data-testid="quick-connect-input" />
             <Button onClick={quickConnect} disabled={!quickId.trim() || connecting === "quick"} className="sm:min-w-28" data-testid="quick-connect-btn">
               {connecting === "quick" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}Connect
@@ -418,11 +457,11 @@ export default function RemoteAccessPage() {
       {/* Stats */}
       <MetricStrip columns={5}>
         {[
-          { label: "Total Devices", value: devices.length, icon: Monitor, color: "text-sky-400", accent: "sky" },
-          { label: "RustDesk Registered", value: registered.length, icon: Link2, color: "text-emerald-400", accent: "emerald" },
-          { label: "Unregistered", value: unregistered.length, icon: Unlink, color: "text-amber-400", accent: "amber" },
+          { label: "Managed Assets", value: managedDevices.length, icon: Monitor, color: "text-sky-400", accent: "sky" },
+          { label: "Remote Ready", value: managedRegistered.length, icon: Link2, color: "text-emerald-400", accent: "emerald" },
+          { label: "Needs Setup", value: managedUnregistered.length, icon: Unlink, color: "text-amber-400", accent: "amber" },
+          { label: "Provider Only", value: providerOnlyDevices.length, icon: Globe, color: "text-violet-400", accent: "violet" },
           { label: "Live Online", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400", accent: "cyan" },
-          { label: "Sessions Today", value: sessions.filter(s => { const d = new Date(s.started_at); const t = new Date(); return d.toDateString() === t.toDateString(); }).length, icon: History, color: "text-sky-400", accent: "sky" },
         ].map(st => (
           <MetricTile key={st.label} label={st.label} value={st.value} accent={st.accent} icon={<st.icon className={`w-2.5 h-2.5 ${st.color}`} />} testid={`remote-metric-${st.label.toLowerCase().replace(/\s+/g, "-")}`} />
         ))}
@@ -430,8 +469,8 @@ export default function RemoteAccessPage() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
-          <TabsTrigger value="devices">All Devices ({devices.length})</TabsTrigger>
-          <TabsTrigger value="registered">Registered ({registered.length})</TabsTrigger>
+          <TabsTrigger value="devices">Managed Assets ({managedDevices.length})</TabsTrigger>
+          <TabsTrigger value="registered">Provider Registry ({registered.length})</TabsTrigger>
           <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Integrations ({providers.length})</TabsTrigger>
           {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Peers ({livePeers.count})</TabsTrigger>}
           <TabsTrigger value="sessions">Sessions ({sessions.length})</TabsTrigger>
@@ -481,12 +520,12 @@ export default function RemoteAccessPage() {
                 <TableHeader><TableRow>
                   <TableHead className="w-10"></TableHead>
                   <TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Type / OS</TableHead>
-                  <TableHead>Status</TableHead><TableHead>RustDesk ID</TableHead><TableHead>Agent</TableHead><TableHead>Last Connected</TableHead><TableHead></TableHead>
+                  <TableHead>Status</TableHead><TableHead>RustDesk ID</TableHead><TableHead className="hidden xl:table-cell">Agent</TableHead><TableHead className="hidden xl:table-cell">Last Connected</TableHead><TableHead></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {filtered.length === 0 ? (
-                    <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No devices match your filters</TableCell></TableRow>
-                  ) : filtered.map(d => {
+                    <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">No devices match your filters</TableCell></TableRow>
+                  ) : filtered.slice(0, managedLimit).map(d => {
                     const Icon = TYPE_ICONS[d.device_type] || Monitor;
                     return (
                       <TableRow key={d.id} data-testid={`device-row-${d.id}`}>
@@ -524,13 +563,10 @@ export default function RemoteAccessPage() {
                             <div className="flex items-center gap-1.5">
                               <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{d.rd_id}</code>
                               <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => copyToClipboard(d.rd_id)}><Copy className="w-3 h-3" /></Button>
-                              {d.rd_password && (
-                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => setShowPassword(p => ({ ...p, [d.id]: !p[d.id] }))}>
-                                  {showPassword[d.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                                </Button>
-                              )}
-                              {showPassword[d.id] && d.rd_password && (
-                                <code className="text-[10px] font-mono text-amber-400">{d.rd_password}</code>
+                              {d.credential_configured && (
+                                <Badge variant="outline" className="h-5 border-emerald-500/25 px-1.5 text-[9px] text-emerald-500">
+                                  <Shield className="mr-1 h-2.5 w-2.5" />Credential secured
+                                </Badge>
                               )}
                             </div>
                           ) : (
@@ -538,7 +574,7 @@ export default function RemoteAccessPage() {
                           )}
                         </TableCell>
                         {/* Agent Status */}
-                        <TableCell>
+                        <TableCell className="hidden xl:table-cell">
                           {d.nexus_agent_id ? (
                             <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-400/30"><CheckCircle className="w-3 h-3 mr-1" />Nexus Agent</Badge>
                           ) : (
@@ -547,20 +583,24 @@ export default function RemoteAccessPage() {
                             </Button>
                           )}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{d.rd_last_connected ? new Date(d.rd_last_connected).toLocaleString() : "—"}</TableCell>
+                        <TableCell className="hidden text-xs text-muted-foreground xl:table-cell">{d.rd_last_connected ? new Date(d.rd_last_connected).toLocaleString() : "—"}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
                             {d.rd_id ? (
-                              <Button size="sm" variant="default" className="h-7 text-xs" onClick={() => connectDevice(d)} disabled={connecting === d.id} data-testid={`connect-${d.id}`}>
-                                {connecting === d.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}Connect
-                              </Button>
+                              <RemoteAccessButton
+                                device={{ ...d, rustdesk_id: d.rd_id }}
+                                status={getLivePeerStatus(d.rd_id) ? (getLivePeerStatus(d.rd_id)?.online ? "online" : "offline") : d.status}
+                                compact
+                                providersOverride={activeProviders}
+                                testid={`connect-${d.id}`}
+                              />
                             ) : (
                               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setShowAssign(d); setAssignForm({ rustdesk_id: d.rustdesk_id || "", rustdesk_password: "" }); }} data-testid={`assign-${d.id}`}>
                                 <Link2 className="w-3 h-3 mr-1" />Assign ID
                               </Button>
                             )}
                             {d.rd_id && (
-                              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowAssign(d); setAssignForm({ rustdesk_id: d.rd_id || "", rustdesk_password: d.rd_password || "" }); }} data-testid={`edit-rd-${d.id}`}>
+                              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowAssign(d); setAssignForm({ rustdesk_id: d.rd_id || "", rustdesk_password: "" }); }} data-testid={`edit-rd-${d.id}`}>
                                 <Pencil className="w-3 h-3" />
                               </Button>
                             )}
@@ -573,14 +613,41 @@ export default function RemoteAccessPage() {
               </Table>
             </CardContent>
           </Card>
+          {filtered.length > managedLimit && (
+            <div className="flex items-center justify-center">
+              <Button variant="outline" size="sm" onClick={() => setManagedLimit(limit => limit + 30)}>
+                Show 30 more <span className="ml-1 text-muted-foreground">({filtered.length - managedLimit} remaining)</span>
+              </Button>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="registered" className="mt-4 space-y-3">
+          <Card className="border-border/40 bg-card/50">
+            <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search provider records by device, client, or RustDesk ID..."
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                  className="pl-9"
+                  data-testid="provider-registry-search"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge variant="outline" className="border-emerald-500/25 text-emerald-300">{managedRegistered.length} linked to managed assets</Badge>
+                <Badge variant="outline" className="border-violet-500/25 text-violet-300">{providerOnlyDevices.length} provider-only</Badge>
+              </div>
+            </CardContent>
+          </Card>
           {registered.length === 0 ? (
             <Card className="border-dashed"><CardContent className="py-12 text-center"><Unlink className="w-12 h-12 mx-auto text-muted-foreground/20 mb-3" /><p className="text-muted-foreground">No devices registered with RustDesk IDs yet</p><p className="text-xs text-muted-foreground mt-1">Go to All Devices and click "Assign ID" to register</p></CardContent></Card>
+          ) : registryFiltered.length === 0 ? (
+            <Card className="border-dashed"><CardContent className="py-12 text-center"><Search className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" /><p className="text-muted-foreground">No provider records match your search</p></CardContent></Card>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {registered.map(d => {
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+              {registryFiltered.slice(0, registryLimit).map(d => {
                 const Icon = TYPE_ICONS[d.device_type] || Monitor;
                 return (
                   <Card key={d.id} className="border-border/40 hover:border-primary/30 transition-colors" data-testid={`rd-card-${d.id}`}>
@@ -593,6 +660,7 @@ export default function RemoteAccessPage() {
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-semibold text-sm truncate">{d.name || d.hostname}</span>
                             <Badge variant={d.status === "online" ? "default" : "secondary"} className="text-[10px] capitalize">{d.status}</Badge>
+                            <Badge variant="outline" className={`text-[10px] ${d.managed_asset === false ? "border-violet-500/25 text-violet-300" : "border-emerald-500/25 text-emerald-300"}`}>{d.managed_asset === false ? "Provider only" : "Managed asset"}</Badge>
                           </div>
                           <p className="text-xs text-muted-foreground">{d.client_name}</p>
                           <div className="flex items-center gap-2 mt-2">
@@ -601,14 +669,31 @@ export default function RemoteAccessPage() {
                           </div>
                           {d.rd_last_connected && <p className="text-[10px] text-muted-foreground mt-1">Last: {new Date(d.rd_last_connected).toLocaleString()}</p>}
                         </div>
-                        <Button size="sm" onClick={() => connectDevice(d)} disabled={connecting === d.id} data-testid={`connect-card-${d.id}`}>
-                          {connecting === d.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Play className="w-3 h-3 mr-1" />}Connect
-                        </Button>
+                        {d.managed_asset === false ? (
+                          <Button size="sm" variant="outline" onClick={() => { setLinkPeer(d); setLinkSearch(""); }} data-testid={`link-card-${d.id}`}>
+                            <Link2 className="w-3 h-3 mr-1" />Link asset
+                          </Button>
+                        ) : (
+                          <RemoteAccessButton
+                            device={{ ...d, rustdesk_id: d.rd_id }}
+                            status={getLivePeerStatus(d.rd_id) ? (getLivePeerStatus(d.rd_id)?.online ? "online" : "offline") : d.status}
+                            compact
+                            providersOverride={activeProviders}
+                            testid={`connect-card-${d.id}`}
+                          />
+                        )}
                       </div>
                     </CardContent>
                   </Card>
                 );
               })}
+            </div>
+          )}
+          {registryFiltered.length > registryLimit && (
+            <div className="flex items-center justify-center">
+              <Button variant="outline" size="sm" onClick={() => setRegistryLimit(limit => limit + 30)}>
+                Show 30 more <span className="ml-1 text-muted-foreground">({registryFiltered.length - registryLimit} remaining)</span>
+              </Button>
             </div>
           )}
         </TabsContent>
@@ -715,7 +800,7 @@ export default function RemoteAccessPage() {
           <TabsContent value="live-peers" className="mt-4 space-y-3" data-testid="live-peers-tab">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm text-muted-foreground">Real-time peer data from <span className="font-mono text-xs">{livePeers.server_url}</span> {livePeers.source && <Badge variant="outline" className="ml-1 text-[10px]">via {livePeers.source}</Badge>}</p>
-              <Button size="sm" variant="outline" onClick={syncFromServer} disabled={syncing}>{syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync to NexusOps</Button>
+              <Button size="sm" variant="outline" onClick={syncFromServer} disabled={syncing}>{syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync to NexusMSP</Button>
             </div>
             <Card className="border-border/40">
               <CardContent className="p-0">
@@ -759,109 +844,15 @@ export default function RemoteAccessPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="deployments" className="mt-4 space-y-4" data-testid="deployments-tab">
-          {/* Deployment Stats */}
-          <div className="grid grid-cols-4 gap-3">
-            <Card className="border-blue-500/20"><CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Total</p><Rocket className="w-4 h-4 text-blue-400" /></div>
-              <p className="text-2xl font-bold text-blue-400">{deployments?.total || 0}</p>
-            </CardContent></Card>
-            <Card className="border-amber-500/20"><CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Pending</p><Clock className="w-4 h-4 text-amber-400" /></div>
-              <p className="text-2xl font-bold text-amber-400">{deployments?.pending || 0}</p>
-            </CardContent></Card>
-            <Card className="border-emerald-500/20"><CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Deployed</p><CheckCircle className="w-4 h-4 text-emerald-400" /></div>
-              <p className="text-2xl font-bold text-emerald-400">{deployments?.deployed || 0}</p>
-            </CardContent></Card>
-            <Card className="border-red-500/20"><CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground">Failed</p><XCircle className="w-4 h-4 text-red-400" /></div>
-              <p className="text-2xl font-bold text-red-400">{deployments?.failed || 0}</p>
-            </CardContent></Card>
-          </div>
-
-          {/* How it works */}
-          <Card className="border-blue-500/10 bg-blue-500/5">
-            <CardContent className="py-4">
-              <div className="flex items-start gap-3">
-                <Terminal className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-semibold mb-1">Deploy Patch Agent via RustDesk</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Click "Deploy" on any device in the All Devices tab, or select multiple devices and click "Deploy Agent to Selected".
-                    Connect to the device via RustDesk, then paste and run the deployment command. The agent runs as a background service,
-                    reporting Windows Update status, installed software, and Defender status back to NexusOps every hour.
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Deployment List */}
-          {(deployments?.deployments || []).length > 0 ? (
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader><TableRow>
-                    <TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Status</TableHead>
-                    <TableHead>Queued By</TableHead><TableHead>Queued</TableHead><TableHead>Deployed</TableHead><TableHead></TableHead>
-                  </TableRow></TableHeader>
-                  <TableBody>
-                    {deployments.deployments.map(dep => (
-                      <TableRow key={dep.id} data-testid={`deployment-${dep.id}`}>
-                        <TableCell className="font-medium text-sm">{dep.device_name}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-xs">{dep.client_name || "—"}</Badge></TableCell>
-                        <TableCell>
-                          {dep.status === "deployed" ? (
-                            <Badge variant="outline" className="text-xs text-emerald-400 border-emerald-400/30"><CheckCircle className="w-3 h-3 mr-1" />Deployed</Badge>
-                          ) : dep.status === "pending" ? (
-                            <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/30 animate-pulse"><Clock className="w-3 h-3 mr-1" />Pending</Badge>
-                          ) : (
-                            <Badge variant="destructive" className="text-xs"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{dep.queued_by}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{dep.queued_at ? new Date(dep.queued_at).toLocaleString() : "—"}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{dep.deployed_at ? new Date(dep.deployed_at).toLocaleString() : "—"}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            {dep.status === "pending" && (
-                              <>
-                                <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setDeployCmd(dep.deploy_command); setShowDeployDialog(true); }} data-testid={`view-cmd-${dep.id}`}>
-                                  <Terminal className="w-3 h-3 mr-1" />View CMD
-                                </Button>
-                                <Button size="sm" variant="ghost" className="h-6 text-[10px] text-emerald-400" onClick={() => markDeployed(dep.device_id)} data-testid={`mark-deployed-${dep.id}`}>
-                                  <Check className="w-3 h-3 mr-1" />Done
-                                </Button>
-                              </>
-                            )}
-                            {dep.status === "deployed" && dep.deploy_command && (
-                              <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { navigator.clipboard.writeText(dep.deploy_command); toast.success("Command copied"); }}>
-                                <Copy className="w-3 h-3 mr-1" />CMD
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="border-dashed">
-              <CardContent className="py-12 text-center">
-                <Rocket className="w-12 h-12 mx-auto text-muted-foreground/20 mb-3" />
-                <p className="text-muted-foreground">No deployments queued yet</p>
-                <p className="text-xs text-muted-foreground mt-1">Select devices and click "Deploy" to start rolling out the Patch Agent</p>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
         <TabsContent value="sessions" className="mt-4">
           <Card className="border-border/40">
-            <CardHeader><CardTitle className="text-sm flex items-center gap-2"><History className="w-4 h-4 text-purple-400" />Remote Sessions</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm flex items-center gap-2"><History className="w-4 h-4 text-sky-400" />Remote session evidence</CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">Technician, endpoint, client, status, and launch time retained for operational review.</p>
+              </div>
+              <Badge variant="outline" className="shrink-0">{sessions.length} records</Badge>
+            </CardHeader>
             <CardContent>
               {sessions.length === 0 ? (
                 <p className="text-center py-8 text-muted-foreground">No remote sessions recorded</p>
@@ -869,16 +860,24 @@ export default function RemoteAccessPage() {
                 <ScrollArea className="h-80">
                   <div className="space-y-2">
                     {sessions.map(s => (
-                      <div key={s.id} className="flex items-center gap-3 p-2 rounded-lg border border-border/20 hover:bg-muted/20" data-testid={`session-${s.id}`}>
-                        <div className="w-8 h-8 rounded-full bg-purple-500/10 flex items-center justify-center"><Play className="w-4 h-4 text-purple-400" /></div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">
-                            <span className="text-muted-foreground">{s.user_name}</span> connected to <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{s.rustdesk_id}</code>
+                      <div key={s.id} className="flex flex-col gap-3 rounded-xl border border-border/40 bg-card/40 p-3 transition-colors hover:border-sky-500/20 hover:bg-sky-500/[0.025] sm:flex-row sm:items-center" data-testid={`session-${s.id}`}>
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${s.status === "completed" ? "bg-emerald-500/10" : "bg-sky-500/10"}`}><Play className={`w-4 h-4 ${s.status === "completed" ? "text-emerald-400" : "text-sky-400"}`} /></div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            <span className="text-muted-foreground">{s.user_name}</span>{" "}
+                            {s.status === "completed" ? "completed a session with" : "prepared remote access to"}{" "}
+                            <span className="text-foreground">{s.device_name || "RustDesk endpoint"}</span>
                           </p>
-                          <p className="text-[10px] text-muted-foreground">{s.client_id ? `Client: ${s.client_id}` : "Quick connect"}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                            <span>{s.client_name || (s.client_id ? `Client ${s.client_id}` : "Unlinked quick connect")}</span>
+                            <span>·</span>
+                            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{s.rustdesk_id}</code>
+                          </div>
                         </div>
-                        <Badge variant={s.status === "initiated" ? "default" : "secondary"} className="text-[10px] capitalize">{s.status}</Badge>
-                        <span className="text-[10px] text-muted-foreground">{s.started_at ? new Date(s.started_at).toLocaleString() : ""}</span>
+                        <div className="flex items-center justify-between gap-3 sm:justify-end">
+                          <Badge variant="outline" className={`text-[10px] capitalize ${s.status === "completed" ? "border-emerald-500/25 text-emerald-300" : "border-sky-500/25 text-sky-300"}`}>{s.status}</Badge>
+                          <span className="whitespace-nowrap text-[10px] text-muted-foreground">{s.started_at ? new Date(s.started_at).toLocaleString() : ""}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -890,6 +889,47 @@ export default function RemoteAccessPage() {
       </Tabs>
 
       {/* Assign RustDesk ID Dialog */}
+      <Dialog open={!!linkPeer} onOpenChange={open => { if (!open) { setLinkPeer(null); setLinkSearch(""); } }}>
+        <DialogContent className="max-w-xl border-cyan-400/20 bg-[#071019]" aria-describedby="link-provider-record-desc">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Link2 className="h-5 w-5 text-cyan-300" />Link provider record</DialogTitle>
+            <DialogDescription id="link-provider-record-desc">Attach this RustDesk identity to one canonical NexusMSP managed asset. The relationship is retained in the audit trail.</DialogDescription>
+          </DialogHeader>
+          {linkPeer && (
+            <div className="space-y-4">
+              <div className="grid gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4 sm:grid-cols-2">
+                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Provider record</p><p className="mt-1 text-sm font-semibold">{linkPeer.name || "Unlinked device"}</p></div>
+                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">RustDesk ID</p><p className="mt-1 font-mono text-sm text-cyan-200">{linkPeer.rd_id}</p></div>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input value={linkSearch} onChange={event => setLinkSearch(event.target.value)} placeholder="Search unlinked assets by device, client, or IP..." className="pl-9" data-testid="link-asset-search" />
+              </div>
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {linkCandidates.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border/70 p-8 text-center">
+                    <p className="text-sm font-medium">No available assets match</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Only managed assets without an existing RustDesk identity are shown.</p>
+                  </div>
+                ) : linkCandidates.map(device => (
+                  <div key={device.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/40 p-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">{device.name || device.hostname}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{device.client_name || "Unassigned client"}{device.ip_address ? ` · ${device.ip_address}` : ""}</p>
+                    </div>
+                    <Button size="sm" onClick={() => linkProviderPeer(device)} disabled={!!linkingDevice} data-testid={`link-peer-to-${device.id}`}>
+                      {linkingDevice === device.id ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Link2 className="mr-1.5 h-3.5 w-3.5" />}
+                      Link
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <DialogFooter><Button variant="outline" onClick={() => { setLinkPeer(null); setLinkSearch(""); }}>Cancel</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!showAssign} onOpenChange={() => setShowAssign(null)}>
         <DialogContent className="max-w-sm" aria-describedby="assign-rd-desc">
           <DialogHeader>
@@ -934,17 +974,17 @@ export default function RemoteAccessPage() {
             </div>
             <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
               <p className="font-medium text-blue-400 mb-1">RustDesk Server Pro Required</p>
-              <p>NexusOps requires <strong>RustDesk Server Pro</strong> for the live API. The OSS server does not expose a REST API. Enter the Web Console API URL (default port <code>21114</code>) and generate a token from Settings → API.</p>
+              <p>NexusMSP requires <strong>RustDesk Server Pro</strong> for the live API. The OSS server does not expose a REST API. Enter the Web Console API URL (default port <code>21114</code>) and generate a token from Settings → API.</p>
             </div>
             {connectionResult && (
-              <div className={`p-3 rounded-lg text-xs border ${connectionResult.connected ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"}`}>
-                <p className={`font-medium mb-1 ${connectionResult.connected ? "text-emerald-400" : "text-red-400"}`}>
-                  {connectionResult.connected ? "Connected Successfully" : "Connection Failed"}
+              <div className={`p-3 rounded-lg text-xs border ${(connectionResult.authorized ?? connectionResult.connected) ? "bg-emerald-500/5 border-emerald-500/20" : connectionResult.connected ? "bg-amber-500/5 border-amber-500/20" : "bg-red-500/5 border-red-500/20"}`}>
+                <p className={`font-medium mb-1 ${(connectionResult.authorized ?? connectionResult.connected) ? "text-emerald-400" : connectionResult.connected ? "text-amber-300" : "text-red-400"}`}>
+                  {(connectionResult.authorized ?? connectionResult.connected) ? "Connected and Authorised" : connectionResult.connected ? "Server Reachable · Access Required" : "Connection Failed"}
                 </p>
                 <p className="text-muted-foreground">{connectionResult.message}</p>
                 {connectionResult.peer_count != null && <p className="mt-1 text-muted-foreground">Peers found: <strong className="text-white">{connectionResult.peer_count}</strong></p>}
                 {connectionResult.endpoints_available?.length > 0 && (
-                  <p className="mt-1 text-muted-foreground">API endpoints: {connectionResult.endpoints_available.map(e => e.path).join(", ")}</p>
+                  <p className="mt-1 text-muted-foreground">API endpoints: {connectionResult.endpoints_available.map(e => `${e.path} (${e.status})`).join(", ")}</p>
                 )}
               </div>
             )}
@@ -953,31 +993,6 @@ export default function RemoteAccessPage() {
               <Button type="submit" disabled={submitting} data-testid="save-settings-btn">{submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}Save Settings</Button>
             </DialogFooter>
           </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Deploy Agent Command Dialog */}
-      <Dialog open={showDeployDialog} onOpenChange={setShowDeployDialog}>
-        <DialogContent className="max-w-lg" aria-describedby="deploy-cmd-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Rocket className="w-5 h-5 text-blue-400" />Deploy Patch Agent</DialogTitle>
-            <DialogDescription id="deploy-cmd-desc">Connect to the device via RustDesk, open PowerShell as Administrator, and run this command:</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="relative">
-              <pre className="bg-zinc-900 text-emerald-400 text-xs p-4 rounded-lg overflow-x-auto font-mono leading-relaxed">{deployCmd}</pre>
-              <Button variant="outline" size="sm" className="absolute top-2 right-2 h-7 text-xs" onClick={() => { navigator.clipboard.writeText(deployCmd); toast.success("Command copied!"); }} data-testid="copy-deploy-dialog-cmd"><Copy className="w-3 h-3 mr-1" />Copy</Button>
-            </div>
-            <div className="space-y-2 text-sm text-muted-foreground">
-              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">1</div><span>Connect to the device via RustDesk</span></div>
-              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">2</div><span>Open PowerShell as Administrator</span></div>
-              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">3</div><span>Paste and run the command above</span></div>
-              <div className="flex items-start gap-2"><div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 text-[10px] font-bold">4</div><span>Come back here and click "Done" to mark as deployed</span></div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDeployDialog(false)}>Close</Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

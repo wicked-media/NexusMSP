@@ -5,12 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import {
-  Search, Zap, HelpCircle, Loader2, RefreshCw, Clock, Monitor,
-  Ticket, Users, Database, Terminal, ChevronRight, History, Star
+  Search, Zap, HelpCircle, Loader2, Clock, Monitor,
+  Ticket, Users, Database, Terminal, ChevronRight, History
 } from "lucide-react";
 
 const TYPE_ICONS = { device: Monitor, ticket: Ticket, stat: Users };

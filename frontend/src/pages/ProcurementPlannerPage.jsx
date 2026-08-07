@@ -19,12 +19,12 @@ export default function ProcurementPlannerPage() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   const load = useCallback(async (showToast = false) => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API}/procurement-planner/recommendations`, { headers });
+      const response = await axios.get(`${API}/procurement-planner/recommendations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setData(response.data);
       if (showToast) toast.success("Procurement evidence refreshed");
     } catch (error) {

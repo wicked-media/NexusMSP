@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
-import { Sparkles, ChevronRight, Loader2, Zap, RefreshCw, ArrowRight } from "lucide-react";
-import { differenceInHours, formatDistanceToNow } from "date-fns";
+import { Sparkles, Loader2, Zap, RefreshCw, ArrowRight } from "lucide-react";
+import { differenceInHours } from "date-fns";
 import { API } from "@/App";
 
 /**
@@ -43,17 +43,20 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
 
   // Heuristic next-best-action
   const nextAction = (() => {
+    const assignedTechnician = ticket.assignee_id || ticket.assigned_to || ticket.assigned_to_id;
+    const isCompleted = ["resolved", "closed"].includes(ticket.status);
     if (ticket.blocked_by_ticket_number) return { label: `Resolve ${ticket.blocked_by_ticket_number} first`, tone: "rose", target: "blocker" };
+    if (isCompleted && !ticket.csat_sent) return { label: "Send CSAT survey", tone: "emerald", target: "csat" };
+    if (isCompleted) return { label: "Completed — review the audit record", tone: "emerald", target: "none" };
     if (burndown?.breach) return { label: "SLA breached — escalate now", tone: "rose", target: "escalate" };
     if (burndown?.pct >= 75 && !burndown?.is_resolved) return { label: `${burndown.pct}% of SLA used — pick this up`, tone: "amber", target: "ack" };
     if (deviceState && deviceState !== "online") return { label: "Device is offline — try Wake-on-LAN", tone: "amber", target: "wol" };
     if (deviceStatus?.needs_reboot) return { label: "Device needs reboot — schedule a window", tone: "cyan", target: "reboot" };
     if (deviceStatus?.checks_failing > 0) return { label: `${deviceStatus.checks_failing} check${deviceStatus.checks_failing === 1 ? "" : "s"} failing — investigate`, tone: "amber", target: "checks" };
     if (deviceStatus?.patches_pending > 0) return { label: `${deviceStatus.patches_pending} patches pending — install`, tone: "cyan", target: "patches" };
-    if (!ticket.assignee_id) return { label: "Unassigned — pick this up or route", tone: "violet", target: "assign" };
+    if (!assignedTechnician) return { label: "Unassigned — pick this up or route", tone: "violet", target: "assign" };
     if (ticket.status === "open") return { label: "Acknowledge with first reply", tone: "violet", target: "reply" };
     if (ticket.status === "in_progress" && ticket.note_count === 0) return { label: "Add a status update note", tone: "violet", target: "note" };
-    if (ticket.status === "resolved" && !ticket.csat_sent) return { label: "Send CSAT survey", tone: "emerald", target: "csat" };
     return { label: "Continue working — looks healthy", tone: "emerald", target: "none" };
   })();
 

@@ -1,23 +1,11 @@
 // Cleaned-up navigation: bugs fixed, duplicates removed, mergers applied.
 import {
   LayoutDashboard, Ticket, Monitor, Package, Users, FileText,
-  Receipt, Clock, BookOpen, Cloud, Network, Laptop, BarChart3,
-  Settings, Zap, UserPlus, Shield, Mail, Terminal, Key,
-  FolderKanban, Server, CalendarClock, UserCog,
-  ShoppingCart, Wifi, Trophy, Phone, Building2, Tags, ShieldCheck,
-  Activity, CreditCard, Bell, Cpu, Heart, Wrench, Radar,
-  Paintbrush, Gift, Volume2, DollarSign, Wallet, Navigation, Bot,
-  QrCode, Workflow, Timer, ScanLine, TrendingUp,
-  History, ShieldAlert, Target, Map, Award,
-  RefreshCw, FileSearch, Star, BarChart, Calculator,
-  TrendingDown, GitBranch, Flame, MessageSquare, HardDrive,
-  ShoppingBag, Lock, BellOff, Layers,
-  Gauge, Eye, Bug, FileWarning, ClipboardList,
-  Search, BrainCircuit, TestTube, Crosshair, ThumbsUp, MapPinned,
-  HeartPulse, AlertTriangle, Banknote, MessageCircle,
-  FileSpreadsheet, Fingerprint, Webhook, GitMerge, BadgeDollarSign, Swords,
-  Building, Radio, Coins, Brain, Mic, ChevronDown, Siren, Sparkles, Bookmark,
-  Inbox, Briefcase, ShieldOff, KeySquare, BellRing, Boxes
+  Receipt, Clock, BookOpen, BarChart3, Settings, UserPlus, Shield,
+  Mail, FolderKanban, Server, UserCog, ShoppingCart, Wifi, Phone,
+  ShieldCheck, Radar, Workflow, TrendingUp, ShieldAlert, GitBranch,
+  MessageSquare, HardDrive, Layers, ClipboardList, BrainCircuit,
+  Siren, Sparkles, Bookmark, Briefcase, Boxes,
 } from "lucide-react";
 
 export const navGroups = [
@@ -27,7 +15,6 @@ export const navGroups = [
     items: [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/workspace", icon: Bookmark, label: "My Workspace" },
-      { path: "/morning-checks", icon: Activity, label: "Morning Checks" },
       {
         path: "/tickets", icon: Ticket, label: "Tickets",
         workspacePaths: ["/triage-queue", "/sla-timer", "/dispatch-board", "/workshop-bench", "/escalation-matrix", "/intelligent-routing", "/blueprints", "/service-catalog"],
@@ -93,12 +80,14 @@ export const navGroups = [
       {
         path: "/billing-dashboard", icon: Receipt, label: "Billing & Finance",
         workspacePaths: [
-          "/billing-pro", "/invoices", "/estimates", "/recurring-invoices", "/quote-to-cash", "/billing-recon", "/usage-billing", "/billing-portal", "/proposals", "/invoice-templates", "/finance-intel", "/late-payment", "/pricing-calc", "/xero",
+          "/billing-pro", "/invoices", "/estimates", "/recurring-invoices", "/services-subscriptions", "/license-management", "/quote-to-cash", "/billing-recon", "/usage-billing", "/billing-portal", "/proposals", "/invoice-templates", "/finance-intel", "/late-payment", "/pricing-calc", "/xero",
         ],
       },
       {
-        path: "/financial-analytics", icon: DollarSign, label: "Financial Analytics",
-        workspacePaths: ["/financial-reports", "/revenue-forecast", "/rpe-dashboard", "/contract-profit", "/profitability-heatmap", "/cost-per-ticket", "/saas-spend"],
+        // CEO Mode is the owner cockpit. Existing financial analysis remains
+        // available as source workspaces without adding another sidebar entry.
+        path: "/executive", icon: Briefcase, label: "Executive",
+        workspacePaths: ["/financial-analytics", "/financial-reports", "/revenue-forecast", "/rpe-dashboard", "/contract-profit", "/profitability-heatmap", "/cost-per-ticket", "/saas-spend"],
       },
       {
         path: "/products", icon: Package, label: "Products & Inventory",
@@ -113,7 +102,6 @@ export const navGroups = [
       { path: "/growth", icon: TrendingUp, label: "Revenue Growth" },
       { path: "/warroom", icon: Siren, label: "War Rooms" },
       { path: "/time-tracking", icon: Clock, label: "Time Tracking" },
-      { path: "/license-management", icon: Layers, label: "License Mgmt" },
     ]
   },
   {
@@ -170,6 +158,7 @@ export const navGroups = [
         path: "/control-plane", icon: Layers, label: "Nexus Control Plane",
         workspacePaths: ["/cipp", "/m365"],
       },
+      { path: "/production-readiness", icon: ShieldCheck, label: "Production Readiness" },
       { path: "/settings", icon: Settings, label: "Settings" },
       {
         path: "/benchmarking", icon: Radar, label: "Planning & Lifecycle",
@@ -185,6 +174,18 @@ export const navGroups = [
       { path: "/documentation-hub", icon: BookOpen, label: "Knowledge & Docs", workspacePaths: ["/doc-scanner"] },
     ]
   },
+];
+
+// Plain-language entry points used by My Workspace and navigation search.
+// These describe the job a technician is trying to complete rather than
+// requiring them to know which Nexus module owns it.
+export const taskShortcuts = [
+  { id: "support-client", label: "Help a client", description: "Open the client 360, contacts, services, history and linked systems.", path: "/clients", icon: Users, accent: "emerald", keywords: ["customer", "contact", "account", "organisation", "history", "service"] },
+  { id: "work-ticket", label: "Work a ticket", description: "Create, triage, assign, communicate, schedule or resolve service work.", path: "/tickets", icon: Ticket, accent: "amber", keywords: ["job", "case", "issue", "request", "dispatch", "sla", "note", "email customer"] },
+  { id: "manage-endpoint", label: "Manage an endpoint", description: "Find a device, inspect health, run tools or start a remote session.", path: "/devices", icon: Monitor, accent: "cyan", keywords: ["remote", "computer", "server", "asset", "agent", "patch", "script", "restart"] },
+  { id: "protect-client", label: "Protect a client", description: "Investigate risk, endpoint protection, canaries and response actions.", path: "/nexus-shield", icon: ShieldCheck, accent: "rose", keywords: ["security", "threat", "incident", "ransomware", "xdr", "isolate", "malware"] },
+  { id: "bill-work", label: "Bill and reconcile", description: "Create invoices, review subscriptions, payments and billing exceptions.", path: "/billing-dashboard", icon: Receipt, accent: "violet", keywords: ["invoice", "payment", "xero", "revenue", "subscription", "charge", "reconcile"] },
+  { id: "automate-work", label: "Automate repeated work", description: "Build, approve and audit workflows, scripts and operational runbooks.", path: "/automation-hub", icon: Workflow, accent: "blue", keywords: ["workflow", "runbook", "script", "trigger", "approval", "deploy", "repeat"] },
 ];
 
 export function getAllNavItems() {

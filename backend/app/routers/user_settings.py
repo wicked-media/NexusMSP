@@ -250,6 +250,7 @@ async def get_display_prefs(current_user: dict = Depends(get_current_user)):
         "toast_style": "nexus",
         "toast_duration": 4500,
         "toast_density": "comfortable",
+        "motion": "system",
     }
     return {**defaults, **(settings or {}).get("display_prefs", {})}
 
@@ -259,6 +260,7 @@ async def update_display_prefs(data: dict, current_user: dict = Depends(get_curr
     allowed_styles = {"nexus", "minimal", "compact"}
     allowed_durations = {3000, 4500, 6500, 9000}
     allowed_densities = {"comfortable", "compact"}
+    allowed_motion = {"system", "full", "minimal", "none"}
     if "toast_position" in data and data["toast_position"] not in allowed_positions:
         raise HTTPException(status_code=400, detail="Unsupported notification position")
     if "toast_style" in data and data["toast_style"] not in allowed_styles:
@@ -267,6 +269,8 @@ async def update_display_prefs(data: dict, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=400, detail="Unsupported notification duration")
     if "toast_density" in data and data["toast_density"] not in allowed_densities:
         raise HTTPException(status_code=400, detail="Unsupported notification density")
+    if "motion" in data and data["motion"] not in allowed_motion:
+        raise HTTPException(status_code=400, detail="Unsupported motion preference")
     await db.user_settings.update_one(
         {"user_id": current_user["id"]},
         {"$set": {"display_prefs": data, "user_id": current_user["id"]}},

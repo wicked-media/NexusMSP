@@ -5,6 +5,7 @@ import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
+import SecondBrainView from "@/components/insights/SecondBrainView";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Brain, Battery, ShieldCheck, AlertOctagon, DollarSign,
-  Award, BookOpen, Mic, Loader2, RefreshCw, Server, Sparkles, ChevronRight, Download,
+  Award, BookOpen, Mic, Loader2, RefreshCw, Server, Sparkles, ChevronRight, Download, BrainCircuit,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,11 +32,12 @@ export default function InsightsHubPage() {
   const api = useApi(token);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
-  const [tab, setTab] = useState(requestedTab === "runbooks" ? "runbooks" : "overload");
+  const validTabs = ["brain", "overload", "patches", "trajectory", "battery", "ar", "xp", "vault", "brief", "runbooks"];
+  const [tab, setTab] = useState(validTabs.includes(requestedTab) ? requestedTab : "brain");
 
   const selectTab = (nextTab) => {
     setTab(nextTab);
-    setSearchParams(nextTab === "overload" ? {} : { tab: nextTab }, { replace: true });
+    setSearchParams(nextTab === "brain" ? {} : { tab: nextTab }, { replace: true });
   };
 
   return (
@@ -44,13 +46,14 @@ export default function InsightsHubPage() {
         <OperationalPageHeader
           eyebrow="Operations intelligence"
           title="Insights Hub"
-          description="Cross-tenant signals for workload, security, fleet health, financial exposure, evidence readiness, and reusable runbooks. Each view is generated from your live NexusMSP records."
+          description="Nexus operational memory, workload, security, fleet health, financial exposure, evidence readiness, and reusable runbooks. Every insight links back to live records."
           icon={Sparkles}
           tone="violet"
         />
 
         <Tabs value={tab} onValueChange={selectTab} className="w-full">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-3 xl:grid-cols-9" data-testid="insights-tabs">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-10" data-testid="insights-tabs">
+            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="brain" data-testid="tab-brain"><BrainCircuit className="w-3.5 h-3.5" />Second Brain</TabsTrigger>
             <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="overload" data-testid="tab-overload"><Brain className="w-3.5 h-3.5" />Tech Load</TabsTrigger>
             <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="patches" data-testid="tab-patches"><AlertOctagon className="w-3.5 h-3.5" />Patch Anomalies</TabsTrigger>
             <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="trajectory" data-testid="tab-trajectory"><Server className="w-3.5 h-3.5" />Device Trajectory</TabsTrigger>
@@ -62,6 +65,7 @@ export default function InsightsHubPage() {
             <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="runbooks" data-testid="tab-runbooks"><BookOpen className="w-3.5 h-3.5" />Runbooks</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="brain"><SecondBrainView api={api} /></TabsContent>
           <TabsContent value="overload"><CognitiveLoadView api={api} /></TabsContent>
           <TabsContent value="patches"><PatchAnomaliesView api={api} /></TabsContent>
           <TabsContent value="trajectory"><HealthTrajectoryView api={api} /></TabsContent>

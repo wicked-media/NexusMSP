@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,20 +20,19 @@ const SEV = {
  */
 export function HuntressSummaryCard({ compact = false }) {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/huntress/summary`, { headers });
+      const res = await axios.get(`${API}/huntress/summary`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
     } catch {
       setData({ configured: false, message: "Huntress unavailable", stats: {} });
     } finally { setLoading(false); }
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  }, [token]);
+  useEffect(() => { load(); }, [load]);
 
   if (loading) {
     return (

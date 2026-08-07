@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,7 @@ const COLOR_TONES = {
  * @param activeViewId - currently active view id (for visual highlight)
  */
 export default function SavedViewsBar({ scope, headers, currentSnapshot, onApply, activeViewId, onClearActive }) {
+  const authorization = headers?.Authorization;
   const [views, setViews] = useState([]);
   const [saveOpen, setSaveOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -34,13 +35,13 @@ export default function SavedViewsBar({ scope, headers, currentSnapshot, onApply
   const [pinned, setPinned] = useState(true);
   const [shared, setShared] = useState(false);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     try {
-      const r = await axios.get(`${API}/saved-views`, { headers, params: { scope } });
+      const r = await axios.get(`${API}/saved-views`, { headers: { Authorization: authorization }, params: { scope } });
       setViews(r.data || []);
     } catch { /* ignore */ }
-  };
-  useEffect(() => { if (headers) reload(); /* eslint-disable-next-line */ }, [scope]);
+  }, [authorization, scope]);
+  useEffect(() => { if (authorization) reload(); }, [authorization, reload]);
 
   const openSaveDialog = (existing = null) => {
     if (existing) {

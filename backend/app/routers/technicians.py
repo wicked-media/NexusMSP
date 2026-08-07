@@ -284,6 +284,28 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
     role = str(tech_data.get("role") or "technician").strip().lower()
     if role not in await _access_role_ids():
         raise HTTPException(status_code=400, detail="Choose a valid access role")
+    scope = normalise_scope_payload(tech_data)
+    client_ids = set(scope["client_scope_ids"])
+    site_ids = set(scope["site_scope_ids"])
+    if scope["client_scope_mode"] == "restricted" and not client_ids:
+        raise HTTPException(status_code=400, detail="Choose at least one client for selected-client access")
+    known_clients = {
+        item["id"]
+        for item in await db.clients.find(
+            {"id": {"$in": list(client_ids)}},
+            {"_id": 0, "id": 1},
+        ).to_list(5000)
+    }
+    if known_clients != client_ids:
+        raise HTTPException(status_code=400, detail="One or more selected clients no longer exist")
+    known_sites = await db.network_sites.find(
+        {"id": {"$in": list(site_ids)}},
+        {"_id": 0, "id": 1, "client_id": 1},
+    ).to_list(5000)
+    if {item["id"] for item in known_sites} != site_ids:
+        raise HTTPException(status_code=400, detail="One or more selected sites no longer exist")
+    if any(item.get("client_id") not in client_ids for item in known_sites):
+        raise HTTPException(status_code=400, detail="Selected sites must belong to a selected client")
     if await db.users.find_one({"email": email}, {"_id": 0, "id": 1}):
         raise HTTPException(status_code=400, detail="Email already registered")
     policy_error = password_policy_error(password, email)
@@ -304,6 +326,7 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
         categories=tech_data.get("categories", []),
         is_active=tech_data.get("is_active", True),
         is_admin=tech_data.get("is_admin", False),
+        **scope,
     )
     user_dict = user.model_dump()
     if permissions:

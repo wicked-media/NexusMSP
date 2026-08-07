@@ -168,6 +168,7 @@ async def get_billing_dashboard_metrics(user=Depends(get_current_user)):
     for inv in all_invoices:
         for p in inv.get("payments", []):
             recent_payments.append({
+                "invoice_id": inv.get("id"),
                 "invoice_number": inv.get("invoice_number"),
                 "client_name": inv.get("client_name"),
                 "amount": round(float(p.get("amount", 0)), 2),
@@ -218,7 +219,14 @@ async def get_billing_dashboard_metrics(user=Depends(get_current_user)):
         if balance > 0:
             client = inv.get("client_name", "Unknown")
             if client not in debtor_map:
-                debtor_map[client] = {"client": client, "balance": 0, "invoices": 0}
+                debtor_map[client] = {
+                    "client": client,
+                    "client_id": inv.get("client_id"),
+                    "balance": 0,
+                    "invoices": 0,
+                }
+            elif not debtor_map[client].get("client_id") and inv.get("client_id"):
+                debtor_map[client]["client_id"] = inv.get("client_id")
             debtor_map[client]["balance"] += balance
             debtor_map[client]["invoices"] += 1
     top_debtors = sorted(debtor_map.values(), key=lambda x: x["balance"], reverse=True)[:10]

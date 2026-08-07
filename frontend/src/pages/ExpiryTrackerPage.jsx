@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { MetricStrip, MetricTile } from "@/components/design-system";
-import { AlertTriangle, CheckCircle2, ExternalLink, Globe, KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, ExternalLink, Globe, KeyRound, Loader2, LockKeyhole, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const ENTRY_ENDPOINTS = { licenses: "/licenses", domains: "/domains", ssl: "/ssl-certificates" };

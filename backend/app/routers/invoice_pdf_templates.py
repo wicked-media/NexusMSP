@@ -27,6 +27,7 @@ from fastapi.responses import Response
 from datetime import datetime, timezone
 import os
 import re
+import tempfile
 import uuid
 import jwt
 
@@ -611,13 +612,14 @@ def _hex_to_rgb(h, fallback=(59, 130, 246)):
 
 
 def _render_qr_png(url: str) -> str | None:
-    """Render a small QR PNG to /tmp and return path, or None on failure."""
+    """Render a small QR PNG to an OS-created temporary file."""
     if not url:
         return None
     try:
         import qrcode
         img = qrcode.make(url)
-        path = f"/tmp/qr-{uuid.uuid4().hex[:10]}.png"
+        with tempfile.NamedTemporaryFile(prefix="nexus-qr-", suffix=".png", delete=False) as temporary:
+            path = temporary.name
         img.save(path)
         return path
     except Exception:
@@ -979,6 +981,11 @@ def _render_template_pdf(template: dict, invoice: dict, branding: dict | None, c
                         pdf.image(qr_path, margin_left, pdf.get_y(), 28, 28)
                     except Exception:
                         pass
+                    finally:
+                        try:
+                            os.unlink(qr_path)
+                        except OSError:
+                            pass
                 pdf.set_x(margin_left + 32)
                 pdf.set_font(font_family, "", 9)
                 pdf.multi_cell(usable_w - 32, 5, _safe("Scan to pay instantly:\n" + url))

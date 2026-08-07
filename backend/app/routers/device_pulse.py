@@ -34,7 +34,7 @@ _rand = _r.Random()
 
 def _seeded_metric(device_id: str, salt: str, lo: int, hi: int) -> int:
     """Deterministic pseudo-random value per device — gives stable sparklines without storing data."""
-    h = int(hashlib.md5(f"{device_id}:{salt}".encode()).hexdigest()[:8], 16)
+    h = int(hashlib.md5(f"{device_id}:{salt}".encode(), usedforsecurity=False).hexdigest()[:8], 16)
     return lo + (h % (hi - lo + 1))
 
 
@@ -70,7 +70,7 @@ def _sparkline(device_id: str, salt: str, points: int = 24, lo: int = 10, hi: in
     out = []
     base = _seeded_metric(device_id, salt, lo + 10, hi - 10)
     for i in range(points):
-        h = int(hashlib.md5(f"{device_id}:{salt}:{i}".encode()).hexdigest()[:6], 16)
+        h = int(hashlib.md5(f"{device_id}:{salt}:{i}".encode(), usedforsecurity=False).hexdigest()[:6], 16)
         delta = (h % 30) - 15
         v = max(lo, min(hi, base + delta))
         out.append(v)

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PresenceDot } from "./PresenceDot";
-import { MessageCircle, X, Send, Hash, Users, Maximize2, AlertCircle } from "lucide-react";
+import { X, Send, Hash, Users, Maximize2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const SHORTCUT = "c";
@@ -41,8 +41,10 @@ export function ChatPanel() {
           axios.get(`${API}/chat/unread`, { headers }).then(r => r.data),
         ]);
         if (!alive) return;
-        setChannels(chs); setPresence(pr.users || []); setUnread(un); setError("");
-        setActiveId(current => current && chs.some(channel => channel.id === current) ? current : chs[0]?.id || null);
+        const channelList = Array.from(new Map((Array.isArray(chs) ? chs : []).map(channel => [channel.id, channel])).values());
+        const presenceList = Array.from(new Map((Array.isArray(pr?.users) ? pr.users : []).map(member => [member.user_id, member])).values());
+        setChannels(channelList); setPresence(presenceList); setUnread(un); setError("");
+        setActiveId(current => current && channelList.some(channel => channel.id === current) ? current : channelList[0]?.id || null);
       } catch (_) { setError("Quick chat is unavailable."); }
     };
     load();
@@ -109,6 +111,21 @@ export function ChatPanel() {
   };
 
   const totalUnread = Object.values(unread).reduce((a, b) => a + b, 0);
+
+  useEffect(() => {
+    const publishUnread = () => {
+      window.dispatchEvent(new CustomEvent("nexus:chat-unread", { detail: { count: totalUnread } }));
+    };
+    const openQuickChat = () => setOpen(true);
+    window.addEventListener("nexus:request-chat-unread", publishUnread);
+    window.addEventListener("nexus:open-quick-chat", openQuickChat);
+    publishUnread();
+    return () => {
+      window.removeEventListener("nexus:request-chat-unread", publishUnread);
+      window.removeEventListener("nexus:open-quick-chat", openQuickChat);
+    };
+  }, [totalUnread]);
+
   const presenceById = useMemo(() => {
     const m = {};
     presence.forEach(p => { m[p.user_id] = p; });
@@ -117,20 +134,7 @@ export function ChatPanel() {
 
   if (!token || location.pathname === "/team-chat") return null;
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-20 right-4 z-50 bg-violet-600 hover:bg-violet-500 rounded-full w-12 h-12 flex items-center justify-center shadow-lg shadow-violet-500/40 transition-transform hover:scale-110"
-        data-testid="chat-toggle-btn"
-      >
-        <MessageCircle className="w-5 h-5 text-white" />
-        {totalUnread > 0 && (
-          <span className="absolute -top-1 -right-1 bg-rose-500 rounded-full text-[10px] px-1.5 py-0.5 text-white font-bold">{totalUnread}</span>
-        )}
-      </button>
-    );
-  }
+  if (!open) return null;
 
   const activeCh = channels.find(c => c.id === activeId);
   const myPresence = presenceById[user?.id];

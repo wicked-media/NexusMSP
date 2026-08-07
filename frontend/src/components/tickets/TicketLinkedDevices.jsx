@@ -3,8 +3,9 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, X, Monitor, Star, ExternalLink } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Plus, X, Monitor, Star, ExternalLink, Check, ChevronsUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { API } from "@/App";
 import RemoteAccessButton from "@/components/devices/RemoteAccessButton";
@@ -19,6 +20,7 @@ import RemoteAccessButton from "@/components/devices/RemoteAccessButton";
 export default function TicketLinkedDevices({ ticket, devices, token, onChange }) {
   const navigate = useNavigate();
   const [picker, setPicker] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -55,6 +57,7 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
       });
       toast.success("Device linked");
       setPicker("");
+      setPickerOpen(false);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to link device"); }
     finally { setBusy(false); }
   };
@@ -154,19 +157,48 @@ export default function TicketLinkedDevices({ ticket, devices, token, onChange }
 
       {candidates.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <Select value={picker || "__none"} onValueChange={v => setPicker(v === "__none" ? "" : v)}>
-            <SelectTrigger className="h-7 text-xs flex-1" data-testid="link-device-select">
-              <SelectValue placeholder="+ Link another device" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none">Choose device...</SelectItem>
-              {candidates.map(d => (
-                <SelectItem key={d.id} value={d.id}>
-                  {d.name} {d.os && <span className="text-muted-foreground"> - {d.os}</span>}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                role="combobox"
+                aria-expanded={pickerOpen}
+                className="h-8 flex-1 justify-between border-cyan-400/20 bg-black/10 px-2.5 text-xs font-normal hover:bg-cyan-400/[0.06]"
+                data-testid="link-device-select"
+              >
+                <span className="truncate">{picker ? (candidates.find(device => device.id === picker)?.name || "Selected device") : "Search and link an asset…"}</span>
+                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-[22rem] overflow-hidden border-cyan-400/25 bg-[#0b151d] p-0 shadow-2xl">
+              <Command>
+                <CommandInput autoFocus placeholder="Search asset, hostname, serial, or IP…" data-testid="link-device-search" />
+                <CommandList>
+                  <CommandEmpty>No unlinked assets match this ticket's client.</CommandEmpty>
+                  <CommandGroup heading={`${candidates.length} available asset${candidates.length === 1 ? "" : "s"}`}>
+                    {candidates.map(device => (
+                      <CommandItem
+                        key={device.id}
+                        value={`${device.name || ""} ${device.hostname || ""} ${device.serial_number || ""} ${device.ip_address || ""} ${device.os || ""}`}
+                        onSelect={() => { setPicker(device.id); setPickerOpen(false); }}
+                        className="items-start py-2.5"
+                        data-testid={`link-device-option-${device.id}`}
+                      >
+                        <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${device.status === "online" ? "bg-emerald-400" : "bg-zinc-600"}`} />
+                        <Monitor className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium">{device.name || device.hostname || device.id}</span>
+                          <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{[device.hostname, device.os, device.ip_address, device.serial_number].filter(Boolean).join(" · ") || "Managed asset"}</span>
+                        </span>
+                        {picker === device.id && <Check className="mt-0.5 h-3.5 w-3.5 text-cyan-300" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
           <Button
             type="button"
             size="sm" variant="outline"

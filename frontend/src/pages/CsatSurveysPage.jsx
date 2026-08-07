@@ -2,17 +2,15 @@ import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { Star, Users, MessageSquare, Loader2, RefreshCw, TrendingUp, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Star, Users, MessageSquare, Loader2, RefreshCw } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function CsatSurveysPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [dashboard, setDashboard] = useState(null);
   const [surveys, setSurveys] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,8 +18,8 @@ export default function CsatSurveysPage() {
   const fetchData = useCallback(async () => {
     try {
       const [dRes, sRes] = await Promise.all([
-        axios.get(`${API}/csat/dashboard`, { headers }),
-        axios.get(`${API}/csat/surveys`, { headers }),
+        axios.get(`${API}/csat/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/csat/surveys`, { headers: { Authorization: `Bearer ${token}` } }),
       ]);
       setDashboard(dRes.data);
       setSurveys(sRes.data);

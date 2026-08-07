@@ -13,13 +13,11 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Bell, BookOpen,
-  Building2, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronRight,
-  CircleDollarSign, Clock3, Copy, CreditCard, Download, FileCheck2, FileText,
+  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Bell, BookOpen, Check, CheckCircle2, ChevronDown, ChevronRight,
+  CircleDollarSign, Copy, CreditCard, Download, FileCheck2, FileText,
   Gauge, HardDrive, Headphones, HeartPulse, History, Home, Layers3,
-  LifeBuoy, Loader2, LockKeyhole, LogOut, Menu, MessageSquareText, Monitor,
-  MoreHorizontal, Network, PackageCheck, PanelLeftClose, Plus, Power,
-  ReceiptText, RefreshCw, Search, Send, Server, Settings2, ShieldCheck,
+  LifeBuoy, Loader2, LockKeyhole, LogOut, Menu, MessageSquareText, Monitor, Network, PackageCheck, Plus, Power,
+  ReceiptText, RefreshCw, Search, Send, Settings2, ShieldCheck,
   Sparkles, Ticket, UserRound, Wifi, WifiOff, X, XCircle,
 } from "lucide-react";
 

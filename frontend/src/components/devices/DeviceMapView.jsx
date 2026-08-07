@@ -4,8 +4,7 @@
  */
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Globe2, Wifi, WifiOff } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const SEV_COLOR = { ok: "#10b981", warning: "#f59e0b", critical: "#f43f5e" };

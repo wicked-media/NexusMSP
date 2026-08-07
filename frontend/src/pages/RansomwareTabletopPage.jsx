@@ -20,9 +20,10 @@ export default function RansomwareTabletopPage() {
 
   const load = useCallback(async () => {
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [scenarioResponse, drillResponse] = await Promise.all([
-        axios.get(`${API}/ransomware-tabletop/scenarios`, { headers }),
-        axios.get(`${API}/ransomware-tabletop/drills`, { headers }),
+        axios.get(`${API}/ransomware-tabletop/scenarios`, { headers: requestHeaders }),
+        axios.get(`${API}/ransomware-tabletop/drills`, { headers: requestHeaders }),
       ]);
       setScenarios(scenarioResponse.data || []);
       setDrills(drillResponse.data || []);

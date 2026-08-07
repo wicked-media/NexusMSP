@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  Shield, Wrench, Truck, Eye, MessageSquare, Paperclip, Lock, AlertTriangle,
+  Shield, Wrench, Truck, MessageSquare, Paperclip, Lock, AlertTriangle,
   ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark,
 } from "lucide-react";
 import { differenceInHours, formatDistanceToNow } from "date-fns";
@@ -73,11 +73,10 @@ function ActiveViewers({ viewers, density = "comfortable" }) {
    ───────────────────────────────────────────────────────────────── */
 export function TicketRow({
   ticket, density = "comfortable", isSelected, onToggleSelect, onOpen, viewers,
-  noteCount, attachmentCount, statusConfig, priorityConfig,
+  noteCount, attachmentCount, statusConfig,
 }) {
   const d = DENSITY[density];
   const sc = statusConfig[ticket.status] || { label: ticket.status };
-  const pc = priorityConfig[ticket.priority] || {};
   const isOverdue = ticket.sla_due && new Date(ticket.sla_due) < new Date() && !["closed", "resolved"].includes(ticket.status);
   const slaHrs = ticket.sla_due ? differenceInHours(new Date(ticket.sla_due), new Date()) : null;
   const isClosed = ["closed", "resolved"].includes(ticket.status);
@@ -87,8 +86,24 @@ export function TicketRow({
   const Icon = ticket.category === "workshop" ? Wrench : ticket.category === "field" ? Truck : ticket.category === "change" ? Layers : Shield;
   const iconTint = ticket.category === "workshop" ? "text-amber-400" : ticket.category === "field" ? "text-cyan-400" : ticket.category === "change" ? "text-purple-400" : "text-blue-400";
 
-  const slaLabel = slaHrs == null ? null : (slaHrs < 0 ? `${Math.abs(slaHrs)}h over` : slaHrs < 24 ? `${slaHrs}h left` : `${Math.round(slaHrs / 24)}d`);
-  const slaTone = slaHrs == null ? "" : (slaHrs < 0 ? "text-rose-400" : slaHrs < 4 ? "text-amber-400" : "text-zinc-500");
+  const slaLabel = isClosed
+    ? "SLA closed"
+    : slaHrs == null
+      ? null
+      : slaHrs < 0
+        ? `${Math.abs(slaHrs)}h over`
+        : slaHrs < 24
+          ? `${slaHrs}h left`
+          : `${Math.round(slaHrs / 24)}d`;
+  const slaTone = isClosed
+    ? "text-emerald-400"
+    : slaHrs == null
+      ? ""
+      : slaHrs < 0
+        ? "text-rose-400"
+        : slaHrs < 4
+          ? "text-amber-400"
+          : "text-zinc-500";
 
   return (
     <div
@@ -222,11 +237,16 @@ export function useDensityMode() {
 }
 
 export function DensityToggle({ density, setDensity }) {
+  const densityLabel = {
+    compact: "Compact",
+    comfortable: "Comfortable",
+    spacious: "Spacious",
+  }[density] || "Comfortable";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="h-8 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-white/5" data-testid="density-toggle">
-          <Layers className="w-3 h-3 mr-1" />{density.slice(0, 4)}
+          <Layers className="w-3 h-3 mr-1" />Density: {densityLabel}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">

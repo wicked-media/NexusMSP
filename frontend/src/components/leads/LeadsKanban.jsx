@@ -1,5 +1,5 @@
 /* LeadsKanban.jsx — 7-column drag-and-drop board with confetti on Won. */
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card } from "@/components/ui/card";

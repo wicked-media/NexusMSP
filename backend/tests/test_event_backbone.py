@@ -2,8 +2,12 @@ import pytest
 
 from app.services.event_backbone import (
     DELIVERY_BACKOFF_SECONDS,
+    EVENT_CHAIN_GENESIS,
+    build_event_integrity,
+    event_content_hash,
     retry_delay_seconds,
     subject_matches,
+    verify_event_integrity,
     validate_subject_patterns,
     validate_webhook_url,
 )
@@ -40,3 +44,45 @@ def test_webhooks_require_https_except_for_local_development():
         validate_webhook_url("http://events.example.com/nexus")
     with pytest.raises(ValueError):
         validate_webhook_url("https://user:password@events.example.com/nexus")
+
+
+def _event(event_id, sequence, payload=None):
+    return {
+        "id": event_id,
+        "subject": "device.health.changed",
+        "schema_version": 1,
+        "source": "test",
+        "tenant_id": "tenant-1",
+        "client_id": "client-1",
+        "correlation_id": "incident-1",
+        "causation_id": None,
+        "actor": {"id": "tech-1", "name": "Aaron", "role": "admin"},
+        "payload": payload or {"status": "offline"},
+        "occurred_at": f"2026-07-29T00:0{sequence}:00+00:00",
+        "partition_key": "client-1",
+        "sequence": sequence,
+        "published_at": f"2026-07-29T00:0{sequence}:01+00:00",
+    }
+
+
+def test_black_box_integrity_links_partition_events():
+    first = _event("event-1", 1)
+    first["integrity"] = build_event_integrity(first)
+    second = _event("event-2", 2, {"status": "online"})
+    second["integrity"] = build_event_integrity(second, first)
+
+    assert first["integrity"]["previous_hash"] == EVENT_CHAIN_GENESIS
+    assert verify_event_integrity(first)["status"] == "verified"
+    assert verify_event_integrity(second, first)["status"] == "verified"
+
+
+def test_black_box_integrity_detects_payload_tampering():
+    event = _event("event-1", 1)
+    event["integrity"] = build_event_integrity(event)
+    original_hash = event_content_hash(event)
+    event["payload"]["status"] = "online"
+
+    result = verify_event_integrity(event)
+    assert event_content_hash(event) != original_hash
+    assert result["status"] == "compromised"
+    assert result["content_verified"] is False

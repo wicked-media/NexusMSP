@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Link2, RefreshCw, Search, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Link2, RefreshCw, Search, Users } from "lucide-react";
 import { toast } from "sonner";
 
 export default function TenantsTab({ token, backupStatuses }) {
@@ -18,22 +18,26 @@ export default function TenantsTab({ token, backupStatuses }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState("");
+  const [mappingFilter, setMappingFilter] = useState("all");
+  const [page, setPage] = useState(1);
   const [linkDialog, setLinkDialog] = useState(null);
   const [linkClientId, setLinkClientId] = useState("");
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
+    const requestHeaders = { Authorization: `Bearer ${token}` };
     setLoading(true);
     try {
       const [custRes, clientsRes] = await Promise.all([
-        axios.get(`${API}/acronis/customers`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/acronis/customers`, { headers: requestHeaders }).catch(() => ({ data: [] })),
+        axios.get(`${API}/clients`, { headers: requestHeaders }).catch(() => ({ data: [] })),
       ]);
       setCustomers(Array.isArray(custRes.data) ? custRes.data : []);
       setClients(clientsRes.data || []);
     } finally { setLoading(false); }
-  };
+  }, [token]);
 
-  useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { setPage(1); }, [search, mappingFilter]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -60,10 +64,23 @@ export default function TenantsTab({ token, backupStatuses }) {
     } catch { toast.error("Link failed"); }
   };
 
-  const filtered = customers.filter(c =>
-    !search || (c.name || "").toLowerCase().includes(search.toLowerCase()) ||
-    (c.linked_client_name || "").toLowerCase().includes(search.toLowerCase())
-  );
+  const normalizedSearch = search.trim().toLowerCase();
+  const filtered = customers.filter((customer) => {
+    const matchesMapping = mappingFilter === "all"
+      || (mappingFilter === "linked" && customer.linked_client_name)
+      || (mappingFilter === "unlinked" && !customer.linked_client_name);
+    if (!matchesMapping) return false;
+    if (!normalizedSearch) return true;
+    return [customer.name, customer.linked_client_name, customer.kind]
+      .some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
+  });
+  const pageSize = 25;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const pagedCustomers = filtered.slice(startIndex, startIndex + pageSize);
+  const rangeStart = filtered.length ? startIndex + 1 : 0;
+  const rangeEnd = Math.min(startIndex + pageSize, filtered.length);
 
   const tenantSummary = backupStatuses?.tenant_summary || {};
 
@@ -71,7 +88,7 @@ export default function TenantsTab({ token, backupStatuses }) {
 
   return (
     <div className="space-y-3" data-testid="bcc-tenants-tab">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -80,8 +97,17 @@ export default function TenantsTab({ token, backupStatuses }) {
             value={search}
             onChange={e => setSearch(e.target.value)}
             data-testid="tenants-search"
+            aria-label="Search Acronis tenants"
           />
         </div>
+        <Select value={mappingFilter} onValueChange={setMappingFilter}>
+          <SelectTrigger className="w-full sm:w-40" aria-label="Filter tenant mapping"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All mappings</SelectItem>
+            <SelectItem value="linked">Linked</SelectItem>
+            <SelectItem value="unlinked">Not linked</SelectItem>
+          </SelectContent>
+        </Select>
         <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} data-testid="sync-acronis-btn">
           {syncing ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
           Sync Acronis
@@ -90,75 +116,87 @@ export default function TenantsTab({ token, backupStatuses }) {
 
       <Card>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Acronis Tenant</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Linked NexusOps Client</TableHead>
-                <TableHead className="text-center">Machines</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((c, i) => {
-                const stats = tenantSummary[c.name] || {};
-                return (
-                  <TableRow key={c.id || i} data-testid={`tenant-row-${c.id}`}>
-                    <TableCell className="font-medium text-sm">{c.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-[10px] capitalize">{c.kind || "customer"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={c.enabled !== false ? "default" : "destructive"}
-                        className={`text-[10px] ${c.enabled !== false ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" : ""}`}
-                      >
-                        {c.enabled !== false ? "Active" : "Disabled"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {c.linked_client_name ? (
-                        <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/30 border text-[10px]">
-                          {c.linked_client_name}
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Acronis Tenant</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Linked NexusMSP Client</TableHead>
+                  <TableHead className="text-center">Machines</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pagedCustomers.map((c, i) => {
+                  const stats = tenantSummary[c.name] || {};
+                  return (
+                    <TableRow key={c.id || startIndex + i} data-testid={`tenant-row-${c.id}`}>
+                      <TableCell className="font-medium text-sm">{c.name}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] capitalize">{c.kind || "customer"}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={c.enabled !== false ? "default" : "destructive"}
+                          className={`text-[10px] ${c.enabled !== false ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" : ""}`}
+                        >
+                          {c.enabled !== false ? "Active" : "Disabled"}
                         </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">Not linked</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center text-xs">
-                      {stats.total ? (
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className="font-mono">{stats.total}</span>
-                          {stats.ok > 0 && <span className="text-emerald-400 text-[10px]">{stats.ok}✓</span>}
-                          {stats.failed > 0 && <span className="text-rose-400 text-[10px]">{stats.failed}✕</span>}
-                          {stats.warning > 0 && <span className="text-amber-400 text-[10px]">{stats.warning}!</span>}
-                        </div>
-                      ) : <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-[11px]"
-                        onClick={() => { setLinkDialog(c); setLinkClientId(c.linked_client_id || ""); }}
-                        data-testid={`link-tenant-${c.id}`}
-                      >
-                        <Link2 className="w-3 h-3 mr-1" />
-                        {c.linked_client_name ? "Change" : "Link"}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                      <TableCell>
+                        {c.linked_client_name ? (
+                          <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-500/30 border text-[10px]">
+                            {c.linked_client_name}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Not linked</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center text-xs">
+                        {stats.total ? (
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span className="font-mono">{stats.total}</span>
+                            {stats.ok > 0 && <span className="text-emerald-400 text-[10px]">{stats.ok}✓</span>}
+                            {stats.failed > 0 && <span className="text-rose-400 text-[10px]">{stats.failed}✕</span>}
+                            {stats.warning > 0 && <span className="text-amber-400 text-[10px]">{stats.warning}!</span>}
+                          </div>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => { setLinkDialog(c); setLinkClientId(c.linked_client_id || ""); }}
+                          data-testid={`link-tenant-${c.id}`}
+                        >
+                          <Link2 className="w-3 h-3 mr-1" />
+                          {c.linked_client_name ? "Change" : "Link"}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
           {filtered.length === 0 && (
             <div className="py-12 text-center text-muted-foreground">
               <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
               <p className="text-sm">{search ? "No matching tenants" : "No tenants found"}</p>
               {!search && <p className="text-[11px] mt-1 opacity-70">Click "Sync Acronis" to pull from Cyber Cloud.</p>}
+            </div>
+          )}
+          {filtered.length > 0 && (
+            <div className="flex flex-col gap-2 border-t border-border/60 bg-muted/[0.12] px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between" data-testid="tenant-pagination">
+              <span>Showing <strong className="text-foreground">{rangeStart}–{rangeEnd}</strong> of <strong className="text-foreground">{filtered.length}</strong> tenants</span>
+              <div className="flex items-center justify-between gap-2 sm:justify-end">
+                <span className="mr-1">Page {safePage} of {totalPages}</span>
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setPage(Math.max(1, safePage - 1))} disabled={safePage <= 1} aria-label="Previous tenant page"><ChevronLeft className="mr-1 h-3.5 w-3.5" />Previous</Button>
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setPage(Math.min(totalPages, safePage + 1))} disabled={safePage >= totalPages} aria-label="Next tenant page">Next<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button>
+              </div>
             </div>
           )}
         </CardContent>

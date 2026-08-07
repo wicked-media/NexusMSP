@@ -10,16 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import SignatureManager from "@/components/email/SignatureManager";
 import {
   User, Lock, Mail, Shield, Bell, Clock, Palette, Globe, Award, Trophy,
-  Star, Zap, Plus, Trash2, Eye, EyeOff,
-  CheckCircle, XCircle, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
+  Star, Zap, Eye, EyeOff,
+  CheckCircle, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
   Upload, Image, RefreshCw, ShieldCheck
 } from "lucide-react";
 
@@ -34,6 +32,13 @@ const BADGES = [
   { id: "knowledge_base", label: "Knowledge Base", description: "Wrote 10 KB articles", icon: "book", color: "#14b8a6" },
 ];
 
+const MOTION_OPTIONS = [
+  { value: "system", label: "Follow system", description: "Uses your operating system Reduce Motion preference.", icon: Settings },
+  { value: "full", label: "Professional", description: "Purposeful transitions and ambient operational cues.", icon: Zap },
+  { value: "minimal", label: "Minimal motion", description: "Keeps short fades while removing ambient animation.", icon: ShieldCheck },
+  { value: "none", label: "Static", description: "Removes non-essential motion and smooth scrolling.", icon: EyeOff },
+];
+
 const SETTINGS_SECTIONS = [
   { key: "profile", icon: User, label: "Profile", description: "Identity, contact details and skills" },
   { key: "security", icon: Lock, label: "Security", description: "Password, two-factor authentication and keys" },
@@ -46,7 +51,7 @@ const SETTINGS_SECTIONS = [
 
 export default function TechSettingsPage() {
   const { user, token, refreshUser } = useAuth();
-  const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
+  const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, motion, setMotion, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
   const headers = { Authorization: `Bearer ${token}` };
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -144,6 +149,7 @@ export default function TechSettingsPage() {
       if (displayData.preset && THEME_PRESETS?.[displayData.preset]) setPreset(displayData.preset);
       if (displayData.accent && ACCENT_COLORS?.[displayData.accent]) setAccent(displayData.accent);
       if (displayData.font && FONTS?.[displayData.font]) setFont(displayData.font);
+      if (["system", "full", "minimal", "none"].includes(displayData.motion)) setMotion(displayData.motion);
       localStorage.setItem("nexus-toast-preferences", JSON.stringify({
         toast_position: displayData.toast_position || "top-right",
         toast_style: displayData.toast_style || "nexus",
@@ -267,7 +273,7 @@ export default function TechSettingsPage() {
 
   const saveDisplay = async () => {
     try {
-      const next = { ...displayPrefs, theme, preset, accent, font };
+      const next = { ...displayPrefs, theme, preset, accent, font, motion };
       await axios.put(`${API}/user-settings/display`, next, { headers });
       setDisplayPrefs(next);
       toast.success("Display preferences saved");
@@ -634,6 +640,37 @@ export default function TechSettingsPage() {
 
                 <Separator />
 
+                <div>
+                  <Label className="text-sm font-medium">Motion & responsiveness</Label>
+                  <p className="mb-3 text-xs text-muted-foreground">Control page transitions, live status cues, animated counters and ambient intelligence.</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {MOTION_OPTIONS.map(option => {
+                      const MotionIcon = option.icon;
+                      const selected = motion === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setMotion(option.value)}
+                          className={`flex items-start gap-3 rounded-xl border p-3 text-left transition-colors ${selected ? "border-primary/45 bg-primary/[0.07] ring-1 ring-primary/20" : "border-border/70 bg-card/55 hover:border-primary/25 hover:bg-muted/30"}`}
+                          data-testid={`motion-${option.value}`}
+                          aria-pressed={selected}
+                        >
+                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${selected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
+                            <MotionIcon className="h-4 w-4" />
+                          </span>
+                          <span>
+                            <span className="block text-sm font-semibold">{option.label}</span>
+                            <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <Separator />
+
                 {/* Theme Presets */}
                 <div>
                   <Label className="text-sm font-medium">Theme Preset</Label>
@@ -808,7 +845,7 @@ export default function TechSettingsPage() {
                 </div>
 
                 <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
-                  <div><p className="text-sm font-semibold">Save workspace appearance</p><p className="mt-1 text-xs text-muted-foreground">Keep this theme, accent, and font when you sign in on another browser.</p></div>
+                  <div><p className="text-sm font-semibold">Save workspace appearance</p><p className="mt-1 text-xs text-muted-foreground">Keep this theme, motion level, accent and font when you sign in on another browser.</p></div>
                   <Button onClick={saveDisplay} data-testid="save-display-preferences"><CheckCircle className="mr-1.5 h-4 w-4" />Save appearance</Button>
                 </div>
 

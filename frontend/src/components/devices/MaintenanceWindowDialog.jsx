@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Calendar, Clock, Wrench, Power, RefreshCw, Download, Loader2, Sparkles, History, Trash2, Play, X, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
+import { Calendar, Wrench, Power, RefreshCw, Download, Loader2, Sparkles, History, Trash2, Play, ChevronRight, CheckCircle2, XCircle } from "lucide-react";
 
 const ACTION_OPTIONS = [
   { key: "install-patches", label: "Windows Update", icon: Download },
@@ -163,16 +163,16 @@ export function MaintenanceWindowHistory({ open, onClose }) {
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await axios.get(`${API}/maintenance-windows`, { headers });
+      const r = await axios.get(`${API}/maintenance-windows`, { headers: { Authorization: `Bearer ${token}` } });
       setItems(r.data || []);
     } catch (e) { toast.error("Load failed"); }
     finally { setLoading(false); }
-  };
+  }, [token]);
 
-  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open]);
+  useEffect(() => { if (open) load(); }, [load, open]);
 
   const cancel = async (w) => {
     if (!window.confirm(`Cancel "${w.name}"?`)) return;

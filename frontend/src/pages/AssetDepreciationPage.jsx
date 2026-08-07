@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { DollarSign, Clock, AlertTriangle, RefreshCw, CheckCircle } from "lucide-react";
+import { DollarSign, AlertTriangle, RefreshCw, CheckCircle } from "lucide-react";
 
 const statusColors = { active: "default", refresh_soon: "secondary", end_of_life: "destructive" };
 
@@ -13,14 +13,12 @@ export default function AssetDepreciationPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
-    axios.get(`${API}/asset-depreciation`, { headers })
+    axios.get(`${API}/asset-depreciation`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
   if (!data) return null;

@@ -8,12 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Shield, ShieldCheck, ShieldX, AlertTriangle, CheckCircle, XCircle,
-  Search, Loader2, RefreshCw, ExternalLink, TrendingUp, Users,
-  MailCheck, Lock, Globe, Server, ArrowUpRight, Eye
+  Search, Loader2, RefreshCw, ExternalLink, TrendingUp, Users, Eye
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";

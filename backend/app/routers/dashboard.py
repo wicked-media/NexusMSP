@@ -336,8 +336,34 @@ async def get_device_analytics(current_user: dict = Depends(get_current_user)):
         "active_alerts": len([a for a in alerts if a.get("status") == "active"]),
     }
 
+def _dedupe_users(rows: list[dict]) -> list[dict]:
+    """Return one canonical directory entry per Nexus user identity.
+
+    Legacy seed and import paths could create repeated documents for the same
+    user ID.  Merging sparse fields keeps useful profile data while preventing
+    every technician selector from showing the same person multiple times.
+    """
+    canonical: dict[str, dict] = {}
+    order: list[str] = []
+    for row in rows:
+        user_id = str(row.get("id") or "").strip()
+        email = str(row.get("email") or "").strip().lower()
+        key = user_id or email
+        if not key:
+            continue
+        if key not in canonical:
+            canonical[key] = dict(row)
+            order.append(key)
+            continue
+        existing = canonical[key]
+        for field, value in row.items():
+            if value not in (None, "", [], {}) and existing.get(field) in (None, "", [], {}):
+                existing[field] = value
+    return [canonical[key] for key in order]
+
+
 @router.get("/users", response_model=List[User])
 async def get_users(current_user: dict = Depends(get_current_user)):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
-    return users
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
+    return _dedupe_users(users)
 

@@ -6,22 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Plus, Search, BookOpen, Eye, ThumbsUp, Loader2, FileText, Tag,
-  RefreshCw, Pin, Globe, Lock, Edit, Trash2, Clock, User, Star,
-  ArrowLeft, Link2, CheckCircle, ChevronRight
+  RefreshCw, Pin, Globe, Lock, Edit, Clock, User,
+  ArrowLeft, Link2
 } from "lucide-react";
-import { formatDistanceToNow, format } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import HeroTile from "@/components/HeroTile";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import DOMPurify from "dompurify";
+import ConfidenceLens from "@/components/confidence/ConfidenceLens";
 
 const categories = [
   { value: "general", label: "General", color: "bg-slate-500/20 text-slate-400" },
@@ -108,7 +107,7 @@ export default function KnowledgeBasePage() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this article?")) return;
+    if (!window.confirm("Delete this article?")) return;
     try {
       await axios.delete(`${API}/kb/articles/${id}`, { headers });
       toast.success("Article deleted");
@@ -228,6 +227,7 @@ export default function KnowledgeBasePage() {
             </div>
           </div>
           <div className="col-span-3 space-y-4">
+            <ConfidenceLens entityType="documentation" entityId={viewArticle.id} token={token} API={API} variant="compact" className="w-full" />
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-1"><Link2 className="w-4 h-4" />Related Articles</CardTitle></CardHeader>
               <CardContent className="space-y-2">

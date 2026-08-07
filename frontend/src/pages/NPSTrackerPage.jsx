@@ -11,10 +11,9 @@ export default function NPSTrackerPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
   const load = useCallback(async () => {
     setLoading(true);
-    try { setData((await axios.get(`${API}/nps-tracker/overview`, { headers })).data); }
+    try { setData((await axios.get(`${API}/nps-tracker/overview`, { headers: { Authorization: `Bearer ${token}` } })).data); }
     finally { setLoading(false); }
   }, [token]);
   useEffect(() => { load(); }, [load]);

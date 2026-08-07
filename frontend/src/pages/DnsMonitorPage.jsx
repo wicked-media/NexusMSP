@@ -14,8 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Activity, AlertTriangle, AppWindow, ArrowRight, CheckCircle2, CircleDollarSign, Clock,
-  FileCheck2, FileText, Filter, Fingerprint, Gauge, Globe2, HelpCircle, History, Laptop2,
-  LockKeyhole, Network, Plus, Radar,
+  FileCheck2, Filter, Fingerprint, Gauge, Globe2, HelpCircle, History, Laptop2,
+  LockKeyhole, Plus, Radar,
   RefreshCw, RotateCcw, Search, ServerCog, Settings2, ShieldAlert, ShieldCheck, Sparkles,
   TestTube2, TicketPlus, TriangleAlert, WifiOff, XCircle, Zap,
 } from "lucide-react";

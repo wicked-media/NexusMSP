@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,10 +8,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Loader2, DollarSign, RefreshCw, Save, Eye, FileText, XCircle, Plus } from "lucide-react";
+import { Loader2, DollarSign, RefreshCw, Save, Eye, FileText, XCircle, Plus, Users, CalendarDays, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import HeroTile from "@/components/HeroTile";
 
-export default function BillingTab({ token }) {
+export default function BillingTab({ token, onOpenTenants }) {
   const headers = { Authorization: `Bearer ${token}` };
   const [pricing, setPricing] = useState({});
   const [currency, setCurrency] = useState("AUD");
@@ -27,7 +28,8 @@ export default function BillingTab({ token }) {
   const [autoBillFrequency, setAutoBillFrequency] = useState("monthly");
   const [syncConfirmOpen, setSyncConfirmOpen] = useState(false);
 
-  const fetchBilling = async () => {
+  const fetchBilling = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${token}` };
     setLoading(true);
     try {
       const [priceRes, previewRes] = await Promise.all([
@@ -41,9 +43,9 @@ export default function BillingTab({ token }) {
       setBillingPreview(previewRes.data);
     } catch { toast.error("Failed to load billing data"); }
     finally { setLoading(false); }
-  };
+  }, [token]);
 
-  useEffect(() => { fetchBilling(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchBilling(); }, [fetchBilling]);
 
   const refreshFx = async (target) => {
     setRefreshingFx(true);
@@ -155,7 +157,7 @@ export default function BillingTab({ token }) {
           <Button size="sm" variant="outline" onClick={() => refreshFx(currency)} disabled={refreshingFx} data-testid="refresh-fx-btn">
             {refreshingFx ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh FX
           </Button>
-          <Button size="sm" variant="outline" onClick={() => syncBillingToLineItems(true)} disabled={syncingBilling} data-testid="dry-run-billing-btn">
+          <Button size="sm" variant="outline" onClick={() => syncBillingToLineItems(true)} disabled={syncingBilling || !(billingPreview?.linked_clients)} data-testid="dry-run-billing-btn">
             <Eye className="w-3 h-3 mr-1" />Dry Run
           </Button>
           <Button size="sm" onClick={() => setSyncConfirmOpen(true)} disabled={syncingBilling || !(billingPreview?.linked_clients)} data-testid="sync-billing-btn">
@@ -164,11 +166,11 @@ export default function BillingTab({ token }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold">{billingPreview?.linked_clients || 0}</p><p className="text-[11px] text-muted-foreground">Linked Clients</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold">{billingPreview?.period || "—"}</p><p className="text-[11px] text-muted-foreground">Billing Period</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold text-emerald-400">{currency} {(billingPreview?.grand_total || 0).toFixed(2)}</p><p className="text-[11px] text-muted-foreground">Total This Period</p></CardContent></Card>
-        <Card><CardContent className="pt-4 pb-3"><p className="text-2xl font-bold text-amber-400">{(billingPreview?.results || []).reduce((n, r) => n + (r.unknown_count || 0), 0)}</p><p className="text-[11px] text-muted-foreground">Unknown Offerings</p></CardContent></Card>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <HeroTile label="Linked clients" value={billingPreview?.linked_clients || 0} icon={Users} glow="cyan" subtitle="Tenant mappings ready" />
+        <HeroTile label="Billing period" value={billingPreview?.period || "—"} animated={false} icon={CalendarDays} glow="sky" subtitle="Current reconciliation window" />
+        <HeroTile label="Period total" value={`${currency} ${(billingPreview?.grand_total || 0).toFixed(2)}`} animated={false} icon={DollarSign} glow="emerald" subtitle="Previewed billable usage" />
+        <HeroTile label="Unknown offerings" value={(billingPreview?.results || []).reduce((n, r) => n + (r.unknown_count || 0), 0)} icon={AlertTriangle} glow="amber" subtitle="Products needing mapping" />
       </div>
 
       <Card>
@@ -239,9 +241,12 @@ export default function BillingTab({ token }) {
         </CardHeader>
         <CardContent>
           {(billingPreview?.results || []).length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground py-6">
-              No linked Acronis tenants. Link tenants to NexusOps clients in the <strong>Tenants</strong> tab first.
-            </p>
+            <div className="py-8 text-center">
+              <Users className="mx-auto h-9 w-9 text-sky-300/70" />
+              <p className="mt-3 text-sm font-medium">No Acronis tenants are linked to NexusMSP clients</p>
+              <p className="mx-auto mt-1 max-w-xl text-xs text-muted-foreground">Map each Acronis tenant to its client before previewing or syncing usage into contracts and recurring invoices.</p>
+              {onOpenTenants && <Button className="mt-4" size="sm" variant="outline" onClick={onOpenTenants}><Users className="mr-1.5 h-3.5 w-3.5" />Open tenant mapping</Button>}
+            </div>
           ) : (
             <div className="space-y-3">
               {billingPreview.results.map(r => (

@@ -14,8 +14,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import {
   FileEdit, Plus, Save, Loader2, Trash2, Star, Eye, GripVertical, Copy,
-  LayoutGrid, Wrench, Sparkles, PaintBucket, FileText, Receipt, ScanLine, FileSignature,
-  Minus, MoveVertical, Type, Image as ImageIcon, Tag,
+  LayoutGrid, Wrench, Sparkles, PaintBucket, FileText, Receipt, ScanLine, FileSignature, Tag,
   RefreshCw,
 } from "lucide-react";
 

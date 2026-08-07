@@ -7,7 +7,7 @@ can stay useful in the moment of work rather than becoming an implementation
 archive.
 """
 
-HELP_CATALOG_VERSION = "2026-07-25-guide-system-v10.0-durable-automation-runtime"
+HELP_CATALOG_VERSION = "2026-08-02-guide-system-v18-recovery-assurance"
 
 
 _WORKSPACE_VISUALS = {
@@ -110,6 +110,40 @@ def _guide(
     }
 
 
+def _workspace_guide(
+    slug, title, category, icon, order, summary, steps, verify, related="",
+    before="", audit="", at_a_glance="", troubleshooting="", rollback="",
+    screenshots=None,
+):
+    """A complete operational guide for a first-class NexusMSP workspace."""
+    return _guide(
+        slug,
+        title,
+        category,
+        icon,
+        order,
+        summary,
+        f"The technician has completed **{title.lower()}**, verified the live result, and attached the evidence to the correct NexusMSP operational record.",
+        before or (
+            "- Confirm the correct client, asset, ticket, or organisation scope before making a change.\n"
+            "- Review client alerts, linked service records, maintenance windows, and approvals that apply to the work.\n"
+            "- Capture the current state and identify the safe recovery point before changing production service."
+        ),
+        steps,
+        verify,
+        audit or (
+            "- Record the technician, approval, affected scope, action, timestamp, and verified result.\n"
+            "- Attach the relevant activity event, screenshot, report, or execution output to the ticket or client history.\n"
+            "- Assign any exception or follow-up work to a named owner with a due date."
+        ),
+        related,
+        screenshots,
+        at_a_glance,
+        troubleshooting,
+        rollback,
+    )
+
+
 CURATED_ARTICLES = [
     {
         "slug": "whats-new",
@@ -143,10 +177,10 @@ Read the newest entry before a shift. If an item changes a procedure, follow its
         "Set up your workspace, establish your availability, and triage the day with the right operational context.",
         "You have a ready-to-use technician workspace, know what needs attention, and can safely begin work.",
         "Sign in with your assigned account. Confirm that you can access the client and ticket workspaces required for your role.",
-        "1. Open **My Workspace** and confirm your profile, notification preferences, and working hours.\n2. Open **Morning Checks** to review priority alerts, backups, and handover items.\n3. Open **Tickets** and use the queue filters to identify your assigned and unassigned urgent work.\n4. Set your availability in **Team** if you are starting, pausing, or finishing a shift.",
+        "1. Open **My Workspace** and confirm your profile, notification preferences, and working hours.\n2. Open **Dashboard** and use **Nexus Daily** to review priority alerts, backups, and handover items. Select **Daily sign-off** when an attributable NOC review is required.\n3. Open **Tickets** and use the queue filters to identify your assigned and unassigned urgent work.\n4. Set your availability in **Team** if you are starting, pausing, or finishing a shift.",
         "Your dashboard should show current data, your ticket queue should be visible, and your availability should be correct for dispatch.",
         "Use ticket notes for customer work. Use Team Chat or the handover workflow for internal operational context; never place credentials in either.",
-        "[Ticket triage](/help/ticket-triage) and [Morning checks](/help/morning-checks).",
+        "[Ticket triage](/help/ticket-triage) and [Daily NOC sign-off](/help/daily-noc-sign-off).",
     ),
     _guide(
         "using-help-center", "Use the Help Centre", "Start here", "📘", 1,
@@ -245,9 +279,9 @@ Read the newest entry before a shift. If an item changes a procedure, follow its
         "Use the Backups workspace to address failures, prove recoverability, and keep billing and client records accurate.",
         "Backup status, alert response, restore evidence, and client mapping are current and auditable.",
         "Confirm the backup provider is connected and the client has a mapped tenant or protected asset.",
-        "1. Open **Backups** and review the live ticker, failures, and overdue verification items.\n2. Filter to the affected client or asset.\n3. Review the last successful job and failure reason.\n4. Escalate or remediate the failure using the linked ticket.\n5. Schedule or record a restore verification.\n6. Confirm the client mapping and billable usage before the recurring billing run.",
-        "The latest job state is current, failed protection has an owner, and a completed restore has evidence of what was recovered and when.",
-        "Use the linked ticket for customer impact. Keep restore evidence in the backup record and client documentation.",
+        "1. Open **Backups** and review the live ticker, failures, and overdue verification items.\n2. Filter to the affected client or asset.\n3. Review the last successful job and failure reason.\n4. Escalate or remediate the failure using the linked ticket.\n5. Open **Verify** and read **Backup Confidence** together with **Evidence coverage**; an unassessed control is not a pass.\n6. Choose **Simulate recovery**, select the customer, enter the workload, RTO, RPO, protected data and dependencies, then review every evidence blocker. Simulation records a plan only and never starts a provider restore.\n7. Schedule an approved recovery test in an isolated destination, then record the measured duration, integrity result and technician notes.\n8. Confirm the client mapping and billable usage before the recurring billing run.",
+        "The latest job state is current, failed protection has an owner, confidence identifies its evidence boundary, and a completed restore has attributable proof of what was recovered and when.",
+        "Use the linked ticket for customer impact. Recovery simulations retain targets, assumptions, restore order, evidence counts and blockers with `external_changes: false`. Keep measured restore evidence in the backup record and client documentation; provider engines remain authoritative for backup execution.",
     ),
     _guide(
         "nexus-shield-and-canary", "Operate Nexus Shield and Canary", "Infrastructure & security", "🛡️", 32,
@@ -399,7 +433,7 @@ def _reference_guide(slug: str, title: str, category: str, icon: str, order: int
 # Existing in-product links remain available, but now resolve to concise technician
 # procedures instead of exposing release notes or implementation detail.
 CURATED_ARTICLES.extend([
-    _reference_guide("morning-checks", "Run the morning service checks", "Start here", "☀️", 4, "Start the day from a prioritised operational check list and turn exceptions into owned work."),
+    _reference_guide("daily-noc-sign-off", "Complete the Daily NOC sign-off", "Start here", "☀️", 4, "Use Nexus Daily on Dashboard to review live operational evidence, assign exceptions, and retain an attributable shift handoff."),
     _reference_guide("team-hub", "Manage your team", "Platform setup", "👥", 21, "Invite technicians, manage roles, and keep team access and profiles current."),
     _reference_guide("settings-hub", "Use the Settings hub", "Platform setup", "⚙️", 22, "Find organisation-level configuration without mixing it with personal workspace preferences."),
     _reference_guide("m365-command-center", "Operate Microsoft 365 services", "Platform setup", "☁️", 23, "Review Microsoft 365 service data and use approved actions with the correct client context."),
@@ -423,6 +457,452 @@ CURATED_ARTICLES.extend([
     ),
     _reference_guide("nexus-elevate-setup", "Set up Nexus Elevate", "Infrastructure & security", "🛡️", 48, "Configure elevation controls, approvals, and technician notifications before enabling client requests."),
     _reference_guide("nexus-shield-canary", "Deploy Nexus Shield Canary", "Infrastructure & security", "🛡️", 49, "Deploy canary protection to an active managed endpoint, verify alerting, and retain the deployment evidence."),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-shield-xdr",
+        "Use Nexus Shield XDR and Security Confidence",
+        "Infrastructure & security",
+        "🛡️",
+        5,
+        "Assess cyber resilience across endpoint, identity, email, cloud, human, DNS, and recovery evidence without mistaking missing telemetry for a healthy result.",
+        "1. Open **Nexus Shield > Shield XDR**.\n"
+        "2. Read **Security Confidence** together with **Evidence Coverage**. Confidence scores only assessed domains; coverage shows how much Nexus can currently prove.\n"
+        "3. Open each domain card and validate the authoritative endpoint, Microsoft, email, DNS, or backup evidence.\n"
+        "4. Review correlated cases. Confirm that the customer and subject identifiers genuinely refer to the same person, endpoint, or service.\n"
+        "5. Select **Investigate**, review the evidence snapshot, then choose **Open investigation**. Nexus creates a durable case, assigns the signed-in technician, and retains the evidence that was visible when the case opened.\n"
+        "6. Use the **XDR investigation desk** to change the case through Investigating, Contained, Recovering, Resolved, or False positive. Every change requires a decision note.\n"
+        "7. Preserve evidence before containment and open the linked response queue or remediation playbook. Record impact, client communication, approvals, and actions in the owning workflow.\n"
+        "8. Complete Security Missions from highest impact to lowest, then refresh the originating connector.\n"
+        "9. Open the evidence graph to review persisted relationships and likely exposure paths.\n"
+        "10. Recheck confidence and coverage after the source systems synchronise, then use Reports for an executive outcome summary only after validating the underlying evidence.",
+        "Every scored domain has current source evidence, unknown domains remain marked Not assessed, correlated cases have been validated by a technician, and containment or accepted risk is approval-backed and auditable.",
+        related="[Open Nexus Shield XDR](/nexus-shield?tab=xdr), [Review the response queue](/nexus-shield?tab=response), [Open Security Graph](/security-graph), [Open remediation playbooks](/remediation-playbooks), and [Review Reports](/reports).",
+        before="- Confirm connector health and the last successful sync before trusting a score.\n"
+        "- Never interpret 100% confidence with partial evidence coverage as complete security.\n"
+        "- Validate the client, identity, and endpoint relationship before containment.\n"
+        "- Require approval for account disablement, session revocation, device isolation, blocking, or customer communication.",
+        audit="- Confidence calculations retain observed counts, gaps, routes, and the evidence boundary for every domain.\n"
+        "- Missing connectors produce Not assessed, never a synthetic pass.\n"
+        "- Correlation uses persisted client and subject identifiers and does not claim causation.\n"
+        "- Opening an investigation snapshots the observed evidence; case status changes retain the signed-in technician, timestamp, and required decision note.\n"
+        "- Closed and false-positive cases remain in the investigation ledger and are not silently deleted.\n"
+        "- Suggested actions do not execute from the confidence view; response remains approval-gated in the owning workflow.\n"
+        "- Incident, ticket, playbook, communication, and change evidence remain attributable to the signed-in technician.",
+        at_a_glance="- **Expected time:** 5-15 minutes for triage\n"
+        "- **Risk:** Read-only until an owning response workflow is opened\n"
+        "- **Required access:** Nexus Shield plus access to the linked source workspaces\n"
+        "- **Evidence location:** Shield XDR, source connector, Security Graph, response playbook, incident ticket, and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| A domain says Not assessed | Connector status, verified source, and last sync | Connect or repair the authoritative provider; do not enter a manual pass |\n"
+        "| Confidence looks high but coverage is low | Assessed-domain count | Treat the score as narrow evidence, then close the missing coverage gaps |\n"
+        "| Two alerts are not correlated | Client ID and subject identifier | Correct the source association only when verified; do not force a relationship |\n"
+        "| A case combines unrelated evidence | Persisted user, endpoint, domain, and client identifiers | Split investigation in the source workflows and correct the bad association |\n"
+        "| A mission remains after remediation | Source refresh and evidence timestamp | Resynchronise or rerun the agent assessment before closing it |",
+        rollback="Shield XDR is read-only. If a linked containment or remediation action was incorrect, stop further actions, use the owning provider or playbook rollback, validate restored identity and endpoint state, notify affected parties when required, and retain the correction in the incident and audit history.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "ambient-intelligence-and-motion",
+        "Configure Ambient Intelligence and motion",
+        "Personal workspace",
+        "✨",
+        4,
+        "Understand Nexus semantic motion, choose the right motion level, and interpret quiet surface signals without relying on animation or colour alone.",
+        "1. Open **My Settings > Display & workspace**.\n"
+        "2. Choose **System preference** to follow the operating system's Reduced Motion setting, **Full motion** for purposeful ambient state, **Minimal motion** for short fades without ambient animation, or **Static** to remove non-essential motion.\n"
+        "3. Save the workspace appearance so the preference follows your Nexus profile.\n"
+        "4. Read every ambient surface together with its text, icon, count, or badge: blue means work is active, green means the source reports healthy or successful, amber means review, red means immediate attention, and violet means AI context or a recommendation.\n"
+        "5. In Mission Control, select the surfaced panel or workstream to open its exact records. Motion is only a quiet state cue; it is never the evidence.\n"
+        "6. In Nexus AI, a blue ambient line means a request is processing and violet means a recommendation is available. Validate the cited sources before acting.\n"
+        "7. In Universal Inspector, compare source-reported health with evidence confidence. A red or amber surface can still have high confidence because Nexus strongly trusts the degraded evidence.\n"
+        "8. Open **Nexus Quick Dock > Focus mode** when a ticket, quote, investigation, or change needs uninterrupted attention. Nexus removes sidebar navigation while leaving the active workflow unchanged.\n"
+        "9. Choose **Exit focus mode**, press Escape, or navigate to another workspace to restore normal navigation.\n"
+        "10. If animation is uncomfortable, distracting, or expensive on the device, choose Minimal or Static. Nexus retains every label, status, action, and source without animation.",
+        "The chosen preference persists, operating-system Reduced Motion is honoured, and all operational states remain understandable when animation is disabled.",
+        related="[Open My Settings](/my-settings), [Open Mission Control](/), [Review Nexus Fabric](/clients), and [Open Accessibility guidance](/documentation-hub?tab=help).",
+        before="- Motion never replaces status text, icons, counts, evidence, or alerts.\n- Sounds remain off unless a future explicitly opt-in setting is approved.\n- Decorative effects such as particles, rain, fireworks, and background motion are not enabled globally.\n- Verify the owning record before acting on any ambient cue.",
+        audit="- Display and motion preferences are stored with the technician profile and locally for immediate application.\n- Semantic colour meanings are centrally defined.\n- Minimal, Static, and operating-system Reduced Motion disable ambient animation.\n- Ambient Intelligence does not create alerts, recommendations, or health claims; it only reflects existing state.",
+        at_a_glance="- **Expected time:** 1-2 minutes\n- **Risk:** None; display preference only\n- **Required access:** Signed-in technician\n- **Evidence location:** Owning operational record, Mission Control drill-down, Nexus AI citations, or Universal Inspector",
+        troubleshooting="| Symptom | Check | Safe response |\n|---|---|---|\n| Motion still appears | Saved motion level and operating-system preference | Select Static, save, then refresh once |\n| A colour is unclear | Text label, badge, icon, and source record | Ignore colour and use the labelled state |\n| Surface is glowing but no item appears | Data refresh and owning workspace | Refresh the source; do not infer an issue from glow alone |\n| Animation affects performance | Browser graphics settings and motion level | Select Minimal or Static |",
+        rollback="Return to My Settings and select System preference, Minimal motion, or Static. This changes presentation only and does not alter operational records.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-ideas",
+        "Capture and review ideas in Nexus Foundation",
+        "Platform administration",
+        "💡",
+        4,
+        "Capture product opportunities without confusing an idea with approved roadmap work, then assess each one against the four Nexus value principles.",
+        "1. Open **Nexus Control Plane > Foundation** and locate **Nexus Ideas**.\n"
+        "2. Search the retained catalog before adding an idea so the same opportunity is not captured twice.\n"
+        "3. Select **Capture idea** and enter an outcome-focused title, category, and explanation of why it matters.\n"
+        "4. Select at least one value principle: save time, reduce stress, increase confidence, or create opportunity.\n"
+        "5. Save the idea. It begins as **Captured** and is not automatically approved, scheduled, or released.\n"
+        "6. During product review, add evidence, dependencies, an owner, and a decision note before moving it to Reviewing or Validated.\n"
+        "7. Promote an idea only when it has a defined roadmap dependency and release gate. Park or reject it with a retained reason instead of deleting product history.",
+        "The idea is retained once, passes at least one Nexus value principle, and its state accurately distinguishes capture, review, validation, promotion, parking, or rejection.",
+        related="[Open Nexus Foundation](/control-plane?module=foundation), [Review Production Readiness](/production-readiness), and [Review Audit Trail](/audit-trail).",
+        before="- Search for an existing idea first.\n- Describe the user outcome, not just a visual effect or implementation technology.\n- Captured does not mean approved.\n- Do not promise a delivery date from the idea registry.",
+        audit="- Idea capture and lifecycle changes emit durable Nexus Foundation events.\n- Rejected and parked ideas remain retained.\n- Roadmap promotion remains a separate deliberate product decision.\n- The four selected value principles are stored with the idea.",
+        at_a_glance="- **Expected time:** 2-5 minutes\n- **Risk:** Low; no product or customer workflow is changed\n- **Required access:** Nexus Foundation product-administration permission\n- **Evidence location:** Nexus Ideas, Product Roadmap, platform events, and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n|---|---|---|\n| Save is rejected | Title, summary, and value principles | Select at least one value principle and provide a clear outcome |\n| Similar idea already exists | Idea number, title, category, and search terms | Update the existing idea rather than duplicating it |\n| Idea is mistaken for committed work | Current status and roadmap presence | Keep it Captured or Reviewing until formal promotion |\n| Permission denied | Product-administration role | Ask an authorised administrator to capture or revise it |",
+        rollback="Idea capture does not alter product behavior. If an idea was entered incorrectly, retain it and mark it Rejected or Parked with the correction reason rather than deleting the decision history.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-fabric",
+        "Trace client relationships with Nexus Fabric",
+        "Client operations",
+        "🕸️",
+        5,
+        "Follow verified relationships between a client, its people, technology, services, commercial records, work, integrations, and documentation, then retrieve source-backed operational memory without guessing what happened before.",
+        "1. Open **Clients**, select the client, and choose **Command > Nexus Fabric**.\n"
+        "2. Review the object, relationship, operational-path, coverage, and attention totals.\n"
+        "3. Use the relationship constellation to focus on people, devices, services, contracts, tickets, projects, invoices, documentation, or integrations.\n"
+        "4. Search by name, status, provider ID, source collection, or record ID.\n"
+        "5. Select an object to inspect every directly connected record.\n"
+        "6. Review **Object story**. Health is the source-reported state; evidence confidence shows how much canonical, relationship, and timeline evidence supports that state. High confidence does not mean healthy.\n"
+        "7. Choose **Open universal inspector** when you need to keep the object beside your current workflow. The inspector carries the same health, trust, impact, timeline, relationship, and source contract across Nexus.\n"
+        "8. Select a related object inside the inspector to follow the relationship without opening another workspace. Choose **Open owning workspace** only when you need to change or fully validate the source record.\n"
+        "9. Review recorded business impact. If Nexus says impact is unknown, add impact in the owning workflow rather than guessing from the relationship graph.\n"
+        "10. Follow the recent object timeline to see the selected record's own history. Nearby events are chronological evidence and do not prove causation.\n"
+        "11. Read the relationship evidence line before relying on a link. Nexus shows the source field or provider mapping used to create it.\n"
+        "12. Select a related object to continue tracing the thread, or choose **Open in owning workspace** to validate the live source record.\n"
+        "13. In **Nexus operational memory**, describe the prior issue, device, technician, category, or known fix you remember. Use short evidence terms such as `VPN Fortinet` or `printer closed ticket`.\n"
+        "14. Read **Why Nexus recalled this** before relying on a result. Open the owning record to validate the full service history, resolution, or commercial context.\n"
+        "15. Use **AI problem radius** to inspect the direct and extended records around an attention item. Treat these as records worth checking, not proof that one caused another.\n"
+        "16. Read the five decision prompts separately: observed state, causal evidence, forecast, recommended validation, and currently approved Nexus action. Unknown answers deliberately remain unknown.\n"
+        "17. Review **Memory Crystal** to understand knowledge readiness. Its score comes from relationship coverage, source diversity, operational memory, and linked documentation; it is not a client-health score.\n"
+        "18. Review **Verified operational threads** for cross-object relationships such as a ticket concerning a device, a service governed by a contract, or an invoice billing a ticket.\n"
+        "19. When an important business reason is not represented by an existing source field, an authorised administrator may choose **Record context**. Select two canonical objects and record the purpose, business process, requester, approval evidence, and decision record.\n"
+        "20. Record context only for an already approved relationship. Nexus stores it as an auditable source record and rebuilds the fabric; it is not a free-form graph-only link.\n"
+        "21. If the fabric is missing or stale, ask an administrator to choose **Refresh fabric**. The rebuild derives a new index from source records without renaming or deleting them.\n"
+        "22. Correct a wrong or missing relationship in its owning source record, then refresh the fabric.",
+        "The selected object opens in the correct owning workspace, every relationship and recalled memory used for a decision shows source evidence, and any corrected source relationship appears after the administrator refreshes the index.",
+        related="[Open Clients](/clients), [Review Nexus Foundation](/control-plane?module=foundation), [Open the operational timeline](/client-insights?tab=client-timeline), and [Review Audit Trail](/audit-trail).",
+        before="- Confirm you have selected the correct client profile.\n"
+        "- Treat Nexus Fabric as a read model; the device, ticket, contract, invoice, provider, or document remains the authoritative source.\n"
+        "- Do not treat an empty domain or missing line as proof that the relationship does not exist outside Nexus.\n"
+        "- Only administrators with the platform-core rebuild permission can refresh the full canonical index.",
+        audit="- Every object retains its source collection and native source ID.\n"
+        "- Every relationship retains the exact field or provider mapping used as evidence.\n"
+        "- Nexus does not infer missing links or generate synthetic relationships.\n"
+        "- Operational memory retains the source record, relationship evidence, confidence label, and reason it was recalled; it does not invent a root cause or resolution.\n"
+        "- Problem radius is a two-hop evidence view. It does not assert technical impact, business impact, or causation without a recorded source.\n"
+        "- Memory Crystal is a transparent readiness calculation and never substitutes for client health, risk, or compliance evidence.\n"
+        "- Approved context retains who requested and recorded it, its approval evidence, business purpose, decision reference, and timestamp.\n"
+        "- Rebuilds are retained as platform events and Audit Trail activity with actor, timestamp, counts, integrity state, and correlation ID.",
+        at_a_glance="- **Expected time:** 2-10 minutes for a relationship trace\n"
+        "- **Risk:** Read-only; a fabric refresh rebuilds only the derived index\n"
+        "- **Required access:** Client scope; administrator permission for Refresh fabric\n"
+        "- **Evidence location:** Owning source record, Nexus Core index, client operational timeline, and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| Fabric has not been indexed | Nexus Foundation status and last rebuild | Ask an administrator to choose **Build verified fabric** |\n"
+        "| An expected object is missing | Client ID and ownership on the source record | Correct the source record, then refresh the fabric |\n"
+        "| A relationship is wrong | The evidence line and named source field | Correct that source field; never create a manual graph-only link |\n"
+        "| Relationship depth is low | Cross-object IDs such as device, contract, ticket, project, or service mappings | Add the missing reference in the owning workflow and rebuild |\n"
+        "| Open in owning workspace goes to an empty result | Native source ID and source record lifecycle | Confirm the record still exists; retain an audit note before archival correction |\n"
+        "| Refresh is denied | Role and `platform.core.rebuild` permission | Use an authorised administrator; do not bypass the action policy |",
+        rollback="Nexus Fabric is read-only. A refresh replaces only the derived canonical index and does not mutate source collections. If a refresh exposes an incorrect relationship, preserve the evidence, correct the owning source record, and rebuild again rather than editing or deleting graph data directly.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-autopilot",
+        "Configure and review Nexus Autopilot",
+        "Automation & intelligence",
+        "🧭",
+        3,
+        "Set a permission-based autonomy boundary, review live readiness gates, and simulate evidence-backed work without giving AI unrestricted access.",
+        "1. Open **AI Operations > Autopilot**.\n"
+        "2. Read the **Autonomy ladder** from Level 0 to Level 4. The configured level is intent; the effective level is the lower level allowed by live readiness.\n"
+        "3. Select **Policy** and keep Autopilot disabled while you choose an explicit client scope, approved action allow-list, confidence threshold, and maximum actions per run.\n"
+        "4. Start at **Level 0 — Observe**. Select an operational candidate and choose **Simulate plan**.\n"
+        "5. Confirm the source evidence, client, endpoint, confidence tier, proposed action, before/after plan, rollback, blockers, and approval path.\n"
+        "6. Resolve every blocker. A trusted Nexus Agent, linked ticket, approved workflow, simulation evidence, and maintenance controls become mandatory as the level rises.\n"
+        "7. Enable only the lowest level that meets the business need. Nexus caps the effective level when a readiness gate is missing.\n"
+        "8. Keep protected security, identity, billing, certificate, and containment actions human-approved. This safeguard cannot be disabled in the policy form.\n"
+        "9. Use **Kill switch** whenever scope, connector behaviour, evidence, or an active incident is unexpected. Record a decision reason.\n"
+        "10. Resume only after reviewing the ladder. Nexus will refuse to resume when Level 1 readiness is not satisfied.",
+        "The header shows the expected effective level, configured intent is not above the highest ready level unless visibly capped, simulations state **No changes executed**, and the policy decision appears in Recent decisions and the Black Box.",
+        related="[Open AI Operations](/auto-ops?tab=autopilot), [Review Automation Studio](/workflow-automation), [Open Change Management](/change-management), [Plan maintenance windows](/maintenance-scheduler), and [Review the Audit Trail](/audit-trail).",
+        before="- Confirm the technician is authorised to manage automation policy for the selected clients.\n"
+        "- Confirm at least one Nexus Agent endpoint has an issued identity and acknowledged policy before considering Level 1.\n"
+        "- Approve and simulate the owning workflow before considering Level 2.\n"
+        "- Record maintenance controls and tested rollback evidence before considering Level 3.\n"
+        "- Treat Level 4 as bounded overnight orchestration, not unrestricted autonomous administration.",
+        audit="- Policy changes record configured and effective levels, selected client count, action count, technician, time, and correlation ID.\n"
+        "- Simulations retain the candidate, source evidence, confidence, policy snapshot, blockers, before/after plan, rollback, and `will_execute: false`.\n"
+        "- Kill-switch and resume decisions require reasons and publish durable Autopilot events.\n"
+        "- Live changes do not execute from the Autopilot screen; eligible work must enter the approved Nexus Automation runtime and its connector-specific controls.\n"
+        "- Protected categories always require a human decision regardless of the configured level.",
+        at_a_glance="- **Expected time:** 10-20 minutes for initial policy and simulation review\n"
+        "- **Risk:** None during simulation; live risk remains with the approved runtime action\n"
+        "- **Required access:** Autopilot simulation access; policy management requires an automation manager or administrator\n"
+        "- **Evidence location:** Autopilot Recent decisions, simulation record, workflow runtime, linked ticket, Change Management, and Black Box",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| Effective level stays at 0 | Enabled state, paused state, client scope, trusted agent, and action allow-list | Satisfy the first failed readiness gate; do not bypass it |\n"
+        "| Configured level is higher than effective | The first level marked Attention in the ladder | Complete its missing gates or intentionally lower the configured level |\n"
+        "| Candidate simulation is blocked | Client scope, action allow-list, confidence, ticket link, endpoint trust, and simulation-source marker | Correct the source record or return the work to a technician |\n"
+        "| Resume is refused | Level 1 readiness and configured level | Review policy, trusted agent identity, and client scope before retrying |\n"
+        "| Candidate does not appear | Source queue status and current need for review | Refresh the owning AI Resolution or Self-Healing evidence; Nexus does not fabricate queue items |\n"
+        "| Protected action looks eligible | Category, approval path, and policy snapshot | Stop and escalate; protected work must remain human-approved |",
+        rollback="Use **Kill switch** first. This immediately returns the effective boundary to Level 0 while preserving evidence. Pause or cancel live work through its owning workflow or maintenance window, apply connector-specific rollback from the recorded checkpoint, validate client state, and retain the correction in the linked ticket and change.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "ceo-mode",
+        "Use CEO Mode and the AI Board Meeting",
+        "Billing & commercial",
+        "📈",
+        2,
+        "Review business performance, customer resilience, aggregate capacity, cash outlook, and owner decisions without mixing operational noise into the executive view.",
+        "1. Open **Executive > CEO Mode**.\n"
+        "2. Read the six headline tiles. **Contract MRR** is agreement-backed; **Contribution** remains Not assessed until explicit direct costs exist; **Cash outlook** is receivables less open purchase commitments, not a bank balance.\n"
+        "3. Read **Owner pulse** and open the first decision only after confirming its source and evidence label.\n"
+        "4. Follow **How the business is moving** from contract revenue to recorded direct costs, service contribution, and the 30-day cash outlook.\n"
+        "5. Review **What needs an owner**. Each item states the source, evidence, decision, and source-workspace link.\n"
+        "6. Review **Service burden outliers**. Nexus compares each client's share of contract MRR with its share of tickets, after-hours tickets, and recorded service time. This is a commercial-fit signal, not an accounting profit claim.\n"
+        "7. Review **Portfolio resilience** and open a client only when a health score, evidence-coverage percentage, or service pattern requires action.\n"
+        "8. Read **Team capacity** as aggregate time coverage only. CEO Mode deliberately does not expose technician location, breaks, or live movement.\n"
+        "9. Review **Evidence confidence** before using any figure externally. Correct missing costs, health sources, time entries, invoices, or purchase-order data in the owning workspace.\n"
+        "10. Select **MSP Simulator** to model a client loss, pricing change, new monthly cost, and optional cash reserve. Confirm the result says no operational changes were made.\n"
+        "11. Select **Board briefing**, review wins, risks, decisions, and outlook, then choose **Save board snapshot** to retain the reviewed point-in-time brief.",
+        "The figures reconcile to their source workspaces, unavailable accounting inputs remain clearly labelled, the simulator states `will_execute: false`, and a saved board briefing appears as the latest retained snapshot with actor and time.",
+        related="[Open CEO Mode](/executive), [Review Billing & Finance](/billing-dashboard), [Open Financial Analytics](/financial-analytics), [Review Client Health](/client-insights?tab=client-health), [Open Contracts](/contracts), and [Review the Audit Trail](/audit-trail).",
+        before="- CEO Mode is cross-client commercial information. Use an administrator or explicitly authorised owner role with global client scope.\n"
+        "- Reconcile invoices, contracts, purchase orders, and client mappings before relying on the briefing.\n"
+        "- Record direct unit, wholesale, or internal costs before describing service contribution as profit.\n"
+        "- Treat the simulator as a planning aid; obtain accounting and legal review for material business decisions.\n"
+        "- Discuss aggregate capacity with the team as a planning input, never as individual surveillance.",
+        audit="- CEO Mode reads existing contract, invoice, purchase-order, time, health, project, and approval evidence; it does not edit those records.\n"
+        "- Scenario simulations retain their inputs, assumptions, result, actor, time, correlation ID, and `will_execute: false` state.\n"
+        "- Board snapshots retain the source-quality statement that existed when the owner saved the briefing.\n"
+        "- Scenario and board-snapshot events are published to the durable Nexus event ledger.\n"
+        "- Source corrections remain in their owning billing, contract, project, team, client, or health workflow.",
+        at_a_glance="- **Expected time:** 10-20 minutes for weekly review; 20-40 minutes for a monthly board snapshot\n"
+        "- **Risk:** Low; CEO Mode is read-only except for retained simulations and board snapshots\n"
+        "- **Required access:** Executive intelligence permission and global client scope\n"
+        "- **Evidence location:** CEO Mode evidence-confidence panel, source workspace, saved board snapshot, scenario history, and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| Contribution says Not assessed | Contract lines, subscriptions, and time entries for explicit cost fields | Add verified cost data at the source; do not estimate it in a ticket note |\n"
+        "| Client health is partial | Evidence coverage and missing health sources | Connect or refresh the relevant agent/provider, then recalculate health |\n"
+        "| Capacity looks unexpectedly low | Time-entry date, duration, technician mapping, and active service-team roles | Correct missing time evidence; do not infer that a technician was idle |\n"
+        "| Cash outlook differs from the bank | Open invoices, due dates, purchase commitments, tax, and bank feeds | Treat the tile as an operational outlook and reconcile in the accounting platform |\n"
+        "| A service-burden finding looks wrong | Contract MRR, ticket client, ticket time, and after-hours timestamp | Correct ownership at the source and refresh CEO Mode |\n"
+        "| Access is denied | Executive action permission and global client scope | Ask an administrator to grant the owner role deliberately; do not broaden technician scope |",
+        rollback="CEO Mode does not modify contracts, invoices, clients, projects, or team records. If a saved snapshot used incorrect evidence, correct the source, refresh CEO Mode, save a replacement snapshot, and retain a note explaining why the earlier briefing was superseded. A scenario has no operational rollback because it never executes.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "asset-story",
+        "Build and use a connected Asset Story",
+        "Infrastructure & security",
+        "📚",
+        35,
+        "Connect a managed endpoint to its canonical inventory, procurement, warranty, commercial and service evidence so technicians can understand the asset without searching disconnected workspaces.",
+        "1. Open **Managed Assets**, search for the endpoint, and open its profile.\n"
+        "2. Select **Asset Story**.\n"
+        "3. Check the connection statement. **Matched by device ID** is canonical. A serial-number match must be confirmed before Nexus writes the relationship.\n"
+        "4. If no inventory record exists, select **Connect lifecycle record**. Record the verified purchase date, historical purchase cost, supplier, PO number, warranty end, useful life and the business reason for purchase. Leave unknown values blank.\n"
+        "5. Review **Lifecycle stage**, **Asset age**, **Warranty**, and **Evidence coverage**. Missing means Nexus could not find attributable source evidence; it does not mean the condition is healthy or not applicable.\n"
+        "6. Read **Replacement decision** and every Explain Why reason. Nexus uses the recorded purchase date, useful life, warranty, endpoint status, capacity pressure, alerts and recent ticket history. It does not treat historical cost as a current replacement quote.\n"
+        "7. Review **Why it was purchased**, **Custody & location**, and **Service footprint**. Correct inaccurate ownership or purchase evidence in the inventory, PO, quote, ticket or device source record.\n"
+        "8. Follow **Connected history** to the owning PO, quote, ticket, invoice or endpoint record. Only directly attributable records are included.\n"
+        "9. Review **Commercial links** for asset-locked contract inclusions and directly linked invoices. Client ownership alone is not enough to claim a commercial relationship.\n"
+        "10. If replacement planning is required, open **Refresh planner**, obtain or link a current quote, record the decision on the ticket/project, and retain disposal or replacement history against the same canonical asset.",
+        "The endpoint is connected to one canonical Inventory Asset, ownership and lifecycle values match their source records, missing evidence remains labelled, replacement guidance is explainable, and the approved outcome is retained on the related ticket, project, quote, PO, contract or disposal record.",
+        related="[Open Managed Assets](/devices), [Open Inventory Assets](/assets), [Review Lifecycle & Warranty](/asset-lifecycle), [Open Refresh Planner](/procurement-planner), [Review Purchase Orders](/purchase-orders), and [Open Contracts](/contracts).",
+        before="- Confirm the endpoint identity, serial number, client, assigned user and location before linking inventory.\n"
+        "- Use supplier documents, an accepted quote, a PO, warranty portal or invoice as commercial evidence. Do not copy an estimate into the purchase-cost field.\n"
+        "- Search Inventory Assets before creating a record to avoid duplicates. A serial match requires deliberate confirmation.\n"
+        "- Obtain client and internal approval before ordering, replacing, decommissioning or disposing of equipment.\n"
+        "- Never store passwords or recovery secrets in the purchase-reason or lifecycle notes. Link to the approved external vault reference instead.",
+        audit="- Creating or confirming an Asset Story records the signed-in technician, time, client, endpoint, canonical asset and connection method.\n"
+        "- `asset.story.connected` is published to the durable Nexus event ledger.\n"
+        "- Inventory lifecycle history retains stage changes, endpoint connection, replacement and disposal evidence.\n"
+        "- Connected history is a read-only join over attributable PO, quote, contract, invoice, ticket, remote-session and endpoint-event records.\n"
+        "- Replacement guidance retains its evidence boundary: missing cost or quote data remains Not assessed.",
+        at_a_glance="- **Expected time:** 5-10 minutes to connect a known asset; 15-30 minutes to reconcile an incomplete commercial history\n"
+        "- **Risk:** Low for review; medium when creating or linking the canonical record\n"
+        "- **Required access:** Managed Assets view; lifecycle management permission to create or confirm a connection\n"
+        "- **Evidence location:** Managed endpoint > Asset Story, Inventory Asset history, source PO/quote/invoice/contract/ticket, and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| No inventory record is connected | Device ID, serial number, client and existing Inventory Assets | Search before creating; connect the correct record or create one from verified evidence |\n"
+        "| Serial match needs confirmation | Serial, client and whether the asset is already linked elsewhere | Confirm only after checking the physical or vendor record |\n"
+        "| Purchase order or invoice is missing | Direct asset/device/serial link, destination ticket and client ownership | Add the relationship to the source line; do not include every client invoice |\n"
+        "| Replacement says Not assessed | Purchase date, useful life, warranty and endpoint evidence | Add verified lifecycle values or continue monitoring without an invented date |\n"
+        "| Historical cost differs from a replacement quote | Original purchase record and current accepted quote | Keep both; never overwrite historical cost with a future replacement option |\n"
+        "| Evidence coverage is unexpectedly low | Identity, ownership, procurement, warranty, commercial and operations checks | Correct each missing category at its owning source and refresh Asset Story |",
+        rollback="If the wrong inventory record was linked, stop any procurement or disposal work, record the mistake in the related ticket, remove or correct the `device_id` relationship through Inventory Assets, reconnect the correct record, verify the serial/client/user/location, and retain the correction in the audit trail. Do not delete commercial or lifecycle history to hide the earlier relationship.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-confidence",
+        "Use Nexus Confidence before making a change",
+        "Platform setup",
+        "🔎",
+        36,
+        "Understand how much a client, endpoint or document can be trusted by reviewing completeness, freshness, attribution and conflicting source evidence before acting.",
+        "1. Open a **Client** profile or a managed endpoint's **Asset Story**.\n"
+        "2. Locate **Nexus Confidence**. Keep the operational health score separate: health describes the current condition; Confidence describes the reliability of the evidence behind the record.\n"
+        "3. Select the Confidence meter or **Inspect evidence**.\n"
+        "4. Review the overall state: **Verified** is 90-100%, **Strong** is 75-89%, **Review** is 50-74%, and **Low confidence** is below 50%. **Unavailable** means Nexus has no attributable source evidence.\n"
+        "5. Review every dimension. Each one shows its source records, evidence count, completeness, freshness and last observation.\n"
+        "6. Read **Evidence gaps** and **Conflicting records** before making a commercial, security, identity, remote-access or lifecycle change.\n"
+        "7. Follow a gap to its owning workspace and correct the source record. Do not type a guessed value into the review note merely to raise confidence.\n"
+        "8. Select **Refresh sources** after correcting the evidence. The score is recalculated from the current source records.\n"
+        "9. When a technician has checked the evidence against the live environment, select **Record review**, describe what was checked, choose the review validity, and save.\n"
+        "10. Confirm the human review appears separately from the calculated score. A review never raises the score or hides an unresolved source gap.\n"
+        "11. For documentation, use the same Confidence API and review pattern for content quality, freshness, relationships and operational use before following a procedure.\n"
+        "12. Link a high-impact change to the appropriate ticket, change record or approval even when Confidence is Verified.",
+        "The technician can explain every Confidence score from its dimensions and source records, material gaps and conflicts are corrected at their owning source, human review is attributable and time-bound, and no attestation conceals missing evidence.",
+        related="[Open Clients](/clients), [Open Managed Assets](/devices), [Build an Asset Story](/help/asset-story), [Review Knowledge & Docs](/documentation-hub?tab=library), and [Open the Audit Trail](/audit-trail).",
+        before="- Confirm the correct client or endpoint before relying on the profile.\n"
+        "- Treat Confidence as a decision aid, not an approval to perform a destructive action.\n"
+        "- Restore disconnected providers or stale agent telemetry before making a current-state claim.\n"
+        "- Use the owning source workspace to correct data; review notes are not a replacement for inventory, billing, contact, backup or documentation records.\n"
+        "- Never store passwords, recovery keys or secret values in a Confidence review.",
+        audit="- Every profile reports its schema version, assessed time, evidence count, source dimensions, gaps, conflicts and calculation method.\n"
+        "- Human reviews retain the entity, score at review, open-gap count, technician, note, validity, time and correlation ID.\n"
+        "- `confidence.assessment.verified` is published to the durable Nexus event ledger.\n"
+        "- Human review never modifies source records, changes the calculated score or deletes a gap.\n"
+        "- Subsequent source evidence can lower or raise the calculated score before a review expires.",
+        at_a_glance="- **Expected time:** 2-5 minutes for review; longer when source evidence must be reconciled\n"
+        "- **Risk:** Low for inspection; the resulting operational action retains its normal risk and approval requirements\n"
+        "- **Required access:** Source record visibility; Confidence verification permission to record a review\n"
+        "- **Evidence location:** Client or device Confidence Lens, source workspace, confidence verification history, event ledger and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| Confidence says Unavailable | Entity ID, client scope, provider mapping and source records | Restore attributable evidence; do not substitute a manual score |\n"
+        "| Score is lower than health | Missing ownership, lifecycle, commercial, backup or documentation evidence | Review the dimensions; health and evidence reliability answer different questions |\n"
+        "| Freshness is low | Last agent, provider, document or billing observation | Repair the source connection or complete a current review at the source |\n"
+        "| Duplicate conflict appears | Serial numbers, contact emails or client ownership | Reconcile the duplicate before using the affected identity |\n"
+        "| Review button is denied | `confidence.verify` permission and client scope | Ask an administrator to grant the action deliberately |\n"
+        "| Review does not raise the score | Expected behaviour | Correct source evidence, refresh, and keep the review as a separate attestation |",
+        rollback="A Confidence review does not change client systems or source records. If a review note or validity was wrong, retain the original attestation, complete a corrected review, and record the reason on the linked ticket or change. If an operational action was taken from unreliable evidence, stop further work, preserve the profile and correlation ID, follow that workflow's rollback, and correct the source data.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-change-guardian",
+        "Review a change with Nexus Change Guardian",
+        "Infrastructure & security",
+        "🛡️",
+        37,
+        "Trace the current people, tickets, sessions, backups, alerts, clients and maintenance records that may be affected before approving a managed-asset change.",
+        "1. Open **Managed Assets** and select the endpoints that belong to the planned change.\n"
+        "2. Choose **Patches**, **Reboot**, **Tag**, or **Message** from the fleet action bar.\n"
+        "3. Wait for **Nexus Change Guardian** to load the current attributable relationships. The preview does not execute or emulate the action.\n"
+        "4. Review the risk score and level. The score is derived from the action type, servers, active remote work, high-priority tickets, running backup or recovery work, client boundaries, target availability, and fleet size.\n"
+        "5. Confirm **Targets** and **Eligible** match your intent. Remove offline, unenrolled, missing, or out-of-scope assets instead of assuming Nexus can reach them.\n"
+        "6. Review every **Change gate**. A review state is not silently treated as approval.\n"
+        "7. Open the linked service, remote, backup, client, or alert records from **Live dependency engine** when the blast radius needs investigation.\n"
+        "8. Read the expected outcome and recovery boundary. A reboot or delivered user message cannot be undone, and a patch rollback remains vendor-specific.\n"
+        "9. Follow the Guardian recommendations and split cross-client work unless one approved change record intentionally covers every customer.\n"
+        "10. Refresh evidence if a remote session ends, a backup finishes, a ticket changes priority, or the target list changes.\n"
+        "11. Select the final action only when the preview still matches the scope. Nexus links the executed fleet command to that exact, time-limited preview.\n"
+        "12. Confirm command results, next agent heartbeats, linked service records, and recovery evidence after execution.",
+        "The reviewed target set matches the executed target set, material dependencies were either cleared or deliberately accepted, the preview remains linked to the resulting commands, and post-change evidence confirms the intended outcome.",
+        related="[Open Managed Assets](/devices), [Review Change Management](/change-management), [Open Nexus Confidence](/help/nexus-confidence), [Review Remote Access](/remote-access), and [Open Backups](/backup-center).",
+        before="- Confirm the correct clients and endpoints before selecting an action.\n"
+        "- Link disruptive or multi-client work to an approved ticket or change record.\n"
+        "- Treat a missing relationship as unknown, not proof that nothing depends on the target.\n"
+        "- End or coordinate active remote work before rebooting, shutting down, or patching an endpoint.\n"
+        "- Do not interrupt a backup, restore, or verification job without an approved recovery decision.",
+        audit="- Each preview retains the technician, action, exact target IDs, client boundaries, assessed time, expiry, risk, gates and correlation ID.\n"
+        "- `change.guardian.previewed` is published to the durable Nexus event ledger without executing the action.\n"
+        "- The fleet action submits the preview ID with the exact reviewed action and target set.\n"
+        "- `change.guardian.execution.linked` records the resulting queued, completed, failed and skipped totals.\n"
+        "- Used, expired, mismatched, or technician-owned previews cannot be silently reused by the guarded workflow.",
+        at_a_glance="- **Expected time:** 1-3 minutes for review; longer when a dependency needs coordination\n"
+        "- **Risk:** Determined from current evidence and action type; the normal approval boundary still applies\n"
+        "- **Required access:** Managed Assets, selected client scope, and the permission required by the final endpoint action\n"
+        "- **Evidence location:** Change Guardian preview, target asset records, linked ticket/change, command history, platform event ledger and Audit Trail",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| Selected target is unavailable | Asset ID, technician client scope, deleted records and current search selection | Return to Managed Assets and rebuild the exact target set |\n"
+        "| Eligible count is lower than selected | Nexus Agent identity, online state and action requirements | Repair or remove the ineligible endpoint before approval |\n"
+        "| Risk is higher than expected | Server count, active sessions, critical tickets, running backups and multiple clients | Open the related records and reduce the blast radius |\n"
+        "| Maintenance context needs review | Active or scheduled maintenance windows and linked change record | Schedule or link the approved window; do not invent one in a note |\n"
+        "| Preview expired | More than ten minutes elapsed or evidence changed | Refresh the preview and review it again |\n"
+        "| Preview does not match | Target selection or action changed after review | Generate a new preview for the final action and scope |\n"
+        "| No dependencies are shown | Source mappings, client/device links and provider telemetry | Treat the blast radius as unknown and verify through the owning systems |",
+        rollback="Closing a preview makes no endpoint change. If the executed action causes an issue, use the recovery boundary shown in the retained preview, stop further fleet execution, link the incident, preserve command results and correlation ID, and confirm recovery from a later trusted source. Never delete the preview or failed command evidence.",
+        screenshots=[],
+    ),
+])
+
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "nexus-time-machine",
+        "Compare endpoint history with Nexus Time Machine",
+        "Infrastructure & security",
+        "⏱️",
+        34,
+        "Compare two trusted Nexus Agent observations to identify software, network, security, update, hardware, service, or configuration changes without inventing evidence from before collection began.",
+        "1. Open **Managed Assets**, search for the endpoint, and open its device profile.\n"
+        "2. Select **Time Machine**.\n"
+        "3. Read the history boundary and collection-coverage panel before drawing a conclusion. **Awaiting** means the agent has not supplied that evidence category; it does not mean healthy or unchanged.\n"
+        "4. Choose an earlier state under **Before** and a later state under **After**.\n"
+        "5. Review every changed category. Added, removed, and modified evidence is kept separate so a technician can identify the direction of change.\n"
+        "6. Cross-check the relevant ticket, remote session, patch deployment, automation run, client timeline, or security alert at the same time.\n"
+        "7. If the change was approved, link the evidence to the owning ticket or change record. If it was unexpected, create or update an incident before taking a disruptive action.\n"
+        "8. Refresh history after remediation and verify that a later Nexus Agent observation records the intended state.",
+        "The selected states belong to the same endpoint, the collection coverage supports the conclusion, the identified change is corroborated by its owning operational record, and the final result is retained on the ticket or client timeline.",
+        related="[Open Managed Assets](/devices), [Review Change Management](/change-management), [Open Security Graph](/security-graph), and [Investigate Nexus Shield](/nexus-shield).",
+        before="- Confirm the device, owning client, assigned user, and Nexus Agent identity.\n"
+        "- Obtain approval before reversing software, security, network, registry, service, driver, or Group Policy changes.\n"
+        "- Nexus Time Machine starts at the first persisted agent observation after the feature is enabled. It cannot reconstruct an earlier state.\n"
+        "- Volatile CPU and memory readings are monitored elsewhere and are deliberately excluded from configuration-state comparisons.",
+        audit="- Each changed endpoint state is stored with device, client, agent, capture time, evidence coverage, content hash, and previous-snapshot reference.\n"
+        "- Identical heartbeats extend the observation period instead of creating noisy duplicate states.\n"
+        "- Time Machine is read-only. Remediation remains in the owning device, ticket, automation, security, or change workflow.\n"
+        "- Missing evidence is always shown as uncollected rather than passed or healthy.",
+        at_a_glance="- **Expected time:** 5-20 minutes\n"
+        "- **Risk:** Low for comparison; remediation risk depends on the source change\n"
+        "- **Required access:** Managed Assets and the owning ticket or change record\n"
+        "- **Evidence location:** Device Time Machine, device audit, linked ticket, client timeline, and Change Management",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| No history appears | Nexus Agent link, online state, last heartbeat, and agent version | Restore agent check-in; do not create a manual fake baseline |\n"
+        "| Only one state appears | Whether the endpoint has produced a real configuration change | Keep the baseline; duplicate heartbeats are intentionally deduplicated |\n"
+        "| A category says Awaiting | Installed agent collector and reported capabilities | Update or repair the collector before relying on that category |\n"
+        "| A change has no matching ticket | Remote sessions, automation runs, patch history, and client timeline | Open an incident and preserve the snapshot IDs before remediation |\n"
+        "| The comparison looks reversed | Before and After timestamps | Re-select the states; Nexus normalises the result chronologically |",
+        rollback="Time Machine does not change an endpoint. If a technician reverses the wrong source change, stop further actions, preserve both snapshot IDs, follow the owning workflow's rollback, verify the device with a fresh agent observation, and document the correction in the linked ticket and change.",
+        screenshots=[{"url": "/uploads/help/guides/managed-assets.png", "caption": "Managed Assets device profile — open the Time Machine tab on an agent-linked endpoint."}],
+    ),
 ])
 
 CURATED_ARTICLES.extend([
@@ -501,24 +981,24 @@ CURATED_ARTICLES.extend([
         "🧭",
         2,
         "Use the Nexus Suite product map to move between specialised workspaces while keeping client context, audit history, and provider boundaries clear.",
-        outcome="Technicians can identify the owning Nexus product, open it safely, and understand whether the workflow is Nexus-native or provider-backed.",
+        outcome="Technicians can identify the owning Nexus product, open it safely, and route external systems through the governed Integrations workspace.",
         steps="1. Open **Platform > Nexus Suite**.\n"
-        "2. Review the four summary tiles to confirm the number of products, Nexus-native workspaces, provider-backed products, and product families.\n"
+        "2. Review the four summary tiles to confirm the number of products, Nexus-native workspaces, Store collections, and product families.\n"
         "3. Search for an outcome such as `remote`, `billing`, `identity`, `backup`, or `automation` rather than memorising a menu path.\n"
         "4. Filter by product family when you need a security, infrastructure, business, or intelligence workspace.\n"
-        "5. Read the delivery badge before opening a product. **Nexus native** means the workflow is built into NexusMSP. **Provider-backed** means NexusMSP preserves the approved external authority.\n"
-        "6. Select **Open** to enter the owning workspace.\n"
-        "7. Use **Nexus Store** for governed connectors, automation packs, technician script packs, and commercial catalogue items.\n"
+        "5. Select **Open** to enter the owning Nexus workspace.\n"
+        "6. Use **Nexus Store** for governed connectors, automation packs, technician script packs, and commercial catalogue items.\n"
+        "7. Configure Keeper, Hudu, Microsoft, and other external authorities through **Integrations** rather than treating them as duplicate Nexus products.\n"
         "8. Validate every provider connection in Settings or Integrations before relying on its health or evidence.",
-        verify="Each product opens its owning workspace, provider-backed products clearly state their security boundary, and the Suite page shows source-backed evidence counts without labelling an unverified provider healthy.",
+        verify="Each product opens its owning workspace, every Store collection opens its governed catalogue, and the Suite page shows source-backed evidence without labelling an unverified provider healthy.",
         related="[Open Nexus Suite](/nexus-suite), [Open Nexus Store](/nexus-suite?view=store), [Review integrations](/integrations), and [Open Nexus Control](/control-plane).",
         before="- Use your normal NexusMSP role; destination permissions still apply.\n"
         "- Confirm the correct client before performing an action in a product workspace.\n"
         "- Keep passwords in Keeper, controlled client documentation in Hudu, and MFA or identity authority in Microsoft.\n"
         "- A product being available does not mean its external provider is configured or healthy.",
         audit="- Existing routes remain valid for backwards compatibility.\n"
-        "- Nexus Vault routes to approved Keeper/Hudu context and does not store a duplicate password vault.\n"
-        "- Nexus Verify routes to Microsoft-backed identity evidence and does not store MFA seeds.\n"
+        "- Password and documentation authority remains with Keeper or Hudu; NexusMSP does not expose a duplicate Vault product.\n"
+        "- MFA and identity authority remains with Microsoft; NexusMSP does not expose a duplicate MFA product.\n"
         "- Actions remain auditable in their owning workspace, linked ticket, client timeline, and provider history.",
         at_a_glance="- **Expected time:** 2-5 minutes\n"
         "- **Risk:** Low for navigation; destination workflow risk still applies\n"
@@ -528,47 +1008,13 @@ CURATED_ARTICLES.extend([
         "|---|---|---|\n"
         "| A product opens but has no data | Provider connection, selected client, permissions, and last sync | Validate the owning integration before making a health claim |\n"
         "| A product is not found in search | Search the outcome, capability, or product family | Clear the family filter and search again |\n"
-        "| Vault or Verify does not expose a secret | This is intentional provider-backed behaviour | Open the approved Keeper, Hudu, or Microsoft record through the linked workflow |\n"
+        "| A Keeper, Hudu, or Microsoft connection is missing | Integration is not configured or verified | Open Integrations, select the provider, and complete its validation workflow |\n"
         "| An old bookmark uses a previous name | Compatibility route and destination workspace | Continue with the destination and update internal documentation when convenient |\n"
         "| A Store entry cannot run | Installation, connector configuration, approval, and client scope | Simulate and validate the connection before enabling execution |",
         rollback="The Suite product map is navigational and does not change client systems. Close an incorrect destination before submitting an action. If a product workflow was already approved and run against the wrong scope, use that workspace's rollback process and preserve its audit record.",
         screenshots=[],
     ),
 ])
-
-def _workspace_guide(
-    slug, title, category, icon, order, summary, steps, verify, related="",
-    before="", audit="", at_a_glance="", troubleshooting="", rollback="",
-    screenshots=None,
-):
-    """A complete operational guide for a first-class NexusMSP workspace."""
-    return _guide(
-        slug,
-        title,
-        category,
-        icon,
-        order,
-        summary,
-        f"The technician has completed **{title.lower()}**, verified the live result, and attached the evidence to the correct NexusMSP operational record.",
-        before or (
-            "- Confirm the correct client, asset, ticket, or organisation scope before making a change.\n"
-            "- Review client alerts, linked service records, maintenance windows, and approvals that apply to the work.\n"
-            "- Capture the current state and identify the safe recovery point before changing production service."
-        ),
-        steps,
-        verify,
-        audit or (
-            "- Record the technician, approval, affected scope, action, timestamp, and verified result.\n"
-            "- Attach the relevant activity event, screenshot, report, or execution output to the ticket or client history.\n"
-            "- Assign any exception or follow-up work to a named owner with a due date."
-        ),
-        related,
-        screenshots,
-        at_a_glance,
-        troubleshooting,
-        rollback,
-    )
-
 
 # A practical coverage layer for the day-to-day workspaces. These complement
 # the deeper core procedures above, so a technician can search for the task
@@ -754,6 +1200,49 @@ CURATED_ARTICLES.extend([
 
 CURATED_ARTICLES.extend([
     _workspace_guide(
+        "nexus-second-brain",
+        "Use Nexus Second Brain",
+        "Automation & intelligence",
+        "🧠",
+        2,
+        "Search institutional memory, review recurring operational patterns, identify documentation gaps, and capture team expertise without turning inference into fact.",
+        "1. Open **Insights Hub > Second Brain**.\n"
+        "2. Read the privacy statement and confirm the view is using only this NexusMSP tenant.\n"
+        "3. Review the evidence, pattern, knowledge-gap, expertise, and recommendation tiles.\n"
+        "4. Use **Ask Nexus memory** for a client, technician, ticket phrase, device, runbook, or historical question.\n"
+        "5. Open a result and validate the direct ticket, knowledge, runbook, client, or audit record.\n"
+        "6. Expand a pattern to review every linked ticket before accepting its significance.\n"
+        "7. Read **Why Nexus suggested this**, the confidence label, and the evidence count on each recommendation.\n"
+        "8. Choose the owning workspace action only when the evidence supports it. Second Brain itself never executes the proposed work.\n"
+        "9. Select **Useful** to record that the recommendation helped, or **Snooze** or **Dismiss** with a clear reason.\n"
+        "10. Review Memory Coverage and improve missing client, asset, ownership, resolution, documentation, or runbook evidence at its source.",
+        "Every surfaced pattern has at least two matching ticket records, every search result opens a direct Nexus record, recommendations explain their evidence and confidence, and technician review decisions are retained without executing an external change.",
+        related="[Open Nexus Second Brain](/insights), [Review ticket pattern discovery](/blueprints?tab=patterns), [Open Knowledge & Docs](/documentation-hub?tab=library), [Open Automation Studio](/workflow-automation), and [Review Audit Trail](/audit-trail).",
+        before="- Keep ticket client, asset, category, owner, resolution, and closure evidence current.\n"
+        "- Treat an emerging pattern as a prompt to investigate, not a proven root cause.\n"
+        "- Confirm the source record before routing work, publishing documentation, or creating automation.\n"
+        "- Do not use outcome evidence as an employee performance score.",
+        audit="- Memory search is read-only and returns direct records ranked by matching evidence.\n"
+        "- Pattern detection requires corroborating tickets and explicitly states that Nexus has not inferred causation.\n"
+        "- Recommendation reviews record technician, decision, reason, timestamp, correlation ID, and `external_changes: false`.\n"
+        "- Snooze and dismiss decisions require a reason and are retained in Audit Trail and the tamper-evident event ledger.\n"
+        "- Cross-MSP intelligence sharing is disabled; no client data is contributed to a shared telemetry network.",
+        at_a_glance="- **Expected time:** 2-10 minutes for a memory search or recommendation review\n"
+        "- **Risk:** Read-only until the technician opens an owning operational workflow\n"
+        "- **Required access:** Insights Hub plus permission to open the linked source record\n"
+        "- **Evidence location:** Source ticket, runbook, knowledge article, client record, Audit Trail, and Black Box",
+        troubleshooting="| Symptom | Check | Safe response |\n"
+        "|---|---|---|\n"
+        "| Search returns no result | Spelling, client name, source workspace, and recorded wording | Search a distinctive ticket phrase or open the source workspace; Nexus will not fabricate a match |\n"
+        "| No pattern appears | Matching ticket count and ticket descriptions | Record consistent categories and symptoms; Nexus requires at least two records |\n"
+        "| A knowledge gap looks wrong | Published runbook and article title, tags, summary, and content | Update the owning knowledge record, then refresh Second Brain |\n"
+        "| Expertise evidence is sparse | Resolved ticket owner and closure status | Correct the ticket record; do not manually inflate a profile |\n"
+        "| A recommendation is not applicable | Linked evidence and current client context | Dismiss it with a reason so the decision remains auditable |\n"
+        "| Memory coverage is low | Client, asset, ownership, resolution, documentation, and runbook fields | Improve the authoritative source record rather than editing the score |",
+        rollback="Second Brain does not execute operational changes. Reset an incorrect review decision from the recommendation card. If a technician followed a linked workflow in error, use that workspace's change, rollback, and incident process while preserving the Second Brain review evidence.",
+        screenshots=[],
+    ),
+    _workspace_guide(
         "automation-studio-simulation",
         "Build and simulate an automation",
         "Automation & intelligence",
@@ -761,27 +1250,32 @@ CURATED_ARTICLES.extend([
         3,
         "Create a governed no-code or JSON workflow, preview every proposed change, and submit material work for independent approval without touching a client system.",
         "1. Open **Automation > Automation Studio**.\n"
-        "2. Create a disabled draft or install a Nexus-verified pack from **Automation Marketplace**.\n"
-        "3. Choose the observed trigger and add conditions that constrain the client, user, asset, severity, or schedule.\n"
-        "4. Add AI, approval, action, notification, and documentation steps in the required order.\n"
-        "5. Complete every required connector and target field, then save the draft.\n"
-        "6. Choose an optional client context and target, then select **Simulate**.\n"
-        "7. Review the predicted before/after state, systems touched, risk, configuration gaps, and step-by-step rollback plan.\n"
-        "8. Correct any configuration gaps and simulate again.\n"
-        "9. For a material workflow, record a justification and select **Submit to Change Management**.\n"
-        "10. Have an independent reviewer approve the linked change before enabling the workflow.\n"
-        "11. Open **Runtime** to watch the durable run, including queued, running, waiting, approval, completed, or failed state.\n"
-        "12. At an approval boundary, select the run, record the decision reason, then approve and resume or reject it.\n"
-        "13. If a step fails, read the exact connector or configuration error. Retry only after correcting the cause.\n"
-        "14. When reversible checkpoints are available, record a recovery reason and choose **Compensate safely**. Nexus restores a value only when it still matches the value written by that run.\n"
-        "15. Review the final workflow log, client timeline, ticket evidence, runtime correlation ID, and connector response.",
+        "2. Create a disabled draft or open **Automation Marketplace** and preview a Nexus-verified operational pack.\n"
+        "3. Review every included component, required connection, declared permission, trust boundary, estimated setup time, and lifecycle stage before installation.\n"
+        "4. Choose **All clients** for a reusable baseline or **One client** for a dedicated scoped copy. A client-scoped installation cannot proceed until a client is selected.\n"
+        "5. Install the pack. Nexus creates its workflow, inactive ticket blueprint, editable documentation templates, disabled policy drafts and disabled exception rule together without making an external change.\n"
+        "6. Open **Configure installed pack**, choose the observed trigger, and add conditions that constrain the client, user, asset, severity, or schedule.\n"
+        "7. Add AI, approval, action, notification, and documentation steps in the required order.\n"
+        "8. Complete every required connector and target field, then save the draft.\n"
+        "9. Choose an optional client context and target, then select **Simulate**.\n"
+        "10. Review the predicted before/after state, systems touched, risk, configuration gaps, and step-by-step rollback plan.\n"
+        "11. Correct any configuration gaps and simulate again.\n"
+        "12. For a material workflow, record a justification and select **Submit to Change Management**.\n"
+        "13. Have an independent reviewer approve the linked change before enabling the workflow.\n"
+        "14. Open **Runtime** to watch the durable run, including queued, running, waiting, approval, completed, or failed state.\n"
+        "15. At an approval boundary, select the run, record the decision reason, then approve and resume or reject it.\n"
+        "16. If a step fails, read the exact connector or configuration error. Retry only after correcting the cause.\n"
+        "17. When reversible checkpoints are available, record a recovery reason and choose **Compensate safely**. Nexus restores a value only when it still matches the value written by that run.\n"
+        "18. Review the final workflow log, client timeline, ticket evidence, runtime correlation ID, and connector response.",
         "The workflow remains disabled until its configuration is complete; Simulation Mode shows zero executed actions; the linked change contains the simulation ID, risk, before/after plan, rollback, requester, and approval history; and every live run retains restart-safe step checkpoints.",
         related="[Open Automation Studio](/workflow-automation), [Open durable runtime](/workflow-automation?tab=runtime), [Browse Automation Marketplace](/workflow-automation?tab=marketplace), [Review simulations](/workflow-automation?tab=simulations), and [Open Change Management](/change-management).",
         before="- Confirm the workflow owner, business outcome, client scope, and authorised connector.\n"
         "- Use a non-production client or narrowly scoped target for the first simulation.\n"
         "- Verify that destructive, identity, licensing, voice, scripting, and external-message steps have a tested rollback.\n"
         "- Do not place secrets in workflow fields or JSON.",
-        audit="- Installing a pack records the pack ID and technician and creates a disabled draft.\n"
+        audit="- Installing a pack records its ID, semantic version, technician, client scope, workflow ID, component manifest and `external_changes: false` in both Audit Trail and the tamper-evident Black Box.\n"
+        "- The workflow, ticket blueprint, document templates, policies, security or recovery baselines and alert rule share one installation ID so the pack can be traced as a unit.\n"
+        "- Removing a pack requires a deliberate hold, is blocked while its workflow is active, disables every managed component and preserves installation, removal and execution evidence.\n"
         "- Every simulation records who ran it, the workflow version, context, predicted steps, missing fields, risk, rollback, and `will_execute: false`.\n"
         "- Approval submission creates a linked Change Management record and does not execute the workflow.\n"
         "- Live dispatch accepts only enabled workflows with an approved or no-approval-required state.\n"
@@ -796,7 +1290,8 @@ CURATED_ARTICLES.extend([
         "|---|---|---|\n"
         "| Workflow cannot be enabled | Last simulation, configuration gaps, and approval state | Resolve gaps, simulate again, and complete approval |\n"
         "| Simulation is blocked | Missing fields shown against each step | Configure only the approved target and rerun Simulation Mode |\n"
-        "| A pack shows Installed | Workflow library and source-pack badge | Open the existing draft instead of installing a duplicate |\n"
+        "| A pack shows Configuration Required | Pack lifecycle, component list and workflow source-pack badge | Choose **Review & configure** and complete each disabled draft; do not install a duplicate |\n"
+        "| A pack cannot be removed | Enabled workflow or active queued, waiting, approval or running execution | Pause the workflow and let active runs finish or cancel them through the governed runtime |\n"
         "| Approval cannot be submitted | Justification length, simulation ID, client scope, and existing open change | Use the existing linked change or record a complete rationale |\n"
         "| Run is waiting | Wake time and persisted current step in Runtime | Leave it queued; restarting Nexus does not lose the continuation |\n"
         "| Run needs approval | Approval group, protected step, client scope, and decision rationale | Approve or reject from Runtime; do not bypass the boundary |\n"

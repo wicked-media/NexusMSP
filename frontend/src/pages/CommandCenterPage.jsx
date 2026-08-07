@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Siren, DollarSign, AlertTriangle, Trophy, TrendingUp, RefreshCw,
+  Siren, DollarSign, AlertTriangle, Trophy, RefreshCw,
   Loader2, Flame, Heart, Server, CalendarCheck, Zap, Crown, Sparkles, Activity,
 } from "lucide-react";
 import { toast } from "sonner";

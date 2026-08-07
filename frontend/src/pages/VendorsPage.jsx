@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, Edit, Trash2, Building2, Globe, Phone, Mail,
-  RefreshCw, ArrowLeft, ChevronRight, ShoppingCart, DollarSign, FileText,
+  Plus, Search, Loader2, Edit, Trash2, Building2,
+  RefreshCw, ArrowLeft, ChevronRight, ShoppingCart,
   MapPin, CreditCard, ExternalLink, Users
 } from "lucide-react";
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Server, Play, Square, RotateCcw, Power, Cpu, MemoryStick, HardDrive, Shield, Clock, Download, Plus, RefreshCw, AlertTriangle, CheckCircle, XCircle, Archive, Calendar, Loader2 } from "lucide-react";
+import { Server, Play, Square, RotateCcw, Power, RefreshCw, CheckCircle, XCircle, Archive, Calendar, Loader2 } from "lucide-react";
 
 export default function ProxmoxPage() {
   const { token } = useAuth();

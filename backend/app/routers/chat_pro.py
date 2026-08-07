@@ -15,6 +15,7 @@ from app.services.chat_access import (
     require_channel_access,
     require_message_access,
 )
+from app.services.scope_permissions import assert_client_scope, scoped_query
 from app.services.avatar_enrichment import attach_user_avatars
 
 router = APIRouter()
@@ -440,6 +441,7 @@ async def ticket_card(ticket_number: str, current_user: dict = Depends(get_curre
     t = await db.tickets.find_one({"$or": [{"ticket_number": ticket_number}, {"id": ticket_number}]}, {"_id": 0})
     if not t:
         raise HTTPException(404, "Ticket not found")
+    await assert_client_scope(current_user, t.get("client_id"), operation="chat:ticket_card", mask_not_found=True)
     return {
         "id": t.get("id"),
         "ticket_number": t.get("ticket_number"),
@@ -447,7 +449,7 @@ async def ticket_card(ticket_number: str, current_user: dict = Depends(get_curre
         "status": t.get("status"),
         "priority": t.get("priority"),
         "client_name": t.get("client_name"),
-        "assigned_to_name": t.get("assigned_to_name"),
+        "assigned_to_name": t.get("assigned_name") or t.get("assignee_name") or t.get("assigned_to_name"),
         "service_name": t.get("service_name"),
         "created_at": t.get("created_at"),
     }
@@ -461,6 +463,7 @@ async def invoice_card(invoice_number: str, current_user: dict = Depends(get_cur
     )
     if not invoice:
         raise HTTPException(404, "Invoice not found")
+    await assert_client_scope(current_user, invoice.get("client_id"), operation="chat:invoice_card", mask_not_found=True)
     total = float(invoice.get("total", 0) or 0)
     paid = float(invoice.get("amount_paid", 0) or 0)
     return {
@@ -479,6 +482,7 @@ async def po_card(po_number: str, current_user: dict = Depends(get_current_user)
     po = await db.purchase_orders.find_one({"$or": [{"po_number": po_number}, {"id": po_number}]}, {"_id": 0})
     if not po:
         raise HTTPException(404, "Purchase order not found")
+    await assert_client_scope(current_user, po.get("client_id"), operation="chat:po_card", mask_not_found=True)
     return {"id": po.get("id"), "po_number": po.get("po_number") or po.get("id"), "vendor": po.get("vendor"), "status": po.get("status") or "draft", "total": float(po.get("total", 0) or 0), "expected_delivery": po.get("expected_delivery")}
 
 
@@ -495,17 +499,17 @@ async def reference_search(kind: str, q: str = "", current_user: dict = Depends(
             {"title": {"$regex": needle, "$options": "i"}},
             {"client_name": {"$regex": needle, "$options": "i"}},
         ]} if needle else {}
-        rows = await db.tickets.find(query, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "status": 1}).sort("updated_at", -1).to_list(8)
+        rows = await db.tickets.find(scoped_query(current_user, query), {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "status": 1}).sort("updated_at", -1).to_list(8)
         return [{"id": row.get("id"), "reference": row.get("ticket_number") or row.get("id"), "title": row.get("title") or "Untitled ticket", "subtitle": f"{row.get('client_name') or 'No client'} · {row.get('status') or 'open'}"} for row in rows]
     if kind == "po":
         query = {"$or": [{"po_number": {"$regex": needle, "$options": "i"}}, {"vendor": {"$regex": needle, "$options": "i"}}]} if needle else {}
-        rows = await db.purchase_orders.find(query, {"_id": 0, "id": 1, "po_number": 1, "vendor": 1, "status": 1, "total": 1}).sort("created_at", -1).to_list(8)
+        rows = await db.purchase_orders.find(scoped_query(current_user, query), {"_id": 0, "id": 1, "po_number": 1, "vendor": 1, "status": 1, "total": 1}).sort("created_at", -1).to_list(8)
         return [{"id": row.get("id"), "reference": row.get("po_number") or row.get("id"), "title": row.get("vendor") or "Purchase order", "subtitle": f"{row.get('status') or 'draft'} · ${float(row.get('total', 0) or 0):.2f}"} for row in rows]
     query = {"$or": [
         {"invoice_number": {"$regex": needle, "$options": "i"}},
         {"client_name": {"$regex": needle, "$options": "i"}},
     ]} if needle else {}
-    rows = await db.invoices.find(query, {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1, "payment_status": 1, "total": 1}).sort("created_at", -1).to_list(8)
+    rows = await db.invoices.find(scoped_query(current_user, query), {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1, "payment_status": 1, "total": 1}).sort("created_at", -1).to_list(8)
     return [{"id": row.get("id"), "reference": row.get("invoice_number") or row.get("id"), "title": row.get("client_name") or "Invoice", "subtitle": f"{row.get('payment_status') or 'unpaid'} · ${float(row.get('total', 0) or 0):.2f}"} for row in rows]
 
 
@@ -516,6 +520,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
     t = await db.tickets.find_one({"$or": [{"ticket_number": ticket_number}, {"id": ticket_number}]}, {"_id": 0})
     if not t:
         raise HTTPException(404, "Ticket not found")
+    await assert_client_scope(current_user, t.get("client_id"), operation="chat:discuss_ticket", mask_not_found=True)
     channel_id = payload.get("channel_id")
     if not channel_id:
         ch = await db.chat_channels.find_one({"$or": [{"name": "ops"}, {"name": "general"}], "is_private": {"$ne": True}}, {"_id": 0})

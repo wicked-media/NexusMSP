@@ -5,6 +5,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -23,7 +24,7 @@ async def get_devices(
     if client_id:
         query["client_id"] = client_id
     
-    devices = await db.devices.find(query, {"_id": 0}).to_list(1000)
+    devices = await db.devices.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     for d in devices:
         for field in ['created_at', 'last_seen']:
             if isinstance(d.get(field), str):
@@ -35,24 +36,27 @@ async def get_devices(
 async def get_stale_devices_route(hours: int = 24, current_user: dict = Depends(get_current_user)):
     """Get devices that haven't reported in within the specified hours"""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    stale = await db.devices.find({
+    stale = await db.devices.find(scoped_query(current_user, {
         "$or": [
             {"last_heartbeat": {"$lt": cutoff}},
             {"last_heartbeat": {"$exists": False}},
         ]
-    }, {"_id": 0}).to_list(500)
+    }), {"_id": 0}).to_list(500)
     return stale
 
 @router.get("/devices/{device_id}")
 async def get_device(device_id: str, current_user: dict = Depends(get_current_user)):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    return device
+    return await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.read", resource_name="Device",
+    )
 
 @router.post("/devices", response_model=Device)
 async def create_device(device_data: DeviceCreate, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, device_data.client_id, operation="device.create")
     client = await db.clients.find_one({"id": device_data.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
     client_name = client['name'] if client else None
     
     device = Device(**device_data.model_dump(), client_name=client_name)
@@ -66,12 +70,14 @@ async def create_device(device_data: DeviceCreate, current_user: dict = Depends(
 
 @router.put("/devices/{device_id}")
 async def update_device(device_id: str, device_data: dict, current_user: dict = Depends(get_current_user)):
-    old_device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not old_device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    old_device = await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.update", resource_name="Device",
+    )
     updates = dict(device_data or {})
     if "client_id" in updates:
         new_client_id = updates.get("client_id") or None
+        await assert_client_scope(current_user, new_client_id, operation="device.move")
         if new_client_id:
             new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0, "id": 1, "name": 1})
             if not new_client:
@@ -102,10 +108,13 @@ async def update_device(device_id: str, device_data: dict, current_user: dict = 
 
 @router.delete("/devices/{device_id}")
 async def delete_device(device_id: str, current_user: dict = Depends(get_current_user)):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if device:
-        await db.clients.update_one({"id": device['client_id']}, {"$inc": {"device_count": -1}})
-        await log_activity(current_user, "deleted", "device", device_id, device.get("name", ""), f"Deleted device '{device.get('name', '')}'")
+    device = await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.delete", resource_name="Device",
+    )
+    if device.get("client_id"):
+        await db.clients.update_one({"id": device["client_id"]}, {"$inc": {"device_count": -1}})
+    await log_activity(current_user, "deleted", "device", device_id, device.get("name", ""), f"Deleted device '{device.get('name', '')}'")
     result = await db.devices.delete_one({"id": device_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -113,20 +122,34 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
 
 @router.get("/devices/{device_id}/detail")
 async def get_device_detail(device_id: str, current_user: dict = Depends(get_current_user)):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    device = await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.detail.read", resource_name="Device",
+    )
     software = await db.device_software.find({"device_id": device_id}, {"_id": 0}).to_list(500)
     patches = await db.device_patches.find({"device_id": device_id}, {"_id": 0}).sort("installed_date", -1).to_list(100)
     events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(100)
     performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
-    alerts = await db.alerts.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    alerts = await db.alerts.find(
+        {
+            "device_id": device_id,
+            "$or": [
+                {"status": {"$in": ["active", "open", "triggered"]}},
+                {"status": {"$exists": False}},
+            ],
+        },
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
     tickets = await db.tickets.find(
         {"$or": [{"device_id": device_id}, {"device_ids": device_id}]}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     network_adapters = await db.device_network.find({"device_id": device_id}, {"_id": 0}).to_list(20)
     remote_sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(50)
     activity_logs = await db.activity_logs.find({"entity_type": "device", "entity_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Keep the hero metric and the detailed alert list on one source of truth.
+    # Stored counts can drift after an alert is resolved, so derive the count
+    # from the access-scoped active records returned with this response.
+    device["alerts_count"] = len(alerts)
     return {
         "device": device,
         "software": software,
@@ -142,27 +165,43 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
 
 @router.get("/devices/{device_id}/software")
 async def get_device_software(device_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.software.read", resource_name="Device",
+    )
     software = await db.device_software.find({"device_id": device_id}, {"_id": 0}).to_list(500)
     return software
 
 @router.get("/devices/{device_id}/patches")
 async def get_device_patches(device_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.patches.read", resource_name="Device",
+    )
     patches = await db.device_patches.find({"device_id": device_id}, {"_id": 0}).sort("installed_date", -1).to_list(200)
     return patches
 
 @router.get("/devices/{device_id}/events")
 async def get_device_events(device_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.events.read", resource_name="Device",
+    )
     events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(200)
     return events
 
 @router.get("/devices/{device_id}/performance")
 async def get_device_performance(device_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.performance.read", resource_name="Device",
+    )
     performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
     return performance
 
 @router.get("/devices/stats/summary")
 async def get_devices_stats(current_user: dict = Depends(get_current_user)):
-    devices = await db.devices.find({}, {"_id": 0}).to_list(10000)
+    devices = await db.devices.find(scoped_query(current_user), {"_id": 0}).to_list(10000)
     total = len(devices)
     online = len([d for d in devices if d.get("status") == "online"])
     offline = len([d for d in devices if d.get("status") == "offline"])
@@ -187,6 +226,10 @@ async def get_devices_stats(current_user: dict = Depends(get_current_user)):
 async def device_heartbeat(device_id: str, data: dict):
     """RMM Agent heartbeat endpoint. Updates device info in real-time.
     Called periodically by the remote agent installed on client devices."""
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy device heartbeat retired. Enrol this endpoint with Nexus Agent and use /api/nexus-agent/heartbeat.",
+    )
     device = await db.devices.find_one({"id": device_id})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -307,6 +350,10 @@ async def device_heartbeat(device_id: str, data: dict):
 @router.post("/devices/heartbeat/bulk")
 async def bulk_device_heartbeat(data: dict):
     """Bulk heartbeat for multiple devices from a single RMM server"""
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy bulk heartbeat retired. Each endpoint must use its own authenticated Nexus Agent identity.",
+    )
     devices = data.get("devices", [])
     results = []
     for d in devices:
@@ -341,7 +388,7 @@ async def get_assets(
     if client_id:
         query["client_id"] = client_id
     
-    assets = await db.assets.find(query, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     for a in assets:
         if isinstance(a.get('created_at'), str):
             a['created_at'] = datetime.fromisoformat(a['created_at'])
@@ -349,7 +396,7 @@ async def get_assets(
 
 @router.get("/assets/stats")
 async def get_asset_stats(current_user: dict = Depends(get_current_user)):
-    assets = await db.assets.find({}, {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(scoped_query(current_user), {"_id": 0}).to_list(10000)
     total = len(assets)
     active = len([a for a in assets if a.get("status") == "active"])
     total_value = sum(a.get("cost", 0) for a in assets)
@@ -379,7 +426,7 @@ async def get_asset_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/assets/expiring")
 async def get_expiring_assets(current_user: dict = Depends(get_current_user)):
-    assets = await db.assets.find({}, {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(scoped_query(current_user), {"_id": 0}).to_list(10000)
     now = datetime.now()
     cutoff = now + timedelta(days=90)
     expiring = []
@@ -398,14 +445,17 @@ async def get_expiring_assets(current_user: dict = Depends(get_current_user)):
 
 @router.get("/assets/{asset_id}")
 async def get_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    return asset
+    return await assert_record_scope(
+        current_user, db.assets, asset_id,
+        operation="asset.read", resource_name="Asset",
+    )
 
 @router.post("/assets", response_model=Asset)
 async def create_asset(asset_data: AssetCreate, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, asset_data.client_id, operation="asset.create")
     client = await db.clients.find_one({"id": asset_data.client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
     client_name = client['name'] if client else None
     
     asset = Asset(**asset_data.model_dump(), client_name=client_name)
@@ -416,6 +466,12 @@ async def create_asset(asset_data: AssetCreate, current_user: dict = Depends(get
 
 @router.put("/assets/{asset_id}")
 async def update_asset(asset_id: str, asset_data: dict, current_user: dict = Depends(get_current_user)):
+    existing = await assert_record_scope(
+        current_user, db.assets, asset_id,
+        operation="asset.update", resource_name="Asset",
+    )
+    if "client_id" in asset_data and asset_data.get("client_id") != existing.get("client_id"):
+        await assert_client_scope(current_user, asset_data.get("client_id"), operation="asset.move")
     result = await db.assets.update_one({"id": asset_id}, {"$set": asset_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -423,6 +479,10 @@ async def update_asset(asset_id: str, asset_data: dict, current_user: dict = Dep
 
 @router.delete("/assets/{asset_id}")
 async def delete_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(
+        current_user, db.assets, asset_id,
+        operation="asset.delete", resource_name="Asset",
+    )
     result = await db.assets.delete_one({"id": asset_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Asset not found")

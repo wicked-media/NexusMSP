@@ -2,13 +2,20 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import Optional
 from datetime import datetime, timezone
 import uuid, os, base64
-from app.database import db
+from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
+from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
 
 router = APIRouter()
 
-WALLPAPER_DIR = "/app/backend/uploads/wallpapers"
-os.makedirs(WALLPAPER_DIR, exist_ok=True)
+WALLPAPER_DIR = UPLOADS_DIR / "wallpapers"
+WALLPAPER_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _require_branding_admin(current_user: dict) -> None:
+    if current_user.get("is_admin") in (True, 1) or str(current_user.get("role") or "").lower() == "admin":
+        return
+    raise HTTPException(status_code=403, detail="Admin access required")
 
 TEMPLATE_WALLPAPERS = [
     {"id": "tpl-cyber-city", "name": "Cyber City", "url": "https://images.unsplash.com/photo-1728330458318-70438beffc44?w=1920&q=80", "category": "cyberpunk"},
@@ -64,6 +71,7 @@ async def update_login_wallpaper(data: dict, current_user: dict = Depends(get_cu
 @router.post("/settings/login-wallpaper/upload")
 async def upload_login_wallpaper(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """Upload a custom wallpaper image"""
+    await _require_branding_admin(current_user)
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
@@ -72,9 +80,9 @@ async def upload_login_wallpaper(file: UploadFile = File(...), current_user: dic
     if len(contents) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
-    ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg"
+    ext = safe_upload_extension(file.filename, allowed=IMAGE_EXTENSIONS, default="jpg")
     filename = f"wallpaper-{uuid.uuid4().hex[:12]}.{ext}"
-    filepath = os.path.join(WALLPAPER_DIR, filename)
+    filepath = WALLPAPER_DIR / filename
 
     with open(filepath, "wb") as f:
         f.write(contents)

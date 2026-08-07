@@ -13,6 +13,8 @@ import os
 from app.database import db
 from app.routers.auth import get_current_user
 from app.services.activity import log_activity
+from app.services.time_machine import compare_endpoint_states
+from app.services.platform_foundation import emit_platform_event
 
 router = APIRouter()
 logger = logging.getLogger("device_intel")
@@ -22,6 +24,137 @@ def _iso(dt):
     if isinstance(dt, datetime):
         return dt.isoformat()
     return dt
+
+
+def _time_machine_record(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "device_id": row.get("device_id"),
+        "client_id": row.get("client_id"),
+        "captured_at": row.get("captured_at"),
+        "last_observed_at": row.get("last_observed_at"),
+        "observation_count": int(row.get("observation_count") or 1),
+        "source": row.get("source") or "nexus-agent",
+        "coverage": list(row.get("coverage") or []),
+        "change_count": int(row.get("change_count") or 0),
+        "changed_categories": list(row.get("changed_categories") or []),
+        "previous_snapshot_id": row.get("previous_snapshot_id"),
+    }
+
+
+@router.get("/devices/{device_id}/time-machine")
+async def device_time_machine(
+    device_id: str,
+    limit: int = Query(50, ge=2, le=200),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return durable, agent-observed state history for one endpoint."""
+    device = await db.devices.find_one(
+        {"id": device_id},
+        {"_id": 0, "id": 1, "name": 1, "client_id": 1, "nexus_agent_id": 1},
+    )
+    if not device:
+        raise HTTPException(404, "Device not found")
+
+    rows = await db.device_state_snapshots.find(
+        {"device_id": device_id},
+        {"_id": 0, "state": 0},
+    ).sort("captured_at", -1).to_list(limit)
+    total = await db.device_state_snapshots.count_documents({"device_id": device_id})
+    oldest_rows = await db.device_state_snapshots.find(
+        {"device_id": device_id},
+        {"_id": 0, "captured_at": 1},
+    ).sort("captured_at", 1).to_list(1)
+    latest = rows[0] if rows else None
+
+    return {
+        "device": {
+            "id": device["id"],
+            "name": device.get("name") or "Endpoint",
+            "client_id": device.get("client_id"),
+            "agent_linked": bool(device.get("nexus_agent_id")),
+        },
+        "snapshots": [_time_machine_record(row) for row in rows],
+        "total": total,
+        "latest_coverage": list((latest or {}).get("coverage") or []),
+        "history_started_at": oldest_rows[0].get("captured_at") if oldest_rows else None,
+        "boundary_note": (
+            "History starts when the Nexus Agent first reports after Time Machine is enabled. "
+            "Nexus does not invent state from before that boundary."
+        ),
+    }
+
+
+@router.get("/devices/{device_id}/time-machine/compare")
+async def compare_device_time_machine(
+    device_id: str,
+    from_snapshot: Optional[str] = Query(None),
+    to_snapshot: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Compare two persisted endpoint states by evidence category."""
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "id": 1})
+    if not device:
+        raise HTTPException(404, "Device not found")
+
+    if from_snapshot and to_snapshot and from_snapshot == to_snapshot:
+        raise HTTPException(400, "Choose two different snapshots")
+
+    selected: list[dict] = []
+    if from_snapshot:
+        row = await db.device_state_snapshots.find_one(
+            {"id": from_snapshot, "device_id": device_id},
+            {"_id": 0},
+        )
+        if not row:
+            raise HTTPException(404, "Starting snapshot not found")
+        selected.append(row)
+    if to_snapshot:
+        row = await db.device_state_snapshots.find_one(
+            {"id": to_snapshot, "device_id": device_id},
+            {"_id": 0},
+        )
+        if not row:
+            raise HTTPException(404, "Ending snapshot not found")
+        selected.append(row)
+
+    if not from_snapshot or not to_snapshot:
+        recent = await db.device_state_snapshots.find(
+            {"device_id": device_id},
+            {"_id": 0},
+        ).sort("captured_at", -1).to_list(10)
+        by_id = {row.get("id"): row for row in [*selected, *recent]}
+        if not to_snapshot and recent:
+            to_snapshot = recent[0].get("id")
+        if not from_snapshot:
+            from_snapshot = next(
+                (row.get("id") for row in recent if row.get("id") != to_snapshot),
+                None,
+            )
+        selected = [
+            by_id[snapshot_id]
+            for snapshot_id in (from_snapshot, to_snapshot)
+            if snapshot_id and snapshot_id in by_id
+        ]
+
+    if len(selected) < 2 or not from_snapshot or not to_snapshot:
+        raise HTTPException(409, "Two endpoint snapshots are required before a comparison can be generated")
+
+    by_id = {row["id"]: row for row in selected}
+    before = by_id.get(from_snapshot)
+    after = by_id.get(to_snapshot)
+    if not before or not after:
+        raise HTTPException(404, "One or more snapshots are unavailable")
+    if str(before.get("captured_at") or "") > str(after.get("captured_at") or ""):
+        before, after = after, before
+
+    return {
+        "from": _time_machine_record(before),
+        "to": _time_machine_record(after),
+        "comparison": compare_endpoint_states(before.get("state"), after.get("state")),
+    }
 
 
 # ─────────────────────── Smart Inbox ───────────────────────
@@ -400,6 +533,29 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
         if not _can_execute_agent_commands(current_user):
             raise HTTPException(403, "Agent command permission required")
 
+    guardian_preview = None
+    preview_id = str(payload.get("guardian_preview_id") or "").strip()
+    if preview_id:
+        guardian_preview = await db.change_guardian_previews.find_one({"id": preview_id}, {"_id": 0})
+        if not guardian_preview:
+            raise HTTPException(409, "Change Guardian preview not found or expired")
+        expires_at = guardian_preview.get("expires_at")
+        try:
+            expiry = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            raise HTTPException(409, "Change Guardian preview has an invalid expiry")
+        if expiry <= datetime.now(timezone.utc):
+            raise HTTPException(409, "Change Guardian preview expired; refresh the evidence")
+        if guardian_preview.get("consumed_at"):
+            raise HTTPException(409, "Change Guardian preview was already used")
+        if guardian_preview.get("action") != action or sorted(guardian_preview.get("entity_ids") or []) != sorted(ids):
+            raise HTTPException(409, "Change Guardian preview does not match this action and target set")
+        preview_actor = guardian_preview.get("created_by_id")
+        if preview_actor and current_user.get("id") and preview_actor != current_user.get("id"):
+            raise HTTPException(409, "Change Guardian preview belongs to another technician")
+
     cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0})
     targets = [d async for d in cursor]
 
@@ -489,7 +645,7 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
     completed = sum(1 for r in results if r["status"] == "completed")
     failed = sum(1 for r in results if r["status"] == "failed")
     skipped = sum(1 for r in results if r["status"] == "skipped")
-    return {
+    response = {
         "action": action,
         "results": results,
         "summary": {
@@ -500,6 +656,33 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
             "skipped": skipped,
         },
     }
+    if guardian_preview:
+        consumed_at = datetime.now(timezone.utc).isoformat()
+        await db.change_guardian_previews.update_one(
+            {"id": preview_id, "consumed_at": None},
+            {"$set": {
+                "consumed_at": consumed_at,
+                "execution_summary": response["summary"],
+            }},
+        )
+        await emit_platform_event(
+            subject="change.guardian.execution.linked",
+            source="nexus.managed-assets",
+            actor=current_user,
+            client_id=(guardian_preview.get("client_ids") or [None])[0] if len(guardian_preview.get("client_ids") or []) == 1 else None,
+            correlation_id=guardian_preview.get("correlation_id"),
+            causation_id=preview_id,
+            payload={
+                "preview_id": preview_id,
+                "action": action,
+                "entity_type": "device",
+                "entity_ids": ids,
+                "summary": response["summary"],
+            },
+            retention_days=365,
+        )
+        response["guardian_preview_id"] = preview_id
+    return response
 
 
 # ─────────────────────── Site map (geo) ───────────────────────

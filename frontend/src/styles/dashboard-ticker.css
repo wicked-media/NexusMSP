@@ -5,7 +5,7 @@
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  contain: inline-size;
+  container-type: inline-size;
   overflow: hidden;
   padding: .55rem .8rem;
   border: 1px solid hsl(var(--border) / .55);
@@ -31,3 +31,6 @@
 
 @media (prefers-reduced-motion: reduce) { .nx-live-ticker__track, .nx-live-ticker__pulse { animation: none; } }
 @media (max-width: 640px) { .nx-live-ticker__refresh { display: none; } .nx-live-ticker__label { font-size: .6rem; } }
+@container (max-width: 700px) {
+  .nx-live-ticker__refresh { display: none; }
+}

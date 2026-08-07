@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Building2, Users, Monitor, DollarSign, Plus, ChevronRight, Settings, BarChart3, Shield, Ticket, TrendingUp } from "lucide-react";
+import { Building2, Users, Monitor, DollarSign, Plus, ChevronRight, TrendingUp } from "lucide-react";
 
 const TIER_COLORS = { enterprise: "#8b5cf6", professional: "#3b82f6", standard: "#6b7280" };
 const FEATURE_LIST = ["tickets", "devices", "clients", "reports", "security", "patching", "backup", "automation", "ai_copilot", "white_label"];

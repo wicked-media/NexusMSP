@@ -9,13 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Power, RefreshCw, Wifi, Terminal, FolderOpen, Monitor, Send,
-  Play, Square, RotateCcw, Cpu, HardDrive, MemoryStick, Activity,
-  ChevronDown, AlertTriangle, CheckCircle, Loader2, ExternalLink, MessageSquareWarning,
-  Skull, Download, Search, Zap,
+  Power, RefreshCw, Wifi, Terminal, FolderOpen, Monitor,
+  Play, Square, RotateCcw, Cpu, HardDrive, MemoryStick, Activity, AlertTriangle, Loader2, MessageSquareWarning,
+  Skull, Download, Search,
 } from "lucide-react";
 import { API } from "@/App";
 

@@ -1,15 +1,14 @@
 /* LeadDrawer.jsx — slide-in detail panel with tabs. Replaces the old dialog approach. */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   X, Mail, Phone, Globe, Building2, DollarSign, Sparkles, Ticket, GitMerge,
-  Activity, Loader2, ChevronRight, AlertTriangle, CheckCircle2, FileText, Wand2, Trash2, ListTodo
+  Activity, Loader2, ChevronRight, CheckCircle2, Wand2, ListTodo
 } from "lucide-react";
 import InitialsAvatar from "./InitialsAvatar";
 import LeadScoreBadge from "./LeadScoreBadge";
@@ -32,7 +31,7 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const loadAll = useCallback(async () => {
     if (!leadId) return;
@@ -50,8 +49,6 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
       const sc = (scores.data?.scores || []).find(x => x.id === leadId);
       setScore(sc || null);
       setNba(action.data);
-      // Touch
-      axios.post(`${API}/lead-studio/${leadId}/touch`.replace("/lead-studio/", `/lead-studio/${leadId}/touch`).replace(`/lead-studio/${leadId}/touch/${leadId}/touch`, `/lead-studio/${leadId}/touch`), null, { headers }).catch(() => {});
       // Fetch linked tickets (if any)
       const linked = l.data?.linked_tickets || [];
       if (linked.length) {
@@ -59,16 +56,14 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
         setTickets(fetched.filter(Boolean));
       } else { setTickets([]); }
     } catch { toast.error("Failed to load lead"); }
-    // eslint-disable-next-line
-  }, [leadId, token]);
+  }, [leadId, headers]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // simpler touch
+  // Record one auditable view event when the technician opens a different lead.
   useEffect(() => {
     if (leadId) axios.post(`${API}/lead-studio/${leadId}/touch`, null, { headers }).catch(() => {});
-    // eslint-disable-next-line
-  }, [leadId]);
+  }, [leadId, headers]);
 
   const draft = async (intent) => {
     setDraftingIntent(intent);
@@ -148,7 +143,7 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
                   <span>{timeAgo(lead.last_activity_at || lead.updated_at)}</span>
                 </div>
               </div>
-              <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200" data-testid="lead-drawer-close">
+              <button type="button" aria-label="Close lead details" onClick={onClose} className="text-zinc-500 hover:text-zinc-200" data-testid="lead-drawer-close">
                 <X className="w-5 h-5" />
               </button>
             </header>
@@ -267,7 +262,12 @@ export default function LeadDrawer({ leadId, onClose, onUpdated }) {
                 <TabsContent value="tickets" className="m-0 space-y-2">
                   {tickets.length === 0 && <p className="text-xs text-zinc-500">No tickets linked to this lead yet. Use the buttons above to create or merge.</p>}
                   {tickets.map(t => (
-                    <Card key={t.id} className="p-2 bg-zinc-900/40 border-zinc-800/60 hover:border-violet-500/40 cursor-pointer" onClick={() => window.open(`/tickets/${t.id}`, "_blank")} data-testid={`drawer-linked-ticket-${t.id}`}>
+                    <Card
+                      key={t.id}
+                      className="p-2 bg-zinc-900/40 border-zinc-800/60 hover:border-violet-500/40 cursor-pointer"
+                      onClick={() => window.open(`/tickets?ticket=${encodeURIComponent(t.ticket_number || t.id)}`, "_blank", "noopener,noreferrer")}
+                      data-testid={`drawer-linked-ticket-${t.id}`}
+                    >
                       <div className="flex items-center gap-2">
                         <Ticket className="w-3.5 h-3.5 text-violet-300" />
                         <span className="text-[11px] font-mono text-violet-300">#{t.ticket_number || t.id?.slice(0, 8)}</span>

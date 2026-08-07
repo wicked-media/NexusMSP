@@ -2,9 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import DOMPurify from "dompurify";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
-import { SentimentBadge } from "@/components/ai/SentimentBadge";
 import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
@@ -49,28 +47,27 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { RichTextEditor } from "@/components/RichTextEditor";
-import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import { PageShell } from "@/components/design-system";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag,
   Timer, GitBranch, Merge, Eye, History, X, Play,
   BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi,
   Terminal, Zap, Brain, ExternalLink, Shield, Cpu, Users,
-  Download, BellRing, Trash2, ShoppingCart, Receipt,
-  Wrench, MapPin, Radio, Pause, PhoneCall, DollarSign, Package, Calendar,
-  Camera, QrCode, ClipboardList, Bell, Truck, Image as ImageIcon, ListChecks, Boxes,
+  Download, Trash2, ShoppingCart, Receipt,
+  Wrench, MapPin, Radio, Pause, DollarSign, Package,
+  Camera, QrCode, ClipboardList, Bell, Image as ImageIcon, ListChecks,
   Settings2, AlertTriangle, Pencil
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
-import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG, FIELD_STATUSES as FIELD_STATUSES_CONFIG, wsStages, fieldStages } from "@/config/ticketConfig";
+import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG } from "@/config/ticketConfig";
 import TicketConsoleHeader from "@/components/tickets/TicketConsoleHeader";
 import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import { collectionFromResponse, matchTicketByReference, ticketToolAvailability } from "@/lib/ticketWorkspaceHelpers";
@@ -81,6 +78,32 @@ import {
   LOCAL_PREVIEW_TICKETS, LOCAL_PREVIEW_USERS, localPreviewCollection,
   localPreviewRecord, localPreviewTicketDetail,
 } from "@/lib/ticketPreviewData";
+
+function uniqueByIdentity(items = []) {
+  const seen = new Set();
+  return items.filter((item, index) => {
+    const identity = String(item?.id || item?.email || item?.name || index).trim().toLowerCase();
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+function resolutionMinutes(ticket) {
+  const explicit = Number(ticket?.resolution_time_minutes);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const completedAt = ticket?.closed_at || ticket?.resolved_at || ticket?.updated_at;
+  if (!ticket?.created_at || !completedAt) return null;
+  const elapsed = Math.round((new Date(completedAt).getTime() - new Date(ticket.created_at).getTime()) / 60_000);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
+}
+
+function formatDuration(minutes) {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+  return `${(minutes / 1440).toFixed(minutes < 14_400 ? 1 : 0)}d`;
+}
 
 export default function TicketsPage() {
   const { token, user } = useAuth();
@@ -397,7 +420,7 @@ export default function TicketsPage() {
       ]);
       setTickets(localPreviewCollection(collectionFromResponse(tRes.data, ["tickets"]), LOCAL_PREVIEW_TICKETS));
       setClients(localPreviewCollection(collectionFromResponse(cRes.data, ["clients"]), LOCAL_PREVIEW_CLIENTS));
-      setUsers(localPreviewCollection(collectionFromResponse(uRes.data, ["users"]), LOCAL_PREVIEW_USERS));
+      setUsers(uniqueByIdentity(localPreviewCollection(collectionFromResponse(uRes.data, ["users"]), LOCAL_PREVIEW_USERS)));
       setCannedResponses(collectionFromResponse(crRes.data, ["responses", "canned_responses"]));
       setNoteCounts(localPreviewRecord(ncRes.data, LOCAL_PREVIEW_NOTE_COUNTS));
       setDevices(localPreviewCollection(collectionFromResponse(dRes.data, ["devices"]), LOCAL_PREVIEW_DEVICES));
@@ -437,11 +460,14 @@ export default function TicketsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const ref = searchParams.get("ticket");
-    if (!ref || tickets.length === 0 || viewingTicket) return;
+    if (!ref || tickets.length === 0) return;
     const wanted = decodeURIComponent(ref).replace(/^#/, "").toUpperCase();
     const match = matchTicketByReference(tickets, wanted);
     if (match) {
-      fetchTicketDetail(match);
+      // A technician may already have another ticket open in this mounted
+      // workspace. A new deep link must still replace it with the requested
+      // record rather than silently leaving the previous ticket on screen.
+      if (viewingTicket?.id !== match.id) fetchTicketDetail(match);
       // Clear the param so back-navigation doesn't trap us
       const np = new URLSearchParams(searchParams);
       np.delete("ticket");
@@ -455,12 +481,12 @@ export default function TicketsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tickets, searchParams]);
 
-  // Queue deep-links from Morning Checks, Notifications and dashboard command tiles.
+  // Queue deep-links from Nexus Daily, Notifications and dashboard command tiles.
   useEffect(() => {
     const status = searchParams.get("status");
     const priority = searchParams.get("priority");
     const attention = searchParams.get("attention");
-    if (status && ["open", "pending", "in_progress", "on_hold", "resolved", "closed"].includes(status)) setStatusFilter(status);
+    if (status && ["open", "pending", "in_progress", "on_hold", "resolved", "closed", "completed"].includes(status)) setStatusFilter(status);
     if (priority && ["critical", "high", "medium", "low"].includes(priority)) setPriorityFilter(priority);
     if (["no_response", "sla_breach", "unassigned", "critical_high"].includes(attention)) setAttentionFilter(attention);
   }, [searchParams]);
@@ -1572,7 +1598,8 @@ export default function TicketsPage() {
   const fmtTime = (s) => { const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${sec.toString().padStart(2, '0')}`; };
 
   const filteredTickets = tickets.filter(t => {
-    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    if (statusFilter === "completed" && !["resolved", "closed"].includes(t.status)) return false;
+    if (statusFilter !== "all" && statusFilter !== "completed" && t.status !== statusFilter) return false;
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
     if (attentionFilter === "no_response" && (noteCounts[t.id] > 0 || ["closed", "resolved"].includes(t.status))) return false;
     if (attentionFilter === "sla_breach") {
@@ -1587,6 +1614,23 @@ export default function TicketsPage() {
     }
     return true;
   });
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const filteredWorkshopJobs = workshopJobs.filter(job => {
+    if (!normalizedSearch) return true;
+    return [
+      job.job_number, job.customer_name, job.fault_description, job.device_type,
+      job.device_brand, job.device_model, job.serial_number, job.assigned_to_name,
+    ].some(value => String(value || "").toLowerCase().includes(normalizedSearch));
+  });
+  const filteredFieldJobs = fieldJobs.filter(job => {
+    if (!normalizedSearch) return true;
+    return [
+      job.job_number, job.customer_name, job.description, job.service_address,
+      job.zone, job.job_category, job.assigned_to_name,
+    ].some(value => String(value || "").toLowerCase().includes(normalizedSearch));
+  });
+  const supportFiltersClear = statusFilter === "all" && priorityFilter === "all" && attentionFilter === "all";
 
   const groupedTickets = useGroupedTickets(filteredTickets, groupBy, statusConfig, priorityConfig);
 
@@ -1671,9 +1715,12 @@ export default function TicketsPage() {
 
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
-    const slaHours = viewingTicket.sla_due ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
+    const ticketCompleted = ["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase());
+    const slaHours = viewingTicket.sla_due && !ticketCompleted ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
     const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
     const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
+    const unbilledTicketItems = ticketProducts.filter(item => !item.invoice_id);
+    const unbilledTicketTotal = unbilledTicketItems.reduce((sum, item) => sum + Number(item.total || 0), 0);
     return (
       <PageShell>
         <div className="p-6 space-y-4 ticket-glass" data-testid="ticket-detail-view">
@@ -1710,6 +1757,9 @@ export default function TicketsPage() {
               window.scrollTo({ top: 600, behavior: "smooth" });
             }
           }}
+          isTimerRunning={isTimerRunning}
+          timerElapsed={timerElapsed}
+          onToggleTimer={toggleTimer}
         />
 
         {runbookSuggestions.length > 0 && (
@@ -1824,7 +1874,7 @@ export default function TicketsPage() {
               description: viewingTicket.device_id ? "Remote support, health checks, and approved scripts for the linked device." : "Link a device in ticket properties to enable remote and automation tools.",
               icon: MonitorCheck,
               content: <>
-                <TicketToolAction icon={ExternalLink} title="Remote access" description={toolAvailability.remote ? `Open a support session to ${linkedDeviceId}.` : "Link a device to enable remote support."} state="connected" stateLabel="Linked" disabled={!toolAvailability.remote} onClick={() => window.open(`/remote-access?device=${linkedDeviceId}`, "_blank")} />
+                <TicketToolAction icon={ExternalLink} title="Remote access" description={toolAvailability.remote ? `Open a support session to ${linkedDeviceId}.` : "Link a device to enable remote support."} state="connected" stateLabel="Linked" disabled={!toolAvailability.remote} onClick={() => window.open(`/remote-access?device=${linkedDeviceId}&ticket=${viewingTicket?.id || ""}`, "_blank")} />
                 <TicketToolAction icon={MonitorCheck} title="Run health checks" description={toolAvailability.remote ? "Collect current endpoint health and service status." : "Link a device to run endpoint checks."} disabled={!toolAvailability.remote} onClick={() => axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"))} />
                 {scripts.slice(0, 6).map(script => <TicketToolAction key={script.id} icon={Terminal} title={script.name} description={script.description || "Run this approved automation against the linked device."} state="connected" stateLabel="Script" disabled={!toolAvailability.scripts} onClick={() => handleRunScript(script.id)} />)}
               </>,
@@ -1891,7 +1941,12 @@ export default function TicketsPage() {
                   onKeyDown={e => e.key === "Enter" && handleAddTag()} data-testid="tag-input" />
               </div>
               {/* SLA indicator */}
-              {slaHours !== null && (
+              {ticketCompleted ? (
+                <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.08] px-3 py-2 text-sm text-emerald-300">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Service record completed · SLA timing retained in the audit trail</span>
+                </div>
+              ) : slaHours !== null && (
                 <div className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${slaHours < 2 ? 'border-red-500/25 bg-red-500/[0.08] text-red-300' : slaHours < 8 ? 'border-yellow-500/25 bg-yellow-500/[0.08] text-yellow-300' : 'border-emerald-500/25 bg-emerald-500/[0.08] text-emerald-300'}`}>
                   <Clock className="w-4 h-4" />
                   <span>SLA: {slaHours > 0 ? `${slaHours}h remaining` : `Overdue by ${Math.abs(slaHours)}h`}</span>
@@ -2285,12 +2340,36 @@ export default function TicketsPage() {
                 </div>
                 <Separator />
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Client</p><p className="mt-1 truncate text-xs font-medium text-zinc-200">{viewingTicket.client_name || "Unassigned"}</p></div>
+                  {viewingTicket.client_id ? (
+                    <a href={`/clients?client=${encodeURIComponent(viewingTicket.client_id)}`} className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5 transition-colors hover:border-cyan-400/25 hover:bg-cyan-500/[0.06]" data-testid="ticket-open-client-profile" title="Open the client 360° profile">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Client</p>
+                      <p className="mt-1 truncate text-xs font-medium text-cyan-100 hover:underline">{viewingTicket.client_name || "Open client profile"}</p>
+                    </a>
+                  ) : <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Client</p><p className="mt-1 truncate text-xs font-medium text-zinc-200">Unassigned</p></div>}
                   <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Created</p><p className="mt-1 text-xs font-medium text-zinc-200">{viewingTicket.created_at && format(new Date(viewingTicket.created_at), "MMM d, HH:mm")}</p></div>
                   <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Tracked time</p><p className="mt-1 font-mono text-xs font-medium text-zinc-200">{viewingTicket.total_time_minutes || 0}m</p></div>
                   {viewingTicket.watchers?.length > 0 && (
                     <div className="rounded-lg border border-white/[0.06] bg-black/10 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Watchers</p><p className="mt-1 text-xs font-medium text-zinc-200">{viewingTicket.watchers.length}</p></div>
                   )}
+                </div>
+                <div className="rounded-xl border border-emerald-400/15 bg-emerald-500/[0.045] p-3" data-testid="ticket-commercial-context">
+                  <div className="flex items-start justify-between gap-3">
+                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">Commercial context</p><p className="mt-1 text-[11px] text-zinc-500">Tracked effort and ticket items remain linked to the billing audit.</p></div>
+                    <Receipt className="h-4 w-4 text-emerald-300" />
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setDetailTab("time")} className="rounded-lg border border-white/[0.06] bg-black/10 p-2 text-left transition-colors hover:border-emerald-400/20 hover:bg-emerald-500/[0.05]">
+                      <span className="block text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Tracked time</span>
+                      <span className="mt-1 block font-mono text-xs font-medium text-zinc-100">{viewingTicket.total_time_minutes || 0}m</span>
+                    </button>
+                    <button type="button" onClick={() => setDetailTab("items")} className="rounded-lg border border-white/[0.06] bg-black/10 p-2 text-left transition-colors hover:border-emerald-400/20 hover:bg-emerald-500/[0.05]">
+                      <span className="block text-[9px] font-semibold uppercase tracking-[0.1em] text-zinc-600">Unbilled items</span>
+                      <span className="mt-1 block font-mono text-xs font-medium text-emerald-200">{unbilledTicketItems.length} · ${unbilledTicketTotal.toFixed(2)}</span>
+                    </button>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" className="mt-3 h-8 w-full border-emerald-400/25 bg-emerald-500/[0.08] text-xs text-emerald-100 hover:bg-emerald-500/[0.16]" onClick={openTicketInvoiceWorkflow} data-testid="ticket-commercial-invoice">
+                    <Receipt className="mr-1.5 h-3.5 w-3.5" />Review invoice workflow
+                  </Button>
                 </div>
                 <Separator />
                 <TicketLinkedDevices
@@ -3595,10 +3674,21 @@ export default function TicketsPage() {
   // ============ LIST VIEW ============
   const openCount = tickets.filter(t => t.status === "open").length;
   const inProgressCount = tickets.filter(t => t.status === "in_progress").length;
-  const resolvedCount = tickets.filter(t => t.status === "closed").length;
+  const completedTickets = tickets.filter(t => ["resolved", "closed"].includes(t.status));
+  const completedCount = completedTickets.length;
   const criticalCount = tickets.filter(t => t.priority === "critical" && t.status !== "closed" && t.status !== "resolved").length;
   const noNotesCount = tickets.filter(t => noteCounts[t.id] === 0 && t.status !== "closed" && t.status !== "resolved").length;
-  const avgResTime = tickets.length > 0 ? Math.round(tickets.reduce((a, t) => a + (t.total_time_minutes || 0), 0) / Math.max(1, tickets.filter(t => t.total_time_minutes > 0).length)) : 0;
+  const completedDurations = completedTickets.map(resolutionMinutes).filter(value => value != null);
+  const avgResTime = completedDurations.length
+    ? Math.round(completedDurations.reduce((total, value) => total + value, 0) / completedDurations.length)
+    : null;
+  const queueCountLabel = typeFilter === "workshop"
+    ? `${filteredWorkshopJobs.length} of ${workshopJobs.length} workshop jobs`
+    : typeFilter === "cabling_wisp"
+      ? `${filteredFieldJobs.length} of ${fieldJobs.length} field jobs`
+      : typeFilter === "all" && supportFiltersClear
+        ? `${filteredTickets.length} support · ${filteredWorkshopJobs.length} workshop · ${filteredFieldJobs.length} field`
+        : `${filteredTickets.length} of ${tickets.length} support tickets`;
 
   return (
     <PageShell className="min-w-0 max-w-full overflow-x-hidden" data-testid="tickets-page">
@@ -3630,10 +3720,10 @@ export default function TicketsPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
           <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
           <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
-          <HeroTile label="Closed" value={resolvedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "closed" })} active={statusFilter === "closed" && attentionFilter === "all"} testId="stat-resolved" />
+          <HeroTile label="Completed" value={completedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && attentionFilter === "all"} testId="stat-resolved" />
           <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
           <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
-          <HeroTile label="Avg Resolve" value={`${avgResTime}m`} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({})} active={statusFilter === "all" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
+          <HeroTile label="Avg Resolve" value={formatDuration(avgResTime)} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
         </div>
       </div>
 
@@ -3719,18 +3809,18 @@ export default function TicketsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input className="h-9 border-white/[0.08] bg-white/[0.03] pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
           </div>
-          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
-            <SelectTrigger className="h-9 w-[140px] border-white/[0.08] bg-white/[0.03]" data-testid="status-filter"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">All Status</SelectItem>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Select value={priorityFilter} onValueChange={v => { setPriorityFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
+          {(typeFilter === "all" || typeFilter === "sla") && <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
+            <SelectTrigger className="h-9 w-[150px] border-white/[0.08] bg-white/[0.03]" data-testid="status-filter"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="completed">Completed</SelectItem>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
+          </Select>}
+          {(typeFilter === "all" || typeFilter === "sla") && <Select value={priorityFilter} onValueChange={v => { setPriorityFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
             <SelectTrigger className="h-9 w-[140px] border-white/[0.08] bg-white/[0.03]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Priority</SelectItem>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
-          </Select>
-          {(statusFilter !== "all" || priorityFilter !== "all" || attentionFilter !== "all") && (
+          </Select>}
+          {(typeFilter === "all" || typeFilter === "sla") && (statusFilter !== "all" || priorityFilter !== "all" || attentionFilter !== "all") && (
             <Button variant="ghost" size="sm" onClick={() => applyQueueFilter({})} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
           )}
-          <p className="ml-auto rounded-lg bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-500">{attentionLabel ? `${attentionLabel} queue: ` : ""}{filteredTickets.length} of {tickets.length} tickets</p>
+          <p className="ml-auto rounded-lg bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-500">{attentionLabel && (typeFilter === "all" || typeFilter === "sla") ? `${attentionLabel} queue: ` : ""}{queueCountLabel}</p>
         </div>
       </div>
 
@@ -3818,7 +3908,7 @@ export default function TicketsPage() {
       )}
 
       {/* Dense ticket list (Linear/Plain.com inspired) */}
-      <div className="rounded-xl border border-white/[0.04] bg-[#0a0a0a]/40 overflow-hidden" data-testid="ticket-list">
+      {(typeFilter === "all" || typeFilter === "sla") && <div className="rounded-xl border border-white/[0.04] bg-[#0a0a0a]/40 overflow-hidden" data-testid="ticket-list">
         {/* Column header (visible on >=md screens) */}
         {(typeFilter === "all" || typeFilter === "sla") && filteredTickets.length > 0 && (
           <div className={`hidden md:flex items-center gap-3 px-3.5 py-1.5 border-b border-white/[0.06] bg-white/[0.015] text-[9px] font-mono uppercase tracking-[0.18em] text-zinc-600`}>
@@ -3882,30 +3972,30 @@ export default function TicketsPage() {
             <Button variant="outline" size="sm" onClick={() => { applyQueueFilter({}); setSearchQuery(""); }}>Clear filters</Button>
           </div>
         )}
-      </div>
+      </div>}
       <div className="space-y-2">
         {/* Workshop / Field jobs continue rendering below */}
 
         {/* Workshop Job Cards (inline in unified list) */}
-        {(typeFilter === "all" || typeFilter === "workshop") && workshopJobs.map(j => {
+        {((typeFilter === "all" && supportFiltersClear) || typeFilter === "workshop") && filteredWorkshopJobs.map(j => {
           const wsStatus = WS_STATUSES[j.repair_status] || WS_STATUSES.checked_in;
           return (
-            <Card key={`ws-${j.id}`} className="group cursor-pointer overflow-hidden border border-purple-500/15 bg-gradient-to-r from-purple-500/[0.055] via-background to-background hover:border-purple-500/35 hover:shadow-md hover:shadow-purple-950/15 transition-all"
+            <Card key={`ws-${j.id}`} className="group cursor-pointer overflow-hidden border border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.05] via-background to-background hover:border-cyan-500/35 hover:shadow-md hover:shadow-cyan-950/15 transition-all"
               onClick={() => fetchWsJobDetail(j)} data-testid={`ws-job-${j.id}`}>
               <CardContent className="py-0 px-0">
                 <div className="flex items-stretch">
-                  <div className="w-1 shrink-0 bg-gradient-to-b from-purple-400 via-purple-500 to-indigo-600" />
+                  <div className="w-1 shrink-0 bg-gradient-to-b from-cyan-300 via-cyan-500 to-emerald-600" />
                   <div className="flex flex-1 items-center gap-4 p-4">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-purple-500/12 border border-purple-500/25 shadow-sm">
-                    <Wrench className="w-4 h-4 text-purple-300" />
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-cyan-500/10 border border-cyan-500/25 shadow-sm">
+                    <Wrench className="w-4 h-4 text-cyan-300" />
                   </div>
                   <div className="relative flex flex-col items-center gap-1 w-24 flex-shrink-0">
-                    <span className="text-[9px] uppercase tracking-[0.14em] font-semibold text-purple-300/70">Workshop</span>
-                    <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-purple-500/12 border border-purple-500/25 text-purple-200">{j.job_number}</div>
+                    <span className="text-[9px] uppercase tracking-[0.14em] font-semibold text-cyan-300/70">Workshop</span>
+                    <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-cyan-500/10 border border-cyan-500/25 text-cyan-100">{j.job_number}</div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <p className="font-semibold text-sm truncate group-hover:text-purple-200 transition-colors">{j.fault_description || "Workshop repair"}</p>
+                      <p className="font-semibold text-sm truncate group-hover:text-cyan-100 transition-colors">{j.fault_description || "Workshop repair"}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
                       <span className="font-medium text-foreground/75">{j.customer_name}</span>
@@ -3928,7 +4018,7 @@ export default function TicketsPage() {
         })}
 
         {/* Cabling/WISP Job Cards (inline in unified list) */}
-        {(typeFilter === "all" || typeFilter === "cabling_wisp") && fieldJobs.map(j => {
+        {((typeFilter === "all" && supportFiltersClear) || typeFilter === "cabling_wisp") && filteredFieldJobs.map(j => {
           const fjStatus = FJ_STATUSES[j.field_status] || FJ_STATUSES.scheduled;
           return (
             <Card key={`fj-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-cyan-500"
@@ -3966,7 +4056,7 @@ export default function TicketsPage() {
         })}
 
         {/* Empty state */}
-        {typeFilter !== "all" && filteredTickets.length === 0 && workshopJobs.length === 0 && fieldJobs.length === 0 && (
+        {((typeFilter === "workshop" && filteredWorkshopJobs.length === 0) || (typeFilter === "cabling_wisp" && filteredFieldJobs.length === 0)) && (
           <Card className="border-dashed"><CardContent className="py-12 text-center">
             <Ticket className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
             <p className="text-muted-foreground mb-3">No items match your filters</p>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import {
   Clock, CheckCircle2, GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
+import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 
 const ICONS = { shield: Shield, award: Award, crown: Crown, gem: Gem, sparkles: Sparkles };
 const ICON_OPTIONS = [
@@ -57,19 +58,19 @@ export default function ServiceTiersSettings() {
   const [featureInput, setFeatureInput] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const fetchTiers = async () => {
+  const fetchTiers = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/service-tiers`, { headers });
+      const res = await axios.get(`${API}/service-tiers`, { headers: { Authorization: `Bearer ${token}` } });
       setTiers(res.data || []);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to load tiers");
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  useEffect(() => { fetchTiers(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { fetchTiers(); }, [fetchTiers]);
 
   const openCreate = () => {
     setEditing({ ...EMPTY_TIER, sort_order: tiers.length + 1 });
@@ -156,23 +157,24 @@ export default function ServiceTiersSettings() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {tiers.map(tier => {
               const Icon = ICONS[tier.icon] || Shield;
+              const visual = getServiceTierVisual(tier);
               return (
                 <Card
                   key={tier.id}
                   data-testid={`tier-card-${tier.slug}`}
                   className={`overflow-hidden border-0 transition ${!tier.is_active ? "opacity-50" : ""}`}
                   style={{
-                    background: `linear-gradient(135deg, ${tier.color}14, transparent 60%), hsl(var(--card))`,
-                    boxShadow: `inset 0 0 0 1px ${tier.color}40`,
+                    background: `linear-gradient(135deg, ${visual.color}16, transparent 60%), hsl(var(--card))`,
+                    boxShadow: `inset 0 0 0 1px ${visual.color}40`,
                   }}
                 >
-                  <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${tier.color}, transparent)` }} />
+                  <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${visual.color}, transparent)` }} />
                   <CardHeader className="pb-2 flex flex-row items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0">
-                      <Icon className="w-5 h-5 shrink-0 mt-0.5" style={{ color: tier.color }} />
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-black/10" style={{ color: visual.color, borderColor: `${visual.color}55` }}><Icon className="h-4 w-4" /></span>
                       <div className="min-w-0">
-                        <CardTitle className="text-sm flex items-center gap-1.5" style={{ color: tier.color }}>
-                          {tier.name}
+                        <CardTitle className="text-sm flex items-center gap-1.5" style={{ color: visual.color }}>
+                          {visual.label}
                           {tier.is_default && <Badge variant="outline" className="text-[8px] uppercase tracking-widest">default</Badge>}
                         </CardTitle>
                         {tier.description && <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-2">{tier.description}</p>}
@@ -197,11 +199,11 @@ export default function ServiceTiersSettings() {
                     <div className="grid grid-cols-2 gap-1.5">
                       <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-1.5">
                         <div className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 flex items-center gap-1"><Clock className="w-2.5 h-2.5" />Response</div>
-                        <div className="text-sm font-bold mt-0.5" style={{ color: tier.color }}>{fmtSla(tier.response_sla_minutes)}</div>
+                        <div className="text-sm font-bold mt-0.5" style={{ color: visual.color }}>{fmtSla(tier.response_sla_minutes)}</div>
                       </div>
                       <div className="rounded-md border border-white/[0.06] bg-white/[0.02] p-1.5">
                         <div className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 flex items-center gap-1"><CheckCircle2 className="w-2.5 h-2.5" />Resolution</div>
-                        <div className="text-sm font-bold mt-0.5" style={{ color: tier.color }}>{fmtSla(tier.resolution_sla_minutes)}</div>
+                        <div className="text-sm font-bold mt-0.5" style={{ color: visual.color }}>{fmtSla(tier.resolution_sla_minutes)}</div>
                       </div>
                     </div>
                     {(tier.features || []).length > 0 && (

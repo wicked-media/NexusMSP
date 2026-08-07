@@ -24,7 +24,10 @@ from app.services.action_permissions import (
 )
 from app.services.core_relationships import core_integrity_snapshot, core_schema
 from app.services.event_backbone import event_backbone_health
+from app.services.nexus_ideas import ideas_snapshot
 from app.services.platform_foundation import EVENT_SUBJECTS
+from app.services.product_roadmap import build_product_roadmap
+from app.services.scope_permissions import assert_client_scope
 
 
 router = APIRouter()
@@ -813,6 +816,12 @@ async def preview_microsoft_action(
                 "detail": "Link this tenant to a Nexus client before running a tenant action.",
             }
         )
+    elif tenant.get("client_id"):
+        await assert_client_scope(
+            current_user,
+            tenant.get("client_id"),
+            operation="microsoft.action.preview",
+        )
     if not tenant.get("provider_reachable"):
         blocks.append(
             {
@@ -938,6 +947,12 @@ async def submit_microsoft_action_plan(
     )
     if not plan:
         raise HTTPException(status_code=404, detail="Microsoft action plan not found")
+    await assert_client_scope(
+        current_user,
+        plan.get("client_id"),
+        operation="microsoft.action.submit",
+        mask_not_found=True,
+    )
     if plan.get("blocks"):
         raise HTTPException(
             status_code=409,
@@ -1076,6 +1091,19 @@ async def control_plane_foundation(current_user: dict = Depends(get_current_user
         dns_settings,
         core_integrity,
         event_health,
+        ticket_count,
+        project_count,
+        documentation_count,
+        knowledge_document_count,
+        generated_document_count,
+        active_agents,
+        remote_sessions,
+        invoice_count,
+        recurring_invoice_count,
+        microsoft_tenants,
+        portal_users,
+        generated_reports,
+        ai_configuration,
     ) = await asyncio.gather(
         db.clients.count_documents({}),
         db.users.count_documents({}),
@@ -1095,6 +1123,19 @@ async def control_plane_foundation(current_user: dict = Depends(get_current_user
         db.nexus_dns_settings.find_one({"id": "nexus-dns-settings"}, {"_id": 0}),
         core_integrity_snapshot(),
         event_backbone_health(),
+        db.tickets.count_documents({}),
+        db.projects.count_documents({}),
+        db.documentation.count_documents({"is_template": {"$ne": True}}),
+        db.kb_articles.count_documents({"client_id": {"$exists": True, "$nin": [None, ""]}}),
+        db.auto_generated_docs.count_documents({"client_id": {"$exists": True, "$nin": [None, ""]}}),
+        db.nexus_agents.count_documents({"is_active": True}),
+        db.remote_sessions.count_documents({}),
+        db.invoices.count_documents({}),
+        db.recurring_invoices.count_documents({}),
+        db.m365_tenants.count_documents({"source": {"$ne": "legacy_mock"}}),
+        db.client_portal_users.count_documents({"is_active": {"$ne": False}}),
+        db.generated_reports.count_documents({}),
+        db.settings.find_one({"type": "ai_config"}, {"_id": 0}),
     )
 
     capabilities = [
@@ -1232,6 +1273,102 @@ async def control_plane_foundation(current_user: dict = Depends(get_current_user
         status: sum(1 for item in capabilities if item["status"] == status)
         for status in ("operational", "partial", "planned")
     }
+    roadmap = build_product_roadmap({
+        "core-platform": {
+            "verified": core_integrity.get("status") == "healthy",
+            "summary": (
+                f"{core_integrity.get('entities', 0)} canonical objects and "
+                f"{core_integrity.get('relationships', 0)} retained relationships are indexed."
+            ),
+            "facts": {
+                "entities": core_integrity.get("entities", 0),
+                "relationships": core_integrity.get("relationships", 0),
+                "anomalies": core_integrity.get("anomaly_count", 0),
+                "schema_version": core_integrity.get("schema_version", 0),
+            },
+        },
+        "identity": {
+            "verified": bool(users),
+            "summary": f"{users} technician identities exist; {restricted_users} use explicit client/site scope.",
+            "facts": {"users": users, "mfa_verified": mfa_users, "restricted_scope": restricted_users},
+        },
+        "agent": {
+            "verified": bool(active_agents),
+            "summary": f"{active_agents} active Nexus Agent installation(s) are registered against {devices} managed asset record(s).",
+            "facts": {"active_agents": active_agents, "managed_assets": devices},
+        },
+        "automation": {
+            "verified": bool(workflows),
+            "summary": f"{workflows} workflow(s), {simulations} simulation(s) and {workflow_logs} retained execution record(s).",
+            "facts": {"workflows": workflows, "simulations": simulations, "executions": workflow_logs},
+        },
+        "microsoft": {
+            "verified": bool(microsoft_tenants),
+            "summary": f"{microsoft_tenants} Microsoft tenant connection record(s) are available for client mapping.",
+            "facts": {"tenants": microsoft_tenants},
+        },
+        "billing": {
+            "verified": bool(invoice_count or recurring_invoice_count),
+            "summary": f"{invoice_count} invoice(s) and {recurring_invoice_count} recurring billing plan(s) are retained.",
+            "facts": {"invoices": invoice_count, "recurring_plans": recurring_invoice_count},
+        },
+        "remote": {
+            "verified": bool(remote_sessions),
+            "summary": f"{remote_sessions} authenticated remote session record(s) are retained.",
+            "facts": {"sessions": remote_sessions},
+        },
+        "ai": {
+            "verified": bool(ai_configuration),
+            "summary": (
+                f"OpenAI is configured with model {ai_configuration.get('model') or 'default'}."
+                if ai_configuration
+                else "No retained OpenAI configuration was found."
+            ),
+            "facts": {
+                "configured": bool(ai_configuration),
+                "provider": (ai_configuration or {}).get("provider"),
+                "model": (ai_configuration or {}).get("model"),
+            },
+        },
+        "reporting": {
+            "verified": bool(generated_reports),
+            "summary": f"{generated_reports} generated report record(s) are retained.",
+            "facts": {"generated_reports": generated_reports},
+        },
+        "ticketing": {
+            "verified": bool(ticket_count),
+            "summary": f"{ticket_count} auditable service record(s) exist across the ticket workflow.",
+            "facts": {"tickets": ticket_count},
+        },
+        "documentation": {
+            "verified": bool(documentation_count or knowledge_document_count or generated_document_count),
+            "summary": (
+                f"{documentation_count + knowledge_document_count + generated_document_count} "
+                "client documentation record(s) are available to the shared knowledge workflow."
+            ),
+            "facts": {
+                "client_documents": documentation_count,
+                "client_knowledge_articles": knowledge_document_count,
+                "generated_documents": generated_document_count,
+            },
+        },
+        "client-portal": {
+            "verified": bool(portal_users),
+            "summary": f"{portal_users} active portal identity record(s) are available.",
+            "facts": {"active_portal_users": portal_users},
+        },
+        "compliance": {
+            "verified": False,
+            "summary": "Compliance remains gated on canonical evidence provenance and signed report verification.",
+            "facts": {},
+        },
+        "maps": {
+            "verified": bool(project_count),
+            "summary": f"Relationship coverage now includes {project_count} project record(s); topology release gates remain open.",
+            "facts": {"projects": project_count},
+        },
+    })
+    idea_registry = await ideas_snapshot()
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "summary": {
@@ -1272,6 +1409,8 @@ async def control_plane_foundation(current_user: dict = Depends(get_current_user
             "integrity": core_integrity,
         },
         "capabilities": capabilities,
+        "roadmap": roadmap,
+        "idea_registry": idea_registry,
         "technology_path": technology_path,
         "guardrails": [
             "Do not build a recursive DNS server, identity provider, cryptographic primitive, database engine or message broker.",

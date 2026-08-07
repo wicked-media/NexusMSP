@@ -34,12 +34,27 @@ const buttonVariants = cva(
   }
 )
 
-const Button = React.forwardRef(({ className, variant, size, asChild = false, ...props }, ref) => {
+const Button = React.forwardRef(({ className, variant, size, asChild = false, onPointerDown, ...props }, ref) => {
   const Comp = asChild ? Slot : "button"
+  const handlePointerDown = (event) => {
+    if (!props.disabled && (event.button === undefined || event.button === 0)) {
+      const element = event.currentTarget
+      const bounds = element.getBoundingClientRect()
+      element.style.setProperty("--nx-press-x", `${event.clientX - bounds.left}px`)
+      element.style.setProperty("--nx-press-y", `${event.clientY - bounds.top}px`)
+      element.dataset.nxPressed = "true"
+      window.clearTimeout(element.__nxPressTimer)
+      element.__nxPressTimer = window.setTimeout(() => {
+        delete element.dataset.nxPressed
+      }, 520)
+    }
+    onPointerDown?.(event)
+  }
   return (
     <Comp
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn("nx-button", buttonVariants({ variant, size, className }))}
       ref={ref}
+      onPointerDown={handlePointerDown}
       {...props} />
   );
 })

@@ -7,14 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Plus, Search, RefreshCw, Loader2, Sparkles, Flame, Filter as FilterIcon,
-  Funnel, KanbanSquare, BarChart3, Table as TableIcon, ChevronRight, Ticket, GitMerge, MoreVertical, Mail, Trophy
+  Funnel, KanbanSquare, BarChart3, Table as TableIcon, Ticket, GitMerge, MoreVertical, Mail, Trophy,
+  Building2, UserRound, BadgeDollarSign, NotebookPen, Check, ChevronsUpDown, ShieldCheck
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import HeroTile from "@/components/HeroTile";
@@ -375,51 +379,117 @@ export default function LeadsPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={showCreate} onOpenChange={(v) => { if (!v) { setShowCreate(false); setEditingLead(null); } }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editingLead ? "Edit Lead" : "New Lead"}</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Company *"><Input value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} data-testid="form-company" /></Field>
-            <Field label="Contact"><Input value={form.contact_name} onChange={e => setForm(f => ({ ...f, contact_name: e.target.value }))} data-testid="form-contact" /></Field>
-            <Field label="Email"><Input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} data-testid="form-email" /></Field>
-            <Field label="Phone"><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} data-testid="form-phone" /></Field>
-            <Field label="Website"><Input value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} /></Field>
-            <Field label="Title"><Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} /></Field>
-            <Field label="Source">
-              <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="website">Website</SelectItem>
-                  <SelectItem value="referral">Referral</SelectItem>
-                  <SelectItem value="cold_call">Cold Call</SelectItem>
-                  <SelectItem value="marketing">Marketing</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Stage">
-              <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PIPELINE_STAGES.concat(["lost"]).map(s => (<SelectItem key={s} value={s}>{STATUS_CONFIG[s].label}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Estimated Value ($)"><Input type="number" value={form.estimated_value} onChange={e => setForm(f => ({ ...f, estimated_value: Number(e.target.value) }))} /></Field>
-            <Field label="Owner">
-              <Select value={form.assigned_to} onValueChange={v => setForm(f => ({ ...f, assigned_to: v }))}>
-                <SelectTrigger><SelectValue placeholder="Assign…" /></SelectTrigger>
-                <SelectContent>
-                  {users.map(u => (<SelectItem key={u.id || u.email} value={u.id || u.email}>{u.name || u.email}</SelectItem>))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Notes" full><Textarea rows={4} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} /></Field>
+        <DialogContent className="max-w-5xl max-h-[92vh] gap-0 overflow-hidden border-violet-500/25 p-0">
+          <DialogHeader className="border-b border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.18),transparent_42%),linear-gradient(135deg,rgba(23,27,38,0.98),rgba(10,12,17,0.98))] px-6 py-5 pr-14">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-500/10 shadow-[0_0_28px_rgba(139,92,246,0.15)]">
+                <Sparkles className="h-5 w-5 text-violet-300" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <DialogTitle>{editingLead ? "Edit lead record" : "Create a new lead"}</DialogTitle>
+                  <Badge variant="outline" className="border-violet-400/30 bg-violet-500/10 text-[10px] uppercase tracking-[0.16em] text-violet-200">
+                    Revenue workflow
+                  </Badge>
+                </div>
+                <DialogDescription>
+                  Capture the account, contact, qualification, and ownership details used across pipeline, forecasting, ticket hand-off, and audit history.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="max-h-[calc(92vh-176px)] overflow-y-auto px-6 py-5">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <WorkflowSection
+                icon={Building2}
+                eyebrow="Account"
+                title="Company and contact"
+                description="The core identity technicians and account managers will see."
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Company *"><Input value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} placeholder="Business or organisation" data-testid="form-company" /></Field>
+                  <Field label="Contact"><Input value={form.contact_name} onChange={e => setForm(f => ({ ...f, contact_name: e.target.value }))} placeholder="Primary contact" data-testid="form-contact" /></Field>
+                  <Field label="Email"><Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="name@company.com.au" data-testid="form-email" /></Field>
+                  <Field label="Phone"><Input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+61…" data-testid="form-phone" /></Field>
+                  <Field label="Website"><Input value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} placeholder="company.com.au" /></Field>
+                  <Field label="Contact title"><Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Operations Manager" /></Field>
+                </div>
+              </WorkflowSection>
+
+              <WorkflowSection
+                icon={BadgeDollarSign}
+                eyebrow="Qualification"
+                title="Pipeline and ownership"
+                description="Route the opportunity and keep forecasts attributable."
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Source">
+                    <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="website">Website</SelectItem>
+                        <SelectItem value="referral">Referral</SelectItem>
+                        <SelectItem value="cold_call">Cold Call</SelectItem>
+                        <SelectItem value="marketing">Marketing</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Stage">
+                    <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {PIPELINE_STAGES.concat(["lost"]).map(s => (<SelectItem key={s} value={s}>{STATUS_CONFIG[s].label}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Estimated value ($)">
+                    <Input min="0" step="0.01" type="number" value={form.estimated_value} onChange={e => setForm(f => ({ ...f, estimated_value: Number(e.target.value) }))} />
+                  </Field>
+                  <Field label="Owner">
+                    <OwnerPicker users={users} value={form.assigned_to} onChange={v => setForm(f => ({ ...f, assigned_to: v }))} />
+                  </Field>
+                </div>
+                <div className="mt-4 flex items-start gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2.5">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  <p className="text-[11px] leading-relaxed text-zinc-400">
+                    Changes are retained in the lead timeline so conversion, ownership, and ticket hand-off remain auditable.
+                  </p>
+                </div>
+              </WorkflowSection>
+
+              <WorkflowSection
+                icon={NotebookPen}
+                eyebrow="Context"
+                title="Qualification notes"
+                description="Record requirements, timing, stakeholders, and the next useful action."
+                className="lg:col-span-2"
+              >
+                <Field label="Notes">
+                  <Textarea
+                    rows={5}
+                    value={form.notes}
+                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                    placeholder="What is the client trying to achieve? Include scope, urgency, current provider, budget signals, and next steps."
+                    className="min-h-32 resize-y"
+                  />
+                </Field>
+              </WorkflowSection>
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => { setShowCreate(false); setEditingLead(null); }}>Cancel</Button>
-            <Button onClick={submit} disabled={!form.company_name.trim()} className="bg-violet-600 hover:bg-violet-500" data-testid="form-submit">
-              {editingLead ? "Save" : "Create"}
-            </Button>
+
+          <DialogFooter className="items-center gap-3 border-t border-white/[0.08] bg-black/20 px-6 py-4 sm:justify-between sm:space-x-0">
+            <div className="flex items-center gap-2 text-left text-[11px] text-zinc-500">
+              <UserRound className="h-3.5 w-3.5 text-violet-300" />
+              {form.company_name.trim() ? "Ready to save to the shared revenue timeline." : "Add a company name to make this lead ready."}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => { setShowCreate(false); setEditingLead(null); }}>Cancel</Button>
+              <Button onClick={submit} disabled={!form.company_name.trim()} className="min-w-32 bg-violet-600 hover:bg-violet-500" data-testid="form-submit">
+                {editingLead ? "Save changes" : "Create lead"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -434,26 +504,93 @@ export default function LeadsPage() {
   );
 }
 
-function Stat({ label, value, hue, testid }) {
-  const cmap = {
-    violet: "from-violet-500/20 to-violet-500/[0.03] border-violet-500/30 text-violet-200",
-    sky: "from-sky-500/20 to-sky-500/[0.03] border-sky-500/30 text-sky-200",
-    emerald: "from-emerald-500/20 to-emerald-500/[0.03] border-emerald-500/30 text-emerald-200",
-    orange: "from-orange-500/20 to-orange-500/[0.03] border-orange-500/30 text-orange-200",
-  };
-  return (
-    <Card className={`p-3 bg-gradient-to-br border ${cmap[hue]}`} data-testid={testid}>
-      <p className="text-[10px] uppercase tracking-wider opacity-80">{label}</p>
-      <p className="text-2xl font-mono font-semibold mt-1">{value}</p>
-    </Card>
-  );
-}
-
 function Field({ label, children, full }) {
   return (
     <div className={full ? "col-span-2" : ""}>
       <Label className="text-[10px] uppercase tracking-wider text-zinc-400">{label}</Label>
       <div className="mt-1">{children}</div>
     </div>
+  );
+}
+
+function WorkflowSection({ icon: Icon, eyebrow, title, description, className = "", children }) {
+  return (
+    <section className={`rounded-2xl border border-white/[0.08] bg-white/[0.025] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] ${className}`}>
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/[0.08]">
+          <Icon className="h-4 w-4 text-violet-300" />
+        </div>
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-violet-300">{eyebrow}</p>
+          <h3 className="mt-0.5 text-sm font-semibold text-zinc-100">{title}</h3>
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{description}</p>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function OwnerPicker({ users, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const uniqueUsers = useMemo(() => {
+    const seen = new Set();
+    return users.filter(user => {
+      const identity = user.id || user.email;
+      if (!identity || seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+  }, [users]);
+  const selectedUser = uniqueUsers.find(u => (u.id || u.email) === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-10 w-full justify-between font-normal"
+          data-testid="form-owner"
+        >
+          <span className={selectedUser ? "truncate text-zinc-100" : "truncate text-zinc-500"}>
+            {selectedUser ? (selectedUser.name || selectedUser.email) : "Search team members…"}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search name or email…" />
+          <CommandList className="max-h-72">
+            <CommandEmpty>No team member found.</CommandEmpty>
+            <CommandGroup heading="Lead owner">
+              <CommandItem value="Unassigned" onSelect={() => { onChange(""); setOpen(false); }}>
+                <Check className={`mr-2 h-4 w-4 ${value ? "opacity-0" : "opacity-100"}`} />
+                <span>Unassigned</span>
+              </CommandItem>
+              {uniqueUsers.map(u => {
+                const userValue = u.id || u.email;
+                return (
+                  <CommandItem
+                    key={userValue}
+                    value={`${u.name || ""} ${u.email || ""}`}
+                    onSelect={() => { onChange(userValue); setOpen(false); }}
+                  >
+                    <Check className={`mr-2 h-4 w-4 ${value === userValue ? "opacity-100" : "opacity-0"}`} />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm">{u.name || u.email}</p>
+                      {u.name && u.email && <p className="truncate text-[10px] text-zinc-500">{u.email}</p>}
+                    </div>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  FileText, Plus, Trash2, Send, CheckCircle, XCircle, Copy, Eye, Edit,
-  DollarSign, TrendingUp, Loader2, RefreshCw, Calendar, ArrowRight, Zap,
+  FileText, Plus, Trash2, Send, CheckCircle, XCircle, Copy, Edit,
+  DollarSign, TrendingUp, Loader2, Zap,
   Search, Award
 } from "lucide-react";
 
@@ -60,10 +60,11 @@ export default function ProposalBuilderPage() {
 
   const fetchData = useCallback(async () => {
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [pRes, sRes, cRes] = await Promise.all([
-        axios.get(`${API}/proposals`, { headers }),
-        axios.get(`${API}/proposals/stats`, { headers }),
-        axios.get(`${API}/clients`, { headers }),
+        axios.get(`${API}/proposals`, { headers: requestHeaders }),
+        axios.get(`${API}/proposals/stats`, { headers: requestHeaders }),
+        axios.get(`${API}/clients`, { headers: requestHeaders }),
       ]);
       setProposals(pRes.data);
       setStats(sRes.data);

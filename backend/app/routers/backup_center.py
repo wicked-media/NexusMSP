@@ -6,10 +6,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.auth import get_current_user
 from app.services.integrations import acronis_service
+from app.services.backup_assurance import build_backup_confidence, simulate_recovery
+from app.services.scope_permissions import assert_client_scope, scoped_query
 from datetime import datetime, timezone
 import uuid
 
 router = APIRouter(tags=["Backup Center"])
+
+
+def _backup_client_match(row: dict, client_id: str, client_name: str = "") -> bool:
+    if not client_id:
+        return True
+    aliases = {client_id.strip().lower(), client_name.strip().lower()} - {""}
+    values = {
+        str(row.get("client_id") or "").strip().lower(),
+        str(row.get("client_name") or "").strip().lower(),
+    }
+    return bool(aliases & values)
 
 
 # ---------------------------------------------------------------------------
@@ -317,3 +330,119 @@ async def complete_verification(test_id: str, data: dict, current_user: dict = D
         "metadata": {"restore_time_minutes": restore_time, "data_integrity_check": update["data_integrity_check"], "client_id": existing.get("client_id")},
     })
     return {"status": "completed", "result": result, "message": "Restore verification outcome recorded"}
+
+
+@router.get("/backup-assurance/overview")
+async def backup_assurance_overview(client_id: str = "", current_user: dict = Depends(get_current_user)):
+    """Return explainable recovery confidence and retained simulation history."""
+    client = None
+    if client_id:
+        await assert_client_scope(current_user, client_id, operation="backup.assurance.read")
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+        if not client:
+            raise HTTPException(status_code=404, detail="Selected customer was not found")
+    client_name = (client or {}).get("company_name") or (client or {}).get("name") or ""
+    jobs = await db.backup_jobs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
+    if not jobs:
+        jobs = await _build_overview_from_acronis()
+    records = await db.backup_records.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(5000)
+    tests = await db.backup_verifications.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
+    if client_id:
+        jobs = [row for row in jobs if _backup_client_match(row, client_id, client_name)]
+        records = [row for row in records if _backup_client_match(row, client_id, client_name)]
+        tests = [row for row in tests if _backup_client_match(row, client_id, client_name)]
+    simulations_query = scoped_query(
+        current_user,
+        {"client_id": client_id} if client_id else {},
+        site_field=None,
+    )
+    simulations = await db.backup_recovery_simulations.find(simulations_query, {"_id": 0}).sort("created_at", -1).to_list(50)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "scope": {"client_id": client_id, "client_name": client_name or "All managed clients"},
+        "confidence": build_backup_confidence(jobs, records, tests),
+        "simulations": simulations,
+        "engine_boundary": {
+            "management_layer": "Nexus recovery assurance and orchestration",
+            "provider_engines": sorted({str(row.get("provider") or row.get("backup_solution") or "Unknown") for row in [*jobs, *tests]} - {"Unknown"}),
+            "native_engine_status": "roadmap",
+            "statement": "Nexus manages evidence and recovery workflows; provider engines remain authoritative for backup execution.",
+        },
+    }
+
+
+@router.post("/backup-assurance/simulate")
+async def create_recovery_simulation(data: dict, current_user: dict = Depends(get_current_user)):
+    """Create a read-only recovery preview using current customer evidence."""
+    client_id = str(data.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Choose the customer whose recovery is being simulated")
+    await assert_client_scope(current_user, client_id, operation="backup.recovery.simulate")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Selected customer was not found")
+    workload = str(data.get("workload") or "").strip()
+    if not workload:
+        raise HTTPException(status_code=400, detail="Describe the workload or service being recovered")
+    try:
+        target_rto = float(data.get("target_rto_hours") or 0)
+        target_rpo = float(data.get("target_rpo_hours") or 0)
+        data_size = float(data.get("data_size_gb") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="RTO, RPO and data size must be numeric")
+    if not 0 < target_rto <= 720 or not 0 < target_rpo <= 720:
+        raise HTTPException(status_code=422, detail="RTO and RPO must be between 0 and 720 hours")
+    if not 0 <= data_size <= 10_000_000:
+        raise HTTPException(status_code=422, detail="Data size must be between 0 and 10,000,000 GB")
+    raw_dependencies = data.get("dependencies") or []
+    if isinstance(raw_dependencies, str):
+        dependencies = [part.strip() for part in raw_dependencies.split(",") if part.strip()]
+    elif isinstance(raw_dependencies, list):
+        dependencies = [str(part).strip() for part in raw_dependencies if str(part).strip()]
+    else:
+        raise HTTPException(status_code=422, detail="Dependencies must be a comma-separated list")
+
+    jobs = await db.backup_jobs.find({}, {"_id": 0}).to_list(2000)
+    if not jobs:
+        jobs = await _build_overview_from_acronis()
+    records = await db.backup_records.find({}, {"_id": 0}).to_list(5000)
+    tests = await db.backup_verifications.find({}, {"_id": 0}).to_list(2000)
+    client_name = client.get("company_name") or client.get("name") or "Customer"
+    result = simulate_recovery(
+        client_id=client_id,
+        client_name=client_name,
+        workload=workload,
+        target_rto_hours=target_rto,
+        target_rpo_hours=target_rpo,
+        data_size_gb=data_size,
+        dependencies=dependencies,
+        jobs=jobs,
+        records=records,
+        tests=tests,
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    simulation_id = f"recovery-sim-{uuid.uuid4().hex[:12]}"
+    technician_name = current_user.get("name") or current_user.get("email") or "Authenticated technician"
+    record = {
+        **result,
+        "id": simulation_id,
+        "created_at": now,
+        "created_by": current_user.get("id") or current_user.get("email"),
+        "created_by_name": technician_name,
+        "assumptions": str(data.get("assumptions") or "").strip(),
+    }
+    await db.backup_recovery_simulations.insert_one(record)
+    await db.activity_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "backup_recovery_simulated",
+        "entity_type": "backup_recovery_simulation",
+        "entity_id": simulation_id,
+        "entity_name": f"{client_name} · {workload}",
+        "user_id": current_user.get("id", ""),
+        "user_name": technician_name,
+        "details": f"Recorded a read-only recovery simulation with status {result['readiness']}",
+        "created_at": now,
+        "metadata": {"client_id": client_id, "external_changes": False, "blockers": len(result["blockers"])},
+    })
+    record.pop("_id", None)
+    return {"message": "Recovery simulation recorded without changing production systems", "simulation": record}

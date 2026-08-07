@@ -49,6 +49,7 @@ type PlatformPolicy struct {
 	PollSecs       int             `json:"poll_secs,omitempty"`
 	Modules        map[string]bool `json:"modules,omitempty"`
 	Updates        map[string]any  `json:"updates,omitempty"`
+	Commands       map[string]any  `json:"commands,omitempty"`
 	SelfRepair     map[string]any  `json:"self_repair,omitempty"`
 	DNS            map[string]any  `json:"dns,omitempty"`
 }

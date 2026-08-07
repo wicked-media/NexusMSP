@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Eye, FileText, GitBranch, History, Loader2, MoreHorizontal, Play, Plus, RefreshCw, RotateCcw, Snowflake, BellOff, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Eye, FileText, GitBranch, History, Loader2, MoreHorizontal, Play, Plus, RefreshCw, RotateCcw, Snowflake, BellOff, XCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import OperationalPageHeader from "@/components/OperationalPageHeader";

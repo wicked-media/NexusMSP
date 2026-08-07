@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Loader2, Heart, TrendingUp, Cake, Copy, Phone, FileText, ShieldCheck, CalendarRange, Download } from "lucide-react";
+import { Loader2, Heart, TrendingUp, Cake, Copy, Phone, ShieldCheck, CalendarRange, Download } from "lucide-react";
 import { toast } from "sonner";
 
 /** Client detail: DNA + LTV tiles, plus buttons for Anniversary, Monthly Recap, Pre-call Brief, Insurance Action Plan, Dossier PDF. */

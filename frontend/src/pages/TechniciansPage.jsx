@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -23,13 +23,13 @@ import { formatDistanceToNow } from "date-fns";
 import { priorityConfig, statusConfig } from "@/config/ticketConfig";
 import {
   Plus, Search, Loader2, User, ArrowLeft, Ticket, Clock, AlertTriangle,
-  CheckCircle, XCircle, Mail, Phone, Edit, Wrench, DollarSign, UserCheck,
+  CheckCircle, XCircle, Mail, Phone, Edit, Wrench, DollarSign,
   AlertCircle, ExternalLink, Shield, Trophy, History, BarChart3, Award,
   Crown, Star, Lock, Unlock, ChevronRight, Eye, FileText, Monitor, Wifi, WifiOff,
-  Upload, Camera, Gift, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
-  Layers, MessageSquare, Image, PhoneCall, ArrowRightLeft, RefreshCw, BellRing,
-  Radio, Cable, ServerCrash, Siren, Settings, Archive, ArchiveRestore, Trash2,
-  Users, UserX, Tags, ChevronDown, SquareCheckBig, Send, Terminal
+  Upload, Camera, Cake, Gem, Rocket, Target, Zap, CreditCard, Calendar,
+  Layers, MessageSquare, PhoneCall, ArrowRightLeft, RefreshCw, BellRing,
+  Radio, Cable, Siren, Settings, Archive, ArchiveRestore, Trash2,
+  Users, UserX, Tags, SquareCheckBig, Send, Terminal
 } from "lucide-react";
 
 const JOB_TITLES = ["L1 Technician", "L2 Technician", "Senior Engineer", "Service Manager", "Dispatcher"];

@@ -13,14 +13,12 @@ export default function ClientComparePage() {
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState("monthly_revenue");
   const [sortDir, setSortDir] = useState("desc");
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
-    axios.get(`${API}/client-compare`, { headers })
+    axios.get(`${API}/client-compare`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [token]);
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
   if (!data) return null;

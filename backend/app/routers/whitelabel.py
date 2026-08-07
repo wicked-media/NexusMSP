@@ -3,13 +3,17 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
-from app.database import db
+from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope
+from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
 
 router = APIRouter()
 
-UPLOAD_DIR = "/app/backend/uploads/branding"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+LOGIN_EXPERIENCES = {"classic", "constellation", "theatre", "calm"}
+
+UPLOAD_DIR = UPLOADS_DIR / "branding"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # ============== WHITE LABEL / BRANDING ==============
 
@@ -45,7 +49,7 @@ async def get_branding_public():
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
     b = branding or _default_branding()
     return {
-        "company_name": b.get("company_name", "NexusOps"),
+        "company_name": b.get("company_name", "NexusMSP"),
         "company_logo_url": _validate_logo_url(b.get("company_logo_url", "")),
         "company_icon_url": _validate_logo_url(b.get("company_icon_url", "")),
         "favicon_url": _validate_logo_url(b.get("favicon_url", "")),
@@ -53,6 +57,7 @@ async def get_branding_public():
         "accent_color": b.get("accent_color", "#06b6d4"),
         "login_tagline": b.get("login_tagline", ""),
         "login_features": b.get("login_features", []),
+        "login_experience": b.get("login_experience", "classic") if b.get("login_experience", "classic") in LOGIN_EXPERIENCES else "classic",
         "powered_by_visible": b.get("powered_by_visible", True),
     }
 
@@ -60,7 +65,7 @@ async def get_branding_public():
 def _default_branding():
     return {
         "type": "branding",
-        "company_name": "NexusOps",
+        "company_name": "NexusMSP",
         "company_logo_url": "",
         "company_icon_url": "",
         "primary_color": "#10b981",
@@ -68,6 +73,7 @@ def _default_branding():
         "accent_color": "#06b6d4",
         "login_tagline": "Unified RMM & PSA platform for modern managed service providers",
         "login_features": ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"],
+        "login_experience": "classic",
         "powered_by_visible": True,
         "sidebar_style": "default",
         "invoice_logo_url": "",
@@ -87,6 +93,8 @@ async def update_branding(data: dict, current_user: dict = Depends(get_current_u
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
+    if data.get("login_experience", "classic") not in LOGIN_EXPERIENCES:
+        raise HTTPException(status_code=400, detail="Unknown login experience")
     data["type"] = "branding"
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one({"type": "branding"}, {"$set": data}, upsert=True)
@@ -101,9 +109,9 @@ async def upload_branding_logo(logo_type: str = "company", file: UploadFile = Fi
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
-    ext = file.filename.split(".")[-1] if "." in file.filename else "png"
+    ext = safe_upload_extension(file.filename, allowed=IMAGE_EXTENSIONS, default="png")
     filename = f"{logo_type}_{uuid.uuid4().hex[:8]}.{ext}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
+    filepath = UPLOAD_DIR / filename
     
     content = await file.read()
     if len(content) > 5 * 1024 * 1024:
@@ -137,15 +145,18 @@ async def upload_client_logo(client_id: str, file: UploadFile = File(...), curre
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    await assert_client_scope(current_user, client_id, operation="client_logo:upload", mask_not_found=True)
     
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
-    ext = file.filename.split(".")[-1] if "." in file.filename else "png"
+    ext = safe_upload_extension(file.filename, allowed=IMAGE_EXTENSIONS, default="png")
     filename = f"client_{client_id[:8]}_{uuid.uuid4().hex[:8]}.{ext}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
+    filepath = UPLOAD_DIR / filename
     
     content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 5MB)")
     with open(filepath, "wb") as f:
         f.write(content)
     

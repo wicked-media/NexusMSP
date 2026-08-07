@@ -6,8 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Users, Award, Wrench, Edit } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Users, Edit } from "lucide-react";
 import { toast } from "sonner";
 
 const skillLevels = { 0: "None", 1: "Basic", 2: "Intermediate", 3: "Advanced", 4: "Expert" };

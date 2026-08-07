@@ -15,7 +15,7 @@ import HeroTile from "@/components/HeroTile";
 import DOMPurify from "dompurify";
 import {
   FileText, Network, HardDrive, Shield, Plus, RefreshCw, Loader2,
-  Play, CheckCircle, Clock, Eye, Download, Zap, FolderOpen, BarChart3
+  Play, CheckCircle, Clock, Zap, FolderOpen, BarChart3
 } from "lucide-react";
 
 const DOC_TYPES = {
@@ -50,9 +50,10 @@ export default function AutoDocumentationPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [docsRes, clientsRes] = await Promise.all([
-        axios.get(`${API}/auto-documentation/documents`, { headers }),
-        axios.get(`${API}/clients`, { headers }),
+        axios.get(`${API}/auto-documentation/documents`, { headers: requestHeaders }),
+        axios.get(`${API}/clients`, { headers: requestHeaders }),
       ]);
       setDocs(docsRes.data);
       setClients(clientsRes.data);

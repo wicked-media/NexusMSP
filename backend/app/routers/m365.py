@@ -270,6 +270,38 @@ def _tenant_access_state(row: dict, verified_ids: set[str]) -> tuple[bool, str]:
     return False, "gdap_required"
 
 
+async def _mapping_target_client(tenant_id: str, client_id: str | None) -> dict | None:
+    """Return a safe client mapping target without silently replacing another tenant."""
+    if not client_id:
+        return None
+    client = await db.clients.find_one(
+        {"id": client_id},
+        {"_id": 0, "id": 1, "name": 1, "cipp_tenant_id": 1, "cipp_tenant_display": 1},
+    )
+    if not client:
+        raise HTTPException(status_code=404, detail="Nexus client not found.")
+
+    linked_tenant_id = str(client.get("cipp_tenant_id") or "")
+    if linked_tenant_id and linked_tenant_id != tenant_id:
+        linked_name = client.get("cipp_tenant_display") or linked_tenant_id
+        raise HTTPException(
+            status_code=409,
+            detail=f"{client.get('name') or 'This Nexus client'} is already linked to {linked_name}. Unlink that tenant before assigning another.",
+        )
+
+    duplicate = await db.m365_tenant_connections.find_one(
+        {"client_id": client_id, "tenant_id": {"$ne": tenant_id}},
+        {"_id": 0, "tenant_id": 1, "tenant_name": 1},
+    )
+    if duplicate:
+        linked_name = duplicate.get("tenant_name") or duplicate.get("tenant_id")
+        raise HTTPException(
+            status_code=409,
+            detail=f"{client.get('name') or 'This Nexus client'} is already mapped to {linked_name} in the Microsoft onboarding registry.",
+        )
+    return client
+
+
 def _execution_unavailable(detail: str = "A verified Microsoft Graph synchronisation provider is required before this action can run.") -> HTTPException:
     return HTTPException(status_code=409, detail=detail)
 
@@ -289,6 +321,8 @@ async def update_connection(
     _: dict = Depends(require_action("m365.tenant.manage")),
 ):
     settings = await _get_settings()
+    credential_keys = {"app_id", "tenant_id", "partner_tenant_id", "app_secret", "refresh_token"}
+    credentials_changed = False
     for key in (
         "app_id",
         "tenant_id",
@@ -300,14 +334,19 @@ async def update_connection(
         "connection_strategy",
     ):
         if key in data and data[key] is not None:
-            settings[key] = str(data[key]).strip() or None
+            value = str(data[key]).strip() or None
+            if key in credential_keys and settings.get(key) != value:
+                credentials_changed = True
+            settings[key] = value
     if settings.get("partner_tenant_id"):
         # Preserve the old key for compatibility with existing provider checks.
         settings["tenant_id"] = settings["partner_tenant_id"]
-    # Credentials being saved is not verification.  A future real Graph test may
-    # set these only after successfully authenticating and completing a sync.
-    settings.pop("verified_at", None)
-    settings.pop("sync_provider", None)
+    # Rotated credentials invalidate the previous test result. Do not leave a
+    # stale "verified" badge visible until the new credentials are tested.
+    if credentials_changed:
+        for key in ("last_test_status", "last_tested_at", "verified_at", "sync_provider"):
+            settings.pop(key, None)
+        settings["credentials_changed_at"] = _now_iso()
     settings["updated_by"] = current_user.get("name")
     settings["updated_at"] = _now_iso()
     await db.settings.update_one(
@@ -576,13 +615,14 @@ async def add_individual_tenant(
     if consent_method not in {"gdap", "customer_admin"}:
         raise HTTPException(status_code=400, detail="Consent method must be GDAP or customer_admin.")
     client_id = str((data or {}).get("client_id") or "").strip() or None
-    client = None
-    if client_id:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
-        if not client:
-            raise HTTPException(status_code=404, detail="Nexus client not found.")
+    client = await _mapping_target_client(tenant_id, client_id)
     now = _now_iso()
     existing = await db.m365_tenant_connections.find_one({"tenant_id": tenant_id}, {"_id": 0})
+    if existing and existing.get("client_id") and client_id and existing.get("client_id") != client_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This Microsoft tenant is already mapped to another Nexus client. Move it from the onboarding registry instead of adding it again.",
+        )
     record = {
         "id": (existing or {}).get("id") or f"m365-tenant-{uuid.uuid4().hex[:12]}",
         "tenant_id": tenant_id,
@@ -645,6 +685,7 @@ async def map_tenant_to_client(
     client_id = str((data or {}).get("client_id") or "").strip() or None
     now = _now_iso()
     previous_client_id = row.get("client_id")
+    client = await _mapping_target_client(str(row.get("tenant_id") or ""), client_id)
     if previous_client_id and previous_client_id != client_id:
         await db.clients.update_one(
             {"id": previous_client_id, "cipp_tenant_id": row.get("tenant_id")},
@@ -655,11 +696,7 @@ async def map_tenant_to_client(
                 "cipp_linked_at": "",
             }},
         )
-    client = None
     if client_id:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
-        if not client:
-            raise HTTPException(status_code=404, detail="Nexus client not found.")
         await db.clients.update_one(
             {"id": client_id},
             {"$set": {

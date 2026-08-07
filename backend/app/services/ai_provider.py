@@ -1,7 +1,6 @@
 """The single, server-side OpenAI AI integration used by NexusMSP."""
 from dataclasses import dataclass
 import os
-from openai import AsyncOpenAI
 
 
 DEFAULT_MODEL = "gpt-5.6-terra"
@@ -61,6 +60,10 @@ class LlmChat:
     async def send_message(self, message: UserMessage) -> str:
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured")
+        # Keep the SDK import lazy so the settings and health routes still load
+        # while a deployment is installing or upgrading optional AI packages.
+        from openai import AsyncOpenAI
+
         model, configured_effort = await self._load_global_config()
         self.model = model
         client = AsyncOpenAI(api_key=self.api_key)
@@ -74,6 +77,8 @@ class LlmChat:
 
 class OpenAISpeechToText:
     def __init__(self, api_key: str | None = None):
+        from openai import AsyncOpenAI
+
         self.client = AsyncOpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY", ""))
 
     async def transcribe(self, **kwargs):

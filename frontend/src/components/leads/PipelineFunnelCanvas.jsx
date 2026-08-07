@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Loader2 } from "lucide-react";
-import { STATUS_CONFIG, PIPELINE_STAGES, money } from "./leadHelpers";
+import { STATUS_CONFIG, money } from "./leadHelpers";
 
 export default function PipelineFunnelCanvas({ onStageClick }) {
   const { token } = useAuth();
@@ -23,8 +23,6 @@ export default function PipelineFunnelCanvas({ onStageClick }) {
   if (data.funnel.length === 0) return <div className="py-12 text-center text-muted-foreground text-sm">No leads in pipeline yet.</div>;
 
   const maxCount = Math.max(...data.funnel.map(f => f.in_funnel || 1), 1);
-  const width = 100;
-
   return (
     <div className="space-y-4" data-testid="pipeline-funnel-canvas">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">

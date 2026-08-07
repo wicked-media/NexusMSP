@@ -25,7 +25,7 @@ export default function ClientUniverseMap() {
 
   const positioned = useMemo(() => {
     if (industries.length === 0) return [];
-    const cx = 380, cy = 280, ringR = 220;
+    const cx = 380, cy = 280;
     const indCount = industries.length;
     return nodes.map((n, i) => {
       const indIdx = Math.max(0, industries.indexOf(n.industry || "other"));

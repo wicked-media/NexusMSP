@@ -13,8 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, Edit, Trash2, Tag, ChevronDown, ChevronRight,
-  Settings, AlertCircle, RefreshCw, Folder, ListTree, Hash, Save
+  Plus, Loader2, Edit, Trash2, Tag, ChevronDown, ChevronRight, AlertCircle, RefreshCw, Folder, ListTree, Hash, Save
 } from "lucide-react";
 
 const PRIORITY_COLORS = {

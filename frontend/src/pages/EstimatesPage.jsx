@@ -15,10 +15,9 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Plus, Search, Loader2, FileText, ArrowLeft, Send, CheckCircle,
-  XCircle, Eye, Trash2, DollarSign, Clock, ArrowRight, Receipt,
-  History, AlertCircle, CircleDot, Zap, RefreshCw, X
+  XCircle, Eye, Trash2, DollarSign, Clock, Receipt,
+  History, CircleDot, RefreshCw, X
 } from "lucide-react";
-import { format } from "date-fns";
 import { EstimateFollowupButton } from "@/components/ai/EstimateFollowupButton";
 import { EstimateAIBundle } from "@/components/ai/EstimateAIBundle";
 import HeroTile from "@/components/HeroTile";
@@ -79,10 +78,11 @@ export default function EstimatesPage() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [eRes, cRes, sRes] = await Promise.all([
-        axios.get(`${API}/estimates`, { headers }),
-        axios.get(`${API}/clients`, { headers }),
-        axios.get(`${API}/estimates/stats/summary`, { headers }),
+        axios.get(`${API}/estimates`, { headers: requestHeaders }),
+        axios.get(`${API}/clients`, { headers: requestHeaders }),
+        axios.get(`${API}/estimates/stats/summary`, { headers: requestHeaders }),
       ]);
       setEstimates(eRes.data);
       setClients(cRes.data);
@@ -137,7 +137,7 @@ export default function EstimatesPage() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this estimate?")) return;
+    if (!window.confirm("Delete this estimate?")) return;
     try {
       await axios.delete(`${API}/estimates/${id}`, { headers });
       toast.success("Estimate deleted");

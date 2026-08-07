@@ -1,6 +1,6 @@
 import { useEffect, useState, createContext, useContext, Suspense } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -14,7 +14,10 @@ import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
 import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
 import CommandPalette from "@/components/CommandPalette";
+import NexusQuickDock from "@/components/NexusQuickDock";
+import UniversalInspector from "@/components/UniversalInspector";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
+import { Menu } from "lucide-react";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || (
@@ -38,14 +41,14 @@ const THEME_PRESETS = {
 };
 
 const ACCENT_COLORS = {
-  emerald: { primary: "142 76% 36%", ring: "142 76% 36%" },
-  blue: { primary: "217 91% 60%", ring: "217 91% 60%" },
-  cyan: { primary: "188 95% 43%", ring: "188 95% 43%" },
-  violet: { primary: "258 90% 66%", ring: "258 90% 66%" },
-  orange: { primary: "25 95% 53%", ring: "25 95% 53%" },
-  red: { primary: "0 84% 60%", ring: "0 84% 60%" },
-  sky: { primary: "199 89% 48%", ring: "199 89% 48%" },
-  rose: { primary: "347 77% 50%", ring: "347 77% 50%" },
+  emerald: { primary: "142 72% 45%", lightPrimary: "142 72% 32%" },
+  blue: { primary: "217 91% 60%", lightPrimary: "217 91% 48%" },
+  cyan: { primary: "188 95% 43%", lightPrimary: "188 95% 32%" },
+  violet: { primary: "258 90% 66%", lightPrimary: "258 72% 52%" },
+  orange: { primary: "25 95% 53%", lightPrimary: "25 90% 42%" },
+  red: { primary: "0 84% 60%", lightPrimary: "0 72% 48%" },
+  sky: { primary: "199 89% 48%", lightPrimary: "199 89% 38%" },
+  rose: { primary: "347 77% 50%", lightPrimary: "347 72% 42%" },
 };
 
 const FONTS = {
@@ -62,9 +65,13 @@ export const ThemeProvider = ({ children }) => {
   const [preset, setPreset] = useState(() => localStorage.getItem("nexusops_preset") || "midnight");
   const [accent, setAccent] = useState(() => localStorage.getItem("nexusops_accent") || "emerald");
   const [font, setFont] = useState(() => localStorage.getItem("nexusops_font") || "Inter");
+  const [motion, setMotion] = useState(() => localStorage.getItem("nexusops_motion") || "system");
 
   useEffect(() => {
-    document.documentElement.classList.toggle("light", theme === "light");
+    const root = document.documentElement;
+    root.classList.toggle("light", theme === "light");
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
     localStorage.setItem("nexusops_theme", theme);
   }, [theme]);
 
@@ -83,17 +90,25 @@ export const ThemeProvider = ({ children }) => {
   useEffect(() => {
     const a = ACCENT_COLORS[accent];
     if (a) {
-      document.documentElement.style.setProperty("--primary", a.primary);
-      document.documentElement.style.setProperty("--ring", a.ring);
+      const primary = theme === "light" ? a.lightPrimary : a.primary;
+      document.documentElement.style.setProperty("--primary", primary);
+      document.documentElement.style.setProperty("--ring", primary);
     }
     localStorage.setItem("nexusops_accent", accent);
-  }, [accent]);
+  }, [accent, theme]);
 
   useEffect(() => {
     const f = FONTS[font];
     if (f) document.documentElement.style.setProperty("--font-sans", f);
     localStorage.setItem("nexusops_font", font);
   }, [font]);
+
+  useEffect(() => {
+    const nextMotion = ["system", "full", "minimal", "none"].includes(motion) ? motion : "system";
+    document.documentElement.dataset.motion = nextMotion;
+    localStorage.setItem("nexusops_motion", nextMotion);
+    window.dispatchEvent(new CustomEvent("nexus-motion-change", { detail: { motion: nextMotion } }));
+  }, [motion]);
 
   // Load Google Fonts dynamically
   useEffect(() => {
@@ -108,7 +123,7 @@ export const ThemeProvider = ({ children }) => {
   const toggleTheme = () => setTheme(t => t === "dark" ? "light" : "dark");
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, THEME_PRESETS, ACCENT_COLORS, FONTS }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, motion, setMotion, THEME_PRESETS, ACCENT_COLORS, FONTS }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -171,8 +186,9 @@ export const AuthProvider = ({ children }) => {
       toast.success("Welcome back!");
       return { success: true };
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Login failed");
-      return { success: false };
+      const message = error.response?.data?.detail || (error.request ? "Unable to reach the Nexus authentication service" : "Login failed");
+      toast.error(message);
+      return { success: false, error: message, status: error.response?.status || null };
     }
   };
 
@@ -254,15 +270,83 @@ const ProtectedRoute = ({ children }) => {
 const MainLayout = ({ children }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    const openCopilot = () => setCopilotOpen(true);
+    window.addEventListener("nexus:open-copilot", openCopilot);
+    return () => window.removeEventListener("nexus:open-copilot", openCopilot);
+  }, []);
+
+  useEffect(() => {
+    const toggleFocus = (event) => {
+      setFocusMode((current) => {
+        const next = typeof event.detail?.enabled === "boolean" ? event.detail.enabled : !current;
+        if (next) setCopilotOpen(false);
+        return next;
+      });
+    };
+    window.addEventListener("nexus:focus-mode", toggleFocus);
+    return () => window.removeEventListener("nexus:focus-mode", toggleFocus);
+  }, []);
+
+  useEffect(() => {
+    setFocusMode(false);
+    setMobileNavigationOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    document.documentElement.dataset.focusMode = focusMode ? "true" : "false";
+    const exitFocus = (event) => { if (event.key === "Escape") setFocusMode(false); };
+    if (focusMode) window.addEventListener("keydown", exitFocus);
+    else window.removeEventListener("keydown", exitFocus);
+    return () => {
+      window.removeEventListener("keydown", exitFocus);
+      delete document.documentElement.dataset.focusMode;
+    };
+  }, [focusMode]);
 
   return (
-    <div className="min-h-screen bg-background flex">
-      <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} onCopilotToggle={() => setCopilotOpen(o => !o)} />
-      <main className={`min-w-0 flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-[72px]' : 'ml-[260px]'} ${copilotOpen ? 'mr-[456px]' : ''}`}>
-        <div className="p-6 md:p-8">
-          {children}
+    <div className="min-h-screen bg-background flex" style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
+      {!focusMode && mobileNavigationOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-30 bg-black/65 backdrop-blur-sm md:hidden"
+          onClick={() => setMobileNavigationOpen(false)}
+        />
+      )}
+      {!focusMode && <Sidebar collapsed={sidebarCollapsed} mobileOpen={mobileNavigationOpen} onMobileClose={() => setMobileNavigationOpen(false)} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} onCopilotToggle={() => setCopilotOpen(o => !o)} />}
+      {!focusMode && (
+        <div className="fixed inset-x-0 top-0 z-20 flex h-14 items-center gap-3 border-b border-border/80 bg-background/90 px-3 backdrop-blur-xl md:hidden">
+          <button
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => { setSidebarCollapsed(false); setMobileNavigationOpen(true); }}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="text-sm font-semibold tracking-tight">NexusMSP</span>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"))}
+            className="ml-auto rounded-lg border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground"
+          >
+            Search
+          </button>
+        </div>
+      )}
+      <main className={`min-w-0 flex-1 transition-all duration-300 ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
+        <div className={`${focusMode ? 'p-4 md:p-8' : 'px-4 pb-24 pt-20 md:p-8'}`}>
+          <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""}`}>
+            {children}
+          </div>
         </div>
       </main>
+      {focusMode && <button type="button" onClick={() => setFocusMode(false)} className="fixed right-5 top-5 z-40 rounded-xl border border-primary/25 bg-card/90 px-3 py-2 text-xs font-semibold text-primary shadow-lg backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" data-testid="exit-focus-mode">Exit focus mode <span className="ml-1 text-muted-foreground">Esc</span></button>}
       <AICopilotPanel isOpen={copilotOpen} onClose={() => setCopilotOpen(false)} />
     </div>
   );
@@ -336,10 +420,10 @@ function App() {
 function GlobalAddons() {
   const { token } = useAuth();
   if (!token) return null;
-  return <AuthedAddons />;
+  return <AuthedAddons token={token} />;
 }
 
-function AuthedAddons() {
+function AuthedAddons({ token }) {
   usePresenceHeartbeat();
   return (
     <>
@@ -347,6 +431,8 @@ function AuthedAddons() {
       <KonamiCRT />
       <ShortcutPalette />
       <CommandPalette />
+      <NexusQuickDock />
+      <UniversalInspector token={token} />
     </>
   );
 }

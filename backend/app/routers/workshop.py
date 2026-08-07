@@ -1,5 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Response
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -7,15 +6,40 @@ import os
 import io
 import asyncio
 import logging
-from app.database import db
+import re
+from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.avatar_enrichment import attach_user_avatars
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.upload_security import IMAGE_EXTENSIONS, safe_original_filename, safe_upload_extension
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
-PHOTO_DIR = "/app/backend/uploads/workshop_photos"
-os.makedirs(PHOTO_DIR, exist_ok=True)
+
+async def _enforce_workshop_job_scope(request: Request, current_user: dict = Depends(get_current_user)):
+    job_id = request.path_params.get("job_id")
+    if not job_id:
+        return
+    collection = db.workshop_bench if request.url.path.startswith("/api/workshop/bench/") else db.workshop_jobs
+    await assert_record_scope(
+        current_user,
+        collection,
+        job_id,
+        operation=request.url.path,
+        request=request,
+        resource_name="Workshop job",
+    )
+
+
+def _download_name(prefix: str, value: object, extension: str) -> str:
+    safe_value = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "record")).strip("._")[:80] or "record"
+    return f"{prefix}_{safe_value}.{extension}"
+
+
+router = APIRouter(dependencies=[Depends(_enforce_workshop_job_scope)])
+
+PHOTO_DIR = UPLOADS_DIR / "workshop_photos"
+PHOTO_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============== HELPERS ==============
@@ -81,18 +105,18 @@ async def upload_workshop_photo(job_id: str, photo_type: str = "general", file: 
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
-    ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    ext = safe_upload_extension(file.filename, allowed=IMAGE_EXTENSIONS, default="jpg")
     filename = f"ws_{job_id[:8]}_{uuid.uuid4().hex[:8]}.{ext}"
-    filepath = os.path.join(PHOTO_DIR, filename)
+    filepath = PHOTO_DIR / filename
     with open(filepath, "wb") as f:
         f.write(content)
     photo = {
         "id": str(uuid.uuid4()),
         "job_id": job_id,
         "filename": filename,
-        "url": f"/uploads/workshop_photos/{filename}",
+        "url": f"/api/uploads/workshop_photos/{filename}",
         "photo_type": photo_type,
-        "original_name": file.filename,
+        "original_name": safe_original_filename(file.filename),
         "size_bytes": len(content),
         "uploaded_by": current_user["id"],
         "uploaded_by_name": current_user.get("name", ""),
@@ -108,7 +132,7 @@ async def upload_workshop_photo(job_id: str, photo_type: str = "general", file: 
 async def delete_workshop_photo(job_id: str, photo_id: str, current_user: dict = Depends(get_current_user)):
     photo = await db.workshop_photos.find_one({"id": photo_id, "job_id": job_id}, {"_id": 0})
     if photo:
-        filepath = os.path.join(PHOTO_DIR, photo.get("filename", ""))
+        filepath = PHOTO_DIR / safe_original_filename(photo.get("filename"), default="missing")
         if os.path.exists(filepath):
             os.remove(filepath)
     await db.workshop_photos.delete_one({"id": photo_id})
@@ -549,11 +573,11 @@ async def get_workshop_qr_code(job_id: str, current_user: dict = Depends(get_cur
     buf = BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    filename = f"qr_{job_id[:8]}.png"
-    filepath = os.path.join(PHOTO_DIR, filename)
-    with open(filepath, "wb") as f:
-        f.write(buf.getvalue())
-    return FileResponse(filepath, media_type="image/png", filename=f"QR_{job.get('job_number', job_id)}.png")
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{_download_name("QR", job.get("job_number", job_id), "png")}"'},
+    )
 
 
 # ============== PDF JOB CARD ==============
@@ -700,9 +724,11 @@ async def generate_workshop_pdf(job_id: str, current_user: dict = Depends(get_cu
     pdf.cell(0, 6, "Customer Signature: ___________________________    Date: _______________", ln=True)
     pdf.cell(0, 6, "Technician Signature: __________________________    Date: _______________", ln=True)
 
-    output_path = f"/tmp/workshop_job_{job_id[:8]}.pdf"
-    pdf.output(output_path)
-    return FileResponse(output_path, media_type="application/pdf", filename=f"JobCard_{job.get('job_number', job_id)}.pdf")
+    return Response(
+        content=bytes(pdf.output()),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{_download_name("JobCard", job.get("job_number", job_id), "pdf")}"'},
+    )
 
 
 # ============== WORKSHOP QUEUE / BENCH VIEW ==============
@@ -710,7 +736,7 @@ async def generate_workshop_pdf(job_id: str, current_user: dict = Depends(get_cu
 @router.get("/workshop/queue")
 async def get_workshop_queue(current_user: dict = Depends(get_current_user)):
     jobs = await db.workshop_jobs.find(
-        {"job_type": "workshop", "repair_status": {"$nin": ["collected", "cancelled"]}},
+        scoped_query(current_user, {"job_type": "workshop", "repair_status": {"$nin": ["collected", "cancelled"]}}),
         {"_id": 0}
     ).sort("created_at", 1).to_list(500)
     columns = {
@@ -732,12 +758,13 @@ async def get_workshop_queue(current_user: dict = Depends(get_current_user)):
 # ============================================================
 @router.get("/workshop/bench")
 async def get_bench_jobs(current_user: dict = Depends(get_current_user)):
-    jobs = await db.workshop_bench.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    jobs = await db.workshop_bench.find(scoped_query(current_user), {"_id": 0}).sort("created_at", -1).to_list(500)
     return jobs
 
 
 @router.post("/workshop/bench")
 async def create_bench_job(data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, data.get("client_id"), operation="workshop.bench.create")
     count = await db.workshop_bench.count_documents({})
     job = {
         "id": str(uuid.uuid4()),
@@ -765,6 +792,13 @@ async def create_bench_job(data: dict, current_user: dict = Depends(get_current_
 @router.put("/workshop/bench/move")
 async def move_bench_job(data: dict, current_user: dict = Depends(get_current_user)):
     job_id = data.get("job_id")
+    await assert_record_scope(
+        current_user,
+        db.workshop_bench,
+        job_id,
+        operation="workshop.bench.move",
+        resource_name="Workshop bench job",
+    )
     stage = data.get("stage")
     valid_stages = ["intake", "diagnosing", "parts_ordered", "repairing", "testing", "ready"]
     if stage not in valid_stages:

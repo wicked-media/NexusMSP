@@ -21,9 +21,7 @@ import { toast } from "sonner";
 import Barcode from "react-barcode";
 import {
   Plus, Search, Loader2, Package, Edit, Trash2, DollarSign, Tag,
-  BarChart3, AlertTriangle, ArrowUpDown, ShoppingCart, RefreshCw,
-  Box, Layers, Archive, Printer, QrCode, ArrowDown, ArrowUp,
-  History, Copy, ChevronRight, Link2, Truck, Unlink, Calculator, Upload,
+  BarChart3, AlertTriangle, ArrowUpDown, RefreshCw, Layers, Archive, Printer, QrCode, ArrowDown, ArrowUp, Copy, ChevronRight, Link2, Truck, Unlink, Calculator, Upload,
   MoreHorizontal, ChevronDown, ClipboardList, Boxes, CircleDollarSign, RotateCcw, ShieldCheck
 } from "lucide-react";
 
@@ -50,7 +48,6 @@ export default function ProductsPage() {
   const [instances, setInstances] = useState([]);
   const [bundleItems, setBundleItems] = useState([]);
   const [onOrderInfo, setOnOrderInfo] = useState(null);
-  const [bundleDialog, setBundleDialog] = useState(false);
   const [bundleAddProduct, setBundleAddProduct] = useState("");
   const [bundleAddQty, setBundleAddQty] = useState(1);
   const [onOrderSummary, setOnOrderSummary] = useState([]);
@@ -79,28 +76,29 @@ export default function ProductsPage() {
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const [prodRes, orderRes] = await Promise.all([
+      const [productsResult, ordersResult] = await Promise.allSettled([
         axios.get(`${API}/products`, { headers }),
         axios.get(`${API}/products/inventory/on-order-summary`, { headers }),
       ]);
-      setProducts(prodRes.data);
-      setOnOrderSummary(orderRes.data || []);
-    } catch { toast.error("Failed to load products"); }
+      if (productsResult.status === "rejected") throw productsResult.reason;
+      setProducts(productsResult.value.data || []);
+      setOnOrderSummary(ordersResult.status === "fulfilled" ? (ordersResult.value.data || []) : []);
+    } catch { toast.error("Failed to load the product catalogue"); }
     finally { setLoading(false); }
   }, [headers]);
 
   const fetchProductDetails = useCallback(async (productId) => {
     try {
-      const [movRes, instRes, bundRes, orderRes] = await Promise.all([
+      const [movRes, instRes, bundRes, orderRes] = await Promise.allSettled([
         axios.get(`${API}/products/${productId}/stock-movements`, { headers }),
         axios.get(`${API}/products/${productId}/instances`, { headers }),
         axios.get(`${API}/products/${productId}/bundle`, { headers }),
         axios.get(`${API}/products/${productId}/on-order`, { headers }),
       ]);
-      setStockMovements(movRes.data);
-      setInstances(instRes.data);
-      setBundleItems(bundRes.data?.bundle_items || []);
-      setOnOrderInfo(orderRes.data);
+      setStockMovements(movRes.status === "fulfilled" ? (movRes.value.data || []) : []);
+      setInstances(instRes.status === "fulfilled" ? (instRes.value.data || []) : []);
+      setBundleItems(bundRes.status === "fulfilled" ? (bundRes.value.data?.bundle_items || []) : []);
+      setOnOrderInfo(orderRes.status === "fulfilled" ? orderRes.value.data : null);
     } catch { /* silent */ }
   }, [headers]);
 
@@ -320,8 +318,8 @@ export default function ProductsPage() {
       <div style="text-align:center;font-family:monospace;font-size:11px;letter-spacing:2px">${barcodeVal}</div>
       ${price}
       <div class="cat">${category}${vendor ? " | " + vendor : ""}</div>
-      <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
-      <script>JsBarcode("#bc","${barcodeVal}",{format:"CODE128",width:2,height:80,displayValue:false});window.print();window.close();<\/script>
+      <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+      <script>JsBarcode("#bc","${barcodeVal}",{format:"CODE128",width:2,height:80,displayValue:false});window.print();window.close();</script>
       </body></html>`);
     doc.close();
   };
@@ -983,10 +981,10 @@ export default function ProductsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="cursor-pointer" onClick={() => toggleSort("name")}><div className="flex items-center gap-1">Product <ArrowUpDown className="w-3 h-3" /></div></TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Barcode</TableHead>
+                <TableHead className="hidden lg:table-cell">SKU</TableHead>
+                <TableHead className="hidden lg:table-cell">Category</TableHead>
+                <TableHead className="hidden xl:table-cell">Vendor</TableHead>
+                <TableHead className="hidden xl:table-cell">Barcode</TableHead>
                 <TableHead className="cursor-pointer text-right" onClick={() => toggleSort("retail_price")}><div className="flex items-center gap-1 justify-end">Price <ArrowUpDown className="w-3 h-3" /></div></TableHead>
                 <TableHead className="cursor-pointer text-right" onClick={() => toggleSort("quantity_in_stock")}><div className="flex items-center gap-1 justify-end">Stock <ArrowUpDown className="w-3 h-3" /></div></TableHead>
                 <TableHead>Status</TableHead>
@@ -998,18 +996,18 @@ export default function ProductsPage() {
                 <TableRow><TableCell colSpan={9} className="text-center py-12 text-muted-foreground">{search || catFilter !== "all" ? "No products match your filters" : "No products yet. Add your first product."}</TableCell></TableRow>
               ) : filtered.map(p => (
                 <TableRow key={p.id} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => { setViewProduct(p); setDetailTab("overview"); }} data-testid={`product-row-${p.id}`}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
+                  <TableCell className="min-w-[11rem]">
+                    <div className="flex min-w-0 items-center gap-2">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-primary/10 bg-primary/10">
                         {p.image_url ? <img src={resolveProductImageUrl(p.image_url)} alt="" className="h-full w-full object-cover" onError={event => { event.currentTarget.style.display = "none"; }} /> : p.is_recurring ? <RefreshCw className="w-4 h-4 text-purple-500" /> : <Package className="w-4 h-4 text-primary" />}
                       </div>
-                      <span className="font-medium">{p.name}</span>
+                      <span className="min-w-0"><span className="block truncate font-medium">{p.name}</span><span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground lg:hidden">{p.sku || "No SKU"}</span></span>
                     </div>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{p.sku || "-"}</TableCell>
-                  <TableCell><Badge variant="outline" className="text-xs">{p.category}</Badge></TableCell>
-                  <TableCell className="text-sm">{p.vendor || "-"}</TableCell>
-                  <TableCell>
+                  <TableCell className="hidden font-mono text-xs lg:table-cell">{p.sku || "-"}</TableCell>
+                  <TableCell className="hidden lg:table-cell"><Badge variant="outline" className="text-xs">{p.category}</Badge></TableCell>
+                  <TableCell className="hidden text-sm xl:table-cell">{p.vendor || "-"}</TableCell>
+                  <TableCell className="hidden xl:table-cell">
                     {p.barcode ? (
                       <div className="flex items-center gap-1">
                         <QrCode className="w-3 h-3 text-emerald-500" />
@@ -1037,9 +1035,9 @@ export default function ProductsPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(p)}><Edit className="w-3 h-3" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => printLabel(p)}><Printer className="w-3 h-3" /></Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setDeleteTarget(p)}><Trash2 className="w-3 h-3" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Edit ${p.name}`} onClick={() => openEdit(p)}><Edit className="w-3 h-3" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Print label for ${p.name}`} onClick={() => printLabel(p)}><Printer className="w-3 h-3" /></Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" aria-label={`Delete ${p.name}`} onClick={() => setDeleteTarget(p)}><Trash2 className="w-3 h-3" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>

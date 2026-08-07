@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MetricStrip, MetricTile } from "@/components/design-system";
-import { AlertTriangle, Bell, Clock, Settings, Zap } from "lucide-react";
+import { Bell, Settings, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 export default function EscalationMatrixPage() {

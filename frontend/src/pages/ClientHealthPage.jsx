@@ -15,12 +15,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  Activity, Heart, Shield, Monitor, DollarSign, AlertTriangle, TrendingUp,
-  TrendingDown, Users, RefreshCw, Loader2, ChevronRight, ChevronDown, ChevronUp,
-  Target, Zap, Bell, Settings, Camera, ArrowUp, ArrowDown, Check, X,
-  HardDrive, Ticket, CreditCard, Lock, Search, FileText, Wifi
+  Activity, Heart, Shield, Monitor, DollarSign, AlertTriangle, RefreshCw, Loader2, Bell, Camera, Check,
+  HardDrive, Ticket, CreditCard, Lock, Search, Wifi
 } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
+import { ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 import HeroTile from "@/components/HeroTile";
 
 const chartStyle = { backgroundColor: "hsl(217, 33%, 17%)", border: "1px solid hsl(217, 33%, 25%)", borderRadius: "8px", color: "hsl(210, 40%, 98%)" };

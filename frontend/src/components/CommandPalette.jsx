@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -16,6 +16,7 @@ import {
   CornerDownLeft,
   FileText,
   HardDrive,
+  History,
   Monitor,
   Phone,
   Receipt,
@@ -25,8 +26,30 @@ import {
   Terminal,
   Ticket,
   Users,
-  Workflow,
 } from "lucide-react";
+
+const RECENT_COMMAND_KEY = "nexus-command-recent-v1";
+
+const readRecentCommands = () => {
+  try {
+    const value = JSON.parse(localStorage.getItem(RECENT_COMMAND_KEY) || "[]");
+    return Array.isArray(value) ? value.slice(0, 6) : [];
+  } catch {
+    return [];
+  }
+};
+
+const commandIdentity = item => [
+  item.kind,
+  item.id || item.path || item.cmd || item.ticket_number || item.slug || item.label,
+].join(":");
+
+const storableCommand = item => {
+  const {
+    kind, id, path, cmd, ticket_number, slug, label, hint, desc, status, route,
+  } = item;
+  return { kind, id, path, cmd, ticket_number, slug, label, hint, desc, status, route };
+};
 
 const EMPTY_SEARCH = {
   intents: [],
@@ -94,12 +117,28 @@ export default function CommandPalette() {
   const [idx, setIdx] = useState(0);
   const [search, setSearch] = useState(EMPTY_SEARCH);
   const [searching, setSearching] = useState(false);
+  const [recent, setRecent] = useState(readRecentCommands);
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
 
+  const rememberItem = useCallback(item => {
+    if (!item || item.kind === "tip") return;
+    setRecent(current => {
+      const next = [
+        storableCommand(item),
+        ...current.filter(entry => commandIdentity(entry) !== commandIdentity(item)),
+      ].slice(0, 6);
+      localStorage.setItem(RECENT_COMMAND_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const onKey = event => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      const modifier = event.metaKey || event.ctrlKey;
+      const commandShortcut = event.key.toLowerCase() === "k";
+      const everythingShortcut = event.code === "Space";
+      if (modifier && (commandShortcut || everythingShortcut)) {
         event.preventDefault();
         setOpen(current => !current);
       }
@@ -173,6 +212,14 @@ export default function CommandPalette() {
         heading: "Nexus understands",
         icon: Sparkles,
         items: search.intents.map(intent => ({ ...intent, kind: "intent", desc: intent.description })),
+      });
+    }
+
+    if (!query && recent.length) {
+      list.push({
+        heading: "Continue where you left off",
+        icon: History,
+        items: recent.map(item => ({ ...item, recent: true })),
       });
     }
 
@@ -300,7 +347,7 @@ export default function CommandPalette() {
       });
     }
     return list;
-  }, [q, search, searching]);
+  }, [q, recent, search, searching]);
 
   const flatItems = useMemo(() => sections.flatMap(section => section.items), [sections]);
   useEffect(() => {
@@ -310,6 +357,7 @@ export default function CommandPalette() {
   const runItem = async item => {
     if (!item || item.kind === "tip") return;
     if (item.kind === "intent") {
+      rememberItem(item);
       navigate(item.route);
       toast.info("Workflow opened for review", {
         description: "Nexus has not changed anything yet. Confirm scope and approval in the workspace.",
@@ -318,6 +366,7 @@ export default function CommandPalette() {
       return;
     }
     if (item.kind === "page") {
+      rememberItem(item);
       navigate(item.path);
       setOpen(false);
       return;
@@ -332,6 +381,7 @@ export default function CommandPalette() {
     if (item.kind === "knowledge") navigate(item.slug ? `/knowledge-base/${item.slug}` : "/documentation-hub?tab=library");
     if (item.kind === "product") navigate(`/products?product=${encodeURIComponent(item.id)}`);
     if (!["slash", "page", "intent"].includes(item.kind)) {
+      rememberItem(item);
       setOpen(false);
       return;
     }
@@ -348,6 +398,7 @@ export default function CommandPalette() {
     }
     try {
       const response = await axios.post(`${API}/command-palette/run`, { raw }, { headers });
+      rememberItem({ ...item, label: raw, hint: item.desc });
       toast.success(response.data?.message?.body?.slice(0, 100) || `Ran ${raw}`);
       setOpen(false);
     } catch (error) {
@@ -372,27 +423,27 @@ export default function CommandPalette() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
-        className="max-w-3xl gap-0 overflow-hidden border-cyan-400/25 bg-[#0d1015] p-0 shadow-2xl shadow-cyan-500/10"
+        className="nx-command-palette max-w-3xl gap-0 overflow-hidden border-cyan-500/25 p-0 shadow-2xl shadow-cyan-500/10"
         data-testid="command-palette"
       >
         <DialogTitle className="sr-only">Nexus Command</DialogTitle>
-        <div className="border-b border-white/[0.07] bg-gradient-to-r from-cyan-500/[0.10] via-violet-500/[0.05] to-transparent px-4 py-3.5">
+        <div className="border-b border-border bg-gradient-to-r from-cyan-500/[0.10] via-violet-500/[0.05] to-transparent px-4 py-3.5">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-400/10">
-                <Sparkles className="h-3.5 w-3.5 text-cyan-200" />
+                <Sparkles className="h-3.5 w-3.5 text-cyan-700 dark:text-cyan-200" />
               </span>
               <div>
-                <p className="text-xs font-semibold text-zinc-100">Nexus Command</p>
-                <p className="text-[10px] text-zinc-500">Find anything or describe an operational outcome</p>
+                <p className="text-xs font-semibold text-foreground">Nexus Command</p>
+                <p className="text-[10px] text-muted-foreground">Search every connected Nexus record or describe an operational outcome</p>
               </div>
             </div>
-            <Badge variant="outline" className="border-emerald-400/20 bg-emerald-400/[0.06] text-[9px] text-emerald-200">
+            <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/[0.07] text-[9px] text-emerald-700 dark:text-emerald-200">
               Approval-aware
             </Badge>
           </div>
-          <div className="flex items-center gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3">
-            <Search className="h-4 w-4 shrink-0 text-cyan-300" />
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-background/60 px-3">
+            <Search className="h-4 w-4 shrink-0 text-cyan-700 dark:text-cyan-300" />
             <Input
               ref={inputRef}
               value={q}
@@ -401,18 +452,18 @@ export default function CommandPalette() {
                 setIdx(0);
               }}
               onKeyDown={onKeyDown}
-              placeholder="Try “Reset John’s MFA” or search any client, asset, ticket, invoice or service"
+              placeholder="Search a person, client, asset, ticket, invoice, PBX, backup, product or document"
               className="h-10 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
               data-testid="palette-input"
             />
-            {searching ? <span className="text-[10px] text-cyan-300">Searching…</span> : <kbd className="hidden rounded border border-white/10 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 md:inline-flex">Esc</kbd>}
+            {searching ? <span className="text-[10px] text-cyan-700 dark:text-cyan-300">Searching…</span> : <kbd className="hidden rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline-flex">Esc</kbd>}
           </div>
         </div>
 
         <div className="max-h-[62vh] overflow-y-auto py-1">
           {sections.map(section => (
             <div key={section.heading} className="py-1">
-              <div className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
+              <div className="flex items-center gap-1.5 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 <section.icon className="h-3 w-3" />
                 {section.heading}
               </div>
@@ -422,26 +473,27 @@ export default function CommandPalette() {
                 const LeadingIcon = paletteIcon(item);
                 return (
                   <button
-                    key={`${item.kind}-${itemIndex}`}
+                    key={`${commandIdentity(item)}-${itemIndex}`}
                     type="button"
                     onClick={() => runItem(item)}
                     onMouseEnter={() => setIdx(itemIndex)}
-                    className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${active ? "bg-cyan-400/[0.10]" : "hover:bg-white/[0.035]"} ${item.kind === "tip" ? "cursor-default" : ""}`}
+                    className={`nx-command-item flex w-full items-center gap-3 px-4 py-2.5 text-left ${active ? "bg-cyan-500/[0.10]" : "hover:bg-muted/35"} ${item.kind === "tip" ? "cursor-default" : ""}`}
+                    data-active={active ? "true" : "false"}
                     data-testid={`palette-item-${item.kind}-${itemIndex}`}
                   >
-                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${item.kind === "intent" ? "border-cyan-300/20 bg-cyan-400/10" : "border-white/[0.07] bg-white/[0.025]"}`}>
-                      <LeadingIcon className={`h-4 w-4 ${item.kind === "intent" ? "text-cyan-200" : "text-zinc-400"}`} />
+                    <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${item.kind === "intent" ? "border-cyan-500/25 bg-cyan-500/10" : "border-border bg-muted/30"}`}>
+                      <LeadingIcon className={`h-4 w-4 ${item.kind === "intent" ? "text-cyan-700 dark:text-cyan-200" : "text-muted-foreground"}`} />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className={`truncate text-sm ${item.kind === "slash" ? "font-mono font-semibold text-violet-200" : "font-medium text-zinc-100"}`}>{item.label}</span>
+                        <span className={`truncate text-sm ${item.kind === "slash" ? "font-mono font-semibold text-violet-700 dark:text-violet-200" : "font-medium text-foreground"}`}>{item.label}</span>
                         {item.status && <Badge variant="outline" className="h-4 px-1 py-0 text-[9px] capitalize">{item.status}</Badge>}
-                        {item.kind === "intent" && <Badge variant="outline" className="h-4 border-cyan-300/20 px-1 py-0 text-[9px] text-cyan-200">Review workflow</Badge>}
+                        {item.kind === "intent" && <Badge variant="outline" className="h-4 border-cyan-500/25 px-1 py-0 text-[9px] text-cyan-700 dark:text-cyan-200">Review workflow</Badge>}
                       </div>
-                      {item.hint && <p className="truncate text-[11px] text-zinc-500">{item.hint}</p>}
-                      {item.desc && <p className="mt-0.5 truncate text-[11px] text-zinc-400">{item.desc}</p>}
+                      {item.hint && <p className="truncate text-[11px] text-muted-foreground">{item.hint}</p>}
+                      {item.desc && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.desc}</p>}
                     </div>
-                    {active && item.kind !== "tip" && <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-cyan-300" />}
+                    {active && item.kind !== "tip" && <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-cyan-700 dark:text-cyan-300" />}
                   </button>
                 );
               })}
@@ -449,10 +501,10 @@ export default function CommandPalette() {
           ))}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-white/[0.07] bg-black/15 px-4 py-2 text-[10px] text-zinc-500">
+        <div className="flex items-center gap-3 border-t border-border bg-muted/20 px-4 py-2 text-[10px] text-muted-foreground">
           <span className="flex items-center gap-1"><ChevronUp className="h-3 w-3" /><ChevronDown className="h-3 w-3" />navigate</span>
           <span className="flex items-center gap-1"><CornerDownLeft className="h-3 w-3" />open or review</span>
-          <span className="flex items-center gap-1"><kbd className="rounded border border-white/10 px-1 font-mono">/</kbd>audited commands</span>
+          <span className="flex items-center gap-1"><kbd className="rounded border border-border px-1 font-mono">/</kbd>audited commands</span>
           <span className="ml-auto">No change runs without the required scope and approval.</span>
         </div>
       </DialogContent>

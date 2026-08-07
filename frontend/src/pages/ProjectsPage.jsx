@@ -16,7 +16,6 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
-  CircleDollarSign,
   ClipboardList,
   Clock3,
   FolderKanban,
@@ -31,7 +30,6 @@ import {
   Target,
   Trash2,
   UserRound,
-  UsersRound,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";

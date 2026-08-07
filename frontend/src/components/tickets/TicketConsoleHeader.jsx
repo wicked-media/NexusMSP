@@ -19,7 +19,7 @@ import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
   ArrowLeft, ChevronRight, MoreVertical, MessageSquareReply, CheckCircle2, AlertTriangle,
   Building2, UserCircle2, Mail, Loader2, History, Search,
-  ArrowLeftRight, X, RotateCcw, Wrench, Receipt,
+  ArrowLeftRight, X, RotateCcw, Wrench, Receipt, Play, Square,
 } from "lucide-react";
 
 const STATUS_FLOW = ["open", "in_progress", "on_hold", "resolved", "closed"];
@@ -38,6 +38,9 @@ export default function TicketConsoleHeader({
   onTitleSave,
   onDescriptionSave,
   onMutate,
+  isTimerRunning = false,
+  timerElapsed = 0,
+  onToggleTimer,
 }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -73,6 +76,13 @@ export default function TicketConsoleHeader({
   const sla = ticket?.sla_status || ticket?.sla;
   const overdue = (ticket?.sla_overdue_hours || 0) > 0 || sla === "breached" || sla === "overdue";
   const hasHistory = (ticket?.customer_history || []).length > 0;
+  const formatElapsed = (seconds) => {
+    const total = Math.max(0, Number(seconds) || 0);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    return [hours, minutes, secs].map(value => String(value).padStart(2, "0")).join(":");
+  };
 
   if (!ticket) return null;
 
@@ -138,6 +148,13 @@ export default function TicketConsoleHeader({
             </div>
 
             <TicketHeaderAction icon={MessageSquareReply} onClick={onReply} data-testid="console-reply-btn">Reply</TicketHeaderAction>
+            <TicketHeaderAction
+              icon={isTimerRunning ? Square : Play}
+              tone={isTimerRunning ? "warning" : "compact"}
+              onClick={onToggleTimer}
+              title={isTimerRunning ? `Stop timer at ${formatElapsed(timerElapsed)}` : "Start time tracking"}
+              data-testid="console-timer-btn"
+            >{isTimerRunning ? formatElapsed(timerElapsed) : "Start timer"}</TicketHeaderAction>
             <TicketHeaderAction icon={Receipt} tone="success" onClick={onInvoice} data-testid="console-invoice-btn">Invoice</TicketHeaderAction>
             <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={onResolve} data-testid="console-resolve-btn">Resolve & close</TicketHeaderAction>
             <TicketHeaderAction icon={Wrench} tone="accent" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>

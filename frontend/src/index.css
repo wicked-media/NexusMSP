@@ -38,6 +38,22 @@
         --chart-3: 48 96% 53%;
         --chart-4: 0 84% 60%;
         --chart-5: 262 83% 58%;
+
+        /* Shared Nexus surfaces keep workspaces consistent across themes. */
+        --nx-surface: 240 5% 7%;
+        --nx-surface-raised: 240 4% 10%;
+        --nx-surface-soft: 240 4% 13%;
+        --nx-surface-border: 240 4% 18%;
+        --nx-surface-shadow: 240 10% 2%;
+        --nx-grid-line: 0 0% 100%;
+
+        /* One motion rhythm across Nexus: acknowledge, transition, reveal. */
+        --nx-motion-instant: 100ms;
+        --nx-motion-fast: 160ms;
+        --nx-motion-standard: 220ms;
+        --nx-motion-deliberate: 420ms;
+        --nx-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+        --nx-ease-standard: cubic-bezier(0.2, 0, 0, 1);
     }
 
     .light {
@@ -71,6 +87,13 @@
         --chart-3: 38 92% 50%;
         --chart-4: 0 84% 55%;
         --chart-5: 262 83% 53%;
+
+        --nx-surface: 220 33% 99%;
+        --nx-surface-raised: 0 0% 100%;
+        --nx-surface-soft: 220 23% 96%;
+        --nx-surface-border: 220 16% 86%;
+        --nx-surface-shadow: 220 40% 30%;
+        --nx-grid-line: 220 25% 18%;
     }
 }
 
@@ -81,7 +104,9 @@
     
     body {
         @apply bg-background text-foreground antialiased;
+        background-color: var(--theme-bg, hsl(var(--background)));
         font-family: var(--font-sans, 'Inter', -apple-system, BlinkMacSystemFont, sans-serif);
+        transition: background-color 180ms ease, color 180ms ease;
     }
     
     h1, h2, h3, h4, h5, h6 {
@@ -93,6 +118,343 @@
     }
 }
 
+@keyframes nx-page-enter {
+    from { opacity: 0; transform: translateY(7px); filter: saturate(0.92); }
+    to { opacity: 1; transform: translateY(0); filter: saturate(1); }
+}
+
+@keyframes nx-page-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes nx-assistant-enter {
+    from { opacity: 0; transform: translateX(18px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes nx-status-heartbeat {
+    0%, 94%, 100% { transform: scale(1); opacity: 0; }
+    96% { transform: scale(1.8); opacity: 0.34; }
+    98% { transform: scale(2.35); opacity: 0; }
+}
+
+@keyframes nx-status-breathe {
+    0%, 100% { transform: scale(1); opacity: 0.22; }
+    50% { transform: scale(1.75); opacity: 0.5; }
+}
+
+@keyframes nx-status-critical {
+    0%, 100% { transform: scale(1); opacity: 0.28; }
+    50% { transform: scale(1.55); opacity: 0.6; }
+}
+
+@keyframes nx-button-ripple {
+    0% { opacity: 0.36; transform: translate(-50%, -50%) scale(0.08); }
+    65% { opacity: 0.16; }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(7.5); }
+}
+
+@keyframes nx-checkbox-settle {
+    0% { opacity: 0; transform: scale(0.45) rotate(-14deg); }
+    58% { opacity: 1; transform: scale(1.16) rotate(3deg); }
+    100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+@keyframes nx-confirmed {
+    0% { box-shadow: 0 0 0 0 hsl(var(--destructive) / 0.42); }
+    100% { box-shadow: 0 0 0 10px hsl(var(--destructive) / 0); }
+}
+
+@keyframes nx-ambient-breathe {
+    0%, 100% { opacity: 0.28; transform: scaleX(0.88); }
+    50% { opacity: 0.58; transform: scaleX(1); }
+}
+
+@keyframes nx-ambient-flow {
+    from { transform: translate3d(-18%, 0, 0); }
+    to { transform: translate3d(18%, 0, 0); }
+}
+
+/* Ambient Intelligence communicates state through restrained light and depth.
+   It never replaces text, icons, badges, ARIA labels, or source evidence. */
+.nx-ambient-surface {
+    --nx-ambient-hue: var(--primary);
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+}
+
+.nx-ambient-surface::before {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: 0 8% auto;
+    height: 1px;
+    border-radius: 999px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, hsl(var(--nx-ambient-hue) / 0.72), transparent);
+    opacity: 0.24;
+    transform-origin: center;
+}
+
+.nx-ambient-surface::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    inset: -35% -15% auto 36%;
+    height: 65%;
+    pointer-events: none;
+    background: radial-gradient(ellipse, hsl(var(--nx-ambient-hue) / 0.105), transparent 68%);
+    opacity: 0.7;
+    transition: opacity 220ms ease, filter 220ms ease;
+}
+
+.nx-ambient-surface > * {
+    position: relative;
+    z-index: 1;
+}
+
+.nx-ambient-surface[data-nx-signal="working"] { --nx-ambient-hue: 217 91% 60%; }
+.nx-ambient-surface[data-nx-signal="healthy"],
+.nx-ambient-surface[data-nx-signal="success"] { --nx-ambient-hue: 142 72% 45%; }
+.nx-ambient-surface[data-nx-signal="attention"] { --nx-ambient-hue: 38 92% 50%; }
+.nx-ambient-surface[data-nx-signal="critical"] { --nx-ambient-hue: 0 84% 60%; }
+.nx-ambient-surface[data-nx-signal="recommendation"],
+.nx-ambient-surface[data-nx-signal="ai"] { --nx-ambient-hue: 258 90% 66%; }
+
+.nx-ambient-surface[data-nx-signal="working"]::before,
+.nx-ambient-surface[data-nx-signal="recommendation"]::before,
+.nx-ambient-surface[data-nx-signal="attention"]::before,
+.nx-ambient-surface[data-nx-signal="critical"]::before {
+    animation: nx-ambient-breathe 3.8s ease-in-out infinite;
+}
+
+.nx-ambient-surface[data-nx-signal="working"]::after {
+    animation: nx-ambient-flow 7s ease-in-out infinite alternate;
+}
+
+.nx-ambient-surface[data-nx-signal="critical"]::after {
+    opacity: 0.9;
+    filter: saturate(1.2);
+}
+
+.nx-button {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.nx-button::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: var(--nx-press-x, 50%);
+    top: var(--nx-press-y, 50%);
+    width: 2rem;
+    height: 2rem;
+    border-radius: 9999px;
+    pointer-events: none;
+    background: currentColor;
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+}
+
+.nx-button[data-nx-pressed="true"]::after {
+    animation: nx-button-ripple 500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nx-card {
+    transition:
+        transform var(--nx-motion-fast) var(--nx-ease-out),
+        border-color var(--nx-motion-fast) ease,
+        box-shadow var(--nx-motion-fast) ease,
+        background-color var(--nx-motion-fast) ease;
+}
+
+.nx-card-interactive {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.nx-card-interactive::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(circle at 18% 0%, hsl(var(--primary) / 0.08), transparent 38%);
+    opacity: 0;
+    transition: opacity 180ms ease;
+}
+
+.nx-card-interactive > * {
+    position: relative;
+    z-index: 1;
+}
+
+.nx-card-interactive:hover {
+    transform: translateY(-2px);
+    border-color: hsl(var(--primary) / 0.32);
+    box-shadow: 0 18px 45px -32px hsl(var(--primary) / 0.48);
+}
+
+.nx-card-interactive:hover::after {
+    opacity: 1;
+}
+
+.nx-card-interactive:active {
+    transform: translateY(0) scale(0.995);
+}
+
+.nx-checkbox {
+    transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.nx-checkbox:active {
+    transform: scale(0.88);
+}
+
+.nx-checkbox[data-state="checked"] .nx-checkbox-indicator {
+    animation: nx-checkbox-settle 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.nx-command-item {
+    position: relative;
+    transition:
+        transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 140ms ease,
+        box-shadow 140ms ease;
+}
+
+.nx-command-item[data-active="true"] {
+    transform: scale(0.997);
+    box-shadow: inset 3px 0 0 hsl(var(--primary) / 0.68);
+}
+
+.nx-hold-confirm__fill {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    transform: scaleX(0);
+    transform-origin: left;
+    background: linear-gradient(90deg, hsl(var(--destructive)), hsl(0 88% 68%));
+}
+
+.nx-hold-confirm[data-holding="true"] .nx-hold-confirm__fill {
+    transform: scaleX(1);
+    transition: transform var(--nx-hold-duration, 1100ms) linear;
+}
+
+.nx-hold-confirm[data-completed="true"] {
+    animation: nx-confirmed 520ms ease-out;
+}
+
+.nx-page-stage {
+    animation: nx-page-enter var(--nx-motion-standard) var(--nx-ease-out) both;
+}
+
+.nx-assistant-drawer {
+    animation: nx-assistant-enter var(--nx-motion-standard) var(--nx-ease-out) both;
+}
+
+.nx-focus-stage {
+    max-width: 100rem;
+    margin-inline: auto;
+    transition: max-width var(--nx-motion-standard) var(--nx-ease-out);
+}
+
+html[data-focus-mode="true"] body {
+    background-image: radial-gradient(circle at 50% -12%, hsl(var(--primary) / 0.07), transparent 35%);
+}
+
+.nx-status-orb {
+    position: relative;
+    isolation: isolate;
+    transition: opacity 180ms ease, filter 180ms ease;
+}
+
+.nx-status-orb__wave {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: currentColor;
+    pointer-events: none;
+}
+
+.nx-status-orb[data-status="online"] .nx-status-orb__wave {
+    animation: nx-status-heartbeat 30s ease-out infinite;
+}
+
+.nx-status-orb[data-status="warning"] .nx-status-orb__wave {
+    animation: nx-status-breathe 3.8s ease-in-out infinite;
+}
+
+.nx-status-orb[data-status="critical"] .nx-status-orb__wave,
+.nx-status-orb[data-status="error"] .nx-status-orb__wave {
+    animation: nx-status-critical 2.8s ease-in-out infinite;
+}
+
+.nx-status-orb[data-status="offline"] {
+    opacity: 0.52;
+    filter: saturate(0.4);
+}
+
+.nx-toast {
+    position: relative;
+    overflow: hidden;
+}
+
+.nx-toast::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: hsl(var(--primary));
+    opacity: 0.82;
+}
+
+html[data-motion="minimal"] .nx-page-stage {
+    animation: nx-page-fade 120ms ease-out both;
+}
+
+html[data-motion="minimal"] .nx-ambient-motion,
+html[data-motion="minimal"] .nx-ambient-surface::before,
+html[data-motion="minimal"] .nx-ambient-surface::after,
+html[data-motion="minimal"] .nx-status-orb__wave,
+html[data-motion="minimal"] .animate-ping,
+html[data-motion="minimal"] .animate-pulse,
+html[data-motion="minimal"] .animated-border {
+    animation: none !important;
+}
+
+html[data-motion="none"] *:not(.animate-spin),
+html[data-motion="none"] *::before,
+html[data-motion="none"] *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin),
+    *::before,
+    *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 1ms !important;
+        transition-delay: 0ms !important;
+    }
+}
+
 @layer utilities {
     .ticket-workspace-scroll {
         scrollbar-width: none;
@@ -100,6 +462,82 @@
     }
     .ticket-workspace-scroll::-webkit-scrollbar {
         display: none;
+    }
+
+    .nx-device-header {
+        background:
+            radial-gradient(circle at 88% 0%, hsl(var(--primary) / 0.13), transparent 32%),
+            linear-gradient(135deg, hsl(var(--nx-surface-raised) / 0.98), hsl(var(--nx-surface) / 0.94));
+        border: 1px solid hsl(var(--nx-surface-border));
+        box-shadow:
+            0 22px 55px -38px hsl(var(--nx-surface-shadow) / 0.75),
+            inset 0 1px 0 hsl(var(--nx-grid-line) / 0.045);
+    }
+
+    .nx-device-action-bar {
+        background: hsl(var(--background) / 0.58);
+        border: 1px solid hsl(var(--border) / 0.75);
+        box-shadow: inset 0 1px 0 hsl(var(--nx-grid-line) / 0.035);
+        backdrop-filter: blur(12px);
+    }
+
+    .nx-device-tabs {
+        display: flex;
+        width: 100%;
+        height: auto;
+        justify-content: flex-start;
+        gap: 0.25rem;
+        overflow-x: auto;
+        padding: 0.375rem;
+        border: 1px solid hsl(var(--nx-surface-border));
+        border-radius: 0.875rem;
+        background: hsl(var(--nx-surface-raised) / 0.88);
+        box-shadow: 0 14px 35px -30px hsl(var(--nx-surface-shadow) / 0.65);
+        scrollbar-width: none;
+    }
+
+    .nx-device-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nx-device-tabs [role="tab"] {
+        flex: 0 0 auto;
+        min-height: 2.25rem;
+        padding-inline: 0.8rem;
+        border-radius: 0.6rem;
+        color: hsl(var(--muted-foreground));
+        white-space: nowrap;
+    }
+
+    .nx-device-tabs [role="tab"][data-state="active"] {
+        color: hsl(var(--foreground));
+        background: hsl(var(--primary) / 0.11);
+        box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.2);
+    }
+
+    .nx-dialog-overlay {
+        background: rgb(3 5 7 / 0.84);
+    }
+
+    .light .nx-dialog-overlay {
+        background: rgb(15 23 42 / 0.5);
+    }
+
+    .nx-dialog-surface {
+        color: hsl(var(--foreground));
+        border-color: hsl(var(--nx-surface-border));
+        background:
+            radial-gradient(circle at 92% 0%, hsl(var(--primary) / 0.1), transparent 28%),
+            linear-gradient(145deg, hsl(var(--nx-surface-raised) / 0.99), hsl(var(--nx-surface) / 0.99));
+        box-shadow:
+            0 26px 80px hsl(var(--nx-surface-shadow) / 0.5),
+            inset 0 1px 0 hsl(var(--nx-grid-line) / 0.045);
+    }
+
+    .light .nx-dialog-surface {
+        box-shadow:
+            0 28px 75px hsl(var(--nx-surface-shadow) / 0.24),
+            inset 0 1px 0 rgb(255 255 255 / 0.85);
     }
 
     /* Glassy ticket detail card aesthetic — gradient bg + subtle border + accent glow.

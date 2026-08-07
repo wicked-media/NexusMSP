@@ -3,6 +3,7 @@ import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -19,9 +20,9 @@ import OperationalPageHeader from "@/components/OperationalPageHeader";
 import {
   Plus, Search, Loader2, Monitor, HardDrive, Laptop, Server, Wifi,
   AlertTriangle, Shield, DollarSign, Edit, Trash2, ArrowLeft, Calendar,
-  Building, Tag, MapPin, ArrowUpDown, RefreshCw, Boxes, Wrench, MessageSquare, MoreHorizontal, ChevronDown, QrCode, ShoppingCart
+  Building, Tag, ArrowUpDown, RefreshCw, Boxes, Wrench, MessageSquare, MoreHorizontal, ChevronDown, QrCode, ShoppingCart
 } from "lucide-react";
-import { format, formatDistanceToNow, isPast, parseISO, differenceInDays } from "date-fns";
+import { format, isPast, parseISO, differenceInDays } from "date-fns";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 
 const ASSET_TYPES = ["hardware", "software", "license", "peripheral", "network", "server", "mobile", "other"];
@@ -213,7 +214,7 @@ export default function AssetsPage() {
         <p className="text-sm text-muted-foreground">This removes <span className="font-medium text-foreground">{pendingDelete?.name}</span> from the inventory register. Use this only for an accidental record; retiring an asset preserves its history.</p>
         <DialogFooter>
           <Button variant="outline" onClick={() => setPendingDelete(null)}>Cancel</Button>
-          <Button variant="destructive" onClick={() => handleDelete(pendingDelete.id)} data-testid="confirm-delete-asset">Remove asset</Button>
+          <HoldToConfirmButton onComplete={() => handleDelete(pendingDelete.id)} data-testid="confirm-delete-asset">Hold to remove</HoldToConfirmButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

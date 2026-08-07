@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Loader2, RefreshCw, AlertTriangle, TrendingUp, Heart, DollarSign,
-  Users, Shield, ChevronRight, Target, ArrowUpRight, ArrowDownRight
+  Users, Shield, Target, ArrowUpRight
 } from "lucide-react";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 

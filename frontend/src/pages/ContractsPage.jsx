@@ -29,9 +29,8 @@ import {
   Download,
   Repeat,
   TrendingUp
-  , PackageCheck, Smartphone, Pencil, RotateCcw, Undo2, History
+  , PackageCheck, Smartphone, Pencil, RotateCcw, Undo2
 } from "lucide-react";
-import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import { PageShell } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
@@ -208,7 +207,7 @@ export default function ContractsPage() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this contract?")) return;
+    if (!window.confirm("Delete this contract?")) return;
     try {
       await axios.delete(`${API}/contracts/${id}`, { headers });
       toast.success("Contract deleted");

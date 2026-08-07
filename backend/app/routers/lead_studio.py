@@ -48,7 +48,7 @@ def _safe_dt(v) -> Optional[datetime]:
 
 
 def _seeded(lead_id: str, salt: str, lo: int, hi: int) -> int:
-    h = int(hashlib.md5(f"{lead_id}:{salt}".encode()).hexdigest()[:8], 16)
+    h = int(hashlib.md5(f"{lead_id}:{salt}".encode(), usedforsecurity=False).hexdigest()[:8], 16)
     return lo + (h % max(1, hi - lo + 1))
 
 

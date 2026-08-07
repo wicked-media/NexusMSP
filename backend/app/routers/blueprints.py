@@ -31,6 +31,8 @@ import uuid
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import log_activity
+from app.services.scope_permissions import assert_client_scope, assert_record_scope
 
 router = APIRouter()
 
@@ -242,6 +244,7 @@ async def install_starter_library(current_user: dict = Depends(get_current_user)
 
 @router.get("/clients/{client_id}/blueprints")
 async def get_client_blueprints(client_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="client.blueprints.read")
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "blueprint_ids": 1, "default_blueprint_id": 1})
     if not client:
         raise HTTPException(404, "Client not found")
@@ -253,6 +256,7 @@ async def get_client_blueprints(client_id: str, current_user: dict = Depends(get
 
 @router.put("/clients/{client_id}/blueprints")
 async def set_client_blueprints(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="client.blueprints.modify")
     bp_ids = [str(b) for b in (data.get("blueprint_ids") or [])]
     default_id = data.get("default_blueprint_id")
     if default_id and default_id not in bp_ids:
@@ -309,9 +313,13 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
     bp = await db.blueprints.find_one({"id": bp_id, "active": True}, {"_id": 0})
     if not bp:
         raise HTTPException(404, "Blueprint not found or inactive")
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.blueprint.apply",
+        resource_name="Ticket",
+    )
     _hydrate_ticket_with_blueprint(ticket, bp)
     ticket["blueprint_applied_at"] = datetime.now(timezone.utc).isoformat()
     ticket["blueprint_applied_by"] = current_user.get("name")
@@ -321,6 +329,15 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
         "blueprint_fields", "blueprint_checklist",
         "blueprint_applied_at", "blueprint_applied_by"
     ) if k in ticket}})
+    await log_activity(
+        current_user,
+        "ticket_blueprint_applied",
+        "ticket",
+        ticket_id,
+        ticket.get("title") or ticket.get("ticket_number") or ticket_id,
+        f"Applied workflow blueprint {bp['name']}.",
+        metadata={"client_id": ticket.get("client_id"), "blueprint_id": bp_id},
+    )
     return await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
 
 
@@ -330,19 +347,36 @@ async def update_worksheet_fields(ticket_id: str, data: dict, current_user: dict
     patch = data.get("fields") or {}
     if not isinstance(patch, dict):
         raise HTTPException(400, "fields must be an object")
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "blueprint_fields": 1})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.blueprint.fields.modify",
+        resource_name="Ticket",
+    )
     merged = {**(ticket.get("blueprint_fields") or {}), **{k: v for k, v in patch.items() if isinstance(k, str)}}
     await db.tickets.update_one({"id": ticket_id}, {"$set": {"blueprint_fields": merged, "blueprint_fields_updated_at": datetime.now(timezone.utc).isoformat()}})
+    await log_activity(
+        current_user,
+        "ticket_blueprint_fields_updated",
+        "ticket",
+        ticket_id,
+        ticket.get("title") or ticket.get("ticket_number") or ticket_id,
+        "Updated workflow record fields.",
+        metadata={"client_id": ticket.get("client_id"), "field_keys": sorted(patch.keys())},
+    )
     return {"success": True, "blueprint_fields": merged}
 
 
 @router.post("/tickets/{ticket_id}/blueprint-checklist/{item_id}/toggle")
 async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "blueprint_checklist": 1})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.blueprint.checklist.modify",
+        resource_name="Ticket",
+    )
     cl = ticket.get("blueprint_checklist") or []
     found = False
     now = datetime.now(timezone.utc).isoformat()
@@ -357,6 +391,20 @@ async def toggle_checklist_item(ticket_id: str, item_id: str, current_user: dict
     if not found:
         raise HTTPException(404, "Checklist item not found")
     await db.tickets.update_one({"id": ticket_id}, {"$set": {"blueprint_checklist": cl}})
+    changed = next(item for item in cl if item.get("id") == item_id)
+    await log_activity(
+        current_user,
+        "ticket_blueprint_checklist_updated",
+        "ticket",
+        ticket_id,
+        ticket.get("title") or ticket.get("ticket_number") or ticket_id,
+        f"Marked {changed.get('label') or 'workflow step'} as {'complete' if changed.get('done') else 'incomplete'}.",
+        metadata={
+            "client_id": ticket.get("client_id"),
+            "checklist_item_id": item_id,
+            "completed": bool(changed.get("done")),
+        },
+    )
     return {"success": True, "checklist": cl}
 
 
@@ -378,14 +426,20 @@ async def suggest_blueprint_from_history(data: dict, current_user: dict = Depend
     title_hint = (data.get("title_hint") or "").strip()
 
     if ticket_id and not client_id:
-        t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "client_id": 1, "title": 1})
-        if t:
-            client_id = t.get("client_id")
-            if not title_hint:
-                title_hint = t.get("title", "")
+        t = await assert_record_scope(
+            current_user,
+            db.tickets,
+            ticket_id,
+            operation="ticket.blueprint.suggest",
+            resource_name="Ticket",
+        )
+        client_id = t.get("client_id")
+        if not title_hint:
+            title_hint = t.get("title", "")
 
     if not client_id:
         raise HTTPException(400, "client_id (or ticket_id) required")
+    await assert_client_scope(current_user, client_id, operation="ticket.blueprint.suggest")
 
     # Pull resolved/closed tickets for this client â€” match on title tokens to narrow scope
     tokens = [tok.lower() for tok in re.split(r"[\s\-_]+", title_hint) if len(tok) > 3][:6]

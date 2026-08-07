@@ -17,8 +17,8 @@ import HeroTile from "@/components/HeroTile";
 import { toast } from "sonner";
 import {
   Activity, AlertTriangle, Building2, CheckCircle2, Cloud, ExternalLink,
-  FileCheck2, KeyRound, Layers, Link2, ListChecks, Loader2, Lock, Plus,
-  RefreshCw, Search, ShieldCheck, Sparkles, UserPlus, Users, XCircle,
+  FileCheck2, KeyRound, Link2, ListChecks, Loader2, Lock, Plus,
+  RefreshCw, Search, ShieldCheck, Sparkles, UserPlus, Users,
 } from "lucide-react";
 
 const severityClasses = {
@@ -284,6 +284,8 @@ function ConnectionTab({ headers, connection, onSaved }) {
   const [onboarding, setOnboarding] = useState(null);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [tenantQuery, setTenantQuery] = useState("");
+  const [tenantFilter, setTenantFilter] = useState("all");
 
   const loadOnboarding = useCallback(async () => {
     try {
@@ -386,6 +388,23 @@ function ConnectionTab({ headers, connection, onSaved }) {
 
   const summary = onboarding?.summary || {};
   const savedConnection = onboarding?.connection || connection || {};
+  const filteredTenants = useMemo(() => {
+    const term = tenantQuery.trim().toLowerCase();
+    return (onboarding?.tenants || []).filter((tenant) => {
+      const matchesSearch = !term || [
+        tenant.tenant_name,
+        tenant.tenant_id,
+        tenant.default_domain,
+        tenant.client_name,
+        tenant.source,
+      ].some((value) => String(value || "").toLowerCase().includes(term));
+      const matchesFilter = tenantFilter === "all"
+        || (tenantFilter === "needs_mapping" && !tenant.mapped)
+        || (tenantFilter === "needs_access" && !tenant.graph_verified)
+        || (tenantFilter === "ready" && tenant.mapped && tenant.graph_verified);
+      return matchesSearch && matchesFilter;
+    });
+  }, [onboarding?.tenants, tenantFilter, tenantQuery]);
 
   return (
     <div className="space-y-4" data-testid="m365-multitenant-onboarding">
@@ -463,6 +482,10 @@ function ConnectionTab({ headers, connection, onSaved }) {
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Discover customers
               </Button>
             </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
+              <span>Last connection test: {savedConnection?.last_tested_at ? new Date(savedConnection.last_tested_at).toLocaleString() : "Not tested"}</span>
+              <span>Last customer discovery: {savedConnection?.last_discovery_at ? new Date(savedConnection.last_discovery_at).toLocaleString() : "Not run"}</span>
+            </div>
             {result && (
               <div className={`rounded-lg border p-3 text-xs leading-5 ${result.ok ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-100" : "border-amber-500/30 bg-amber-500/[0.05] text-amber-100"}`}>
                 <p className="font-medium">{result.message || result.reason || "Partner Center needs attention"}</p>
@@ -520,12 +543,43 @@ function ConnectionTab({ headers, connection, onSaved }) {
               <p className="text-sm font-semibold">Tenant onboarding registry</p>
               <p className="mt-1 text-xs text-muted-foreground">Discovery, client ownership and Microsoft access are deliberately separate, auditable states.</p>
             </div>
-            <Button variant="outline" size="sm" asChild>
-              <a href="https://partner.microsoft.com/dashboard/commerce2/customers/list" target="_blank" rel="noreferrer">
-                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open Partner Center
-              </a>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={loadOnboarding} disabled={busy} data-testid="m365-registry-refresh">
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh registry
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <a href="https://partner.microsoft.com/dashboard/commerce2/customers/list" target="_blank" rel="noreferrer">
+                  <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Open Partner Center
+                </a>
+              </Button>
+            </div>
           </div>
+          {onboarding?.tenants?.length > 0 && (
+            <div className="grid gap-3 border-b border-border/70 bg-muted/[0.08] p-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-center">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={tenantQuery}
+                  onChange={(event) => setTenantQuery(event.target.value)}
+                  placeholder="Search tenant, domain, ID or linked client"
+                  className="pl-9"
+                  data-testid="m365-tenant-registry-search"
+                />
+              </div>
+              <Select value={tenantFilter} onValueChange={setTenantFilter}>
+                <SelectTrigger data-testid="m365-tenant-registry-filter"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All tenants</SelectItem>
+                  <SelectItem value="needs_mapping">Needs client mapping</SelectItem>
+                  <SelectItem value="needs_access">Needs Microsoft access</SelectItem>
+                  <SelectItem value="ready">Operationally ready</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground md:text-right">
+                Showing <span className="font-medium text-foreground">{filteredTenants.length}</span> of {onboarding.tenants.length}
+              </p>
+            </div>
+          )}
           {!onboarding ? (
             <div className="flex items-center justify-center py-12 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading tenant registry</div>
           ) : onboarding.tenants.length === 0 ? (
@@ -533,6 +587,13 @@ function ConnectionTab({ headers, connection, onSaved }) {
               <Cloud className="mx-auto h-8 w-8 text-muted-foreground/60" />
               <p className="mt-3 text-sm font-medium">No Microsoft tenants onboarded</p>
               <p className="mt-1 text-xs text-muted-foreground">Save Partner Center credentials and discover customers, or add one tenant manually.</p>
+            </div>
+          ) : filteredTenants.length === 0 ? (
+            <div className="py-12 text-center">
+              <Search className="mx-auto h-8 w-8 text-muted-foreground/60" />
+              <p className="mt-3 text-sm font-medium">No tenants match this view</p>
+              <p className="mt-1 text-xs text-muted-foreground">Change the search or readiness filter to see other onboarding records.</p>
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => { setTenantQuery(""); setTenantFilter("all"); }}>Reset registry filters</Button>
             </div>
           ) : (
             <Table>
@@ -546,7 +607,7 @@ function ConnectionTab({ headers, connection, onSaved }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {onboarding.tenants.map((tenant) => (
+                {filteredTenants.map((tenant) => (
                   <TableRow key={tenant.id}>
                     <TableCell>
                       <p className="text-sm font-medium">{tenant.tenant_name || tenant.tenant_id}</p>
@@ -606,6 +667,23 @@ function ConnectionTab({ headers, connection, onSaved }) {
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">{copy}</p>
               </div>
             ))}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-border/60 pt-4">
+            <Button variant="outline" size="sm" asChild>
+              <a href="https://learn.microsoft.com/en-us/partner-center/developer/set-up-api-access-in-partner-center" target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Partner Center API setup
+              </a>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href="https://learn.microsoft.com/en-us/partner-center/developer/partner-center-authentication" target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Authentication guide
+              </a>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href="https://learn.microsoft.com/en-us/partner-center/security/partner-security-requirements" target="_blank" rel="noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />Partner security requirements
+              </a>
+            </Button>
           </div>
         </CardContent>
       </Card>

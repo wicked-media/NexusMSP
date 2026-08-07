@@ -4,20 +4,20 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { DollarSign, TrendingUp, TrendingDown, Users, AlertTriangle, Loader2, RefreshCw, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, Loader2, RefreshCw, ArrowUpRight, ArrowDownRight } from "lucide-react";
 
 export default function ProfitabilityHeatmapPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/profitability-heatmap/data`, { headers });
+      const res = await axios.get(`${API}/profitability-heatmap/data`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setData(res.data);
     } catch { toast.error("Failed to load profitability data"); }
     finally { setLoading(false); }

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,10 +20,10 @@ import { MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Building2, Users, Monitor, FileText, Shield, Activity, BookOpen, Rocket,
   ArrowRight, ArrowLeft, CheckCircle2, Circle, Loader2, Plus, Trash2,
-  Pause, Play, Clock, CalendarDays, AlertTriangle, ChevronRight,
-  Search, Download, Upload, Globe, Phone, Mail, MapPin, Hash,
-  Cpu, HardDrive, Network, Lock, Eye, Bell, Wrench,
-  ClipboardCheck, MessageSquare, Star, Target, Zap, BarChart3, X,
+  Pause, Play, Clock, AlertTriangle, ChevronRight,
+  Search, Upload, Globe,
+  Cpu, Bell, Wrench,
+  ClipboardCheck, MessageSquare, Target,
   LayoutGrid, List, GripVertical, Ticket
 } from "lucide-react";
 
@@ -277,7 +277,7 @@ function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
                     <span>{s.created_at?.slice(0, 10)}</span>
                   </div>
                   <div className="flex gap-1 mt-3">
-                    {STEP_KEYS.map((key, i) => {
+                    {STEP_KEYS.map((key) => {
                       const st = s.steps?.[key]?.status;
                       return (
                         <div key={key} className={`h-1.5 flex-1 rounded-full ${st === "completed" ? "bg-emerald-500" : st === "skipped" ? "bg-amber-500/50" : "bg-border/40"}`} />
@@ -936,7 +936,6 @@ function GoLiveForm({ session, preflight, onPreflightChange, firstTicket, onFirs
   ];
 
   const criticalDone = PREFLIGHT_ITEMS.filter(i => i.critical).every(i => preflight[i.id]);
-  const allDone = PREFLIGHT_ITEMS.every(i => preflight[i.id]);
   const pfDoneCount = PREFLIGHT_ITEMS.filter(i => preflight[i.id]).length;
   const workflowReady = STEP_KEYS.slice(0, -1).every(key => ["completed", "skipped"].includes(steps[key]?.status)) && Boolean(session?.client_id);
   const readyToLaunch = criticalDone && workflowReady;

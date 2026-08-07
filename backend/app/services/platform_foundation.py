@@ -19,6 +19,9 @@ from app.services.event_backbone import persist_platform_event
 
 EVENT_SUBJECTS = [
     {"subject": "core.relationships.rebuilt", "owner": "Nexus Core", "risk": "medium", "description": "The canonical entity and relationship index was rebuilt from operational sources."},
+    {"subject": "core.idea.captured", "owner": "Nexus Foundation", "risk": "low", "description": "A product idea was captured with its declared Nexus value principles."},
+    {"subject": "core.idea.updated", "owner": "Nexus Foundation", "risk": "medium", "description": "An authorised product decision changed an idea's review state or evidence."},
+    {"subject": "core.context.recorded", "owner": "Nexus Core", "risk": "medium", "description": "An authorised technician recorded approved operational context between two canonical client objects."},
     {"subject": "device.identity.issued", "owner": "Nexus Agent", "risk": "medium", "description": "A device-generated CSR was issued a short-lived Nexus Agent client certificate."},
     {"subject": "device.trust.changed", "owner": "Nexus Agent", "risk": "high", "description": "An endpoint trust, certificate, policy or self-repair state changed."},
     {"subject": "device.connected", "owner": "Managed Assets", "risk": "low", "description": "A trusted Nexus Agent established a current session."},
@@ -36,8 +39,22 @@ EVENT_SUBJECTS = [
     {"subject": "automation.approval.required", "owner": "Automation", "risk": "high", "description": "A durable workflow reached a protected approval boundary."},
     {"subject": "automation.run.completed", "owner": "Automation", "risk": "low", "description": "A durable workflow completed every executable step."},
     {"subject": "automation.run.failed", "owner": "Automation", "risk": "high", "description": "A durable workflow stopped safely because a step could not be completed."},
+    {"subject": "autopilot.policy.changed", "owner": "Nexus Autopilot", "risk": "high", "description": "An administrator changed the governed Autopilot autonomy boundary or scope."},
+    {"subject": "autopilot.simulation.completed", "owner": "Nexus Autopilot", "risk": "low", "description": "Autopilot generated a non-mutating plan from retained operational evidence."},
+    {"subject": "autopilot.paused", "owner": "Nexus Autopilot", "risk": "medium", "description": "A technician activated the Autopilot kill switch and returned operations to suggestion-only mode."},
+    {"subject": "autopilot.resumed", "owner": "Nexus Autopilot", "risk": "high", "description": "An authorised manager resumed Autopilot inside its configured and readiness-capped boundary."},
+    {"subject": "executive.scenario.simulated", "owner": "Nexus Executive", "risk": "low", "description": "An owner ran a non-mutating business scenario against the current evidence-backed baseline."},
+    {"subject": "executive.board.snapshot.saved", "owner": "Nexus Executive", "risk": "low", "description": "An owner retained a point-in-time executive briefing and its source-quality statement."},
     {"subject": "automation.compensation.completed", "owner": "Automation", "risk": "high", "description": "A governed compensation attempt completed with its conflict evidence preserved."},
+    {"subject": "automation.pack.installed", "owner": "Automation", "risk": "medium", "description": "A verified workflow pack and its governed draft components were installed from the Nexus Marketplace."},
+    {"subject": "automation.pack.removed", "owner": "Automation", "risk": "medium", "description": "An installed workflow pack was removed while its lifecycle and audit evidence were preserved."},
+    {"subject": "asset.story.connected", "owner": "Managed Assets", "risk": "medium", "description": "A managed endpoint was connected to its canonical inventory and lifecycle record."},
+    {"subject": "confidence.assessment.verified", "owner": "Nexus Confidence", "risk": "low", "description": "A technician attested an evidence-based confidence profile without overriding its recorded gaps."},
+    {"subject": "change.guardian.previewed", "owner": "Nexus Change Guardian", "risk": "low", "description": "A technician generated a non-mutating dependency and blast-radius preview from current Nexus evidence."},
+    {"subject": "change.guardian.execution.linked", "owner": "Nexus Change Guardian", "risk": "high", "description": "A governed operational action was linked to the exact Change Guardian preview reviewed before execution."},
+    {"subject": "intelligence.memory.reviewed", "owner": "Nexus Intelligence", "risk": "low", "description": "A technician reviewed an evidence-backed Second Brain recommendation without executing an external change."},
     {"subject": "connector.health.changed", "owner": "Integrations", "risk": "medium", "description": "A connector changed connection, sync or rate-limit state."},
+    {"subject": "platform.readiness.reviewed", "owner": "Nexus Foundation", "risk": "high", "description": "A production-readiness item, test result or launch-blocker decision was reviewed."},
 ]
 
 _SUBJECT_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+$")

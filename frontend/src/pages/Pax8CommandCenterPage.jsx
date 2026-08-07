@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Loader2, Cloud, CheckCircle, XCircle, RefreshCw, Users, Link2, Play,
+  Loader2, Cloud, XCircle, RefreshCw, Users, Link2, Play,
   DollarSign, Plus, Search, Package, Building2, Save
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";

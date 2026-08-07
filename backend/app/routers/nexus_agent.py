@@ -45,16 +45,20 @@ from app.services.agent_trust import (
     agent_trust_state,
     build_agent_policy,
     issue_device_certificate,
+    sign_agent_command_payload,
     sign_update_manifest,
 )
 from app.services.action_permissions import require_action
 from app.services.platform_foundation import emit_platform_event
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.time_machine import record_endpoint_state_snapshot
 
 logger = logging.getLogger("nexus_agent")
 router = APIRouter(tags=["NexusOps Agent"])
 
 ONLINE_WINDOW_SECONDS = 180
 MAX_FLEET_TARGETS = 200
+COMMAND_AUTHORIZATION_TTL_SECONDS = 300
 
 # Where the compiled Windows agent binary lives. Production can set
 # NEXUS_AGENT_BINARY; local development uses the repository's agent/dist.
@@ -69,7 +73,7 @@ AGENT_BINARY_PATH = Path(os.environ["NEXUS_AGENT_BINARY"]) if os.environ.get("NE
 CHAT_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_CHAT_COMPANION_BINARY"]) if os.environ.get("NEXUS_CHAT_COMPANION_BINARY") else (
     _CONTAINER_CHAT_COMPANION_BINARY if _CONTAINER_CHAT_COMPANION_BINARY.exists() else _LOCAL_CHAT_COMPANION_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.7-nexus-identity"
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.10-signed-commands"
 MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
@@ -215,29 +219,54 @@ def _batch_scope(batch_id: str, user: dict) -> dict[str, Any]:
     if not _is_agent_admin(user):
         identities = [value for value in {user.get("id"), user.get("email")} if value]
         query["queued_by"] = {"$in": identities}
-    return query
+    return scoped_query(user, query)
 
 
 async def _verify_agent_token(
     db,
     x_agent_token: str | None,
     x_client_cert_fingerprint: str | None = None,
+    *,
+    allow_expired_identity: bool = False,
 ) -> dict:
     if not x_agent_token:
         raise HTTPException(401, "missing agent token")
     agent = await db.nexus_agents.find_one({"agent_token": x_agent_token, "is_active": True})
     if not agent:
         raise HTTPException(401, "invalid agent token")
-    expected = str((agent.get("device_identity") or {}).get("certificate_fingerprint") or "").lower()
+    identity = agent.get("device_identity") if isinstance(agent.get("device_identity"), dict) else {}
+    expected = str(identity.get("certificate_fingerprint") or "").lower()
+    expires_at = identity.get("certificate_expires_at")
+    if expires_at and not allow_expired_identity:
+        try:
+            expired = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")) <= datetime.now(timezone.utc)
+        except (TypeError, ValueError):
+            expired = True
+        if expired:
+            raise HTTPException(401, "device certificate expired; renew the enrolled identity")
+
+    settings: dict[str, Any] = {}
+    settings_collection = getattr(db, "nexus_agent_settings", None)
+    if settings_collection is not None:
+        try:
+            settings = await settings_collection.find_one({"_id": "settings"}, {"_id": 0}) or {}
+        except (AttributeError, TypeError):
+            settings = {}
+    require_mtls = bool(settings.get("require_mtls", False))
+    raw_fingerprint = x_client_cert_fingerprint if isinstance(x_client_cert_fingerprint, str) else ""
     presented = (
-        str(x_client_cert_fingerprint or "").replace(":", "").strip().lower()
+        raw_fingerprint.replace(":", "").strip().lower()
         if MTLS_PROXY_TRUST_ENABLED
         else ""
     )
+    if require_mtls and not MTLS_PROXY_TRUST_ENABLED:
+        raise HTTPException(503, "mTLS enforcement is enabled but the trusted proxy certificate header is disabled")
+    if require_mtls and not presented:
+        raise HTTPException(401, "device certificate is required")
     if presented and (not expected or not secrets.compare_digest(expected, presented)):
         raise HTTPException(401, "device certificate fingerprint does not match enrolled identity")
     transport = "mtls" if presented and expected else "token"
-    if (agent.get("device_identity") or {}).get("last_transport") != transport:
+    if identity.get("last_transport") != transport and hasattr(db.nexus_agents, "update_one"):
         now = _now()
         await db.nexus_agents.update_one(
             {"id": agent["id"]},
@@ -248,6 +277,62 @@ async def _verify_agent_token(
         )
         agent.setdefault("device_identity", {})["last_transport"] = transport
     return agent
+
+
+def _command_payload_sha256(payload: dict[str, Any] | None) -> str:
+    canonical = json.dumps(payload or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _seal_agent_command(command: dict[str, Any], agent: dict[str, Any]) -> dict[str, Any]:
+    """Create a short-lived authorization envelope bound to one endpoint."""
+    issued = datetime.now(timezone.utc)
+    expires = issued + timedelta(seconds=COMMAND_AUTHORIZATION_TTL_SECONDS)
+    nonce = uuid.uuid4().hex
+    client_id = str(agent.get("client_id") or command.get("client_id") or "")
+    payload_sha256 = _command_payload_sha256(command.get("payload"))
+    envelope = {
+        "schema_version": 1,
+        "command_id": str(command.get("id") or ""),
+        "device_id": str(agent.get("id") or command.get("device_id") or ""),
+        "client_id": client_id,
+        "kind": str(command.get("kind") or ""),
+        "payload_sha256": payload_sha256,
+        "issued_at": issued.isoformat(),
+        "expires_at": expires.isoformat(),
+        "nonce": nonce,
+        "queued_by": str(command.get("queued_by") or "system"),
+        "approval_id": str(command.get("approval_id") or ""),
+        "privilege": str(command.get("privilege") or "system"),
+    }
+    signed_payload = "|".join(str(envelope[key]) for key in (
+        "schema_version",
+        "command_id",
+        "device_id",
+        "client_id",
+        "kind",
+        "payload_sha256",
+        "issued_at",
+        "expires_at",
+        "nonce",
+        "queued_by",
+        "approval_id",
+        "privilege",
+    ))
+    return {
+        **envelope,
+        **sign_agent_command_payload(signed_payload),
+    }
+
+
+async def _agent_in_scope(device_id: str, user: dict, operation: str) -> dict[str, Any]:
+    return await assert_record_scope(
+        user,
+        db.nexus_agents,
+        device_id,
+        operation=operation,
+        resource_name="Agent",
+    )
 
 
 async def _issue_enrollment_identity(
@@ -493,6 +578,7 @@ class CommandRequest(BaseModel):
 
 class CommandResult(BaseModel):
     id: str
+    nonce: str = Field(default="", max_length=128)
     status: Literal["ok", "error", "timeout"]
     exit_code: int = 0
     stdout: str = Field(default="", max_length=70_000)
@@ -527,6 +613,7 @@ class NexusAgentSettings(BaseModel):
     auto_update_enabled: bool = True
     self_repair_enabled: bool = True
     require_signed_updates: Literal[True] = True
+    require_mtls: bool = False
     winget_enabled: bool = False
     winget_allowed_ids: list[str] = Field(default_factory=list, max_length=100)
 
@@ -681,7 +768,12 @@ async def renew_device_identity(
     x_agent_token: str | None = Header(None),
     x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
 ):
-    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    agent = await _verify_agent_token(
+        db,
+        x_agent_token,
+        x_client_cert_fingerprint,
+        allow_expired_identity=True,
+    )
     identity = await _issue_enrollment_identity(
         agent_id=agent["id"],
         client_id=str(agent.get("client_id") or ""),
@@ -952,7 +1044,10 @@ async def heartbeat(
                 **telemetry,
             }},
         )
-        mirrored_device = await db.devices.find_one({"nexus_agent_id": agent["id"]}, {"_id": 0, "id": 1})
+        mirrored_device = await db.devices.find_one(
+            {"nexus_agent_id": agent["id"]},
+            {"_id": 0, "id": 1, "client_id": 1},
+        )
         if mirrored_device and mirrored_device.get("id"):
             device_id = mirrored_device["id"]
             await db.device_disks.delete_many({"device_id": device_id})
@@ -996,6 +1091,20 @@ async def heartbeat(
                     "last_inventory_at": now,
                 } for app in software])
                 await db.devices.update_one({"id": device_id}, {"$set": {"installed_software_count": len(software)}})
+            try:
+                await record_endpoint_state_snapshot(
+                    db,
+                    device_id=device_id,
+                    client_id=mirrored_device.get("client_id") or agent.get("client_id"),
+                    agent_id=agent["id"],
+                    snapshot=snap,
+                    capabilities=p.capabilities,
+                    agent_version=p.agent_version or agent.get("agent_version", ""),
+                    captured_at=now,
+                )
+            except Exception:
+                # State history must never make a valid heartbeat fail.
+                logger.exception("[nexus-agent] failed to capture endpoint state history")
             # Keep a compact, technician-useful trailÃ¢â‚¬â€not one noisy event per
             # minute. Heartbeat inventory is summarised at most once per hour.
             last_audit = agent.get("last_device_audit_at")
@@ -1145,16 +1254,27 @@ async def commands_poll(
     }).to_list(length=20)
     out: list[dict] = []
     for c in pending:
+        authorization = _seal_agent_command(c, agent)
         claimed = await db.nexus_agent_commands.update_one(
             {"_id": c["_id"], "status": "pending"},
-            {"$set": {"status": "dispatched", "dispatched_at": _now()}},
+            {"$set": {
+                "status": "dispatched",
+                "dispatched_at": _now(),
+                "client_id": agent.get("client_id"),
+                "authorization": authorization,
+            }},
         )
         if claimed.modified_count == 1:
             if c.get("script_execution_id"):
                 await db.script_executions.update_one({"id": c["script_execution_id"], "status": "pending"}, {"$set": {
                     "status": "running", "started_at": _now(),
                 }})
-            out.append({"id": c["id"], "kind": c["kind"], "payload": c.get("payload") or {}})
+            out.append({
+                "id": c["id"],
+                "kind": c["kind"],
+                "payload": c.get("payload") or {},
+                "authorization": authorization,
+            })
     return {"commands": out}
 
 
@@ -1165,8 +1285,22 @@ async def command_result(
     x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
 ):
     agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
-    await db.nexus_agent_commands.update_one(
+    command_record = await db.nexus_agent_commands.find_one(
         {"id": res.id, "device_id": agent["id"]},
+        {"_id": 0, "status": 1, "authorization": 1},
+    )
+    if not command_record:
+        raise HTTPException(404, "command not found")
+    expected_nonce = str((command_record.get("authorization") or {}).get("nonce") or "")
+    if not expected_nonce or not res.nonce or not secrets.compare_digest(expected_nonce, res.nonce):
+        await _audit(db, "command_result_rejected", {
+            "device_id": agent["id"],
+            "command_id": res.id,
+            "reason": "authorization nonce mismatch",
+        })
+        raise HTTPException(409, "command result authorization does not match the dispatched command")
+    result_update = await db.nexus_agent_commands.update_one(
+        {"id": res.id, "device_id": agent["id"], "status": "dispatched"},
         {"$set": {
             "status": res.status,
             "exit_code": res.exit_code,
@@ -1176,6 +1310,56 @@ async def command_result(
             "completed_at": _now(),
         }},
     )
+    if result_update.modified_count != 1:
+        await _audit(db, "command_result_rejected", {
+            "device_id": agent["id"],
+            "command_id": res.id,
+            "reason": f"invalid result transition from {command_record.get('status')}",
+        })
+        raise HTTPException(409, "command result has already been recorded or was not dispatched")
+    try:
+        repair_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"], "kind": "agent_repair"},
+            {"_id": 0, "payload": 1},
+        )
+        if repair_command:
+            repair_evidence: dict[str, Any] = {}
+            if res.stdout:
+                try:
+                    parsed = json.loads(res.stdout)
+                    if isinstance(parsed, dict):
+                        repair_evidence = parsed
+                except json.JSONDecodeError:
+                    repair_evidence = {}
+            repair_status = (
+                "healthy"
+                if res.status == "ok" and repair_evidence.get("status") == "healthy"
+                else "attention"
+            )
+            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+                "self_repair": {
+                    "status": repair_status,
+                    "checks": list(repair_evidence.get("checks") or [])[:20],
+                    "repairs": list(repair_evidence.get("repairs") or [])[:20],
+                    "details": repair_evidence.get("details") if isinstance(repair_evidence.get("details"), dict) else {},
+                    "last_repair_at": _now(),
+                    "command_id": res.id,
+                },
+            }})
+            await emit_platform_event(
+                subject="device.trust.changed",
+                source="nexus.agent.repair",
+                actor={"id": agent["id"], "name": agent.get("hostname") or "Nexus Agent", "role": "device"},
+                client_id=agent.get("client_id") or None,
+                payload={
+                    "device_id": agent["id"],
+                    "state": repair_status,
+                    "command_id": res.id,
+                    "actions": (repair_command.get("payload") or {}).get("actions") or [],
+                },
+            )
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile agent trust repair")
     # Maintenance windows queue commands asynchronously; reconcile the window
     # record when the agent returns instead of leaving a permanent "queued".
     try:
@@ -1332,7 +1516,7 @@ async def list_agents(client_id: str | None = None, user=Depends(get_current_use
     q: dict[str, Any] = {}
     if client_id:
         q["client_id"] = client_id
-    cursor = db.nexus_agents.find(q, {"agent_token": 0}).sort("last_seen", -1)
+    cursor = db.nexus_agents.find(scoped_query(user, q), {"agent_token": 0}).sort("last_seen", -1)
     agents = await cursor.to_list(length=2000)
     for a in agents:
         a.pop("_id", None)
@@ -1343,9 +1527,8 @@ async def list_agents(client_id: str | None = None, user=Depends(get_current_use
 
 @router.get("/nexus-agent/agents/{device_id}")
 async def get_agent(device_id: str, user=Depends(require_agent_operator)):
-    agent = await db.nexus_agents.find_one({"id": device_id}, {"agent_token": 0, "_id": 0})
-    if not agent:
-        raise HTTPException(404, "agent not found")
+    agent = await _agent_in_scope(device_id, user, "agent.read")
+    agent.pop("agent_token", None)
     agent["trust"] = agent_trust_state(agent)
     # Recent commands
     cmds = await db.nexus_agent_commands.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(length=50)
@@ -1359,7 +1542,7 @@ async def get_agent(device_id: str, user=Depends(require_agent_operator)):
 async def trust_overview(user=Depends(get_current_user)):
     """Summarise endpoint identity, policy and local resilience evidence."""
     agents = await db.nexus_agents.find(
-        {"is_active": True},
+        scoped_query(user, {"is_active": True}),
         {
             "_id": 0,
             "id": 1,
@@ -1441,8 +1624,8 @@ async def remediate_agent_trust(
     req: AgentRepairRequest,
     user=Depends(require_action("agent.trust.remediate")),
 ):
-    agent = await db.nexus_agents.find_one({"id": device_id, "is_active": True}, {"_id": 0})
-    if not agent:
+    agent = await _agent_in_scope(device_id, user, "agent.trust.remediate")
+    if not agent.get("is_active"):
         raise HTTPException(404, "agent not found")
     if not _is_online(agent.get("last_seen")):
         raise HTTPException(409, "agent is offline; reconnect it before repairing trust")
@@ -1489,6 +1672,7 @@ async def remediate_agent_trust(
 
 @router.post("/nexus-agent/agents/{device_id}/command")
 async def queue_command(device_id: str, req: CommandRequest, user=Depends(require_agent_operator)):
+    scoped_agent = await _agent_in_scope(device_id, user, "agent.command.queue")
     agent_query: dict[str, Any] = {"id": device_id, "is_active": True}
     if not req.include_offline:
         agent_query["last_seen"] = {"$gte": _online_cutoff()}
@@ -1500,6 +1684,7 @@ async def queue_command(device_id: str, req: CommandRequest, user=Depends(requir
     doc = {
         "id": cmd_id,
         "device_id": device_id,
+        "client_id": scoped_agent.get("client_id"),
         "kind": req.kind,
         "payload": req.payload or {},
         "status": "pending",
@@ -1524,20 +1709,22 @@ async def deploy_client_companion(req: CompanionDeployRequest, user=Depends(requ
         raise HTTPException(409, "Nexus Client Chat companion binary is not available on the server")
     selected_ids = list(dict.fromkeys([item.strip() for item in req.device_ids if item and item.strip()]))
     if req.all_online:
-        agents = await db.nexus_agents.find({
+        agents = await db.nexus_agents.find(scoped_query(user, {
             "is_active": True,
             "last_seen": {"$gte": _online_cutoff()},
             "agent_version": AGENT_VERSION,
-        }, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1}).sort("last_seen", -1).to_list(MAX_FLEET_TARGETS)
+        }), {"_id": 0, "id": 1, "hostname": 1, "client_id": 1}).sort("last_seen", -1).to_list(MAX_FLEET_TARGETS)
     else:
         if not selected_ids:
             raise HTTPException(400, "Select at least one online agent or choose all online agents")
-        agents = await db.nexus_agents.find({
+        agents = await db.nexus_agents.find(scoped_query(user, {
             "id": {"$in": selected_ids},
             "is_active": True,
             "last_seen": {"$gte": _online_cutoff()},
             "agent_version": AGENT_VERSION,
-        }, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1}).to_list(MAX_FLEET_TARGETS)
+        }), {"_id": 0, "id": 1, "hostname": 1, "client_id": 1}).to_list(MAX_FLEET_TARGETS)
+        if len({agent.get("id") for agent in agents}) != len(selected_ids):
+            raise HTTPException(404, "One or more selected agents were unavailable or outside your client scope")
     if not agents:
         raise HTTPException(409, "No selected Nexus Agents are online with the current companion-rollout agent version")
 
@@ -1547,6 +1734,7 @@ async def deploy_client_companion(req: CompanionDeployRequest, user=Depends(requ
         commands.append({
             "id": str(uuid.uuid4()),
             "device_id": agent["id"],
+            "client_id": agent.get("client_id"),
             "kind": "install_companion",
             "payload": {"sha256": companion["sha256"]},
             "status": "pending",
@@ -1573,6 +1761,7 @@ async def agent_commands(
     limit: int = Query(50, ge=1, le=200),
     user=Depends(require_agent_operator),
 ):
+    await _agent_in_scope(device_id, user, "agent.command.read")
     cur = db.nexus_agent_commands.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1)
     return await cur.to_list(length=limit)
 
@@ -1655,6 +1844,7 @@ def _build_installer_zip(
 
 @router.post("/nexus-agent/installers/build")
 async def build_installer(req: InstallerBuildRequest, request: Request, user=Depends(require_agent_operator)):
+    await assert_client_scope(user, req.client_id, operation="agent.installer.build")
     client = await db.clients.find_one({"id": req.client_id}, {"_id": 0, "id": 1, "name": 1})
     if not client:
         raise HTTPException(404, "client not found")
@@ -1829,7 +2019,7 @@ async def list_installers(client_id: str | None = None, user=Depends(require_age
     q: dict[str, Any] = {"is_deleted": False}
     if client_id:
         q["client_id"] = client_id
-    cur = db.nexus_agent_installers.find(q, {"_id": 0}).sort("created_at", -1)
+    cur = db.nexus_agent_installers.find(scoped_query(user, q), {"_id": 0}).sort("created_at", -1)
     return await cur.to_list(length=200)
 
 
@@ -1872,14 +2062,18 @@ async def version_manifest():
 @router.get("/nexus-agent/fleet/version-distribution")
 async def fleet_version_distribution(user=Depends(get_current_user)):
     """Version-distribution donut data for the Fleet Control Room."""
-    pipeline = [
-        {"$match": {"is_active": True}},
-        {"$group": {"_id": {"$ifNull": ["$agent_version", "unknown"]}, "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
+    agents = await db.nexus_agents.find(
+        scoped_query(user, {"is_active": True}),
+        {"_id": 0, "agent_version": 1},
+    ).to_list(length=10_000)
+    version_counts: dict[str, int] = {}
+    for agent in agents:
+        version = str(agent.get("agent_version") or "unknown")
+        version_counts[version] = version_counts.get(version, 0) + 1
+    rows = [
+        {"version": version, "count": count}
+        for version, count in sorted(version_counts.items(), key=lambda item: item[1], reverse=True)
     ]
-    rows = []
-    async for r in db.nexus_agents.aggregate(pipeline):
-        rows.append({"version": r["_id"], "count": r["count"]})
     latest = _binary_info()["version"]
     total = sum(r["count"] for r in rows) or 1
     for r in rows:
@@ -1900,8 +2094,18 @@ async def fleet_activity(
     """Bloomberg-style ticker of recent fleet events: enrollments + commands +
     heartbeat anomalies. Most-recent first."""
     events: list[dict] = []
+    allowed_agents = await db.nexus_agents.find(
+        scoped_query(user, {"is_active": True}),
+        {"_id": 0, "id": 1},
+    ).to_list(length=10_000)
+    allowed_agent_ids = [agent["id"] for agent in allowed_agents if agent.get("id")]
+    if not allowed_agent_ids:
+        return {"events": []}
     # Recent enrollments
-    cur = db.nexus_agent_audit.find({"kind": {"$in": ["enroll", "re-enroll"]}}, {"_id": 0}).sort("at", -1).limit(20)
+    cur = db.nexus_agent_audit.find({
+        "kind": {"$in": ["enroll", "re-enroll"]},
+        "payload.device_id": {"$in": allowed_agent_ids},
+    }, {"_id": 0}).sort("at", -1).limit(20)
     async for a in cur:
         p = a.get("payload") or {}
         events.append({
@@ -1914,7 +2118,10 @@ async def fleet_activity(
             "tone": "emerald",
         })
     # Recent commands
-    cur = db.nexus_agent_commands.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
+    cur = db.nexus_agent_commands.find(
+        {"device_id": {"$in": allowed_agent_ids}},
+        {"_id": 0},
+    ).sort("created_at", -1).limit(limit)
     async for c in cur:
         events.append({
             "kind": "command",
@@ -1927,7 +2134,10 @@ async def fleet_activity(
         })
     # Use immutable heartbeat rows so the feed represents actual events rather
     # than repeatedly presenting each agent's mutable last_seen value as new.
-    cur = db.nexus_agent_heartbeats.find({}, {"_id": 0}).sort("at", -1).limit(20)
+    cur = db.nexus_agent_heartbeats.find(
+        {"device_id": {"$in": allowed_agent_ids}},
+        {"_id": 0},
+    ).sort("at", -1).limit(20)
     async for heartbeat in cur:
         events.append({
             "kind": "heartbeat",
@@ -1942,7 +2152,10 @@ async def fleet_activity(
     ids = list({e.get("device_id") for e in events if e.get("device_id") and not e.get("hostname")})
     if ids:
         host_map = {}
-        cur = db.nexus_agents.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1})
+        cur = db.nexus_agents.find(
+            scoped_query(user, {"id": {"$in": ids}}),
+            {"_id": 0, "id": 1, "hostname": 1, "client_id": 1},
+        )
         async for a in cur:
             host_map[a["id"]] = {"hostname": a.get("hostname"), "client_id": a.get("client_id")}
         for e in events:
@@ -1960,7 +2173,10 @@ async def fleet_recent_enrollments(
     limit: int = Query(20, ge=1, le=100),
     user=Depends(get_current_user),
 ):
-    cur = db.nexus_agents.find({}, {"_id": 0, "agent_token": 0}).sort("enrolled_at", -1).limit(limit)
+    cur = db.nexus_agents.find(
+        scoped_query(user),
+        {"_id": 0, "agent_token": 0},
+    ).sort("enrolled_at", -1).limit(limit)
     rows = await cur.to_list(length=limit)
     agent_ids = [row.get("id") for row in rows if row.get("id")]
     device_ids: dict[str, str] = {}
@@ -2002,13 +2218,14 @@ async def fleet_run_script(req: FleetScriptRequest, user=Depends(require_agent_o
     requested_ids = list(dict.fromkeys(req.device_ids))
     if req.device_ids:
         cur = db.nexus_agents.find(
-            {**base_query, "id": {"$in": requested_ids}},
+            scoped_query(user, {**base_query, "id": {"$in": requested_ids}}),
             {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1},
         )
         targets = await cur.to_list(length=len(requested_ids))
     elif req.client_id:
+        await assert_client_scope(user, req.client_id, operation="agent.fleet.run_script")
         cur = db.nexus_agents.find(
-            {**base_query, "client_id": req.client_id},
+            scoped_query(user, {**base_query, "client_id": req.client_id}),
             {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "os": 1, "last_seen": 1},
         )
         targets = await cur.to_list(length=MAX_FLEET_TARGETS + 1)
@@ -2031,6 +2248,7 @@ async def fleet_run_script(req: FleetScriptRequest, user=Depends(require_agent_o
         docs.append({
             "id": cmd_id,
             "device_id": t["id"],
+            "client_id": t.get("client_id"),
             "hostname": t.get("hostname"),
             "kind": "run_script",
             "payload": payload,
@@ -2092,42 +2310,6 @@ async def fleet_batch_cancel(batch_id: str, user=Depends(require_agent_operator)
             "cancelled_by": user.get("email") or user.get("id"),
         }},
     )
-    repair_command = await db.nexus_agent_commands.find_one(
-        {"id": res.id, "device_id": agent["id"], "kind": "agent_repair"},
-        {"_id": 0, "payload": 1},
-    )
-    if repair_command:
-        repair_evidence: dict[str, Any] = {}
-        if res.stdout:
-            try:
-                parsed = json.loads(res.stdout)
-                if isinstance(parsed, dict):
-                    repair_evidence = parsed
-            except json.JSONDecodeError:
-                repair_evidence = {}
-        repair_status = "healthy" if res.status == "ok" and repair_evidence.get("status") == "healthy" else "attention"
-        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
-            "self_repair": {
-                "status": repair_status,
-                "checks": list(repair_evidence.get("checks") or [])[:20],
-                "repairs": list(repair_evidence.get("repairs") or [])[:20],
-                "details": repair_evidence.get("details") if isinstance(repair_evidence.get("details"), dict) else {},
-                "last_repair_at": _now(),
-                "command_id": res.id,
-            },
-        }})
-        await emit_platform_event(
-            subject="device.trust.changed",
-            source="nexus.agent.repair",
-            actor={"id": agent["id"], "name": agent.get("hostname") or "Nexus Agent", "role": "device"},
-            client_id=agent.get("client_id") or None,
-            payload={
-                "device_id": agent["id"],
-                "state": repair_status,
-                "command_id": res.id,
-                "actions": (repair_command.get("payload") or {}).get("actions") or [],
-            },
-        )
     await _audit(db, "fleet_script_cancel", {
         "batch_id": batch_id,
         "cancelled_count": result.modified_count,
@@ -2168,6 +2350,7 @@ async def get_settings(user=Depends(require_agent_admin)):
         "auto_update_enabled": s.get("auto_update_enabled", True),
         "self_repair_enabled": s.get("self_repair_enabled", True),
         "require_signed_updates": s.get("require_signed_updates", True),
+        "require_mtls": s.get("require_mtls", False),
         "winget_enabled": s.get("winget_enabled", False),
         "winget_allowed_ids": s.get("winget_allowed_ids", []),
         "agent_version": AGENT_VERSION,
@@ -2177,7 +2360,7 @@ async def get_settings(user=Depends(require_agent_admin)):
         "client_companion_exists": _companion_binary_info()["exists"],
         "client_companion_sha256": _companion_binary_info()["sha256"],
         "client_companion_size": _companion_binary_info()["size"],
-        "transport_mode": "token-compatible-mtls-ready",
+        "transport_mode": "mtls-required" if s.get("require_mtls", False) else "token-compatible-mtls-ready",
         "mtls_proxy_header": "X-Client-Cert-Fingerprint",
         "mtls_proxy_trust_enabled": MTLS_PROXY_TRUST_ENABLED,
     }
@@ -2185,6 +2368,11 @@ async def get_settings(user=Depends(require_agent_admin)):
 
 @router.put("/nexus-agent/settings")
 async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_admin)):
+    if payload.require_mtls and not MTLS_PROXY_TRUST_ENABLED:
+        raise HTTPException(
+            409,
+            "Enable NEXUS_AGENT_TRUST_PROXY_MTLS before requiring device certificates",
+        )
     await db.nexus_agent_settings.update_one(
         {"_id": "settings"},
         {"$set": {
@@ -2196,6 +2384,7 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
             "auto_update_enabled": payload.auto_update_enabled,
             "self_repair_enabled": payload.self_repair_enabled,
             "require_signed_updates": payload.require_signed_updates,
+            "require_mtls": payload.require_mtls,
             "winget_enabled": payload.winget_enabled,
             "winget_allowed_ids": [item.strip() for item in payload.winget_allowed_ids if item.strip()],
             "updated_at": _now(),
@@ -2209,6 +2398,7 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
         "auto_update_enabled": payload.auto_update_enabled,
         "self_repair_enabled": payload.self_repair_enabled,
         "require_signed_updates": payload.require_signed_updates,
+        "require_mtls": payload.require_mtls,
         "winget_enabled": payload.winget_enabled,
         "by": user.get("email") or user.get("id"),
     })
@@ -2217,38 +2407,49 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
 
 @router.get("/nexus-agent/stats")
 async def stats(user=Depends(get_current_user)):
-    total = await db.nexus_agents.count_documents({"is_active": True})
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(minutes=3)).isoformat()
-    online = await db.nexus_agents.count_documents({"is_active": True, "last_seen": {"$gte": cutoff}})
-    cmds_pending = await db.nexus_agent_commands.count_documents({"status": "pending"})
-    active_agents = await db.nexus_agents.find({"is_active": True}, {"_id": 0, "id": 1}).to_list(length=10_000)
-    active_agent_ids = [agent["id"] for agent in active_agents if agent.get("id")]
-    agent_device_query: dict[str, Any] = {"nexus_agent_id": {"$in": active_agent_ids}}
-    agent_devices = await db.devices.count_documents(agent_device_query)
-    assessed_devices = await db.devices.count_documents({
-        **agent_device_query,
-        "security_assessed_at": {"$exists": True, "$ne": None},
-    })
-    managed_devices = await db.devices.count_documents({})
-    assessed_rows = await db.devices.find(
-        {
-            **agent_device_query,
-            "security_assessed_at": {"$exists": True, "$ne": None},
-        },
-        {"_id": 0, "pending_patches": 1},
-    ).to_list(5000)
-    pending_updates = sum(int(row.get("pending_patches") or 0) for row in assessed_rows)
-    trust_rows = await db.nexus_agents.find(
-        {"is_active": True},
+    active_agents = await db.nexus_agents.find(
+        scoped_query(user, {"is_active": True}, site_field=None),
         {
             "_id": 0,
+            "id": 1,
+            "client_id": 1,
+            "last_seen": 1,
             "device_identity": 1,
             "policy_evidence": 1,
             "self_repair": 1,
             "update_evidence": 1,
         },
     ).to_list(length=10_000)
+    active_agent_ids = [agent["id"] for agent in active_agents if agent.get("id")]
+    total = len(active_agents)
+    online = sum(1 for agent in active_agents if str(agent.get("last_seen") or "") >= cutoff)
+    cmds_pending = await db.nexus_agent_commands.count_documents(
+        {"status": "pending", "device_id": {"$in": active_agent_ids}}
+    )
+    agent_device_query = scoped_query(
+        user,
+        {"nexus_agent_id": {"$in": active_agent_ids}},
+    )
+    agent_devices = await db.devices.count_documents(agent_device_query)
+    assessed_devices = await db.devices.count_documents({
+        "$and": [
+            agent_device_query,
+            {"security_assessed_at": {"$exists": True, "$ne": None}},
+        ],
+    })
+    managed_devices = await db.devices.count_documents(scoped_query(user, {}))
+    assessed_rows = await db.devices.find(
+        {
+            "$and": [
+                agent_device_query,
+                {"security_assessed_at": {"$exists": True, "$ne": None}},
+            ],
+        },
+        {"_id": 0, "pending_patches": 1},
+    ).to_list(5000)
+    pending_updates = sum(int(row.get("pending_patches") or 0) for row in assessed_rows)
     trust_counts = {
         "certificate_issued": 0,
         "mtls_verified": 0,
@@ -2256,19 +2457,17 @@ async def stats(user=Depends(get_current_user)):
         "self_repair_healthy": 0,
         "signed_update_verified": 0,
     }
-    for row in trust_rows:
+    by_client_counts: dict[str, int] = {}
+    for row in active_agents:
         trust_status = agent_trust_state(row)["status"]
         trust_counts["certificate_issued"] += int(trust_status in {"certificate_issued", "mtls_verified"})
         trust_counts["mtls_verified"] += int(trust_status == "mtls_verified")
         trust_counts["policy_acknowledged"] += int((row.get("policy_evidence") or {}).get("status") == "acknowledged")
         trust_counts["self_repair_healthy"] += int((row.get("self_repair") or {}).get("status") == "healthy")
         trust_counts["signed_update_verified"] += int(bool((row.get("update_evidence") or {}).get("signature_verified")))
-    by_client = await db.nexus_agents.aggregate([
-        {"$match": {"is_active": True}},
-        {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-        {"$limit": 12},
-    ]).to_list(length=12)
+        client_id = str(row.get("client_id") or "unassigned")
+        by_client_counts[client_id] = by_client_counts.get(client_id, 0) + 1
+    by_client = sorted(by_client_counts.items(), key=lambda item: (-item[1], item[0]))[:12]
     return {
         "total_agents": total,
         "online_agents": online,
@@ -2279,6 +2478,6 @@ async def stats(user=Depends(get_current_user)):
         "managed_devices": managed_devices,
         "pending_updates": pending_updates,
         **trust_counts,
-        "by_client": [{"client_id": r["_id"], "count": r["count"]} for r in by_client],
+        "by_client": [{"client_id": client_id, "count": count} for client_id, count in by_client],
         "agent_version": AGENT_VERSION,
     }

@@ -654,14 +654,14 @@ function AgentTrustCard({ canOperate }) {
 function SettingsCard({ canEdit }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, self_repair_enabled: true, require_signed_updates: true, winget_enabled: false, winget_allowed_ids: [] });
+  const [s, setS] = useState({ heartbeat_secs: 60, poll_secs: 10, server_url: "", splashtop_enabled: false, splashtop_deploy_code_default: "", auto_update_enabled: true, self_repair_enabled: true, require_signed_updates: true, require_mtls: false, winget_enabled: false, winget_allowed_ids: [] });
   const [busy, setBusy] = useState(false);
-  const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false, agent_binary_sha256: "", agent_binary_size: 0 });
+  const [meta, setMeta] = useState({ agent_version: "", agent_binary_exists: false, agent_binary_sha256: "", agent_binary_size: 0, transport_mode: "", mtls_proxy_trust_enabled: false });
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     axios.get(`${API}/nexus-agent/settings`, { headers })
-      .then(r => { setS(prev => ({ ...prev, ...r.data })); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0 }); setLoadError(""); })
+      .then(r => { setS(prev => ({ ...prev, ...r.data })); setMeta({ agent_version: r.data.agent_version, agent_binary_exists: r.data.agent_binary_exists, agent_binary_sha256: r.data.agent_binary_sha256 || "", agent_binary_size: r.data.agent_binary_size || 0, transport_mode: r.data.transport_mode || "", mtls_proxy_trust_enabled: Boolean(r.data.mtls_proxy_trust_enabled) }); setLoadError(""); })
       .catch(() => setLoadError("Agent settings are unavailable."));
   }, [headers]);
 
@@ -742,6 +742,25 @@ function SettingsCard({ canEdit }) {
           <button type="button" onClick={() => canEdit && setS({ ...s, self_repair_enabled: !s.self_repair_enabled })} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left disabled:opacity-60" disabled={!canEdit}>
             <div className="flex items-center gap-2 text-sm font-medium"><Wrench className="h-4 w-4 text-amber-300" />Local self-repair<Badge variant="outline" className="ml-auto text-[9px]">{s.self_repair_enabled ? "ON" : "OFF"}</Badge></div>
             <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">Verify identity files, policy cache and local configuration evidence.</p>
+          </button>
+        </div>
+        <div className="border-t border-zinc-800 pt-3">
+          <button
+            type="button"
+            onClick={() => canEdit && meta.mtls_proxy_trust_enabled && setS({ ...s, require_mtls: !s.require_mtls })}
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-left disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!canEdit || !meta.mtls_proxy_trust_enabled}
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <ShieldCheck className="h-4 w-4 text-emerald-300" />
+              Require per-device mTLS
+              <Badge variant="outline" className="ml-auto text-[9px]">{s.require_mtls ? "ENFORCED" : "MIGRATION"}</Badge>
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+              {meta.mtls_proxy_trust_enabled
+                ? "Reject token-only check-ins after every active endpoint has a verified certificate."
+                : "Configure the trusted proxy certificate header before this launch gate can be enabled."}
+            </p>
           </button>
         </div>
         <div className="border-t border-zinc-800 pt-3">

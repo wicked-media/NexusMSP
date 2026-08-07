@@ -1,5 +1,5 @@
 /** Public Walk-in Kiosk page (zero-auth tablet UI). Route: /kiosk/:kioskToken */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import { API } from "@/App";
@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { TabletSmartphone, Loader2, CheckCircle2, MessageSquare, FileText, Receipt } from "lucide-react";
 

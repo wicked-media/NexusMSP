@@ -12,30 +12,43 @@ Endpoints:
   POST /api/clients/{client_id}/runbooks             — create/update a runbook (rich text)
   DELETE /api/clients/{client_id}/documents/{doc_id} — delete a document/runbook
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from datetime import datetime, timezone
 from typing import Optional
 import uuid
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope
+from app.services.upload_security import safe_upload_extension
 
-router = APIRouter()
+
+async def _enforce_client_profile_scope(request: Request, current_user: dict = Depends(get_current_user)):
+    client_id = request.path_params.get("client_id")
+    if client_id:
+        await assert_record_scope(
+            current_user, db.clients, client_id, request=request,
+            operation=f"client_profile:{request.method.lower()}", resource_name="Client",
+            client_field="id", site_field="site_id",
+        )
+
+
+router = APIRouter(dependencies=[Depends(_enforce_client_profile_scope)])
 
 CLIENT_ASSETS_DIR = UPLOADS_DIR / "clients"
 CLIENT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 CLIENT_DOCS_DIR = UPLOADS_DIR / "client-documents"
 CLIENT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif", "svg"}
-ALLOWED_DOC_EXTS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "md", "png", "jpg", "jpeg", "webp", "gif", "svg", "zip"}
+ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
+ALLOWED_DOC_EXTS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "md", "png", "jpg", "jpeg", "webp", "gif", "zip"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
 def _safe_ext(filename: str, allow: set) -> str:
-    ext = (filename or "").rsplit(".", 1)[-1].lower()
-    if ext not in allow:
-        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(sorted(allow))}")
-    return ext
+    try:
+        return safe_upload_extension(filename, allowed=allow)
+    except HTTPException as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(sorted(allow))}") from exc
 
 
 async def _ensure_client(client_id: str):

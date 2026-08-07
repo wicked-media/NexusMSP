@@ -26,17 +26,17 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TONES = {
-  cyan: "border-cyan-500/25 bg-cyan-500/[0.045] text-cyan-200",
-  sky: "border-sky-500/25 bg-sky-500/[0.045] text-sky-200",
-  emerald: "border-emerald-500/25 bg-emerald-500/[0.045] text-emerald-200",
-  amber: "border-amber-500/25 bg-amber-500/[0.045] text-amber-200",
-  violet: "border-violet-500/25 bg-violet-500/[0.045] text-violet-200",
+  cyan: "border-cyan-500/25 bg-cyan-500/[0.06] text-cyan-700 dark:text-cyan-200",
+  sky: "border-sky-500/25 bg-sky-500/[0.06] text-sky-700 dark:text-sky-200",
+  emerald: "border-emerald-500/25 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-200",
+  amber: "border-amber-500/25 bg-amber-500/[0.06] text-amber-700 dark:text-amber-200",
+  violet: "border-violet-500/25 bg-violet-500/[0.06] text-violet-700 dark:text-violet-200",
 };
 
 function deliveryBadge(product) {
   return product.delivery === "provider"
-    ? { label: "Provider-backed", className: "border-amber-500/30 bg-amber-500/10 text-amber-100" }
-    : { label: "Nexus native", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-100" };
+    ? { label: "Provider-backed", className: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-100" }
+    : { label: "Nexus native", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-100" };
 }
 
 function ProductCard({ product, evidence, loading }) {
@@ -67,7 +67,7 @@ function ProductCard({ product, evidence, loading }) {
           ))}
         </div>
         {product.boundary && (
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] px-3 py-2 text-[10px] leading-4 text-amber-100/80">
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] px-3 py-2 text-[10px] leading-4 text-amber-800 dark:text-amber-100/80">
             <ShieldCheck className="mr-1.5 inline h-3 w-3" />{product.boundary}
           </div>
         )}
@@ -148,7 +148,6 @@ export default function NexusSuitePage() {
   }, [category, query]);
 
   const nativeCount = NEXUS_PRODUCTS.filter((product) => product.delivery === "native").length;
-  const providerCount = NEXUS_PRODUCTS.filter((product) => product.delivery === "provider").length;
   const categories = new Set(NEXUS_PRODUCTS.map((product) => product.category)).size;
 
   return (
@@ -160,7 +159,7 @@ export default function NexusSuitePage() {
         icon={Boxes}
         tone="sky"
         actions={<>
-          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/[0.08] text-cyan-100"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Unified operations fabric</Badge>
+          <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/[0.08] text-cyan-700 dark:text-cyan-100"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Unified operations fabric</Badge>
           <Button variant="outline" size="sm" asChild><Link to="/help/nexus-suite-product-map">Product guide</Link></Button>
           <Button variant="outline" size="sm" onClick={loadEvidence} disabled={loading}><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
         </>}
@@ -170,9 +169,9 @@ export default function NexusSuitePage() {
         <Card className="border-amber-500/25 bg-amber-500/[0.045]" role="status" data-testid="suite-evidence-warning">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 gap-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
               <div>
-                <p className="text-xs font-semibold text-amber-100">Evidence refresh needs attention</p>
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-100">Evidence refresh needs attention</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">{evidenceError}</p>
                 {lastUpdatedAt && (
                   <p className="mt-1 text-[10px] text-muted-foreground">
@@ -191,7 +190,7 @@ export default function NexusSuitePage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <HeroTile label="Nexus products" value={NEXUS_PRODUCTS.length} icon={Boxes} glow="cyan" subtitle="One coherent suite" />
         <HeroTile label="Nexus native" value={nativeCount} icon={CheckCircle2} glow="emerald" subtitle="Built into the platform" />
-        <HeroTile label="Provider-backed" value={providerCount} icon={ShieldCheck} glow="amber" subtitle="Keeper, Hudu & Microsoft" />
+        <HeroTile label="Store collections" value={NEXUS_STORE_COLLECTIONS.length} icon={Store} glow="amber" subtitle="Governed extension paths" />
         <HeroTile label="Product families" value={categories} icon={Network} glow="violet" subtitle="Clear operational ownership" />
       </div>
 
@@ -209,12 +208,13 @@ export default function NexusSuitePage() {
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  aria-label="Find a Nexus product or capability"
                   placeholder="Find a Nexus product or capability"
-                  className="h-10 border-cyan-500/20 bg-black/15 pl-9"
+                  className="h-10 border-cyan-500/20 bg-background/70 pl-9"
                   data-testid="suite-search-input"
                 />
               </div>
-              <div className="flex max-w-full flex-wrap gap-1.5">
+              <div className="flex max-w-full flex-wrap gap-1.5" role="group" aria-label="Filter products by family">
                 {NEXUS_PRODUCT_CATEGORIES.map((item) => (
                   <Button
                     key={item}
@@ -253,7 +253,7 @@ export default function NexusSuitePage() {
           </div>
 
           {!filtered.length && (
-            <Card><CardContent className="py-14 text-center"><Search className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">No matching Nexus products</p><p className="mt-1 text-xs text-muted-foreground">Try another capability or product family.</p></CardContent></Card>
+            <Card><CardContent className="flex flex-col items-center py-14 text-center"><Search className="h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">No matching Nexus products</p><p className="mt-1 text-xs text-muted-foreground">Try another capability or product family.</p><Button variant="outline" size="sm" className="mt-4" onClick={() => { setQuery(""); setCategory("All products"); }}>Clear filters</Button></CardContent></Card>
           )}
 
           <div className="grid gap-4 xl:grid-cols-3">
@@ -273,7 +273,7 @@ export default function NexusSuitePage() {
           <Card className="overflow-hidden border-violet-500/20 bg-gradient-to-br from-violet-500/[0.08] via-card to-cyan-500/[0.04]">
             <CardContent className="grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-center">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Governed capability catalogue</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-700 dark:text-violet-300">Governed capability catalogue</p>
                 <h2 className="mt-1 text-xl font-semibold">Extend NexusMSP without fragmenting it</h2>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">Nexus Store brings connectors, automation packs, script libraries and commercial products into one discoverable surface. Installation never implies a provider is configured or healthy; each connection must still be validated.</p>
               </div>
@@ -285,7 +285,7 @@ export default function NexusSuitePage() {
           </div>
           <Card className="border-amber-500/20 bg-amber-500/[0.035]">
             <CardContent className="flex gap-3 p-4 text-xs leading-5 text-muted-foreground">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
               <span><strong className="text-foreground">Trust rule:</strong> store entries declare permissions, data boundaries, approvals and rollback behaviour before installation. Secrets remain in approved provider systems and are never exposed in catalogue metadata.</span>
             </CardContent>
           </Card>

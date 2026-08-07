@@ -14,13 +14,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   RefreshCw, Plus, Trash2, Play, Pause, Edit, DollarSign, Calendar,
-  Receipt, TrendingUp, Loader2, Copy, Send, Clock, FileText, Users,
-  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, BarChart3, Search, Cloud, Sparkles
+  Receipt, TrendingUp, Loader2, Copy, Clock, FileText,
+  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, Search, Cloud, Sparkles
 } from "lucide-react";
 import ReconcileDialog from "@/components/billing/ReconcileDialog";
 import RecurringSmartActions, { ConsolidateButton } from "@/components/billing/RecurringSmartActions";

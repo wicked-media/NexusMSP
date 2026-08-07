@@ -364,7 +364,7 @@ export default function PublicPaymentPage() {
             {method === "becs" && (
               <div className="p-3 rounded-lg bg-purple-500/5 border border-purple-500/20 text-xs text-muted-foreground">
                 <p className="font-medium text-purple-400 mb-1">BECS Direct Debit</p>
-                <p>Funds will be debited from your Australian bank account. Processing takes 3-5 business days. By proceeding you agree to the <a href="https://stripe.com/au-becs-dd-service-agreement/legal" target="_blank" rel="noopener" className="text-purple-400 underline">BECS Direct Debit Service Agreement</a>.</p>
+                <p>Funds will be debited from your Australian bank account. Processing takes 3-5 business days. By proceeding you agree to the <a href="https://stripe.com/au-becs-dd-service-agreement/legal" target="_blank" rel="noopener noreferrer" className="text-purple-400 underline">BECS Direct Debit Service Agreement</a>.</p>
               </div>
             )}
 

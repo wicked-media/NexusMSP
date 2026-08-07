@@ -65,20 +65,17 @@ async def suite_overview(current_user: dict = Depends(get_current_user)):
         "deploy": {"label": "Installed packs", "value": installed_packs},
         "network": {"label": "Network sites", "value": network_sites},
         "dns": {"label": "Monitored domains", "value": dns_domains},
-        "vault": {"label": "Security boundary", "value": "Keeper / Hudu"},
-        "verify": {"label": "Identity authority", "value": "Microsoft"},
         "projects": {"label": "Project records", "value": projects},
         "finance": {"label": "Invoice records", "value": invoices},
         "insight": {"label": "Insight records", "value": insights},
         "ai": {"label": "Reviewed AI actions", "value": ai_actions},
-        "store": {"label": "Installed packs", "value": installed_packs},
     }
 
     return {
         "evidence": evidence,
         "totals": {
             "products": len(evidence),
-            "provider_backed_products": 2,
-            "native_products": len(evidence) - 2,
+            "provider_backed_products": 0,
+            "native_products": len(evidence),
         },
     }

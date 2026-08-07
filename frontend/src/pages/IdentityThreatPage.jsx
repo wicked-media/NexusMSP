@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import { Loader2, Users, Shield, ShieldAlert, AlertTriangle, Lock, Unlock, Globe, Eye, Search, RefreshCw, Key, MapPin } from "lucide-react";
+import { Loader2, Search, RefreshCw, Key, MapPin } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 const SEV = { critical: "bg-red-500/20 text-red-400", high: "bg-orange-500/20 text-orange-400", medium: "bg-amber-500/20 text-amber-400", low: "bg-blue-500/20 text-blue-400" };
@@ -64,15 +64,14 @@ export default function IdentityThreatPage() {
   const [search, setSearch] = useState("");
   const [sevFilter, setSevFilter] = useState("all");
   const [huntressActive, setHuntressActive] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [socRes, huntRes, huntStatusRes] = await Promise.all([
-        axios.get(`${API}/soc/identity-threats`, { headers }),
-        axios.get(`${API}/huntress/incident-reports?limit=500`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: { configured: false } })),
+        axios.get(`${API}/soc/identity-threats`, { headers: requestHeaders }),
+        axios.get(`${API}/huntress/incident-reports?limit=500`, { headers: requestHeaders }).catch(() => ({ data: null })),
+        axios.get(`${API}/huntress/status`, { headers: requestHeaders }).catch(() => ({ data: { configured: false } })),
       ]);
       let payload = socRes.data;
       const huntressConfigured = huntStatusRes.data?.configured === true;

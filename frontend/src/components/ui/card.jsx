@@ -2,12 +2,23 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-const Card = React.forwardRef(({ className, ...props }, ref) => (
-  <div
-    ref={ref}
-    className={cn("rounded-xl border bg-card text-card-foreground shadow", className)}
-    {...props} />
-))
+const Card = React.forwardRef(({ className, interactive = false, onClick, signal, ...props }, ref) => {
+  const isInteractive = Boolean(interactive || onClick)
+  return (
+    <div
+      ref={ref}
+      data-interactive={isInteractive ? "true" : undefined}
+      data-nx-signal={signal || undefined}
+      className={cn(
+        "nx-card rounded-xl border bg-card text-card-foreground shadow",
+        isInteractive && "nx-card-interactive",
+        signal && "nx-ambient-surface",
+        className,
+      )}
+      onClick={onClick}
+      {...props} />
+  )
+})
 Card.displayName = "Card"
 
 const CardHeader = React.forwardRef(({ className, ...props }, ref) => (

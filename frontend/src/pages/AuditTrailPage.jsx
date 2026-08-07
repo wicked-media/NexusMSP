@@ -11,9 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusBlackBox from "@/components/audit/NexusBlackBox";
 import {
   ClipboardList, Search, Shield, Loader2, RefreshCw, AlertTriangle,
-  Clock, TrendingUp, TrendingDown, Filter, Download, Activity,
+  Clock, Filter, Download, Activity,
   Lock, Ticket, DollarSign, Settings, Zap, Monitor, Users, Globe
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -110,6 +111,8 @@ export default function AuditTrailPage() {
   return (
     <div className="space-y-5" data-testid="audit-trail-page">
       <OperationalPageHeader eyebrow="Governance and accountability" title="Audit Trail" description="Administrator-only, read-only operational evidence across tickets, assets, billing, security, and integrations." icon={ClipboardList} tone="amber" actions={<><Button variant="outline" size="sm" onClick={exportAudit} disabled={exporting} data-testid="export-audit-btn">{exporting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}Export CSV</Button><Button variant="outline" size="sm" onClick={fetchData} disabled={loading}><RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button></>} />
+
+      <NexusBlackBox headers={headers} />
 
       {/* HeroTile metric strip — shared with Dashboard, Tickets, and Devices */}
       {summary && (

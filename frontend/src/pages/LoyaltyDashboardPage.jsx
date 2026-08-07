@@ -8,8 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
-  Loader2, RefreshCw, Trophy, Crown, Star, Gift, DollarSign,
-  Users, TrendingUp, ArrowUpRight, Target, Percent, Zap
+  Loader2, RefreshCw, Trophy, Crown, Star, DollarSign, TrendingUp, ArrowUpRight, Target, Zap
 } from "lucide-react";
 
 const tierConfig = {

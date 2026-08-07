@@ -58,6 +58,33 @@ export default function UnifiCommandCenterPage() {
   const [linkDialog, setLinkDialog] = useState(null);
   const [linkClientId, setLinkClientId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(null);
+
+  const doDeviceAction = async (device, action) => {
+    const deviceId = device?.id || device?.mac;
+    if (!deviceId) {
+      toast.error("This UniFi device has no provider identifier");
+      return;
+    }
+    const key = `${deviceId}:${action}`;
+    setActionBusy(key);
+    try {
+      const response = await axios.post(
+        `${API}/unifi/devices/${encodeURIComponent(deviceId)}/${action}`,
+        { host_id: device.host_id || device.hostId || selectedSite?.host_id || selectedSite?.hostId || "" },
+        { headers },
+      );
+      if (response.data?.success === false) {
+        toast.error(response.data?.message || "UniFi rejected the device action");
+      } else {
+        toast.success(response.data?.message || "UniFi action queued");
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "UniFi device action failed");
+    } finally {
+      setActionBusy(null);
+    }
+  };
 
   const loadSummary = useCallback(async () => {
     setLoading(true);

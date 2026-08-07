@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Activity, AlertTriangle, CheckCircle, Clock, Shield, Zap, ArrowRight } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { Loader2 } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
 const SEV = { critical: "border-red-500/40 bg-red-500/5", high: "border-orange-500/30 bg-orange-500/5", medium: "border-amber-500/20", low: "border-blue-500/20" };
 const SEV_DOT = { critical: "bg-red-500", high: "bg-orange-500", medium: "bg-amber-500", low: "bg-blue-500" };

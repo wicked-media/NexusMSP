@@ -37,6 +37,7 @@ from app.routers import (  # noqa: E402
     dark_web_monitor,
     device_intel,
     device_terminal,
+    devices,
     executive_reports,
     geo_map,
     identity_threats,
@@ -147,7 +148,11 @@ def test_m365_workspace_never_promotes_saved_credentials_to_live_telemetry(monke
     async def configured_settings():
         return {"app_id": "app", "tenant_id": "tenant", "app_secret": "secret"}
 
+    async def unavailable_partner_provider(*_args, **_kwargs):
+        raise HTTPException(status_code=503, detail="Partner Center provider is not installed for this unit test")
+
     monkeypatch.setattr(m365, "_get_settings", configured_settings)
+    monkeypatch.setattr(m365, "_partner_center_customers", unavailable_partner_provider)
     result = asyncio.run(m365.test_connection(current_user={"id": "operator-1"}))
     assert result["ok"] is False
     assert result["mode"] == "configured_unverified"
@@ -417,11 +422,71 @@ class StaleCommandCollection:
         return SimpleNamespace(modified_count=0)
 
 
+class ResultCommandCollection:
+    def __init__(self):
+        self.command = {
+            "id": "cmd-result-1",
+            "device_id": "agent-1",
+            "kind": "ping",
+            "status": "dispatched",
+            "authorization": {"nonce": "nonce-result-1"},
+        }
+
+    async def find_one(self, query, *_args, **_kwargs):
+        if query.get("id") != self.command["id"] or query.get("device_id") != self.command["device_id"]:
+            return None
+        if query.get("kind") and query["kind"] != self.command["kind"]:
+            return None
+        return dict(self.command)
+
+    async def update_one(self, query, update):
+        if query.get("status") == "dispatched" and self.command["status"] == "dispatched":
+            self.command.update(update["$set"])
+            return SimpleNamespace(modified_count=1)
+        return SimpleNamespace(modified_count=0)
+
+
+class EmptyCollection:
+    async def find_one(self, *_args, **_kwargs):
+        return None
+
+    async def update_one(self, *_args, **_kwargs):
+        return SimpleNamespace(modified_count=0)
+
+
 class AgentTokenCollection:
     async def find_one(self, query):
         if query.get("agent_token") == "valid-token":
             return {"id": "agent-1", "is_active": True}
         return None
+
+
+class AgentSettingsCollection:
+    def __init__(self, require_mtls=False):
+        self.require_mtls = require_mtls
+
+    async def find_one(self, *_args, **_kwargs):
+        return {"require_mtls": self.require_mtls}
+
+
+class IdentityAgentCollection:
+    def __init__(self, expires_at="2099-01-01T00:00:00+00:00"):
+        self.agent = {
+            "id": "agent-1",
+            "client_id": "client-1",
+            "agent_token": "valid-token",
+            "is_active": True,
+            "device_identity": {
+                "certificate_fingerprint": "ab" * 32,
+                "certificate_expires_at": expires_at,
+            },
+        }
+
+    async def find_one(self, query, *_args, **_kwargs):
+        return self.agent if query.get("agent_token") == "valid-token" else None
+
+    async def update_one(self, *_args, **_kwargs):
+        return SimpleNamespace(modified_count=1)
 
 
 def test_command_poll_claims_each_command_only_once(monkeypatch):
@@ -435,7 +500,79 @@ def test_command_poll_claims_each_command_only_once(monkeypatch):
     second = asyncio.run(nexus_agent.commands_poll(x_agent_token="valid-token"))
 
     assert [command["id"] for command in first["commands"]] == ["cmd-1"]
+    assert first["commands"][0]["authorization"]["command_id"] == "cmd-1"
+    assert first["commands"][0]["authorization"]["device_id"] == "agent-1"
+    assert first["commands"][0]["authorization"]["signature_algorithm"] == "ed25519"
+    assert first["commands"][0]["authorization"]["nonce"]
     assert second["commands"] == []
+
+
+def test_command_result_requires_dispatch_nonce_and_single_terminal_transition(monkeypatch):
+    commands = ResultCommandCollection()
+    empty = EmptyCollection()
+    fake_db = SimpleNamespace(
+        nexus_agents=AgentTokenCollection(),
+        nexus_agent_commands=commands,
+        nexus_agent_audit=AuditCollection(),
+        maintenance_window_runs=empty,
+        terminal_sessions=empty,
+        devices=empty,
+        device_events=empty,
+        ransomware_canaries=empty,
+        script_executions=empty,
+    )
+    monkeypatch.setattr(nexus_agent, "db", fake_db)
+
+    with pytest.raises(HTTPException) as mismatch:
+        asyncio.run(nexus_agent.command_result(
+            nexus_agent.CommandResult(id="cmd-result-1", nonce="wrong", status="ok"),
+            x_agent_token="valid-token",
+        ))
+    assert mismatch.value.status_code == 409
+
+    accepted = asyncio.run(nexus_agent.command_result(
+        nexus_agent.CommandResult(id="cmd-result-1", nonce="nonce-result-1", status="ok"),
+        x_agent_token="valid-token",
+    ))
+    assert accepted == {"ok": True}
+
+    with pytest.raises(HTTPException) as duplicate:
+        asyncio.run(nexus_agent.command_result(
+            nexus_agent.CommandResult(id="cmd-result-1", nonce="nonce-result-1", status="ok"),
+            x_agent_token="valid-token",
+        ))
+    assert duplicate.value.status_code == 409
+
+
+def test_agent_transport_enforces_mtls_only_after_proxy_trust_is_enabled(monkeypatch):
+    fake_db = SimpleNamespace(
+        nexus_agents=IdentityAgentCollection(),
+        nexus_agent_settings=AgentSettingsCollection(require_mtls=True),
+    )
+    monkeypatch.setattr(nexus_agent, "MTLS_PROXY_TRUST_ENABLED", True)
+
+    with pytest.raises(HTTPException) as missing:
+        asyncio.run(nexus_agent._verify_agent_token(fake_db, "valid-token"))
+    assert missing.value.status_code == 401
+
+    verified = asyncio.run(nexus_agent._verify_agent_token(fake_db, "valid-token", "AB:" * 31 + "AB"))
+    assert verified["device_identity"]["last_transport"] == "mtls"
+
+
+def test_expired_agent_identity_is_limited_to_certificate_renewal():
+    fake_db = SimpleNamespace(
+        nexus_agents=IdentityAgentCollection(expires_at="2020-01-01T00:00:00+00:00"),
+        nexus_agent_settings=AgentSettingsCollection(require_mtls=False),
+    )
+
+    with pytest.raises(HTTPException) as expired:
+        asyncio.run(nexus_agent._verify_agent_token(fake_db, "valid-token"))
+    assert expired.value.status_code == 401
+
+    renewing = asyncio.run(
+        nexus_agent._verify_agent_token(fake_db, "valid-token", allow_expired_identity=True)
+    )
+    assert renewing["id"] == "agent-1"
 
 
 class RecentAgentCollection:
@@ -507,12 +644,22 @@ def test_fleet_scripts_skip_offline_targets_by_default(monkeypatch):
     )
     result = asyncio.run(nexus_agent.fleet_run_script(
         request,
-        user={"id": "user-1", "email": "operator@example.test"},
+        user={"id": "user-1", "email": "operator@example.test", "role": "admin"},
     ))
 
     assert "last_seen" in agents.last_query
     assert result["skipped_device_ids"] == ["offline-1"]
     assert len(commands.docs) == 1
+
+
+def test_legacy_unauthenticated_heartbeat_endpoints_are_retired():
+    with pytest.raises(HTTPException) as single:
+        asyncio.run(devices.device_heartbeat("device-1", {"status": "online"}))
+    assert single.value.status_code == 410
+
+    with pytest.raises(HTTPException) as bulk:
+        asyncio.run(devices.bulk_device_heartbeat({"devices": [{"id": "device-1"}]}))
+    assert bulk.value.status_code == 410
 
 
 class BulkDeviceCollection:

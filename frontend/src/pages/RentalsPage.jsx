@@ -15,10 +15,10 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
-  Phone, Plus, Search, Loader2, Edit, Trash2, DollarSign, Package,
-  ArrowLeft, CheckCircle, Clock, AlertTriangle, RefreshCw, Eye,
-  CreditCard, Smartphone, Hash, Wifi, ShieldCheck, Calendar, TrendingUp,
-  ArrowRightLeft, RotateCcw, Receipt, ChevronRight, Filter
+  Phone, Plus, Search, Loader2, Edit, Trash2, DollarSign,
+  ArrowLeft, CheckCircle, AlertTriangle, RefreshCw,
+  CreditCard, Smartphone, Calendar, TrendingUp,
+  ArrowRightLeft, RotateCcw, Receipt, ChevronRight
 } from "lucide-react";
 
 const STATUS_CONFIG = {

@@ -1,7 +1,7 @@
 // All Pro-Pack pages in one shared module to keep imports light.
 // Each export is a default page used via lazy() in routes.js.
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,6 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
@@ -23,9 +22,10 @@ import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } fro
 import { toast } from "sonner";
 import {
   Inbox, Loader2, Plus, Trash2, AlertTriangle, CheckCircle, Save, Webhook, Send,
-  Heart, Calendar, ShoppingCart, Phone, KeySquare, Briefcase, BookOpen,
+  Heart, Calendar, Phone, KeySquare, Briefcase, BookOpen,
   ShieldOff, ScanLine, BarChart3, BellRing, FileSpreadsheet, Activity, MapPin,
-  Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt, ChevronRight
+  Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt, ChevronRight,
+  Shield, Clock,
 } from "lucide-react";
 
 const useApi = () => {

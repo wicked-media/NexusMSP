@@ -4,7 +4,7 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Activity, CheckCircle, XCircle, RefreshCw, Loader2, Lock, Unlock, MessageSquare, UserPlus } from "lucide-react";
+import { Activity, CheckCircle, RefreshCw, Loader2, Lock, Unlock, MessageSquare, UserPlus } from "lucide-react";
 
 const ACTION_ICON = {
   close: <CheckCircle className="w-3 h-3 text-emerald-400" />,

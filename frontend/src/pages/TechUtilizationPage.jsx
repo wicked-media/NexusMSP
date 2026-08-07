@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import {
-  UserCog, Clock, DollarSign, Ticket, TrendingUp, BarChart3,
+  UserCog, Clock, DollarSign, TrendingUp,
   AlertTriangle, CheckCircle, Loader2, Target, Zap, Users
 } from "lucide-react";
 

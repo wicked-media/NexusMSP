@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, toast } from "sonner"
 
 const DEFAULT_TOAST_PREFS = {
@@ -15,20 +14,25 @@ const readToastPrefs = () => {
 };
 
 const Toaster = ({ ...props }) => {
-  const { theme = "system" } = useTheme()
   const [preferences, setPreferences] = useState(readToastPrefs);
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme || "dark");
 
   useEffect(() => {
     const refresh = () => setPreferences(readToastPrefs());
+    const themeObserver = new MutationObserver(() => setTheme(document.documentElement.dataset.theme || "dark"));
     window.addEventListener("nexus-toast-preferences", refresh);
-    return () => window.removeEventListener("nexus-toast-preferences", refresh);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      window.removeEventListener("nexus-toast-preferences", refresh);
+      themeObserver.disconnect();
+    };
   }, []);
 
   const styleClass = preferences.toast_style === "minimal"
-    ? "!rounded-lg !border-zinc-700/80 !bg-zinc-950 !shadow-xl"
+    ? "!rounded-lg !border-border !bg-card !shadow-xl"
     : preferences.toast_style === "compact"
-      ? "!rounded-lg !border-violet-500/25 !bg-zinc-950/95 !shadow-lg"
-      : "!rounded-xl !border-violet-500/25 !bg-zinc-950/95 !shadow-[0_18px_45px_-24px_rgba(139,92,246,0.85)] !backdrop-blur-xl";
+      ? "!rounded-lg !border-primary/20 !bg-card/95 !shadow-lg"
+      : "!rounded-xl !border-primary/25 !bg-card/95 !shadow-[0_18px_45px_-24px_hsl(var(--primary)/0.45)] !backdrop-blur-xl";
   const densityClass = preferences.toast_density === "compact" ? "!p-2 !text-xs" : "!p-4";
 
   return (
@@ -44,10 +48,10 @@ const Toaster = ({ ...props }) => {
       toastOptions={{
         classNames: {
           toast:
-            `group toast !text-zinc-100 ${styleClass} ${densityClass}`,
-          description: "!mt-1 !text-zinc-400",
-          actionButton: "!rounded-md !bg-violet-500 !text-white hover:!bg-violet-400",
-          cancelButton: "!rounded-md !bg-zinc-800 !text-zinc-300 hover:!bg-zinc-700",
+            `nx-toast group toast !text-foreground ${styleClass} ${densityClass}`,
+          description: "!mt-1 !text-muted-foreground",
+          actionButton: "!rounded-md !bg-primary !text-primary-foreground hover:!brightness-110",
+          cancelButton: "!rounded-md !bg-muted !text-muted-foreground hover:!bg-accent hover:!text-foreground",
         },
       }}
       {...props} />

@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { 
   MessageSquare,
@@ -17,7 +17,6 @@ import {
   Monitor,
   User,
   Bot,
-  Clock,
   ArrowLeft,
   RefreshCw,
   Loader2,
@@ -148,7 +147,7 @@ export default function DeviceChatPage() {
   };
 
   const clearChat = async () => {
-    if (!confirm("Clear all chat history for this device?")) return;
+    if (!window.confirm("Clear all chat history for this device?")) return;
     try {
       await axios.delete(`${API}/devices/${deviceId}/chat`, { headers });
       setMessages([]);

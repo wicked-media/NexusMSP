@@ -5,17 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import {
-  Terminal, FileCode, Zap, Cpu, HardDrive, Shield, Package, RefreshCw,
-  Play, Pause, Square, Loader2, Search, Star, StarOff, Trash2, ChevronDown,
-  ChevronRight, CheckCircle2, XCircle, AlertTriangle, Copy, Download, Server,
-  PowerOff, Clock, X,
+  Terminal, FileCode, Zap, Cpu, Package, RefreshCw,
+  Play, Square, Loader2, Search, Star, StarOff, Trash2, CheckCircle2, XCircle, AlertTriangle, Copy, Download, Server, Clock, X,
 } from "lucide-react";
 
 const SHELLS = [

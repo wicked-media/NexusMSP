@@ -4,7 +4,7 @@ import { API, useAuth } from "@/App";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,12 +13,12 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
   Search, Building2, Users, HardDrive, Ticket, DollarSign, AlertTriangle,
-  Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles, Timer, Zap,
-  Activity, ChevronRight, Send, RefreshCw, Filter, X, TrendingUp, TrendingDown,
-  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink, MoreHorizontal, ChevronDown, BarChart3, Scale, Globe
+  Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles,
+  Activity, ChevronRight, RefreshCw, Filter, X,
+  Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink, MoreHorizontal,
+  ChevronDown, BarChart3, Scale, Globe, FileText, ArrowRight, CheckCircle2
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { AreaChart, Area, ResponsiveContainer } from "recharts";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
 import { Client360Subscriptions, Client360Security, Client360Billing, Client360Assets } from "@/components/clients/Client360Tabs";
 import ClientWarRoom from "@/components/clients/ClientWarRoom";
@@ -33,33 +33,15 @@ import ClientQuickActionsStrip from "@/components/clients/ClientQuickActionsStri
 import ClientServiceTierChip from "@/components/clients/ClientServiceTierChip";
 import ClientPulseWall from "@/components/clients/ClientPulseWall";
 import ClientUniverseMap from "@/components/clients/ClientUniverseMap";
+import ClientFabricPanel from "@/components/clients/ClientFabricPanel";
 import {
   AccountBriefingDialog, ExpansionEngineTile, RenewalForecastTile, ChurnRadarCard,
   LifecycleTimelineCard, ActivityHeatmapCard, HoursBurndownCard, AchievementsCard,
   ContractWatchCard, ScorecardCard, ComplianceCard, AccountPlanCanvas, StakeholderMapCard,
   RenewalWatchTable, MyAccountsTable
 } from "@/components/clients/ClientStudioWidgets";
-import { Responsive, WidthProvider } from "react-grid-layout";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
-import "@/styles/dashboard-grid.css";
-import { useWidgetGrid } from "@/hooks/useWidgetGrid";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
-
-const ClientResponsiveGridLayout = WidthProvider(Responsive);
-
-const CLIENT_OVERVIEW_WIDGET_META = {
-  "nba":      { label: "Next Best Action",     icon: Sparkles },
-  "quick":    { label: "Quick Actions Tiles",  icon: Zap },
-  "health":   { label: "Health Score Breakdown", icon: Activity },
-  "activity": { label: "Recent Activity",      icon: Activity },
-};
-const CLIENT_OVERVIEW_DEFAULT_LAYOUT = [
-  { i: "nba",      x: 0, y: 0, w: 6,  h: 3, minH: 2, minW: 4 },
-  { i: "quick",    x: 6, y: 0, w: 6,  h: 3, minH: 2, minW: 4 },
-  { i: "health",   x: 0, y: 3, w: 12, h: 4, minH: 3, minW: 6 },
-  { i: "activity", x: 0, y: 7, w: 12, h: 6, minH: 3, minW: 6 },
-];
+import ConfidenceLens from "@/components/confidence/ConfidenceLens";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -69,12 +51,74 @@ const LIFECYCLE_COLORS = {
   churned: "text-rose-400 border-rose-500/30 bg-rose-500/5",
 };
 
-const TIER_COLORS = {
-  platinum: "from-fuchsia-500 to-indigo-500",
-  gold: "from-amber-400 to-orange-500",
-  silver: "from-zinc-300 to-zinc-500",
-  standard: "from-zinc-500 to-zinc-700",
-};
+const CLIENT_WORKSPACE_GROUPS = [
+  {
+    id: "command",
+    label: "Command",
+    description: "Health, priorities, strategy and AI guidance.",
+    icon: Building2,
+    tabs: [
+      { value: "overview", label: "Digital twin" },
+      { value: "fabric", label: "Nexus Fabric" },
+      { value: "studio", label: "Growth studio" },
+      { value: "plan", label: "Strategic plan" },
+      { value: "ai", label: "AI insights" },
+    ],
+  },
+  {
+    id: "service",
+    label: "Service",
+    description: "Support history, collaboration and account notes.",
+    icon: Ticket,
+    tabs: [
+      { value: "tickets", label: "Tickets & jobs" },
+      { value: "warroom", label: "War room" },
+      { value: "notes", label: "Notes" },
+    ],
+  },
+  {
+    id: "technology",
+    label: "Technology",
+    description: "Assets, security posture and connected services.",
+    icon: HardDrive,
+    tabs: [
+      { value: "assets", label: "Managed assets" },
+      { value: "security", label: "Security" },
+      { value: "integrations", label: "Integrations" },
+      { value: "cipp", label: "Microsoft 365" },
+    ],
+  },
+  {
+    id: "commercial",
+    label: "Commercial",
+    description: "People, services, contracts and account billing.",
+    icon: DollarSign,
+    tabs: [
+      { value: "contacts", label: "Contacts" },
+      { value: "subscriptions", label: "Subscriptions" },
+      { value: "billing", label: "Billing" },
+    ],
+  },
+  {
+    id: "knowledge",
+    label: "Knowledge",
+    description: "Client documents and service blueprints.",
+    icon: FileText,
+    tabs: [
+      { value: "documents", label: "Documents" },
+      { value: "blueprints", label: "Blueprints" },
+    ],
+  },
+  {
+    id: "audit",
+    label: "Audit",
+    description: "One attributable operational timeline.",
+    icon: Activity,
+    tabs: [{ value: "activity", label: "Operational timeline" }],
+  },
+];
+
+const CLIENT_TAB_VALUES = new Set(CLIENT_WORKSPACE_GROUPS.flatMap((group) => group.tabs.map((tab) => tab.value)));
 
 function HealthDial({ score, size = 44 }) {
   const s = Math.max(0, Math.min(100, score || 0));
@@ -97,56 +141,37 @@ function HealthDial({ score, size = 44 }) {
 
 function IntegrationChip({ type, active }) {
   const map = {
-    acronis: { label: "ACR", color: "text-sky-400 border-sky-500/40", tip: "Acronis Cyber Cloud" },
-    pax8: { label: "PX8", color: "text-indigo-400 border-indigo-500/40", tip: "Pax8 / Microsoft CSP" },
-    m365: { label: "365", color: "text-blue-400 border-blue-500/40", tip: "Microsoft 365" },
-    rmm: { label: "RMM", color: "text-emerald-400 border-emerald-500/40", tip: "RMM agent installed" },
-    yeastar: { label: "PBX", color: "text-cyan-400 border-cyan-500/40", tip: "Yeastar PBX linked" },
-    suped: { label: "SUP", color: "text-fuchsia-400 border-fuchsia-500/40", tip: "Suped DMARC" },
-    cipp: { label: "NCP", color: "text-cyan-400 border-cyan-500/40", tip: "Nexus Control Plane — Microsoft 365" },
+    acronis: { label: "Backup", color: "text-sky-300 border-sky-500/30 bg-sky-500/[0.06]", tip: "Acronis Cyber Cloud" },
+    pax8: { label: "Pax8", color: "text-indigo-300 border-indigo-500/30 bg-indigo-500/[0.06]", tip: "Pax8 / Microsoft CSP" },
+    m365: { label: "Microsoft 365", color: "text-blue-300 border-blue-500/30 bg-blue-500/[0.06]", tip: "Microsoft 365" },
+    rmm: { label: "Nexus Agent", color: "text-emerald-300 border-emerald-500/30 bg-emerald-500/[0.06]", tip: "Nexus Agent installed" },
+    yeastar: { label: "Voice", color: "text-cyan-300 border-cyan-500/30 bg-cyan-500/[0.06]", tip: "Yeastar PBX linked" },
+    suped: { label: "DMARC", color: "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/[0.06]", tip: "Suped DMARC" },
+    cipp: { label: "Control Plane", color: "text-cyan-300 border-cyan-500/30 bg-cyan-500/[0.06]", tip: "Nexus Control Plane — Microsoft 365" },
   };
   const cfg = map[type];
   if (!cfg) return null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={`font-mono text-[10px] h-5 px-1.5 rounded border flex items-center ${active ? cfg.color : "text-zinc-600 border-zinc-800 opacity-60"}`}>{cfg.label}</span>
+        <span className={`flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[10px] font-medium ${active ? cfg.color : "border-zinc-800 bg-black/10 text-zinc-600 opacity-70"}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-current shadow-[0_0_7px_currentColor]" : "bg-zinc-700"}`} />
+          {cfg.label}
+        </span>
       </TooltipTrigger>
       <TooltipContent><span className="text-xs">{cfg.tip} {active ? "· linked" : "· not linked"}</span></TooltipContent>
     </Tooltip>
   );
 }
 
-function Sparkline({ data, color = "#818cf8" }) {
-  if (!data || data.every(d => !d.value)) return <div className="h-7 w-20 opacity-30 flex items-end"><div className="h-0.5 w-full bg-zinc-700" /></div>;
-  return (
-    <div className="h-7 w-20">
-      <ResponsiveContainer width="100%" height="100%" minWidth={60} minHeight={20}>
-        <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
-          <defs>
-            <linearGradient id="sp" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={color} stopOpacity={0.4} />
-              <stop offset="95%" stopColor={color} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.5} fill="url(#sp)" dot={false} isAnimationActive={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
 function ClientListItem({ client, selected, onClick }) {
-  const mrrSeries = client.mrr_trend || [];
-  const firstVal = mrrSeries.find(m => m.value > 0)?.value || 0;
-  const lastVal = mrrSeries[mrrSeries.length - 1]?.value || 0;
-  const delta = firstVal > 0 ? ((lastVal - firstVal) / firstVal) * 100 : 0;
+  const agentReporting = client.assets_assessed > 0;
 
   return (
     <button
       onClick={onClick}
       data-testid={`client-list-item-${client.id}`}
-      className={`w-full text-left flex items-center gap-3 px-4 py-3 border-b border-zinc-800/80 transition-colors
+      className={`w-full text-left flex items-center gap-3 border-b border-zinc-800/80 px-4 py-3.5 transition-colors
         ${selected ? "bg-zinc-900 border-l-2 border-l-indigo-500 pl-[14px]" : "hover:bg-zinc-900/50 border-l-2 border-l-transparent pl-[14px]"}`}
     >
       <HealthDial score={client.health_score} size={36} />
@@ -157,29 +182,21 @@ function ClientListItem({ client, selected, onClick }) {
             <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{client.lifecycle.replace("_", " ")}</span>
           )}
         </div>
-        <div className="flex items-center gap-3 mt-1 text-[11px] text-zinc-500 font-mono">
-          {client.industry && <span className="truncate max-w-[80px]">{client.industry}</span>}
-          {client.open_tickets > 0 && <span className={client.open_tickets > 10 ? "text-amber-400" : ""}><Ticket className="w-2.5 h-2.5 inline mr-0.5" />{client.open_tickets}</span>}
-          <span><HardDrive className="w-2.5 h-2.5 inline mr-0.5" />{client.asset_count}</span>
-          {client.patch_pending > 0 && <span className="text-amber-400"><Shield className="w-2.5 h-2.5 inline mr-0.5" />{client.patch_pending} patches</span>}
-          {client.overdue_count > 0 && <span className="text-rose-400"><AlertTriangle className="w-2.5 h-2.5 inline mr-0.5" />{client.overdue_count}</span>}
+        <div className="mt-1 flex items-center gap-2.5 text-[11px] text-zinc-500">
+          {client.industry && <span className="truncate max-w-[108px]">{client.industry}</span>}
+          <span className={client.open_tickets > 10 ? "text-amber-400" : ""}><Ticket className="mr-0.5 inline h-3 w-3" />{client.open_tickets || 0}</span>
+          <span><HardDrive className="mr-0.5 inline h-3 w-3" />{client.asset_count || 0}</span>
+          {client.patch_pending > 0 && <span className="text-amber-400"><Shield className="mr-0.5 inline h-3 w-3" />{client.patch_pending}</span>}
+          {client.overdue_count > 0 && <span className="text-rose-400"><AlertTriangle className="mr-0.5 inline h-3 w-3" />{client.overdue_count}</span>}
         </div>
-        <div className="flex items-center gap-3 mt-1.5 text-[10px] font-mono">
-          <span className={client.assets_assessed > 0 ? "text-emerald-400" : "text-zinc-500"}>● Agent {client.assets_assessed || 0}/{client.asset_count || 0}</span>
-          <span className={client.integrations.acronis ? "text-sky-400" : "text-zinc-500"}>● Backup {client.integrations.acronis ? "linked" : "not linked"}</span>
-          <span className={client.integrations.m365 ? "text-blue-400" : "text-zinc-500"}>● M365 {client.integrations.m365 ? "linked" : "not linked"}</span>
+        <div className={`mt-1.5 flex items-center gap-1.5 text-[10px] font-medium ${agentReporting ? "text-emerald-400" : "text-zinc-500"}`}>
+          <span className={`h-1.5 w-1.5 rounded-full ${agentReporting ? "bg-emerald-400 shadow-[0_0_7px_rgba(52,211,153,0.65)]" : "bg-zinc-600"}`} />
+          {agentReporting ? `Agent reporting ${client.assets_assessed}/${client.asset_count || 0}` : "Agent not reporting"}
         </div>
       </div>
-      <div className="flex flex-col items-end gap-0.5 shrink-0">
-        <div className="font-mono text-xs text-zinc-200">${client.mrr.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-        <div className="flex items-center gap-1">
-          {delta !== 0 && (
-            <span className={`text-[9px] font-mono ${delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {delta >= 0 ? "▲" : "▼"}{Math.abs(delta).toFixed(0)}%
-            </span>
-          )}
-          <Sparkline data={mrrSeries} color={delta >= 0 ? "#34d399" : "#fb7185"} />
-        </div>
+      <div className="shrink-0 text-right">
+        <p className="text-[10px] uppercase tracking-wide text-zinc-500">MRR</p>
+        <p className="mt-0.5 font-mono text-xs font-medium text-zinc-200">${(client.mrr || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
       </div>
     </button>
   );
@@ -191,9 +208,10 @@ function TopMetric({ label, value, trend, color = "indigo" }) {
   return <MetricTile label={label} value={value} trend={trend} accent={accentMap[color] || "violet"} testid={`clients-metric-${label.toLowerCase().replace(/\s+/g, "-")}`} />;
 }
 
-function ClientQuickSearch({ clients = [], activeClientId, onSelect }) {
+function ClientQuickSearch({ clients = [], activeClientId, onSelect, onBrowsePortfolio }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const activeClient = useMemo(() => clients.find((client) => client.id === activeClientId), [clients, activeClientId]);
 
   const matches = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -214,8 +232,8 @@ function ClientQuickSearch({ clients = [], activeClientId, onSelect }) {
         <div className="flex shrink-0 items-center gap-3">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><Search className="h-4 w-4 text-primary" /></span>
           <div>
-            <p className="text-sm font-semibold text-foreground">Open a client</p>
-            <p className="text-xs text-muted-foreground">Find any account without leaving this workspace.</p>
+            <p className="text-sm font-semibold text-foreground">{activeClient ? "Client switcher" : "Open a client"}</p>
+            <p className="text-xs text-muted-foreground">{activeClient ? `Viewing ${activeClient.name}` : "Find any account without leaving this workspace."}</p>
           </div>
         </div>
         <div className="relative min-w-0 flex-1 lg:max-w-3xl">
@@ -236,8 +254,15 @@ function ClientQuickSearch({ clients = [], activeClientId, onSelect }) {
                 const active = client.id === activeClientId;
                 return (
                   <button key={client.id} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseClient(client)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition ${active ? "bg-primary/10 ring-1 ring-primary/20" : "hover:bg-muted/55"}`} data-testid={`client-quick-search-result-${client.id}`}>
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-xs font-semibold text-primary">{client.name?.slice(0, 2).toUpperCase() || "CL"}</span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-foreground">{client.name}</span><span className="mt-0.5 block truncate text-xs text-muted-foreground">{[client.industry, client.email].filter(Boolean).join(" - ") || "Client profile"}</span></span>
+                    <HealthDial score={client.health_score} size={34} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">{client.name}</span>
+                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">{[client.industry, client.email].filter(Boolean).join(" - ") || "Client profile"}</span>
+                      <span className="mt-1.5 flex flex-wrap gap-1.5">
+                        <span className="rounded border border-border/70 bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{client.open_tickets || 0} open ticket{client.open_tickets === 1 ? "" : "s"}</span>
+                        <span className={`rounded border px-1.5 py-0.5 text-[10px] ${client.assets_assessed > 0 ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-300" : "border-border/70 bg-background text-muted-foreground"}`}>{client.assets_assessed > 0 ? "Agent reporting" : "Agent not linked"}</span>
+                      </span>
+                    </span>
                     <span className={`shrink-0 text-[10px] uppercase tracking-wide ${active ? "text-primary" : "text-muted-foreground"}`}>{active ? "Open" : "View"}</span>
                   </button>
                 );
@@ -245,7 +270,10 @@ function ClientQuickSearch({ clients = [], activeClientId, onSelect }) {
             </div>
           )}
         </div>
-        <p className="text-xs text-muted-foreground lg:max-w-48">Start typing, then select an account to open its live profile.</p>
+        <div className="flex shrink-0 items-center gap-3">
+          {activeClient && <Button variant="outline" size="sm" onClick={onBrowsePortfolio} data-testid="browse-client-portfolio">Browse portfolio</Button>}
+          <p className="text-xs text-muted-foreground lg:max-w-48">Start typing, then select an account to open its live profile.</p>
+        </div>
       </div>
     </section>
   );
@@ -254,8 +282,9 @@ function ClientQuickSearch({ clients = [], activeClientId, onSelect }) {
 export default function ClientsPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const clientIdFromUrl = searchParams.get("client");
+  const tabFromUrl = searchParams.get("view");
   const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
@@ -269,11 +298,35 @@ export default function ClientsPage() {
   const [detail, setDetail] = useState(null);
   const [activity, setActivity] = useState([]);
   const [healthDetail, setHealthDetail] = useState(null);
-  const [detailTab, setDetailTab] = useState("overview");
+  const [detailTab, setDetailTab] = useState(CLIENT_TAB_VALUES.has(tabFromUrl) ? tabFromUrl : "overview");
   const [detailLoading, setDetailLoading] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
   const [createForm, setCreateForm] = useState({ name: "", industry: "", email: "", phone: "", tier: "standard", lifecycle: "active" });
   const searchRef = useRef(null);
+
+  const openClient = useCallback((id, { preserveView = false } = {}) => {
+    setSelectedId(id || null);
+    if (!preserveView) setDetailTab("overview");
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (id) next.set("client", id);
+      else next.delete("client");
+      if (!preserveView || !id) next.delete("view");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const changeDetailTab = useCallback((nextTab) => {
+    const safeTab = CLIENT_TAB_VALUES.has(nextTab) ? nextTab : "overview";
+    setDetailTab(safeTab);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (selectedId) next.set("client", selectedId);
+      if (safeTab === "overview") next.delete("view");
+      else next.set("view", safeTab);
+      return next;
+    }, { replace: true });
+  }, [selectedId, setSearchParams]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -282,8 +335,8 @@ export default function ClientsPage() {
       setData(res.data || { summary: null, clients: [] });
       if (res.data?.clients?.length) {
         const requestedClient = res.data.clients.find(client => client.id === clientIdFromUrl);
-        if (requestedClient) setSelectedId(requestedClient.id);
-        else if (!selectedId) setSelectedId(res.data.clients[0].id);
+        if (requestedClient) openClient(requestedClient.id, { preserveView: true });
+        else if (clientIdFromUrl) openClient(null);
       }
     } catch {
       toast.error("Failed to load clients");
@@ -308,11 +361,11 @@ export default function ClientsPage() {
     try {
       const [cRes, aRes, hRes] = await Promise.all([
         axios.get(`${API}/clients/${id}`, { headers }),
-        axios.get(`${API}/clients/${id}/activity-timeline`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/clients/${id}/timeline?limit=300`, { headers }).catch(() => ({ data: { events: [] } })),
         axios.get(`${API}/clients/${id}/health`, { headers }).catch(() => ({ data: null })),
       ]);
       setDetail(cRes.data);
-      setActivity(aRes.data || []);
+      setActivity(aRes.data?.events || []);
       setHealthDetail(hRes.data);
     } catch {
       toast.error("Failed to load client");
@@ -331,7 +384,7 @@ export default function ClientsPage() {
       else if (e.key === "j" || e.key === "k") {
         const idx = filtered.findIndex(c => c.id === selectedId);
         const next = e.key === "j" ? Math.min(idx + 1, filtered.length - 1) : Math.max(idx - 1, 0);
-        if (filtered[next]) setSelectedId(filtered[next].id);
+        if (filtered[next]) openClient(filtered[next].id);
       } else if (e.key === "n" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         setCreateDialog(true);
@@ -340,7 +393,7 @@ export default function ClientsPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line
-  }, [selectedId, data]);
+  }, [selectedId, data, openClient]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -409,11 +462,11 @@ export default function ClientsPage() {
             <TopMetric label="Needs Attention" value={attentionClients.length} trend={attentionClients.length ? "service risk identified" : "all clear"} color={attentionClients.length ? "rose" : "emerald"} />
           </MetricStrip>
         </div>
-        <ClientQuickSearch clients={data.clients || []} activeClientId={selectedId} onSelect={setSelectedId} />
+        <ClientQuickSearch clients={data.clients || []} activeClientId={selectedId} onSelect={openClient} onBrowsePortfolio={() => openClient(null)} />
 
         <div className="flex min-h-0 flex-1">
           {/* Master list */}
-          {!selectedClient && <aside className="flex w-full flex-col border-r border-zinc-800 bg-zinc-950 md:w-[40%] lg:w-[32%]">
+          {!selectedClient && <aside className="flex w-full flex-col border-r border-zinc-800 bg-zinc-950 md:w-[42%] lg:w-[420px] lg:max-w-[44%]">
             <div className="border-b border-zinc-800 px-3 py-2 space-y-2">
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-zinc-500 shrink-0" />
@@ -490,7 +543,7 @@ export default function ClientsPage() {
                 <div className="p-3 border-b border-amber-500/20 bg-amber-500/[0.04]">
                   <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-amber-300 font-semibold mb-2"><AlertTriangle className="w-3 h-3" />Needs attention</div>
                   <div className="flex flex-wrap gap-1.5">
-                    {attentionClients.slice(0, 4).map(client => <button key={client.id} onClick={() => setSelectedId(client.id)} className="text-[10px] px-2 py-1 rounded border border-amber-500/20 text-amber-200 hover:bg-amber-500/10">{client.name}{client.patch_pending ? ` · ${client.patch_pending} patches` : ""}</button>)}
+                    {attentionClients.slice(0, 4).map(client => <button key={client.id} onClick={() => openClient(client.id)} className="text-[10px] px-2 py-1 rounded border border-amber-500/20 text-amber-200 hover:bg-amber-500/10">{client.name}{client.patch_pending ? ` · ${client.patch_pending} patches` : ""}</button>)}
                   </div>
                 </div>
               )}
@@ -501,7 +554,7 @@ export default function ClientsPage() {
                 </div>
               ) : (
                 filtered.map(c => (
-                  <ClientListItem key={c.id} client={c} selected={selectedId === c.id} onClick={() => setSelectedId(c.id)} />
+                  <ClientListItem key={c.id} client={c} selected={selectedId === c.id} onClick={() => openClient(c.id)} />
                 ))
               )}
             </div>
@@ -519,8 +572,8 @@ export default function ClientsPage() {
                     <p className="text-xs text-muted-foreground">Pick a client from the sidebar, or explore the universe below.</p>
                   </div>
                 </div>
-                <RenewalWatchTable onOpen={setSelectedId} />
-                <MyAccountsTable onOpen={setSelectedId} />
+                <RenewalWatchTable onOpen={openClient} />
+                <MyAccountsTable onOpen={openClient} />
                 <div>
                   <p className="text-[11px] uppercase tracking-wider text-zinc-400 mb-2 px-1">Universe Map</p>
                   <ClientUniverseMap />
@@ -537,9 +590,9 @@ export default function ClientsPage() {
                 activity={activity}
                 healthDetail={healthDetail}
                 tab={detailTab}
-                setTab={setDetailTab}
+                setTab={changeDetailTab}
                 loading={detailLoading}
-                onClose={() => setSelectedId(null)}
+                onClose={() => openClient(null)}
               />
             )}
           </main>
@@ -547,29 +600,68 @@ export default function ClientsPage() {
 
         {/* Create dialog */}
         <Dialog open={createDialog} onOpenChange={setCreateDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>New Client</DialogTitle>
-              <DialogDescription>Add a new client to your portfolio.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3">
-              <Input placeholder="Client name" value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} data-testid="new-client-name" />
-              <Input placeholder="Industry (e.g. Legal, Healthcare)" value={createForm.industry} onChange={e => setCreateForm({ ...createForm, industry: e.target.value })} />
-              <div className="grid grid-cols-2 gap-2">
-                <Input placeholder="Primary email" value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} />
-                <Input placeholder="Phone" value={createForm.phone} onChange={e => setCreateForm({ ...createForm, phone: e.target.value })} />
+          <DialogContent className="max-w-2xl overflow-hidden border-border/80 bg-background p-0" data-testid="new-client-dialog">
+            <DialogHeader className="border-b border-border/70 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_42%),linear-gradient(135deg,rgba(24,24,27,0.96),rgba(9,9,11,0.98))] px-6 py-5 text-left">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Building2 className="h-4 w-4" /></span>
+                <Badge variant="outline" className="border-primary/25 bg-primary/[0.06] text-[9px] uppercase tracking-[0.16em] text-primary">Client operating record</Badge>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <Select value={createForm.lifecycle} onValueChange={v => setCreateForm({ ...createForm, lifecycle: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="prospect">Prospect</SelectItem>
-                    <SelectItem value="onboarding">Onboarding</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                  </SelectContent>
-                </Select>
+              <DialogTitle className="text-xl">Create a new client</DialogTitle>
+              <DialogDescription className="max-w-xl leading-5">Start the canonical Nexus relationship that tickets, assets, services, contracts, billing, integrations, and audit records will use.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-5 px-6 py-5">
+              <section>
+                <div className="mb-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Organisation</p>
+                  <p className="mt-1 text-xs text-muted-foreground">The identity technicians will see throughout NexusMSP.</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1.5 md:col-span-2">
+                    <span className="text-xs font-medium text-foreground">Client name <span className="text-rose-400">*</span></span>
+                    <Input placeholder="Organisation or trading name" value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} data-testid="new-client-name" />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-foreground">Industry</span>
+                    <Input placeholder="Legal, healthcare, manufacturing…" value={createForm.industry} onChange={e => setCreateForm({ ...createForm, industry: e.target.value })} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-foreground">Lifecycle stage</span>
+                    <Select value={createForm.lifecycle} onValueChange={v => setCreateForm({ ...createForm, lifecycle: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="prospect">Prospect</SelectItem>
+                        <SelectItem value="onboarding">Onboarding</SelectItem>
+                        <SelectItem value="active">Active client</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-border/70 bg-card/30 p-4">
+                <div className="mb-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Primary contact channel</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Used as the initial account contact until people are added to the client record.</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-foreground">Primary email</span>
+                    <Input type="email" placeholder="support@client.example" value={createForm.email} onChange={e => setCreateForm({ ...createForm, email: e.target.value })} />
+                  </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-medium text-foreground">Phone</span>
+                    <Input placeholder="+61 …" value={createForm.phone} onChange={e => setCreateForm({ ...createForm, phone: e.target.value })} />
+                  </label>
+                </div>
+              </section>
+
+              <section className="flex flex-col gap-3 rounded-xl border border-primary/15 bg-primary/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-medium text-foreground">Initial service tier</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">This can be refined later through the managed service-tier catalogue.</p>
+                </div>
                 <Select value={createForm.tier} onValueChange={v => setCreateForm({ ...createForm, tier: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="standard">Standard</SelectItem>
                     <SelectItem value="silver">Silver</SelectItem>
@@ -577,11 +669,11 @@ export default function ClientsPage() {
                     <SelectItem value="platinum">Platinum</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
+              </section>
             </div>
-            <DialogFooter>
+            <DialogFooter className="border-t border-border/70 bg-muted/15 px-6 py-4">
               <Button variant="ghost" onClick={() => setCreateDialog(false)}>Cancel</Button>
-              <Button onClick={createClient} variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" data-testid="create-client-btn"><Plus className="w-4 h-4 mr-1" />Create</Button>
+              <Button onClick={createClient} data-testid="create-client-btn"><Plus className="mr-1.5 h-4 w-4" />Create client record</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -590,138 +682,238 @@ export default function ClientsPage() {
   );
 }
 
-function ClientOverviewGrid({ client, activity, healthDetail }) {
-  const grid = useWidgetGrid({
-    storageKey: "nx-client-overview-layout-v1",
-    hiddenKey:  "nx-client-overview-hidden-v1",
-    defaultLayout: CLIENT_OVERVIEW_DEFAULT_LAYOUT,
-    widgetMeta: CLIENT_OVERVIEW_WIDGET_META,
-    label: "Client Overview",
-  });
+function ClientWorkspaceNavigation({ value, onChange }) {
+  const activeGroup = CLIENT_WORKSPACE_GROUPS.find((group) => group.tabs.some((tab) => tab.value === value)) || CLIENT_WORKSPACE_GROUPS[0];
+  const ActiveIcon = activeGroup.icon;
 
   return (
-    <>
-      <grid.EditBar testIdPrefix="client-overview-" />
-      <ClientResponsiveGridLayout
-        className={`layout ${grid.editMode ? "nx-edit-mode" : ""}`}
-        layouts={grid.visibleLayouts}
-        breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-        cols={{ lg: 12, md: 12, sm: 8, xs: 4, xxs: 2 }}
-        rowHeight={48}
-        margin={[12, 12]}
-        containerPadding={[0, 0]}
-        isDraggable={grid.editMode}
-        isResizable={grid.editMode}
-        onLayoutChange={grid.onLayoutChange}
-        draggableCancel=".nx-widget-hide,button,a,input,kbd,select,[role='combobox']"
-        useCSSTransforms
-        compactType="vertical"
-      >
-        {!grid.hiddenWidgets.has("nba") && (
-          <div key="nba" className="nx-widget-card">
-            <grid.HideBtn id="nba" />
-            <div className="h-full rounded-2xl border border-border/70 bg-[linear-gradient(135deg,rgba(29,78,216,0.08),rgba(9,12,18,0.82))] p-4 shadow-sm">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-indigo-400" />Next Best Action
-              </div>
-              <p className="text-sm text-zinc-300">
-                {client.overdue_count > 0 ? <>Client has <strong className="text-rose-400">${(client.overdue_amount || 0).toLocaleString()} overdue</strong>. Send SMS reminder or start a dunning chase.</> :
-                  client.open_tickets > 10 ? <>Ticket volume is <strong className="text-amber-400">{client.open_tickets}</strong> — book a QBR to understand what's causing the pressure.</> :
-                  client.health_score < 70 ? <>Health score <strong className="text-amber-400">{client.health_score}</strong> — review breakdown and mitigate.</> :
-                  <>All green. Consider scheduling the next QBR or proposing an upsell.</>}
-              </p>
-            </div>
+    <div className="border-b border-border/75 bg-[linear-gradient(180deg,rgba(24,24,27,0.72),rgba(9,9,11,0.3))]" data-testid="client-workspace-navigation">
+      <div className="grid grid-cols-2 gap-1.5 p-2 sm:grid-cols-3 xl:grid-cols-6">
+        {CLIENT_WORKSPACE_GROUPS.map((group) => {
+          const Icon = group.icon;
+          const active = group.id === activeGroup.id;
+          return (
+            <button
+              key={group.id}
+              type="button"
+              onClick={() => onChange(group.tabs[0].value)}
+              className={`group flex min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition ${
+                active
+                  ? "border-primary/30 bg-primary/[0.11] text-foreground shadow-[0_8px_24px_rgba(45,212,191,0.06)]"
+                  : "border-transparent text-muted-foreground hover:border-border/80 hover:bg-muted/35 hover:text-foreground"
+              }`}
+              data-testid={`client-nav-group-${group.id}`}
+            >
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${active ? "border-primary/25 bg-primary/10 text-primary" : "border-border/70 bg-background/45 group-hover:text-primary"}`}>
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-semibold">{group.label}</span>
+                <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.12em] opacity-60">{group.tabs.length} view{group.tabs.length === 1 ? "" : "s"}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex flex-col gap-3 border-t border-white/[0.05] px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <ActiveIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">{activeGroup.label} workspace</p>
+            <p className="truncate text-xs text-muted-foreground">{activeGroup.description}</p>
           </div>
-        )}
-
-        {!grid.hiddenWidgets.has("quick") && (
-          <div key="quick" className="nx-widget-card">
-            <grid.HideBtn id="quick" />
-            <div className="h-full rounded-2xl border border-border/70 bg-[linear-gradient(135deg,rgba(45,212,191,0.07),rgba(9,12,18,0.82))] p-4 shadow-sm">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-2 flex items-center gap-1">
-                <Zap className="w-3 h-3 text-amber-400" />Quick Actions
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link to={`/tickets?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs" data-testid="qa-new-ticket"><Ticket className="w-3 h-3 mr-1" />New Ticket</Button></Link>
-                <Link to={`/invoices?clientId=${client.id}`}><Button size="sm" variant="outline" className="h-7 text-xs"><DollarSign className="w-3 h-3 mr-1" />New Invoice</Button></Link>
-                <Button size="sm" variant="outline" className="h-7 text-xs"><Send className="w-3 h-3 mr-1" />Send SMS</Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs"><Mail className="w-3 h-3 mr-1" />Email</Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs"><Timer className="w-3 h-3 mr-1" />Start Timer</Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!grid.hiddenWidgets.has("health") && (
-          <div key="health" className="nx-widget-card">
-            <grid.HideBtn id="health" />
-            <div className="h-full overflow-auto rounded-2xl border border-border/70 bg-card/45 p-4 shadow-sm">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center justify-between">
-                <span>Health Score Breakdown</span>
-                {healthDetail && <span className="text-zinc-400 font-mono">{healthDetail.health_score}/100</span>}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {healthDetail?.breakdown ? [
-                  { k: "tickets", max: 30, label: "Tickets" },
-                  { k: "sla", max: 20, label: "SLA" },
-                  { k: "devices", max: healthDetail.breakdown.m365_hygiene != null ? 15 : 20, label: "Devices" },
-                  { k: "payments", max: 20, label: "Payments" },
-                  { k: "contracts", max: healthDetail.breakdown.m365_hygiene != null ? 5 : 10, label: "Contracts" },
-                  ...(healthDetail.breakdown.m365_hygiene != null ? [{ k: "m365_hygiene", max: 10, label: "M365" }] : []),
-                ].map(({ k, max, label }) => {
-                  const v = healthDetail.breakdown[k] ?? 0;
-                  const pct = (v / max) * 100;
-                  const color = pct >= 85 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-rose-500";
-                  return (
-                    <div key={k} className="text-xs" data-testid={`health-breakdown-${k}`}>
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500 uppercase tracking-wider text-[10px]">{label}</span>
-                        <span className="font-mono text-zinc-400 text-[10px]">{v}/{max}</span>
-                      </div>
-                      <div className="h-1 bg-zinc-800 rounded overflow-hidden mt-1">
-                        <div className={`h-full ${color}`} style={{ width: `${Math.min(100, pct)}%`, transition: "width 600ms" }} />
-                      </div>
-                    </div>
-                  );
-                }) : (
-                  <div className="col-span-5 text-xs text-zinc-500">Calculating…</div>
-                )}
-              </div>
-              <p className="text-[11px] text-zinc-500 mt-3">Composite score derived from ticket velocity, SLA adherence, device uptime, payment timeliness, and contract status.</p>
-            </div>
-          </div>
-        )}
-
-        {!grid.hiddenWidgets.has("activity") && (
-          <div key="activity" className="nx-widget-card">
-            <grid.HideBtn id="activity" />
-            <div className="h-full overflow-auto rounded-2xl border border-border/70 bg-card/45 p-4 shadow-sm">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-1">
-                <Activity className="w-3 h-3" />Recent Activity
-              </div>
-              {activity.length === 0 ? (
-                <p className="text-sm text-zinc-500">No recent activity.</p>
-              ) : (
-                <div className="space-y-2">
-                  {activity.slice(0, 8).map((a, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-zinc-900 last:border-0" data-testid={`activity-row-${i}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.type === "ticket" ? "bg-indigo-400" : a.type === "invoice" ? "bg-emerald-400" : a.type === "email" ? (a.status === "sent" || a.status === "received" ? "bg-violet-400" : "bg-rose-400") : a.type?.startsWith("device") ? "bg-cyan-400" : "bg-amber-400"}`} />
-                      <span className="text-zinc-300 flex-1 truncate">{a.title}{a.device_name ? <span className="text-zinc-500"> · {a.device_name}</span> : null}</span>
-                      {a.amount != null && <span className="font-mono text-zinc-500">${a.amount}</span>}
-                      <span className="text-[10px] text-zinc-600 font-mono">{a.timestamp ? formatDistanceToNow(new Date(a.timestamp), { addSuffix: true }) : "—"}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </ClientResponsiveGridLayout>
-    </>
+        </div>
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label={`${activeGroup.label} views`}>
+          {activeGroup.tabs.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              role="tab"
+              aria-selected={value === item.value}
+              onClick={() => onChange(item.value)}
+              className={`h-8 rounded-lg border px-3 text-[11px] font-medium transition ${
+                value === item.value
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border/60 bg-background/35 text-muted-foreground hover:border-primary/20 hover:text-foreground"
+              }`}
+              data-testid={`tab-${item.value}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, tab, setTab, loading, onClose }) {
+function ClientDigitalTwinOverview({ client, activity, healthDetail, onNavigate }) {
+  const integrations = client.integrations || {};
+  const nextAction = client.overdue_count > 0
+    ? {
+        eyebrow: "Commercial exception",
+        title: `Reconcile $${(client.overdue_amount || 0).toLocaleString()} overdue`,
+        body: "Review the affected invoices, record correspondence, and keep the collection trail attributable.",
+        action: "Open billing",
+        tab: "billing",
+        tone: "rose",
+      }
+    : client.open_tickets > 10
+      ? {
+          eyebrow: "Service pressure",
+          title: `${client.open_tickets} open tickets need review`,
+          body: "Inspect repeat demand, ownership, SLA exposure, and whether a coordinated response is required.",
+          action: "Review service work",
+          tab: "tickets",
+          tone: "amber",
+        }
+      : client.health_score < 70
+        ? {
+            eyebrow: "Health intervention",
+            title: `Restore the client health score from ${client.health_score}`,
+            body: "Use the evidence breakdown to identify the weakest operational relationship before taking action.",
+            action: "Open security posture",
+            tab: "security",
+            tone: "amber",
+          }
+        : !integrations.rmm || !integrations.m365 || !integrations.acronis
+          ? {
+              eyebrow: "Coverage gap",
+              title: "Complete the client service map",
+              body: "One or more core management, Microsoft, or backup relationships are not yet linked to this account.",
+              action: "Review integrations",
+              tab: "integrations",
+              tone: "cyan",
+            }
+          : {
+              eyebrow: "Account opportunity",
+              title: "Prepare the next client review",
+              body: "The account is stable. Review outcomes, renewal readiness, and the next evidence-backed improvement.",
+              action: "Open growth studio",
+              tab: "studio",
+              tone: "emerald",
+            };
+
+  const toneClasses = {
+    rose: "border-rose-500/25 from-rose-500/[0.11]",
+    amber: "border-amber-500/25 from-amber-500/[0.11]",
+    cyan: "border-cyan-500/25 from-cyan-500/[0.11]",
+    emerald: "border-emerald-500/25 from-emerald-500/[0.11]",
+  };
+
+  const relationships = [
+    { label: "People", value: client.contact_count || 0, detail: "contacts", healthy: (client.contact_count || 0) > 0, tab: "contacts" },
+    { label: "Managed estate", value: client.asset_count || 0, detail: `${client.assets_online || 0} online`, healthy: (client.asset_count || 0) > 0, tab: "assets" },
+    { label: "Agreements", value: client.active_contracts || 0, detail: "active", healthy: (client.active_contracts || 0) > 0, tab: "subscriptions" },
+    { label: "Microsoft 365", value: integrations.m365 ? "Linked" : "Missing", detail: "tenant relationship", healthy: !!integrations.m365, tab: "cipp" },
+    { label: "Voice", value: integrations.yeastar ? "Linked" : "Missing", detail: "PBX relationship", healthy: !!integrations.yeastar, tab: "integrations" },
+    { label: "Backups", value: integrations.acronis ? "Linked" : "Missing", detail: "protection source", healthy: !!integrations.acronis, tab: "integrations" },
+  ];
+
+  const breakdown = healthDetail?.breakdown;
+  const dimensions = breakdown ? [
+    { key: "tickets", label: "Tickets", max: 30 },
+    { key: "sla", label: "SLA", max: 20 },
+    { key: "devices", label: "Devices", max: breakdown.m365_hygiene != null ? 15 : 20 },
+    { key: "payments", label: "Payments", max: 20 },
+    { key: "contracts", label: "Contracts", max: breakdown.m365_hygiene != null ? 5 : 10 },
+    ...(breakdown.m365_hygiene != null ? [{ key: "m365_hygiene", label: "Microsoft 365", max: 10 }] : []),
+  ] : [];
+
+  return (
+    <div className="space-y-4" data-testid="client-digital-twin-overview">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)]">
+        <section className={`rounded-2xl border bg-gradient-to-br ${toneClasses[nextAction.tone]} to-card/45 p-5 shadow-sm`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">{nextAction.eyebrow}</p>
+              <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground">{nextAction.title}</h3>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">{nextAction.body}</p>
+            </div>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+              <Sparkles className="h-4.5 w-4.5" />
+            </span>
+          </div>
+          <Button type="button" size="sm" className="mt-5 gap-1.5" onClick={() => onNavigate(nextAction.tab)} data-testid="client-next-best-action">
+            {nextAction.action}<ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </section>
+
+        <section className="rounded-2xl border border-border/70 bg-card/35 p-5 shadow-sm">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Relationship coverage</p>
+              <h3 className="mt-1 text-base font-semibold text-foreground">Client digital twin</h3>
+            </div>
+            <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><CheckCircle2 className="h-3 w-3 text-emerald-400" />Live Nexus relationships</span>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3">
+            {relationships.map((relationship) => (
+              <button
+                key={relationship.label}
+                type="button"
+                onClick={() => onNavigate(relationship.tab)}
+                className="group rounded-xl border border-border/70 bg-background/35 p-3 text-left transition hover:border-primary/25 hover:bg-primary/[0.05]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">{relationship.label}</span>
+                  <span className={`h-1.5 w-1.5 rounded-full ${relationship.healthy ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.65)]" : "bg-amber-400"}`} />
+                </div>
+                <p className={`mt-2 text-sm font-semibold ${relationship.healthy ? "text-foreground" : "text-amber-300"}`}>{relationship.value}</p>
+                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{relationship.detail}</p>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-2xl border border-border/70 bg-card/35 p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Evidence-backed health</p>
+            <p className="mt-1 text-sm text-muted-foreground">A transparent score derived from operational records, never an unexplained estimate.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/45 px-3 py-2">
+            <span className="text-[10px] uppercase tracking-[0.13em] text-muted-foreground">Current score</span>
+            <span className="font-mono text-sm font-semibold text-foreground">{healthDetail?.health_score ?? client.health_score ?? "—"}/100</span>
+          </div>
+        </div>
+        {dimensions.length ? (
+          <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+            {dimensions.map(({ key, label, max }) => {
+              const value = breakdown[key] ?? 0;
+              const percentage = Math.min(100, (value / max) * 100);
+              const color = percentage >= 85 ? "bg-emerald-400" : percentage >= 60 ? "bg-amber-400" : "bg-rose-400";
+              return (
+                <div key={key} data-testid={`health-breakdown-${key}`}>
+                  <div className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="uppercase tracking-[0.12em] text-muted-foreground">{label}</span>
+                    <span className="font-mono text-foreground">{value}/{max}</span>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div className={`h-full rounded-full ${color}`} style={{ width: `${percentage}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-5 rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">Health evidence is still being assembled for this account.</div>
+        )}
+      </section>
+
+      <ClientActivityFeed
+        activity={activity}
+        limit={10}
+        compact
+        title="Operational timeline"
+        description="The latest attributable tickets, correspondence, billing, asset, change, and audit events for this client."
+      />
+    </div>
+  );
+}
+
+function ClientDetailPane({ client: clientProp, detail: _detail, activity, healthDetail, tab, setTab, loading: _loading, onClose }) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
   const [briefingOpen, setBriefingOpen] = useState(false);
@@ -755,7 +947,6 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
   }, [clientProp?.id, token]);
   const client = clientLocal || clientProp;
   const mrrData = client.mrr_trend || [];
-  const tierGrad = TIER_COLORS[client.tier] || TIER_COLORS.standard;
   const isAdmin = user?.role === "admin" || user?.is_admin;
   const applyClientPatch = (patch) => setClientLocal(c => ({ ...c, ...patch }));
 
@@ -820,15 +1011,16 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
             <div><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Service health</p><p className="mt-0.5 text-xs text-foreground">Live account score</p></div>
             <HealthDial score={client.health_score} size={54} />
           </div>
+          <ConfidenceLens entityType="client" entityId={client.id} token={token} API={API} variant="compact" />
           {onClose && (
             <button
               type="button"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/45 px-3 text-xs text-muted-foreground hover:border-primary/35 hover:bg-muted/50 hover:text-foreground"
               onClick={onClose}
               data-testid="back-to-studio-home-btn"
-              title="Back to Studio Home"
+              title="Return to the client portfolio"
             >
-              ← Studio Home
+              ← All clients
             </button>
           )}
           <button
@@ -853,10 +1045,10 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
       <AccountBriefingDialog clientId={client.id} open={briefingOpen} onClose={() => setBriefingOpen(false)} />
 
       {/* Quick Actions strip */}
-      <section className="rounded-2xl border border-border/70 bg-card/35 p-4 shadow-sm">
+      <section className="rounded-2xl border border-primary/15 bg-[linear-gradient(135deg,rgba(45,212,191,0.055),rgba(9,9,11,0.72))] p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Account actions</p><p className="mt-1 text-sm text-muted-foreground">Start a traceable client action without leaving this profile.</p></div>
-          <span className="text-[10px] text-muted-foreground">Every action remains linked to {client.name}</span>
+          <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Client command bar</p><p className="mt-1 text-sm text-muted-foreground">Start a traceable operational action without leaving this record.</p></div>
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><CheckCircle2 className="h-3 w-3 text-emerald-400" />Every action remains linked to {client.name}</span>
         </div>
         <ClientQuickActionsStrip client={client} onOpenWarRoom={() => setTab("warroom")} />
       </section>
@@ -907,34 +1099,15 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/25 shadow-sm">
-        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b border-border bg-muted/15 p-2">
-          {[
-            { v: "overview", l: "Overview" },
-            { v: "studio", l: "Studio ✨" },
-            { v: "plan", l: "Strategic Plan" },
-            { v: "warroom", l: "War Room" },
-            { v: "tickets", l: "Tickets" },
-            { v: "assets", l: "Assets" },
-            { v: "documents", l: "Documents" },
-            { v: "notes", l: "Notes" },
-            { v: "subscriptions", l: "Subscriptions" },
-            { v: "security", l: "Security" },
-            { v: "contacts", l: "Contacts" },
-            { v: "billing", l: "Billing" },
-            { v: "blueprints", l: "Blueprints" },
-            { v: "ai", l: "AI Insights" },
-            { v: "integrations", l: "Integrations" },
-            { v: "cipp", l: "Microsoft 365" },
-            { v: "activity", l: "Activity" },
-          ].map(t => (
-            <TabsTrigger key={t.v} value={t.v} className="shrink-0 rounded-lg border border-transparent px-3 py-2 text-[11px] font-medium tracking-wide text-muted-foreground shadow-none data-[state=active]:border-primary/20 data-[state=active]:bg-primary/10 data-[state=active]:text-primary" data-testid={`tab-${t.v}`}>{t.l}</TabsTrigger>
-          ))}
-        </TabsList>
+        <ClientWorkspaceNavigation value={tab} onChange={setTab} />
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           <TabsContent value="overview" className="mt-0 space-y-3">
-            <ClientActivityFeed activity={activity} limit={8} compact title="Client activity" description="Your at-a-glance feed for recorded tickets, correspondence, billing, assets, change work, and account audit events." />
-            <ClientOverviewGrid client={client} activity={activity} healthDetail={healthDetail} />
+            <ClientDigitalTwinOverview client={client} activity={activity} healthDetail={healthDetail} onNavigate={setTab} />
+          </TabsContent>
+
+          <TabsContent value="fabric" className="mt-0 space-y-3">
+            <ClientFabricPanel clientId={client.id} clientName={client.name} token={token} API={API} isAdmin={isAdmin} />
           </TabsContent>
 
           <TabsContent value="studio" className="mt-0 space-y-3">
@@ -956,7 +1129,7 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
               <ContractWatchCard clientId={client.id} />
               <ComplianceCard clientId={client.id} />
             </div>
-            <ScorecardCard clientId={client.id} onExport={(d) => { try { window.print(); } catch {} }} />
+            <ScorecardCard clientId={client.id} onExport={(_d) => { try { window.print(); } catch {} }} />
           </TabsContent>
 
           <TabsContent value="plan" className="mt-0 space-y-3">
@@ -1107,7 +1280,7 @@ function ClientDetailPane({ client: clientProp, detail, activity, healthDetail, 
           </TabsContent>
 
           <TabsContent value="activity" className="mt-0">
-            <ClientActivityFeed activity={activity} title="Client activity and audit feed" description="Every row is linked to its operational record where one exists. Entries are sourced from persisted tickets, communications, billing, assets, change records, and audit logs." />
+            <ClientActivityFeed activity={activity} title="Nexus Timeline" description="The client’s complete operational chronology across service, correspondence, assets, remote sessions, automation, backups, billing, documentation, governance, and platform events." />
             <div className="hidden space-y-1">
               {activity.map((a, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs py-2 border-b border-zinc-900">

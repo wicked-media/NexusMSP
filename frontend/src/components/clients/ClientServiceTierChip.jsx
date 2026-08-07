@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Shield, Award, Crown, Gem, Sparkles, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 
 const ICON_MAP = { shield: Shield, award: Award, crown: Crown, gem: Gem, sparkles: Sparkles };
 
@@ -69,6 +70,7 @@ export default function ClientServiceTierChip({ client, isAdmin = false, onUpdat
   }
 
   const Icon = ICON_MAP[tier.icon] || Shield;
+  const visual = getServiceTierVisual(tier);
 
   if (editing && isAdmin) {
     return (
@@ -88,13 +90,13 @@ export default function ClientServiceTierChip({ client, isAdmin = false, onUpdat
     <Badge
       variant="outline"
       className="gap-1.5 text-[10.5px] font-semibold border-current cursor-pointer hover:brightness-125"
-      style={{ color: tier.color, borderColor: `${tier.color}66`, backgroundColor: `${tier.color}10` }}
+      style={{ color: visual.color, borderColor: `${visual.color}66`, backgroundColor: `${visual.color}10` }}
       data-testid="client-tier-chip"
       title={`${tier.name} · response ${tier.response_sla_minutes < 60 ? tier.response_sla_minutes + "m" : Math.round(tier.response_sla_minutes / 60) + "h"} / resolution ${Math.round(tier.resolution_sla_minutes / 60)}h${isAdmin ? " · click to change" : ""}`}
       onClick={() => isAdmin && setEditing(true)}
     >
-      <Icon className="w-3 h-3" />
-      {tier.name}
+      <span className="flex h-4 w-4 items-center justify-center rounded border bg-black/10" style={{ borderColor: `${visual.color}55` }}><Icon className="w-2.5 h-2.5" /></span>
+      {visual.label}
       {isAdmin && <Pencil className="w-2.5 h-2.5 opacity-50" />}
     </Badge>
   );

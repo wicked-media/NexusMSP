@@ -1,19 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import {
-  Wrench, Search, RefreshCw, Loader2, Clock, AlertTriangle, Plus,
-  User, GripVertical, Monitor, Package, CheckCircle, Timer
+  Wrench, Search, RefreshCw, Loader2, Clock, AlertTriangle, Plus, GripVertical, Monitor, Timer
 } from "lucide-react";
 
 const BENCH_COLUMNS = [

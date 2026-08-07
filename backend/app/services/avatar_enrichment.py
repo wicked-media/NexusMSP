@@ -29,13 +29,18 @@ async def attach_user_avatars(
         return items
 
     avatar_by_user_id: dict[str, str] = {}
-    cursor = db.users.find(
-        {"id": {"$in": list(user_ids)}},
-        {"_id": 0, "id": 1, "avatar": 1},
-    )
-    async for user in cursor:
-        if user.get("avatar"):
-            avatar_by_user_id[str(user["id"])] = user["avatar"]
+    try:
+        cursor = db.users.find(
+            {"id": {"$in": list(user_ids)}},
+            {"_id": 0, "id": 1, "avatar": 1},
+        )
+        async for user in cursor:
+            if user.get("avatar"):
+                avatar_by_user_id[str(user["id"])] = user["avatar"]
+    except Exception:
+        # Avatar decoration is presentational. Presence, comments and audit
+        # records must remain available during a transient profile-store fault.
+        return items
 
     for record in items:
         user_id = next((record.get(field) for field in id_fields if record.get(field)), None)

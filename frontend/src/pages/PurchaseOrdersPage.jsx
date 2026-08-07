@@ -19,11 +19,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, FileText, Edit, Trash2, DollarSign, Package,
-  Truck, CheckCircle, Clock, ArrowLeft, Send, XCircle, Eye, ShoppingCart,
-  AlertTriangle, Scan, History, ChevronRight, PackageCheck, Box, RefreshCw,
+  Plus, Search, Loader2, FileText, Edit, Trash2, DollarSign, CheckCircle, Clock, ArrowLeft, Send, XCircle, Eye, ShoppingCart,
+  AlertTriangle, Scan, PackageCheck, Box,
   BellRing, Mail, Download, Copy, ThumbsUp, ThumbsDown, MessageSquare,
-  BarChart3, TrendingUp, Printer, BookTemplate, Save, Layers, Check, ChevronsUpDown,
+  BarChart3, TrendingUp, Save, Layers, Check, ChevronsUpDown,
   MoreHorizontal, ChevronDown, Building2, Paperclip, RotateCcw, Settings2
 } from "lucide-react";
 import { format } from "date-fns";
@@ -262,7 +261,8 @@ export default function PurchaseOrdersPage() {
   const resetFormObj = () => ({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
-    client_id: "", client_name: "", shipping: "0", assigned_to: "", assigned_to_name: ""
+    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "",
+    shipping: "0", assigned_to: "", assigned_to_name: ""
   });
 
   const openEdit = (po) => {
@@ -280,13 +280,23 @@ export default function PurchaseOrdersPage() {
     setIsFormOpen(true);
   };
 
-  const addLineItem = () => setForm(f => ({
-    ...f, line_items: [...f.line_items, {
-      product_id: "", product_name: "", quantity: 1, unit_price: 0, received_qty: 0, status: "pending",
-      destination_type: "stock", destination_ticket_id: "", destination_ticket_number: "", destination_ticket_title: "",
-      destination_technician_id: "", destination_technician_name: "", arrival_notified: false,
-    }]
-  }));
+  const addLineItem = () => setForm(f => {
+    const relatedTicket = tickets.find(ticket => ticket.id === f.ticket_id);
+    const hasRelatedTicket = Boolean(f.ticket_id);
+    return {
+      ...f,
+      line_items: [...f.line_items, {
+        product_id: "", product_name: "", quantity: 1, unit_price: 0, received_qty: 0, status: "pending",
+        destination_type: hasRelatedTicket ? "ticket" : "stock",
+        destination_ticket_id: hasRelatedTicket ? f.ticket_id : "",
+        destination_ticket_number: hasRelatedTicket ? f.ticket_number : "",
+        destination_ticket_title: hasRelatedTicket ? f.ticket_title : "",
+        destination_technician_id: hasRelatedTicket ? (relatedTicket?.assigned_to || "") : "",
+        destination_technician_name: hasRelatedTicket ? (relatedTicket?.assigned_name || "") : "",
+        arrival_notified: false,
+      }],
+    };
+  });
 
   const updateLineItem = (idx, field, value) => {
     setForm(f => {
@@ -1464,23 +1474,24 @@ export default function PurchaseOrdersPage() {
     if (!spendAnalytics) fetchSpendAnalytics();
     return (
       <div className="space-y-6" data-testid="po-analytics">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">PO Spend Analytics</h1>
-            <p className="text-muted-foreground">Overview of purchase order spending</p>
-          </div>
-          <Button variant="outline" onClick={() => setAnalyticsTab("list")} data-testid="back-to-po-list"><ArrowLeft className="w-4 h-4 mr-1" />Back to POs</Button>
-        </div>
+        <OperationalPageHeader
+          eyebrow="Procurement intelligence"
+          title="PO Spend Analytics"
+          description="Track supplier concentration, monthly commitments, and purchase-order status from the same audited procurement ledger."
+          icon={BarChart3}
+          tone="emerald"
+          actions={<Button variant="outline" size="sm" onClick={() => setAnalyticsTab("list")} data-testid="back-to-po-list"><ArrowLeft className="w-4 h-4 mr-1" />Back to POs</Button>}
+        />
         {!spendAnalytics ? (
           <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin" /></div>
         ) : (
           <>
-            <div className="grid grid-cols-3 gap-4">
-              <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total Spend</p><p className="text-2xl font-bold text-green-500">${(spendAnalytics.total_spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></CardContent></Card>
-              <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Total POs</p><p className="text-2xl font-bold">{spendAnalytics.total_pos || 0}</p></CardContent></Card>
-              <Card><CardContent className="pt-4"><p className="text-xs text-muted-foreground">Avg PO Value</p><p className="text-2xl font-bold">${(spendAnalytics.avg_po_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></CardContent></Card>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <HeroTile label="Total spend" value={`$${(spendAnalytics.total_spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`} icon={DollarSign} glow="emerald" subtitle="Audited purchase orders" />
+              <HeroTile label="Purchase orders" value={spendAnalytics.total_pos || 0} icon={ShoppingCart} glow="cyan" subtitle="Across all suppliers" />
+              <HeroTile label="Average PO value" value={`$${(spendAnalytics.avg_po_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`} icon={TrendingUp} glow="violet" subtitle="Mean committed value" />
             </div>
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <Card>
                 <CardHeader><CardTitle className="text-sm flex items-center gap-2"><TrendingUp className="w-4 h-4" />Top Vendors by Spend</CardTitle></CardHeader>
                 <CardContent>

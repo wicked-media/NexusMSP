@@ -1,15 +1,120 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import uuid
+
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import log_activity
 
 router = APIRouter()
 
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _actor(user: dict) -> str:
+    return user.get("name") or user.get("email") or "Authenticated technician"
+
+
+def _run_date(user: dict) -> str:
+    timezone_name = user.get("timezone") or "Australia/Sydney"
+    try:
+        local_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        local_timezone = timezone.utc
+    return datetime.now(timezone.utc).astimezone(local_timezone).date().isoformat()
+
+
+def _review_steps(checks: dict) -> list[dict]:
+    devices = checks.get("devices") or {}
+    tickets = checks.get("tickets") or {}
+    backups = checks.get("backups") or {}
+    security = checks.get("security") or {}
+    phones = checks.get("phones") or {}
+    overdue = checks.get("overdue_invoices") or {}
+    scheduled = checks.get("scheduled_tasks") or []
+    recurring = checks.get("recurring_due") or []
+    patches = int(checks.get("patches_pending") or 0)
+
+    definitions = [
+        {
+            "key": "fleet",
+            "title": "Fleet and connectivity",
+            "description": "Review offline and degraded managed endpoints.",
+            "source": "Nexus Agent device evidence",
+            "attention": int(devices.get("offline") or 0) + int(devices.get("warning") or 0) > 0,
+            "evidence": f"{int(devices.get('online') or 0)} online · {int(devices.get('offline') or 0)} offline · {int(devices.get('warning') or 0)} degraded",
+        },
+        {
+            "key": "service_desk",
+            "title": "Service desk triage",
+            "description": "Confirm urgent, breached and unassigned work has an owner.",
+            "source": "Ticket and SLA records",
+            "attention": any(int(tickets.get(key) or 0) > 0 for key in ("critical_high", "sla_breaches", "unassigned")),
+            "evidence": f"{int(tickets.get('critical_high') or 0)} critical/high · {int(tickets.get('sla_breaches') or 0)} breached · {int(tickets.get('unassigned') or 0)} unassigned",
+        },
+        {
+            "key": "backups",
+            "title": "Backup assurance",
+            "description": "Validate failed and warning backup jobs before customer impact.",
+            "source": "Connected backup job evidence",
+            "attention": int(backups.get("failed") or 0) + int(backups.get("warning") or 0) > 0,
+            "evidence": f"{int(backups.get('success') or 0)} successful · {int(backups.get('failed') or 0)} failed · {int(backups.get('warning') or 0)} warning",
+        },
+        {
+            "key": "security",
+            "title": "Security response",
+            "description": "Review high-priority security signals recorded in the last 24 hours.",
+            "source": "Security alert evidence",
+            "attention": int(security.get("critical_alerts") or 0) > 0,
+            "evidence": f"{int(security.get('alerts_24h') or 0)} signals in 24h · {int(security.get('critical_alerts') or 0)} critical/high",
+        },
+        {
+            "key": "patching",
+            "title": "Patch and maintenance exposure",
+            "description": "Confirm critical pending updates have a reviewed remediation path.",
+            "source": "Patch inventory evidence",
+            "attention": patches > 0,
+            "evidence": f"{patches} critical or important updates pending",
+        },
+        {
+            "key": "voice_and_tasks",
+            "title": "Voice and scheduled operations",
+            "description": "Check client PBX connectivity and today's scheduled automation.",
+            "source": "Yeastar and scheduler records",
+            "attention": int(phones.get("attention") or 0) > 0,
+            "evidence": f"{int(phones.get('online') or 0)}/{int(phones.get('pbx_count') or 0)} PBXs online · {len(scheduled)} scheduled tasks",
+        },
+        {
+            "key": "billing",
+            "title": "Billing exceptions",
+            "description": "Review overdue receivables and recurring runs that need operational follow-up.",
+            "source": "Billing and recurring invoice records",
+            "attention": int(overdue.get("count") or 0) + len(recurring) > 0,
+            "evidence": f"{int(overdue.get('count') or 0)} overdue invoices · {len(recurring)} recurring runs due",
+        },
+    ]
+    steps = []
+    for definition in definitions:
+        attention = definition.pop("attention")
+        steps.append({
+            **definition,
+            "signal": "attention" if attention else "clear",
+            "outcome": "pending",
+            "note": "",
+            "reviewed_at": None,
+            "reviewed_by": None,
+        })
+    return steps
+
+@router.get("/dashboard/daily-review")
 @router.get("/morning-checks")
 async def get_morning_checks(current_user: dict = Depends(get_current_user)):
     """Aggregate all critical morning check data for MSP NOC team"""
     now = datetime.now(timezone.utc)
-    today_str = now.strftime("%Y-%m-%d")
+    today_str = _run_date(current_user)
     yesterday = (now - timedelta(days=1)).isoformat()
 
     # 1. Device Health
@@ -88,6 +193,7 @@ async def get_morning_checks(current_user: dict = Depends(get_current_user)):
 
     return {
         "timestamp": now.isoformat(),
+        "run_date": today_str,
         "health_score": health_score,
         "devices": {
             "total": len(all_devices),
@@ -134,3 +240,190 @@ async def get_morning_checks(current_user: dict = Depends(get_current_user)):
             "list": [{"invoice_number": i.get("invoice_number", ""), "client_name": i.get("client_name", ""), "amount_due": i.get("amount_due", 0), "due_date": i.get("due_date", "")} for i in overdue_invoices[:10]],
         },
     }
+
+
+@router.get("/dashboard/daily-review/runs")
+@router.get("/morning-checks/runs")
+async def list_morning_check_runs(limit: int = 30, current_user: dict = Depends(get_current_user)):
+    safe_limit = max(1, min(limit, 100))
+    return await db.morning_check_runs.find({}, {"_id": 0}).sort("started_at", -1).to_list(safe_limit)
+
+
+@router.post("/dashboard/daily-review/runs/start")
+@router.post("/morning-checks/runs/start")
+async def start_morning_check_run(data: dict | None = None, current_user: dict = Depends(get_current_user)):
+    data = data or {}
+    run_date = _run_date(current_user)
+    existing = await db.morning_check_runs.find_one(
+        {"run_date": run_date, "status": "in_progress"}, {"_id": 0}
+    )
+    if existing:
+        return existing
+
+    checks = await get_morning_checks(current_user)
+    now = _now()
+    run = {
+        "id": str(uuid.uuid4()),
+        "run_date": run_date,
+        "status": "in_progress",
+        "title": data.get("title") or f"Daily NOC review · {run_date}",
+        "started_at": now,
+        "started_by": _actor(current_user),
+        "started_by_id": current_user.get("id"),
+        "snapshot_generated_at": checks.get("timestamp"),
+        "snapshot_health_score": checks.get("health_score"),
+        "steps": _review_steps(checks),
+        "handoff_note": "",
+        "completed_at": None,
+        "completed_by": None,
+    }
+    # Motor adds MongoDB's private ObjectId to the inserted mapping. Insert a
+    # copy so the API response remains an ID-safe Nexus record.
+    await db.morning_check_runs.insert_one(dict(run))
+    await log_activity(
+        current_user,
+        "morning_review_started",
+        "morning_check_run",
+        run["id"],
+        run["title"],
+        "Started an auditable daily NOC review from the current operational snapshot",
+        metadata={"run_date": run_date, "health_score": run.get("snapshot_health_score")},
+    )
+    return run
+
+
+@router.post("/dashboard/daily-review/runs/{run_id}/steps/{step_key}")
+@router.post("/morning-checks/runs/{run_id}/steps/{step_key}")
+async def review_morning_check_step(
+    run_id: str,
+    step_key: str,
+    data: dict | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    data = data or {}
+    outcome = str(data.get("outcome") or "").strip().lower()
+    note = str(data.get("note") or "").strip()
+    if outcome not in {"reviewed", "exception"}:
+        raise HTTPException(status_code=422, detail="Outcome must be reviewed or exception")
+    if outcome == "exception" and len(note) < 8:
+        raise HTTPException(status_code=422, detail="Record the exception, owner, or next action")
+
+    run = await db.morning_check_runs.find_one({"id": run_id, "status": "in_progress"}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Active morning review not found")
+    if step_key not in {step.get("key") for step in run.get("steps") or []}:
+        raise HTTPException(status_code=404, detail="Morning review step not found")
+
+    reviewed_at = _now()
+    steps = [
+        {
+            **step,
+            "outcome": outcome,
+            "note": note,
+            "reviewed_at": reviewed_at,
+            "reviewed_by": _actor(current_user),
+        } if step.get("key") == step_key else step
+        for step in run.get("steps") or []
+    ]
+    result = await db.morning_check_runs.update_one(
+        {"id": run_id, "status": "in_progress"},
+        {"$set": {"steps": steps, "updated_at": reviewed_at, "updated_by": _actor(current_user)}},
+    )
+    if not result.modified_count:
+        raise HTTPException(status_code=409, detail="Morning review changed before this step was recorded")
+    updated = await db.morning_check_runs.find_one({"id": run_id}, {"_id": 0})
+    await log_activity(
+        current_user,
+        "morning_review_step_recorded",
+        "morning_check_run",
+        run_id,
+        run.get("title") or "Daily NOC review",
+        f"{step_key.replace('_', ' ').title()} marked {outcome}",
+        metadata={"step_key": step_key, "outcome": outcome, "note": note},
+    )
+    return updated
+
+
+@router.post("/dashboard/daily-review/runs/{run_id}/complete")
+@router.post("/morning-checks/runs/{run_id}/complete")
+async def complete_morning_check_run(
+    run_id: str,
+    data: dict | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    data = data or {}
+    handoff_note = str(data.get("handoff_note") or "").strip()
+    if len(handoff_note) < 12:
+        raise HTTPException(status_code=422, detail="Record a meaningful handoff or all-clear summary")
+
+    run = await db.morning_check_runs.find_one({"id": run_id, "status": "in_progress"}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Active morning review not found")
+    pending = [step.get("title") for step in run.get("steps") or [] if step.get("outcome") == "pending"]
+    if pending:
+        raise HTTPException(status_code=409, detail=f"Review every section before sign-off: {', '.join(pending)}")
+
+    completed_at = _now()
+    completed_by = _actor(current_user)
+    result = await db.morning_check_runs.update_one(
+        {"id": run_id, "status": "in_progress"},
+        {"$set": {
+            "status": "completed",
+            "handoff_note": handoff_note,
+            "completed_at": completed_at,
+            "completed_by": completed_by,
+            "completed_by_id": current_user.get("id"),
+        }},
+    )
+    if not result.modified_count:
+        raise HTTPException(status_code=409, detail="Morning review changed before sign-off")
+    completed = await db.morning_check_runs.find_one({"id": run_id}, {"_id": 0})
+    await log_activity(
+        current_user,
+        "morning_review_completed",
+        "morning_check_run",
+        run_id,
+        run.get("title") or "Daily NOC review",
+        f"Signed off the daily NOC review with {sum(1 for step in run.get('steps') or [] if step.get('outcome') == 'exception')} recorded exception(s)",
+        metadata={"run_date": run.get("run_date"), "handoff_note": handoff_note},
+    )
+    return completed
+
+
+@router.post("/dashboard/daily-review/runs/{run_id}/cancel")
+@router.post("/morning-checks/runs/{run_id}/cancel")
+async def cancel_morning_check_run(
+    run_id: str,
+    data: dict | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    reason = str((data or {}).get("reason") or "").strip()
+    if len(reason) < 8:
+        raise HTTPException(status_code=422, detail="Record why this review was cancelled")
+    run = await db.morning_check_runs.find_one({"id": run_id, "status": "in_progress"}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Active morning review not found")
+    cancelled_at = _now()
+    cancelled_by = _actor(current_user)
+    result = await db.morning_check_runs.update_one(
+        {"id": run_id, "status": "in_progress"},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": cancelled_at,
+            "cancelled_by": cancelled_by,
+            "cancel_reason": reason,
+        }},
+    )
+    if not result.modified_count:
+        raise HTTPException(status_code=409, detail="Morning review changed before cancellation")
+    cancelled = await db.morning_check_runs.find_one({"id": run_id}, {"_id": 0})
+    await log_activity(
+        current_user,
+        "morning_review_cancelled",
+        "morning_check_run",
+        run_id,
+        run.get("title") or "Daily NOC review",
+        f"Cancelled the daily NOC review: {reason}",
+        metadata={"run_date": run.get("run_date"), "reason": reason},
+    )
+    return cancelled

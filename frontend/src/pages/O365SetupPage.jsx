@@ -15,8 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
 import { toast } from "sonner";
 import {
-  Mail, Settings, CheckCircle, XCircle, RefreshCw, Loader2, Shield,
-  Globe, Key, Link, Unlink, TestTube, ArrowRight, UserPlus, Zap, Plus, Pencil, Send
+  Mail, Settings, CheckCircle, XCircle, RefreshCw, Loader2, Shield, Key, Link, Unlink, TestTube, UserPlus, Zap, Plus, Pencil, Send
 } from "lucide-react";
 
 const OUTBOUND_ROLES = [
@@ -102,7 +101,7 @@ export default function O365SetupPage() {
   };
 
   const handleDisconnect = async () => {
-    if (!confirm("Disconnect Microsoft 365 mailbox?")) return;
+    if (!window.confirm("Disconnect Microsoft 365 mailbox?")) return;
     try {
       await axios.post(`${API}/o365/disconnect`, {}, { headers });
       toast.success("Disconnected");

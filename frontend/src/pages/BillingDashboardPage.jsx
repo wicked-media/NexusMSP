@@ -1,19 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   Loader2, DollarSign, TrendingUp, AlertTriangle, CheckCircle,
   Clock, CreditCard, Flame, Zap, Send, ArrowUpRight, ArrowDownRight,
   BarChart3, Users, FileText, Receipt, ShoppingCart, Target, Banknote,
-  Trophy, ChevronRight, Activity, RefreshCw, MoreHorizontal, ChevronDown, Calculator
+  Trophy, ChevronRight, Activity, RefreshCw, MoreHorizontal, ChevronDown, Calculator, Layers3
 } from "lucide-react";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
@@ -34,6 +32,57 @@ const SEVERITY_CONFIG = {
   medium: { label: "Medium", class: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
   low: { label: "Low", class: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
 };
+
+function normalizeBillingMetrics(payload = {}) {
+  const number = (value) => Number(value) || 0;
+  return {
+    ...payload,
+    mrr: number(payload.mrr),
+    arr: number(payload.arr),
+    total_invoiced: number(payload.total_invoiced),
+    total_collected: number(payload.total_collected),
+    total_outstanding: number(payload.total_outstanding),
+    collection_rate: number(payload.collection_rate),
+    payment_health_score: payload.payment_health_score == null ? 50 : number(payload.payment_health_score),
+    total_po_spend: number(payload.total_po_spend),
+    streak: {
+      current: number(payload.streak?.current),
+      best: number(payload.streak?.best),
+      level: payload.streak?.level || "starter",
+    },
+    overdue_alerts: Array.isArray(payload.overdue_alerts)
+      ? payload.overdue_alerts.map(item => ({ ...item, balance: number(item.balance), total: number(item.total), days_overdue: number(item.days_overdue) }))
+      : [],
+    recent_payments: Array.isArray(payload.recent_payments)
+      ? payload.recent_payments.map(item => ({ ...item, amount: number(item.amount) }))
+      : [],
+    monthly_trend: Array.isArray(payload.monthly_trend)
+      ? payload.monthly_trend.map(item => ({ ...item, invoiced: number(item.invoiced), collected: number(item.collected) }))
+      : [],
+    top_debtors: Array.isArray(payload.top_debtors)
+      ? payload.top_debtors.map(item => ({ ...item, balance: number(item.balance), invoices: number(item.invoices) }))
+      : [],
+    overdue_count: number(payload.overdue_count),
+    counts: {
+      total_invoices: number(payload.counts?.total_invoices),
+      draft: number(payload.counts?.draft),
+      sent: number(payload.counts?.sent),
+      paid: number(payload.counts?.paid),
+      overdue: number(payload.counts?.overdue),
+    },
+    cash_flow_forecast: {
+      incoming_30d: number(payload.cash_flow_forecast?.incoming_30d),
+      outgoing_30d: number(payload.cash_flow_forecast?.outgoing_30d),
+      net_30d: number(payload.cash_flow_forecast?.net_30d),
+    },
+  };
+}
+
+function formatPaymentDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "-" : format(date, "MMM d, HH:mm");
+}
 
 function HealthGauge({ score }) {
   const radius = 58;
@@ -76,18 +125,25 @@ export default function BillingDashboardPage() {
   const { token } = useAuth();
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [chasingId, setChasingId] = useState(null);
   const navigate = useNavigate();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const res = await axios.get(`${API}/billing-dashboard/metrics`, { headers });
-      setMetrics(res.data);
-    } catch { toast.error("Failed to load billing metrics"); }
+      setMetrics(normalizeBillingMetrics(res.data));
+    } catch (error) {
+      const message = error.response?.data?.detail || "Failed to load billing metrics";
+      setMetrics(null);
+      setLoadError(message);
+      toast.error(message);
+    }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
 
@@ -101,8 +157,31 @@ export default function BillingDashboardPage() {
     finally { setChasingId(null); }
   };
 
-  if (loading || !metrics) {
+  if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
+
+  if (loadError || !metrics) {
+    return (
+      <div className="space-y-6" data-testid="billing-dashboard-error">
+        <OperationalPageHeader
+          eyebrow="Financial operations"
+          title="Billing Command"
+          description="Revenue, collections, cash flow, and financial follow-through across NexusMSP."
+          icon={Banknote}
+          tone="emerald"
+          actions={<Button variant="outline" size="sm" onClick={fetchMetrics}><RefreshCw className="mr-1.5 h-4 w-4" />Retry</Button>}
+        />
+        <Card className="border-rose-500/20 bg-rose-500/[0.04]">
+          <CardContent className="flex min-h-56 flex-col items-center justify-center p-8 text-center">
+            <AlertTriangle className="h-8 w-8 text-rose-300" />
+            <h2 className="mt-3 text-base font-semibold">Billing metrics are temporarily unavailable</h2>
+            <p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError || "The metrics response was empty."}</p>
+            <Button className="mt-4" onClick={fetchMetrics}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   const m = metrics;
@@ -138,6 +217,7 @@ export default function BillingDashboardPage() {
               <DropdownMenuItem onClick={() => navigate("/estimates")} className="gap-2.5"><FileText className="h-4 w-4 text-sky-300" />Estimates</DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate("/quote-to-cash")} className="gap-2.5"><Target className="h-4 w-4 text-violet-300" />Quote to cash</DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate("/billing-recon")} className="gap-2.5"><CheckCircle className="h-4 w-4 text-emerald-300" />Reconciliation</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => navigate("/services-subscriptions")} className="gap-2.5"><Layers3 className="h-4 w-4 text-cyan-300" />Services & subscriptions</DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate("/usage-billing")} className="gap-2.5"><Activity className="h-4 w-4 text-cyan-300" />Usage billing</DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate("/billing-portal")} className="gap-2.5"><CreditCard className="h-4 w-4 text-amber-300" />Payment portal</DropdownMenuItem>
               <DropdownMenuItem onClick={() => navigate("/proposals")} className="gap-2.5"><FileText className="h-4 w-4 text-indigo-300" />Proposals & quotes</DropdownMenuItem>
@@ -152,9 +232,17 @@ export default function BillingDashboardPage() {
       />
 
       {/* Row 1: MRR/ARR + Health + Streak */}
-      <div className="grid grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {/* MRR/ARR */}
-        <Card className="col-span-4 border-purple-500/20 overflow-hidden relative" data-testid="mrr-arr-card">
+        <Card
+          className="relative cursor-pointer overflow-hidden border-purple-500/20 transition hover:-translate-y-0.5 hover:border-purple-400/40 hover:shadow-[0_18px_45px_rgba(139,92,246,0.10)]"
+          role="button"
+          tabIndex={0}
+          aria-label="Open recurring billing"
+          onClick={() => navigate("/recurring-invoices")}
+          onKeyDown={event => { if (event.key === "Enter" || event.key === " ") navigate("/recurring-invoices"); }}
+          data-testid="mrr-arr-card"
+        >
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-purple-500 via-cyan-500 to-purple-500" />
           <CardContent className="pt-5 space-y-4">
             <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -175,7 +263,15 @@ export default function BillingDashboardPage() {
         </Card>
 
         {/* Health Score */}
-        <Card className="col-span-4 overflow-hidden relative" data-testid="health-score-card">
+        <Card
+          className="relative cursor-pointer overflow-hidden transition hover:-translate-y-0.5 hover:border-emerald-400/30 hover:shadow-[0_18px_45px_rgba(16,185,129,0.08)]"
+          role="button"
+          tabIndex={0}
+          aria-label="Open billing reconciliation"
+          onClick={() => navigate("/billing-recon")}
+          onKeyDown={event => { if (event.key === "Enter" || event.key === " ") navigate("/billing-recon"); }}
+          data-testid="health-score-card"
+        >
           <div className={`absolute top-0 left-0 w-full h-0.5 ${m.payment_health_score >= 80 ? "bg-green-500" : m.payment_health_score >= 60 ? "bg-amber-500" : "bg-red-500"}`} />
           <CardContent className="pt-5">
             <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
@@ -189,7 +285,15 @@ export default function BillingDashboardPage() {
         </Card>
 
         {/* Collection Streak */}
-        <Card className={`col-span-4 overflow-hidden relative ${streakCfg.ring}`} data-testid="streak-card">
+        <Card
+          className={`relative cursor-pointer overflow-hidden transition hover:-translate-y-0.5 hover:border-orange-400/30 hover:shadow-[0_18px_45px_rgba(249,115,22,0.08)] ${streakCfg.ring}`}
+          role="button"
+          tabIndex={0}
+          aria-label="Open invoice collections"
+          onClick={() => navigate("/invoices")}
+          onKeyDown={event => { if (event.key === "Enter" || event.key === " ") navigate("/invoices"); }}
+          data-testid="streak-card"
+        >
           <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-orange-500 via-red-500 to-yellow-500" />
           <CardContent className="pt-5 text-center">
             <div className="flex items-center justify-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
@@ -220,13 +324,21 @@ export default function BillingDashboardPage() {
         <HeroTile label="Total invoiced" value={`$${m.total_invoiced.toLocaleString()}`} icon={DollarSign} glow="cyan" animated={false} onClick={() => navigate("/invoices")} testId="stat-total-invoiced" />
         <HeroTile label="Collected" value={`$${m.total_collected.toLocaleString()}`} icon={CheckCircle} glow="emerald" animated={false} onClick={() => navigate("/invoices")} testId="stat-collected" />
         <HeroTile label="Outstanding" value={`$${m.total_outstanding.toLocaleString()}`} icon={AlertTriangle} glow={m.total_outstanding > 0 ? "rose" : "emerald"} animated={false} onClick={() => navigate("/invoices")} testId="stat-outstanding" />
-        <HeroTile label="Collection rate" value={m.collection_rate} suffix="%" icon={Target} glow="emerald" testId="stat-collection-rate" />
+        <HeroTile label="Collection rate" value={m.collection_rate} suffix="%" icon={Target} glow="emerald" onClick={() => navigate("/invoices")} testId="stat-collection-rate" />
         <HeroTile label="Purchase order spend" value={`$${m.total_po_spend.toLocaleString()}`} icon={ShoppingCart} glow="violet" animated={false} onClick={() => navigate("/purchase-orders")} testId="stat-po-spend" />
         <HeroTile label="Overdue" value={m.overdue_count} icon={Clock} glow={m.overdue_count > 0 ? "rose" : "emerald"} onClick={() => navigate("/invoices")} testId="stat-overdue" />
       </div>
 
       {/* Row 3: Cash Flow Forecast */}
-      <Card className="border-slate-700/40" data-testid="cash-flow-forecast">
+      <Card
+        className="cursor-pointer border-slate-700/40 transition hover:border-cyan-400/25 hover:bg-cyan-400/[0.02]"
+        role="button"
+        tabIndex={0}
+        aria-label="Open finance intelligence"
+        onClick={() => navigate("/finance-intel")}
+        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") navigate("/finance-intel"); }}
+        data-testid="cash-flow-forecast"
+      >
         <CardContent className="py-4 px-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -236,7 +348,7 @@ export default function BillingDashboardPage() {
               Net: ${m.cash_flow_forecast.net_30d.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </Badge>
           </div>
-          <div className="grid grid-cols-3 gap-6 mt-3">
+          <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-6">
             <div className="flex items-center gap-3">
               <ArrowUpRight className="w-5 h-5 text-green-400" />
               <div><p className="text-xs text-muted-foreground">Expected Incoming</p><p className="text-xl font-bold text-green-400 font-mono">${m.cash_flow_forecast.incoming_30d.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p></div>
@@ -254,9 +366,9 @@ export default function BillingDashboardPage() {
       </Card>
 
       {/* Row 4: Overdue Alerts + Monthly Trend */}
-      <div className="grid grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         {/* Overdue Alerts */}
-        <Card className="col-span-7 border-red-500/10" data-testid="overdue-alerts-card">
+        <Card className="border-red-500/10 xl:col-span-7" data-testid="overdue-alerts-card">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -304,7 +416,7 @@ export default function BillingDashboardPage() {
         </Card>
 
         {/* Monthly Trend */}
-        <Card className="col-span-5" data-testid="monthly-trend-card">
+        <Card className="xl:col-span-5" data-testid="monthly-trend-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2"><BarChart3 className="w-4 h-4 text-blue-400" />Monthly Revenue Trend</CardTitle>
           </CardHeader>
@@ -341,9 +453,9 @@ export default function BillingDashboardPage() {
       </div>
 
       {/* Row 5: Top Debtors + Recent Payments */}
-      <div className="grid grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
         {/* Top Debtors */}
-        <Card className="col-span-5" data-testid="top-debtors-card">
+        <Card className="xl:col-span-5" data-testid="top-debtors-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2"><Users className="w-4 h-4 text-red-400" />Top Debtors</CardTitle>
           </CardHeader>
@@ -356,7 +468,13 @@ export default function BillingDashboardPage() {
                   const maxDebt = m.top_debtors[0]?.balance || 1;
                   const pct = (d.balance / maxDebt) * 100;
                   return (
-                    <div key={`k-${i}`} className="flex items-center gap-3" data-testid={`debtor-${i}`}>
+                    <button
+                      type="button"
+                      key={`${d.client_id || d.client}-${i}`}
+                      className="flex w-full items-center gap-3 rounded-lg p-1.5 text-left transition hover:bg-white/[0.035] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-rose-300"
+                      onClick={() => d.client_id ? navigate(`/clients?client=${encodeURIComponent(d.client_id)}`) : navigate("/invoices")}
+                      data-testid={`debtor-${i}`}
+                    >
                       <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
                         i === 0 ? "bg-red-500/20 text-red-400" : i < 3 ? "bg-orange-500/20 text-orange-400" : "bg-muted/30 text-muted-foreground"
                       }`}>{i + 1}</span>
@@ -370,7 +488,7 @@ export default function BillingDashboardPage() {
                         </div>
                       </div>
                       <span className="text-[10px] text-muted-foreground">{d.invoices} inv</span>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -379,7 +497,7 @@ export default function BillingDashboardPage() {
         </Card>
 
         {/* Recent Payments */}
-        <Card className="col-span-7" data-testid="recent-payments-card">
+        <Card className="xl:col-span-7" data-testid="recent-payments-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2"><Banknote className="w-4 h-4 text-green-400" />Recent Payments</CardTitle>
           </CardHeader>
@@ -393,11 +511,15 @@ export default function BillingDashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {m.recent_payments.slice(0, 8).map((p, i) => (
-                    <TableRow key={`k-${i}`}>
+                    <TableRow
+                      key={`${p.invoice_id || p.invoice_number}-${i}`}
+                      className={p.invoice_id ? "cursor-pointer hover:bg-emerald-500/[0.04]" : ""}
+                      onClick={() => p.invoice_id && navigate(`/invoices?invoice=${encodeURIComponent(p.invoice_id)}`)}
+                    >
                       <TableCell className="font-mono text-sm">{p.invoice_number}</TableCell>
                       <TableCell className="text-sm">{p.client_name}</TableCell>
                       <TableCell><Badge variant="outline" className="text-[10px] capitalize">{(p.method || "").replace(/_/g, " ")}</Badge></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{p.date ? format(new Date(p.date), "MMM d, HH:mm") : "-"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatPaymentDate(p.date)}</TableCell>
                       <TableCell className="text-right font-mono text-green-400">${p.amount.toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
@@ -414,20 +536,24 @@ export default function BillingDashboardPage() {
           <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
             <FileText className="w-4 h-4" />Invoice Pipeline
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             {[
               { label: "Draft", count: m.counts.draft, color: "bg-gray-500/20 text-gray-400 border-gray-500/30" },
               { label: "Sent", count: m.counts.sent, color: "bg-blue-500/20 text-blue-400 border-blue-500/30" },
               { label: "Overdue", count: m.counts.overdue, color: "bg-red-500/20 text-red-400 border-red-500/30" },
               { label: "Paid", count: m.counts.paid, color: "bg-green-500/20 text-green-400 border-green-500/30" },
-            ].map((stage, i, arr) => (
-              <div key={stage.label} className="flex items-center gap-2 flex-1">
-                <div className={`flex-1 p-3 rounded-lg border ${stage.color} text-center`}>
+            ].map(stage => (
+              <button
+                type="button"
+                key={stage.label}
+                className={`rounded-lg border p-3 text-center transition hover:-translate-y-0.5 hover:brightness-125 ${stage.color}`}
+                onClick={() => navigate("/invoices")}
+                aria-label={`Open ${stage.label.toLowerCase()} invoices`}
+                data-testid={`invoice-pipeline-${stage.label.toLowerCase()}`}
+              >
                   <p className="text-2xl font-bold">{stage.count}</p>
                   <p className="text-[10px] uppercase tracking-wider">{stage.label}</p>
-                </div>
-                {i < arr.length - 1 && <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
-              </div>
+              </button>
             ))}
           </div>
         </CardContent>

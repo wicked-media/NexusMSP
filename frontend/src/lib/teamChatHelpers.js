@@ -7,6 +7,13 @@ export const PRESENCE_META = {
   offline: { label: "Offline", dot: "bg-zinc-500", text: "text-zinc-500" },
 };
 
+const LIVE_PRESENCE_STATES = new Set(["active", "busy", "dnd"]);
+const OPERATIONAL_REFERENCE_PATTERNS = {
+  tickets: /\b(?:TKT(?:-CHAT)?|INC|CHG|REQ|PRB|SR)-[A-Z0-9-]+\b/gi,
+  invoices: /\bINV-[A-Z0-9-]+\b/gi,
+  purchaseOrders: /\bPO-[A-Z0-9-]+\b/gi,
+};
+
 // Some early chat system records were written through a non-UTF-8 pipeline.
 // Keep the original audit record untouched, but make historic notices readable
 // anywhere they are presented in Nexus Chat.
@@ -37,10 +44,39 @@ export function repairDisplayText(value) {
   }
 
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+    return decodeURIComponent(bytes.map(byte => `%${byte.toString(16).padStart(2, "0")}`).join(""));
   } catch {
     return text;
   }
+}
+
+export function isLivePresence(value) {
+  return LIVE_PRESENCE_STATES.has(String(value || "").toLowerCase());
+}
+
+export function chatAuthorName(value, isSystem = false) {
+  const name = String(value || "").trim();
+  if (isSystem || name.toLowerCase() === "nexusops") return "Nexus Automation";
+  return name || "Technician";
+}
+
+export function extractOperationalContext(messages = []) {
+  const references = {
+    tickets: new Set(),
+    invoices: new Set(),
+    purchaseOrders: new Set(),
+  };
+
+  messages.forEach(message => {
+    const body = repairDisplayText(message?.body || "");
+    Object.entries(OPERATIONAL_REFERENCE_PATTERNS).forEach(([kind, pattern]) => {
+      for (const match of body.matchAll(pattern)) references[kind].add(match[0].toUpperCase());
+    });
+  });
+
+  return Object.fromEntries(
+    Object.entries(references).map(([kind, values]) => [kind, values.size]),
+  );
 }
 
 export function channelDisplayName(channel) {
@@ -54,8 +90,9 @@ export function filterChatChannels(channels, mode, query = "") {
   const term = query.trim().toLowerCase();
   return channels.filter(channel => {
     if (mode === "activity" && !(channel.unread_count > 0)) return false;
-    if (mode === "chat" && channel.kind === "team") return false;
+    if (mode === "chat" && !["dm", "group_dm"].includes(channel.kind)) return false;
     if (mode === "teams" && channel.kind !== "team") return false;
+    if (mode === "work" && channel.kind !== "object") return false;
     if (!term) return true;
     const haystack = `${channelDisplayName(channel)} ${channel.last_message?.body || ""}`.toLowerCase();
     return haystack.includes(term);

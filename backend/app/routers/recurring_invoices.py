@@ -70,14 +70,23 @@ async def _resolve_yeastar_usage_lines_legacy(recurring: dict, current_user: dic
 
 
 async def _resolve_yeastar_usage_lines(recurring: dict, current_user: dict) -> list:
-    """Attach product-mapped, client-scoped Yeastar extension usage without blocking invoicing."""
+    """Attach verified Yeastar usage, failing closed to prevent underbilling."""
     if not recurring.get("include_yeastar_usage") or not recurring.get("client_id"):
         return []
     try:
         from app.routers.yeastar import get_client_yeastar_billing
         usage = await get_client_yeastar_billing(recurring["client_id"], current_user=current_user)
-        if not usage.get("linked") or not usage.get("billing_ready"):
-            return []
+        if not usage.get("linked"):
+            raise HTTPException(status_code=409, detail="Yeastar billing is enabled but no active PBX is linked to this client")
+        if not usage.get("billing_ready"):
+            missing = ", ".join(
+                item.get("pbx_name") or "Yeastar PBX"
+                for item in usage.get("missing_mappings", [])
+            ) or "one or more PBXs"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Yeastar billing cannot be reconciled until product mappings are complete ({missing})",
+            )
         return [{
             "description": f"Yeastar - {item['pbx_name']} ({usage['period']})",
             "details": f"{item['quantity']} live billable extensions x {usage['currency']} {item['unit_price']:.4f}",
@@ -85,9 +94,13 @@ async def _resolve_yeastar_usage_lines(recurring: dict, current_user: dict) -> l
             "yeastar_auto": True, "yeastar_pbx_id": item["pbx_id"],
             "yeastar_product_id": item["product_id"], "yeastar_period": usage["period"],
         } for item in usage.get("line_items", [])]
-    except Exception:
-        # A provider outage must not prevent the rest of a recurring invoice from generating.
-        return []
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Yeastar usage could not be verified; no potentially incomplete invoice was generated",
+        ) from exc
 
 
 async def _deliver_recurring_invoice(invoice: dict, recurring: dict, current_user: dict) -> dict:

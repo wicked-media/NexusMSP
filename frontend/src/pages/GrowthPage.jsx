@@ -12,8 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   TrendingUp, RefreshCw, Loader2, Sparkles, DollarSign, Target, Search,
-  Award, AlertTriangle, CheckCircle2, XCircle, Copy, FileText, Mail,
-  ChevronRight, Filter,
+  Award, CheckCircle2, XCircle, Copy, FileText, Mail, Filter,
 } from "lucide-react";
 
 function fmtUSD(n) {

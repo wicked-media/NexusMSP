@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Plus, GripVertical, Trash2, Save, Layout, BarChart3, PieChart, Activity, Settings, Copy } from "lucide-react";
+import { Plus, GripVertical, Trash2, Save, Layout, BarChart3, PieChart, Activity, Settings } from "lucide-react";
 
 const WIDGET_ICONS = { stat_card: BarChart3, line_chart: Activity, bar_chart: BarChart3, pie_chart: PieChart, ticket_feed: Activity, alert_feed: Activity, device_map: Layout, sla_gauge: BarChart3, client_table: Layout, tech_status: Layout, revenue_trend: Activity, patch_status: BarChart3 };
 

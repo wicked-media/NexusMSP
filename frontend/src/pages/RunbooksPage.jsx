@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { toast } from "sonner";
 import {
   Workflow, Play, Plus, Trash2, Power, PowerOff, Loader2, RefreshCw,
-  Zap, Clock, Settings, ChevronRight, Copy, ToggleLeft, ToggleRight, BookOpen, Search, ExternalLink, ThumbsUp, Pencil
+  Zap, ChevronRight, Copy, BookOpen, Search, ExternalLink, ThumbsUp, Pencil
 } from "lucide-react";
 
 const RUNBOOK_TABS = ["automation", "templates", "logs"];

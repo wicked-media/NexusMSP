@@ -22,7 +22,7 @@ import (
 )
 
 // Version is injected at build time via -ldflags.
-var Version = "0.1.7-nexus-identity"
+var Version = "0.1.10-signed-commands"
 
 func main() {
 	var (

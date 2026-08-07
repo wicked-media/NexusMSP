@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -48,22 +48,21 @@ const SLOT_DEFAULT_LABEL = { morning: "Morning Standup", afternoon: "Midday Puls
  */
 export function StandupDigestBanner() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [digest, setDigest] = useState(null);
   const [expanded, setExpanded] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/ai/standup-digest`, { headers });
+      const res = await axios.get(`${API}/ai/standup-digest`, { headers: { Authorization: `Bearer ${token}` } });
       setDigest(res.data);
     } catch {
       setDigest({ ai_brief: "Unable to generate digest right now.", stats: {} });
     } finally { setLoading(false); }
-  };
+  }, [token]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { load(); }, [load]);
 
   const s = digest?.stats || {};
   const slot = digest?.slot || "morning";

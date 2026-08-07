@@ -13,6 +13,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import assert_client_scope
 from app.models import *
 
 router = APIRouter()
@@ -91,6 +92,15 @@ async def test_yeastar_connection(pbx_id: Optional[str] = None, current_user: di
                 "updated_at": now,
             }},
         )
+        await log_activity(
+            current_user,
+            "voice_pbx_connection_verified",
+            "voice_pbx",
+            pbx_id,
+            settings.get("name") or "Yeastar PBX",
+            f"Live PBX connection verified in {result['api_latency_ms']} ms.",
+            metadata={"client_id": settings.get("client_id", ""), "api_latency_ms": result["api_latency_ms"]},
+        )
         return {
             "success": True,
             "message": f"Connected to {result.get('system_name') or settings.get('name') or 'Yeastar PBX'} in {result['api_latency_ms']} ms.",
@@ -102,6 +112,15 @@ async def test_yeastar_connection(pbx_id: Optional[str] = None, current_user: di
         await db.yeastar_pbxs.update_one(
             {"id": pbx_id},
             {"$set": {"status": status, "last_test_at": now, "last_test_error": str(exc), "updated_at": now}},
+        )
+        await log_activity(
+            current_user,
+            "voice_pbx_connection_failed",
+            "voice_pbx",
+            pbx_id,
+            settings.get("name") or "Yeastar PBX",
+            f"Live PBX connection test failed: {exc}",
+            metadata={"client_id": settings.get("client_id", ""), "error_kind": exc.kind},
         )
         return {"success": False, "message": str(exc), "error_kind": exc.kind}
 
@@ -507,6 +526,10 @@ async def _voice_extensions_with_overrides(current_user: dict, pbx: dict | None 
 async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)):
     sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
     billing_history = await db.yeastar_billing_snapshots.find({}, {"_id": 0}).sort("created_at", -1).to_list(24)
+    activity = await db.activity_logs.find(
+        {"entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing"]}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(50)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
     pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
@@ -556,6 +579,7 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
         "extensions": extensions,
         "billing": {"current_quantity": billable, "previous_quantity": previous_quantity, "pending_changes": abs(billable - previous_quantity), "history": billing_history, "by_pbx": billing_by_pbx},
         "sync_history": sync_history,
+        "activity": activity,
         "last_successful_sync": last_success.get("completed_at") if last_success else None,
         "system_health": "healthy" if last_success else "needs_attention",
     }
@@ -633,6 +657,16 @@ async def create_yeastar_pbx(data: dict, current_user: dict = Depends(get_curren
         "source": "initial_link",
         "created_by": current_user.get("email", "system"),
     })
+    await log_activity(
+        current_user,
+        "voice_pbx_linked",
+        "voice_pbx",
+        record["id"],
+        record["name"],
+        f"Linked {record['name']} to {record['client_name']} after a successful live connection test.",
+        changes={"extension_count": {"before": 0, "after": len(extensions)}},
+        metadata={"client_id": client_id, "connection_verified": True},
+    )
     return {**{key: value for key, value in record.items() if key != "client_secret"}, "connection_verified": True}
 
 
@@ -687,10 +721,27 @@ async def update_yeastar_pbx(pbx_id: str, data: dict, current_user: dict = Depen
         except YeastarConnectionError as exc:
             raise HTTPException(status_code=400, detail=f"PBX settings were not changed: {exc}") from exc
 
+    changes = {
+        key: {"before": existing.get(key), "after": candidate.get(key)}
+        for key in allowed | {"client_id"}
+        if existing.get(key) != candidate.get(key)
+    }
+    if data.get("client_secret"):
+        changes["client_secret"] = {"before": "stored", "after": "rotated"}
     update.update({"updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("email", "system")})
     await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": update})
     _yeastar_token_cache.clear()
     record = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
+    await log_activity(
+        current_user,
+        "voice_pbx_configuration_updated",
+        "voice_pbx",
+        pbx_id,
+        record.get("name") or "Yeastar PBX",
+        "PBX configuration updated after its effective connection settings passed validation.",
+        changes=changes,
+        metadata={"client_id": record.get("client_id", ""), "connection_verified": bool(candidate.get("enabled", True))},
+    )
     return {key: value for key, value in record.items() if key != "client_secret"}
 
 
@@ -784,6 +835,15 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
     quantity = len([extension for extension in all_extensions if extension.get("included_in_billing")])
     summary = {"id": str(uuid.uuid4()), "created_at": captured_at, "billable_quantity": quantity, "pbx_count": len(per_pbx), "source": "manual_recalculate_summary", "created_by": current_user.get("email", "system")}
     await db.yeastar_billing_snapshots.insert_one(dict(summary))
+    await log_activity(
+        current_user,
+        "voice_billing_snapshot_captured",
+        "voice_billing",
+        summary["id"],
+        "Voice billing snapshot",
+        f"Captured {quantity} billable extensions across {len(per_pbx)} PBX connections.",
+        metadata={"billable_quantity": quantity, "pbx_count": len(per_pbx)},
+    )
     return {**summary, "by_pbx": per_pbx}
 
 
@@ -804,6 +864,7 @@ async def get_client_yeastar_billing(client_id: str, current_user: dict = Depend
     A PBX must be mapped to a product ID before usage is allowed to reach a
     recurring invoice. This prevents a live count from silently billing at $0.
     """
+    await assert_client_scope(current_user, client_id, operation="voice.billing.read")
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -895,6 +956,16 @@ async def link_yeastar_billing_to_recurring(client_id: str, data: dict | None = 
             modified.append(created_id)
 
     await db.yeastar_pbxs.update_many({"client_id": client_id}, {"$set": {"automatic_billing": True, "updated_at": now, "updated_by": current_user.get("email", "system")}})
+    await log_activity(
+        current_user,
+        "voice_billing_linked",
+        "voice_billing",
+        client_id,
+        f"{billing['client_name']} Voice billing",
+        f"Linked live Yeastar quantities to {len(modified)} recurring invoice configuration(s).",
+        changes={"recurring_invoice_ids": {"before": [], "after": modified}},
+        metadata={"client_id": client_id, "billable_quantity": sum(item.get("quantity", 0) for item in billing.get("line_items", []))},
+    )
     return {"message": "Yeastar extension usage will be attached to the selected recurring billing", "recurring_invoice_ids": modified, "created_recurring_invoice_id": created_id, "preview": billing}
 
 
@@ -904,16 +975,44 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
     existing = await db.yeastar_extension_overrides.find_one({"extension_key": extension_key}, {"_id": 0}) or {}
     if not existing and ":" not in extension_key:
         existing = await db.yeastar_extension_overrides.find_one({"extension_number": extension_number}, {"_id": 0}) or {}
+    next_enabled = bool(data.get("enabled", existing.get("enabled", True)))
+    next_excluded = bool(data.get("exclude_from_billing", existing.get("exclude_from_billing", False)))
+    previous_enabled = bool(existing.get("enabled", True))
+    previous_excluded = bool(existing.get("exclude_from_billing", False))
+    changed = next_enabled != previous_enabled or next_excluded != previous_excluded
+    change_reason = str(data.get("change_reason") or "").strip()
+    if changed and not change_reason:
+        raise HTTPException(status_code=400, detail="A technician justification is required for extension overrides")
     record = {
         "extension_key": extension_key,
         "extension_number": extension_number,
-        "enabled": bool(data.get("enabled", existing.get("enabled", True))),
-        "exclude_from_billing": bool(data.get("exclude_from_billing", existing.get("exclude_from_billing", False))),
+        "enabled": next_enabled,
+        "exclude_from_billing": next_excluded,
         "exclusion_reason": data.get("exclusion_reason", existing.get("exclusion_reason", "")),
+        "change_reason": change_reason or existing.get("change_reason", ""),
         "first_discovered": existing.get("first_discovered", datetime.now(timezone.utc).isoformat()),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": current_user.get("email", "system"),
     }
     await db.yeastar_extension_overrides.update_one({"extension_key": extension_key}, {"$set": record}, upsert=True)
+    if changed:
+        pbx_id = extension_key.split(":", 1)[0] if ":" in extension_key else ""
+        pbx = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0, "name": 1, "client_id": 1}) if pbx_id else None
+        await log_activity(
+            current_user,
+            "voice_extension_override_updated",
+            "voice_extension",
+            extension_key,
+            f"Extension {extension_number}",
+            change_reason,
+            changes={
+                "enabled": {"before": previous_enabled, "after": next_enabled},
+                "included_in_billing": {
+                    "before": previous_enabled and not previous_excluded,
+                    "after": next_enabled and not next_excluded,
+                },
+            },
+            metadata={"client_id": (pbx or {}).get("client_id", ""), "pbx_id": pbx_id, "pbx_name": (pbx or {}).get("name", "")},
+        )
     return record
 

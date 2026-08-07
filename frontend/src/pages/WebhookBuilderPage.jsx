@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -9,15 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import {
-  Webhook, Plus, Play, Pause, Trash2, Edit, Search, RefreshCw, Loader2,
-  Code, Zap, Send, Check, X, Copy, Settings, FileText, Clock,
-  AlertTriangle, ChevronDown, ChevronUp, ExternalLink, ToggleLeft, ToggleRight
+  Webhook, Plus, Play, Pause, Trash2, Edit, Search, Loader2, Zap, Send, ChevronDown, ChevronUp
 } from "lucide-react";
 
 const METHODS = ["POST", "PUT", "PATCH", "GET", "DELETE"];

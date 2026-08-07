@@ -6,13 +6,14 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   RefreshCw, Download, Power, Tag, MessageSquareWarning, Loader2, X, Check, Sparkles,
 } from "lucide-react";
 import { API } from "@/App";
+import ChangeGuardianDialog from "./ChangeGuardianDialog";
 
 export default function DeviceBulkBar({ selectedIds, onClear, headers, devices = [] }) {
   const [busy, setBusy] = useState(null);
@@ -20,6 +21,7 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
   const [confirm, setConfirm] = useState(null); // "reboot" | "tag" | "message"
   const [tagValue, setTagValue] = useState("");
   const [msgBody, setMsgBody] = useState("");
+  const [guardian, setGuardian] = useState(null);
 
   if (selectedIds.length === 0) return null;
 
@@ -42,7 +44,13 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
     } finally {
       setBusy(null);
       setConfirm(null);
+      setGuardian(null);
     }
+  };
+
+  const reviewChange = (action, label, extra = {}, confirmLabel = label) => {
+    setConfirm(null);
+    setGuardian({ action, label, extra, confirmLabel });
   };
 
   return (
@@ -58,10 +66,10 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
           <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => run("run-checks", "Check agent connection")} data-testid="bulk-checks">
             {busy === "run-checks" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Agent check
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => run("install-patches", "Queue Windows updates")} data-testid="bulk-patches">
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => reviewChange("install-patches", "Queue Windows updates", {}, "Queue updates")} data-testid="bulk-patches">
             {busy === "install-patches" ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}Patches
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => setConfirm("reboot")} data-testid="bulk-reboot">
+          <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => reviewChange("reboot", "Reboot endpoints", {}, "Approve reboot")} data-testid="bulk-reboot">
             <Power className="w-3 h-3 mr-1" />Reboot
           </Button>
           <Button size="sm" variant="outline" className="h-7 text-[10px]" disabled={!!busy} onClick={() => setConfirm("tag")} data-testid="bulk-tag">
@@ -110,19 +118,6 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
       )}
 
       {/* Confirm dialogs */}
-      <Dialog open={confirm === "reboot"} onOpenChange={(v) => !v && setConfirm(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Power className="w-4 h-4 text-amber-400" />Reboot {selectedIds.length} devices?</DialogTitle>
-            <DialogDescription className="text-xs">Each device reboots in parallel. Offline devices skipped.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
-            <Button onClick={() => run("reboot", "Reboot all")} disabled={!!busy} data-testid="bulk-reboot-confirm">Reboot all</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={confirm === "tag"} onOpenChange={(v) => !v && setConfirm(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -131,7 +126,7 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
           <Input placeholder="Tag (e.g. priority, branch-1, audit-2026)" value={tagValue} onChange={e => setTagValue(e.target.value)} data-testid="bulk-tag-input" />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
-            <Button onClick={() => run("tag", "Apply tag", { value: tagValue })} disabled={!tagValue.trim() || !!busy} data-testid="bulk-tag-confirm"><Check className="w-3 h-3 mr-1" />Apply</Button>
+            <Button onClick={() => reviewChange("tag", "Apply asset tag", { value: tagValue }, "Apply tag")} disabled={!tagValue.trim() || !!busy} data-testid="bulk-tag-confirm"><Check className="w-3 h-3 mr-1" />Review impact</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -144,10 +139,25 @@ export default function DeviceBulkBar({ selectedIds, onClear, headers, devices =
           <Textarea rows={4} value={msgBody} onChange={e => setMsgBody(e.target.value)} placeholder="A message to display on each user's screen…" data-testid="bulk-msg-input" />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
-            <Button onClick={() => run("send-message", "Broadcast message", { title: "Message from IT", body: msgBody })} disabled={!msgBody.trim() || !!busy} data-testid="bulk-msg-confirm">Send</Button>
+            <Button onClick={() => reviewChange("send-message", "Broadcast message", { title: "Message from IT", body: msgBody }, "Send message")} disabled={!msgBody.trim() || !!busy} data-testid="bulk-msg-confirm">Review impact</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ChangeGuardianDialog
+        open={!!guardian}
+        onOpenChange={(next) => !next && setGuardian(null)}
+        action={guardian?.action}
+        deviceIds={selectedIds}
+        headers={headers}
+        busy={!!busy}
+        confirmLabel={guardian?.confirmLabel}
+        onApprove={(previewId) => run(
+          guardian.action,
+          guardian.label,
+          { ...guardian.extra, guardian_preview_id: previewId },
+        )}
+      />
     </>
   );
 }

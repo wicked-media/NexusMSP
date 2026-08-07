@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, ShieldOff, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Zap, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Thermometer, Pencil, Building2, Search, MessageSquare } from "lucide-react";
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
+import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Pencil, Building2, Search, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -20,7 +20,11 @@ import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import WatchDeviceButton from "../components/devices/WatchDeviceButton";
 import DeviceBackupPlansPanel from "../components/devices/DeviceBackupPlansPanel";
 import DeviceDossier from "../components/devices/DeviceDossier";
+import DeviceTimeMachine from "../components/devices/DeviceTimeMachine";
+import AssetStoryPanel from "../components/devices/AssetStoryPanel";
 import MaintenanceWindowDialog from "../components/devices/MaintenanceWindowDialog";
+import StatusOrb from "../components/devices/StatusOrb";
+import NexusPageSkeleton from "../components/feedback/NexusPageSkeleton";
 import HeroTile from "../components/HeroTile";
 import { toast } from "sonner";
 
@@ -32,6 +36,12 @@ const SEVERITY_COLORS = { critical: "bg-red-500/10 text-red-500", high: "bg-oran
 const PATCH_STATUS = { installed: "bg-emerald-500/10 text-emerald-500", pending: "bg-amber-500/10 text-amber-500", failed: "bg-red-500/10 text-red-500" };
 const EVENT_ICONS = { agent_check_in: Activity, login: User, logout: User, software_installed: Package, patch_applied: Download, alert_triggered: AlertTriangle, reboot: RefreshCw, service_restart: Wrench, backup_completed: HardDrive, script_executed: Terminal };
 const displayLinkSpeed = (speed) => !speed ? "—" : speed >= 1000 ? `${speed / 1000} Gbps` : `${speed} Mbps`;
+const cleanDeviceText = (value) => String(value || "")
+  .replace(/[\u00c3\u201a\u00c2]+\u00b7/g, "\u00b7")
+  .replace(/[\u00c3\u201a\u00c2]+\u00b0/g, "\u00b0")
+  .replace(/\u00e2\u20ac\u201d/g, "\u2014")
+  .replace(/\u00e2\u2020\u2019/g, "\u2192")
+  .replace(/\u00c2/g, "");
 
 export default function DeviceDetailPage() {
   const { deviceId } = useParams();
@@ -147,7 +157,7 @@ export default function DeviceDetailPage() {
     finally { setDeviceEditorBusy(false); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><RefreshCw className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <NexusPageSkeleton label="Loading managed asset" />;
   if (!data) return <div className="text-center py-20 text-muted-foreground">Device not found</div>;
 
   const dev = data.device;
@@ -180,18 +190,24 @@ export default function DeviceDetailPage() {
   const softwareInventoryAt = software.reduce((latest, item) => item.last_inventory_at && (!latest || item.last_inventory_at > latest) ? item.last_inventory_at : latest, null);
 
   return (
-    <div className="space-y-6" data-testid="device-detail-page">
-      {/* Device identity */}<div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+    <div className="space-y-5 sm:space-y-6" data-testid="device-detail-page">
+      {/* Device identity */}
+      <section className="nx-device-header relative overflow-hidden rounded-2xl p-4 sm:p-5">
+        <div className="mb-4 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+          Managed asset
+          <span className="text-muted-foreground">· Live endpoint record</span>
+        </div>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate("/devices")} data-testid="back-to-devices"><ArrowLeft className="w-5 h-5" /></Button>
-          <div className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
+          <div className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border shadow-sm ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
             <DevIcon className="w-7 h-7" />
-            {((rdLiveStatus || dev.status) === "online") && <span className="absolute -right-0.5 -top-0.5 flex h-3 w-3"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-3 w-3 rounded-full border-2 border-background bg-emerald-400" /></span>}
+            <span className="absolute -right-0.5 -top-0.5 rounded-full border-2 border-background"><StatusOrb status={rdLiveStatus || dev.status} size={10} /></span>
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-2xl font-bold tracking-tight" data-testid="device-name">{dev.name}</h1>
-              <span className={`inline-flex items-center gap-1.5 text-xs font-medium capitalize ${(rdLiveStatus || dev.status) === "online" ? "text-emerald-400" : (rdLiveStatus || dev.status) === "offline" ? "text-red-400" : "text-amber-400"}`} data-testid="device-status"><span className={`h-2 w-2 rounded-full ${(rdLiveStatus || dev.status) === "online" ? "bg-emerald-400" : (rdLiveStatus || dev.status) === "offline" ? "bg-red-400" : "bg-amber-400"}`} />{rdLiveStatus || dev.status}</span>
+              <span className={`inline-flex items-center gap-1.5 text-xs font-medium capitalize ${(rdLiveStatus || dev.status) === "online" ? "text-emerald-700 dark:text-emerald-400" : (rdLiveStatus || dev.status) === "offline" ? "text-zinc-600 dark:text-zinc-400" : "text-amber-700 dark:text-amber-400"}`} data-testid="device-status"><StatusOrb status={rdLiveStatus || dev.status} size={8} />{rdLiveStatus || dev.status}</span>
               {rdLiveStatus && rdLiveStatus !== dev.status && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">LIVE</span>
               )}
@@ -210,9 +226,9 @@ export default function DeviceDetailPage() {
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 xl:justify-end">
+        <div className="nx-device-action-bar flex flex-wrap gap-2 rounded-xl p-2 xl:max-w-[620px] xl:justify-end">
           <Button size="sm" onClick={openLiveSupport} className="bg-emerald-600 hover:bg-emerald-500" data-testid="start-device-live-chat"><MessageSquare className="mr-1 h-4 w-4" />Start live chat</Button>
-          <Button size="sm" variant="outline" className="border-sky-500/30 text-sky-300 hover:bg-sky-500/10" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)} data-testid="create-device-ticket"><Ticket className="mr-1 h-4 w-4" />New ticket</Button>
+          <Button size="sm" variant="outline" className="border-sky-500/30 text-sky-700 hover:bg-sky-500/10 dark:text-sky-300" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)} data-testid="create-device-ticket"><Ticket className="mr-1 h-4 w-4" />New ticket</Button>
           {dev.client_id && <Button size="sm" variant="outline" onClick={() => navigate(`/clients?client=${encodeURIComponent(dev.client_id)}`)} data-testid="open-device-client"><Building2 className="mr-1 h-4 w-4" />Open client</Button>}
           <Button variant="outline" size="sm" onClick={openDeviceEditor} data-testid="edit-device-identity"><Pencil className="mr-1 h-4 w-4" />Edit</Button>
           <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
@@ -236,10 +252,11 @@ export default function DeviceDetailPage() {
           </DropdownMenu>
           <Button variant="outline" size="sm" onClick={fetchDetail}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
         </div>
-      </div>
+        </div>
+      </section>
 
       {/* Quick Stats Row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" data-testid="device-hero-tiles">
+      <div className="grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" data-testid="device-hero-tiles">
         <HeroTile label="CPU" value={cpuUsage} suffix="%" icon={Cpu} glow={usageGlow(cpuUsage)} subtitle={cpuUsage >= 90 ? "Critical load" : cpuUsage >= 70 ? "Elevated load" : "Normal load"} testId="device-stat-cpu" />
         <HeroTile label="Memory" value={memoryUsage} suffix="%" icon={MemoryStick} glow={usageGlow(memoryUsage)} subtitle={memoryUsage >= 90 ? "Critical pressure" : memoryUsage >= 70 ? "Elevated pressure" : "Normal pressure"} testId="device-stat-memory" />
         <HeroTile label="Disk" value={diskUsage} suffix="%" icon={HardDrive} glow={usageGlow(diskUsage)} subtitle={diskUsage >= 90 ? "Capacity critical" : diskUsage >= 70 ? "Capacity watch" : "Capacity healthy"} testId="device-stat-disk" />
@@ -252,8 +269,10 @@ export default function DeviceDetailPage() {
       <DeviceDossier deviceId={dev.id} headers={{ Authorization: `Bearer ${token}` }} API={API} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-11" data-testid="device-tabs">
+        <TabsList className="nx-device-tabs" data-testid="device-tabs" aria-label="Device workspace sections">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="asset-story" data-testid="device-asset-story-tab">Asset Story</TabsTrigger>
+          <TabsTrigger value="time-machine" data-testid="device-time-machine-tab">Time Machine</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
           <TabsTrigger value="tickets">Tickets ({data.tickets?.length || 0})</TabsTrigger>
           <TabsTrigger value="remote-sessions" data-testid="device-remote-tab">Sessions ({data.remote_sessions?.length || 0})</TabsTrigger>
@@ -269,12 +288,12 @@ export default function DeviceDetailPage() {
         {/* OVERVIEW TAB */}
         <TabsContent value="overview" className="space-y-4 mt-4">
           <div className="grid grid-cols-12 gap-4">
-            <div className="col-span-8 space-y-4">
+            <div className="col-span-12 space-y-4 xl:col-span-8">
               {/* Hardware Info */}
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Cpu className="w-4 h-4" />Hardware Specifications</CardTitle></CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                  <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
                     <div><span className="text-muted-foreground block text-xs">Manufacturer</span><span className="font-medium">{dev.manufacturer || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Model</span><span className="font-medium">{dev.model || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Serial Number</span><span className="font-mono text-xs">{dev.serial_number || "N/A"}</span></div>
@@ -291,7 +310,7 @@ export default function DeviceDetailPage() {
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Monitor className="w-4 h-4" />Operating System</CardTitle></CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-3 gap-x-8 gap-y-3 text-sm">
+                  <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
                     <div><span className="text-muted-foreground block text-xs">OS</span><span className="font-medium">{dev.os}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Version</span><span className="font-medium">{dev.os_version || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Build</span><span className="font-mono text-xs">{dev.os_build || "N/A"}</span></div>
@@ -340,10 +359,10 @@ export default function DeviceDetailPage() {
                               <div><span className="text-muted-foreground block">FS</span><span className="font-mono font-medium">{disk.file_system}</span></div>
                             </div>
                             {(disk.model || disk.smart_temperature || disk.smart_hours) && (
-                              <div className="grid grid-cols-4 gap-2 text-[10px] mt-2 pt-2 border-t border-border/20">
+                                <div className="mt-2 grid grid-cols-2 gap-2 border-t border-border/20 pt-2 text-[10px] sm:grid-cols-4">
                                 {disk.model && <div className="col-span-2"><span className="text-muted-foreground block">Model</span><span className="font-medium truncate block">{disk.model}</span></div>}
                                 {disk.smart_temperature != null && (
-                                  <div><span className="text-muted-foreground block">Temp</span><span className={`font-mono font-medium ${disk.smart_temperature > 50 ? "text-red-400" : disk.smart_temperature > 40 ? "text-amber-400" : "text-emerald-400"}`}>{disk.smart_temperature}°C</span></div>
+                                  <div><span className="text-muted-foreground block">Temp</span><span className={`font-mono font-medium ${disk.smart_temperature > 50 ? "text-red-600 dark:text-red-400" : disk.smart_temperature > 40 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>{disk.smart_temperature}°C</span></div>
                                 )}
                                 {disk.smart_hours != null && (
                                   <div><span className="text-muted-foreground block">Power Hours</span><span className="font-mono font-medium">{disk.smart_hours.toLocaleString()}h</span></div>
@@ -373,26 +392,36 @@ export default function DeviceDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-2">
-                    {(data.events || []).slice(0, 5).map((evt, i) => {
+                  {(data.events || []).length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border/60 bg-muted/15 px-4 py-6 text-center">
+                      <Activity className="mx-auto h-5 w-5 text-muted-foreground/70" />
+                      <p className="mt-2 text-sm font-medium">No recent endpoint activity</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Agent check-ins, commands, patches and device changes will appear here with their recorded time.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {(data.events || []).slice(0, 5).map((evt, i) => {
                       const EvtIcon = EVENT_ICONS[evt.event_type] || Info;
                       return (
                         <div key={`k-${i}`} className="flex items-center gap-3 py-1.5 text-sm">
                           <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${SEVERITY_COLORS[evt.severity] || "bg-muted"}`}>
                             <EvtIcon className="w-3.5 h-3.5" />
                           </div>
-                          <span className="flex-1 truncate">{evt.message}</span>
+                          <span className="flex-1 truncate">{cleanDeviceText(evt.message)}</span>
                           <span className="text-xs text-muted-foreground whitespace-nowrap">{evt.timestamp ? formatDistanceToNow(new Date(evt.timestamp), { addSuffix: true }) : ""}</span>
                         </div>
                       );
-                    })}
-                  </div>
+                      })}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
 
             {/* Sidebar */}
-            <div className="col-span-4 space-y-4">
+            <div className="col-span-12 space-y-4 xl:col-span-4">
               {/* Assignment & Identity */}
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm">Assignment</CardTitle></CardHeader>
@@ -462,7 +491,7 @@ export default function DeviceDetailPage() {
                           <Badge className={SEVERITY_COLORS[a.severity] + " text-[10px]"}>{a.severity}</Badge>
                           <span className="text-xs text-muted-foreground">{a.alert_type}</span>
                         </div>
-                        <p className="mt-1 text-xs">{a.message}</p>
+                        <p className="mt-1 text-xs">{cleanDeviceText(a.message)}</p>
                       </div>
                     ))}
                   </CardContent>
@@ -600,6 +629,11 @@ export default function DeviceDetailPage() {
               </CardContent>
             </Card>
           </div>}
+        </TabsContent>
+
+        {/* ASSET STORY TAB */}
+        <TabsContent value="asset-story" className="mt-4">
+          <AssetStoryPanel device={dev} token={token} API={API} />
         </TabsContent>
 
         {/* SOFTWARE TAB */}
@@ -824,7 +858,7 @@ export default function DeviceDetailPage() {
                       <TableRow key={`k-${i}`}>
                         <TableCell><div className={`w-7 h-7 rounded-md flex items-center justify-center ${SEVERITY_COLORS[evt.severity] || "bg-muted"}`}><EvtIcon className="w-3.5 h-3.5" /></div></TableCell>
                         <TableCell className="font-medium capitalize text-sm">{(evt.event_type || "").replace(/_/g, " ")}</TableCell>
-                        <TableCell className="text-sm">{evt.message}</TableCell>
+                        <TableCell className="text-sm">{cleanDeviceText(evt.message)}</TableCell>
                         <TableCell><Badge className={SEVERITY_COLORS[evt.severity] + " text-[10px] capitalize"}>{evt.severity}</Badge></TableCell>
                         <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{evt.timestamp ? format(new Date(evt.timestamp), "MMM d, HH:mm") : "-"}</TableCell>
                       </TableRow>
@@ -894,6 +928,15 @@ export default function DeviceDetailPage() {
           <DeviceBackupPlansPanel deviceId={dev.id} token={token} />
         </TabsContent>
 
+        {/* TIME MACHINE TAB */}
+        <TabsContent value="time-machine" className="mt-4">
+          <DeviceTimeMachine
+            deviceId={dev.id}
+            headers={{ Authorization: `Bearer ${token}` }}
+            API={API}
+          />
+        </TabsContent>
+
         {/* AUDIT LOG TAB */}
         <TabsContent value="audit-log" className="mt-4">
           <Card>
@@ -935,7 +978,7 @@ export default function DeviceDetailPage() {
                         {log.changes && Object.keys(log.changes).length > 0 && (
                           <div className="mt-2 rounded-md bg-muted/50 px-2.5 py-2 text-[11px] text-muted-foreground">
                             {Object.entries(log.changes).slice(0, 5).map(([k, v]) => (
-                              <div key={k} className="flex flex-wrap gap-x-1.5"><span className="font-medium text-foreground/70">{k}</span><span className="text-red-400 line-through">{v.old ?? "—"}</span><span className="text-muted-foreground">→</span><span className="text-emerald-400">{v.new ?? "—"}</span></div>
+                              <div key={k} className="flex flex-wrap gap-x-1.5"><span className="font-medium text-foreground/70">{k}</span><span className="text-red-600 line-through dark:text-red-400">{v.old ?? "—"}</span><span className="text-muted-foreground">→</span><span className="text-emerald-600 dark:text-emerald-400">{v.new ?? "—"}</span></div>
                             ))}
                           </div>
                         )}

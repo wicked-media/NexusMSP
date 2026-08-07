@@ -53,7 +53,7 @@ export default function WatchDeviceButton({ deviceId, token, deviceName }) {
       variant="outline" size="sm"
       onClick={toggle}
       disabled={loading || checking}
-      className={watched ? "text-cyan-300 border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20" : ""}
+      className={watched ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-700 hover:bg-cyan-500/20 dark:text-cyan-300" : ""}
       title={watched ? "Stop watching this device" : "Add to my workspace watch list"}
       data-testid="watch-device-btn"
     >

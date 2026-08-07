@@ -2,24 +2,23 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { DollarSign, TrendingUp, AlertTriangle, Loader2, RefreshCw, Clock, Users, Ticket } from "lucide-react";
+import { DollarSign, TrendingUp, AlertTriangle, Loader2, RefreshCw, Clock, Users } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
 
 export default function ContractProfitPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const navigate = useNavigate();
 
   const fetchData = useCallback(async () => {
-    try { const res = await axios.get(`${API}/contract-profit/overview`, { headers }); setData(res.data); }
+    try { const res = await axios.get(`${API}/contract-profit/overview`, { headers: { Authorization: `Bearer ${token}` } }); setData(res.data); }
     catch { toast.error("Failed to load data"); }
     finally { setLoading(false); }
   }, [token]);

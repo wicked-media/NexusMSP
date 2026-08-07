@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -42,11 +43,48 @@ type Info struct {
 
 var inProgress atomic.Bool
 
+// ShouldApplyVersion prevents a stale control-plane process from silently
+// downgrading an endpoint. Deliberate rollback needs a separate signed,
+// approval-bound protocol rather than reusing the normal update path.
+func ShouldApplyVersion(currentVersion, targetVersion string) (bool, string) {
+	current, currentOK := versionTriplet(currentVersion)
+	target, targetOK := versionTriplet(targetVersion)
+	if !currentOK || !targetOK {
+		return false, "unparseable version"
+	}
+	for index := range current {
+		if target[index] > current[index] {
+			return true, "newer version"
+		}
+		if target[index] < current[index] {
+			return false, "downgrade rejected"
+		}
+	}
+	return false, "same version"
+}
+
+func versionTriplet(version string) ([3]int, bool) {
+	var parsed [3]int
+	core := strings.SplitN(strings.TrimPrefix(strings.TrimSpace(version), "v"), "-", 2)[0]
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return parsed, false
+	}
+	for index, part := range parts {
+		value, err := strconv.Atoi(part)
+		if err != nil || value < 0 {
+			return parsed, false
+		}
+		parsed[index] = value
+	}
+	return parsed, true
+}
+
 // Apply downloads + verifies + swaps the binary, then exits.
 // `serverBase` is the base URL of the server (e.g. https://nexusops.example.com).
 // `currentVersion` is the running agent's compiled-in Version.
 // `token` is the agent's X-Agent-Token (for authenticated download).
-func Apply(info Info, serverBase, currentVersion, token string) error {
+func Apply(info Info, serverBase, currentVersion, token, pinnedSigningPublicKey string) error {
 	if !inProgress.CompareAndSwap(false, true) {
 		return errors.New("update already in progress")
 	}
@@ -55,10 +93,10 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 	if info.Version == "" || info.URL == "" || info.SHA256 == "" {
 		return errors.New("update advert missing fields")
 	}
-	if info.Version == currentVersion {
-		return nil // nothing to do
+	if shouldApply, reason := ShouldApplyVersion(currentVersion, info.Version); !shouldApply {
+		return fmt.Errorf("refusing update from %s to %s: %s", currentVersion, info.Version, reason)
 	}
-	if err := VerifyManifest(info); err != nil {
+	if err := VerifyManifestWithKey(info, pinnedSigningPublicKey); err != nil {
 		return fmt.Errorf("update signature: %w", err)
 	}
 
@@ -120,9 +158,17 @@ func Apply(info Info, serverBase, currentVersion, token string) error {
 	return nil
 }
 
-func VerifyManifest(info Info) error {
+// VerifyManifestWithKey rejects a correctly signed manifest when its key does
+// not match the trust anchor already cached in Nexus platform policy.
+func VerifyManifestWithKey(info Info, pinnedSigningPublicKey string) error {
 	if !strings.EqualFold(info.SignatureAlgorithm, "ed25519") {
 		return errors.New("unsupported or missing signature algorithm")
+	}
+	if pinnedSigningPublicKey == "" {
+		return errors.New("update signing trust anchor is unavailable")
+	}
+	if info.SigningPublicKey != pinnedSigningPublicKey {
+		return errors.New("update signing key does not match pinned policy")
 	}
 	publicKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(info.SigningPublicKey))
 	if err != nil || len(publicKey) != ed25519.PublicKeySize {
@@ -197,25 +243,55 @@ func spawnUpdater(exe, newPath, dir string) error {
 //   - starts the Windows service
 func spawnWindows(exe, newPath, dir string) error {
 	bat := filepath.Join(dir, "_update.bat")
+	logPath := filepath.Join(dir, "_update.log")
+	backupPath := exe + ".pre-update"
 	content := fmt.Sprintf(
 		"@echo off\r\n"+
+			"setlocal\r\n"+
+			"set \"LOG=%s\"\r\n"+
+			"echo [%%date%% %%time%%] Nexus Agent update started>\"%%LOG%%\"\r\n"+
+			"timeout /t 2 /nobreak >nul\r\n"+
+			"sc stop NexusOpsAgent >>\"%%LOG%%\" 2>&1\r\n"+
 			"timeout /t 3 /nobreak >nul\r\n"+
-			"sc stop NexusOpsAgent >nul 2>&1\r\n"+
-			"timeout /t 3 /nobreak >nul\r\n"+
+			"copy /Y \"%s\" \"%s\" >>\"%%LOG%%\" 2>&1\r\n"+
+			"set /a tries=0\r\n"+
 			":loop\r\n"+
-			"move /Y \"%s\" \"%s\" >nul 2>&1\r\n"+
+			"set /a tries+=1\r\n"+
+			"move /Y \"%s\" \"%s\" >>\"%%LOG%%\" 2>&1\r\n"+
 			"if errorlevel 1 (\r\n"+
+			"  if %%tries%% GEQ 30 goto swap_failed\r\n"+
 			"  timeout /t 1 /nobreak >nul\r\n"+
 			"  goto loop\r\n"+
 			")\r\n"+
-			"sc start NexusOpsAgent >nul 2>&1\r\n"+
+			"sc start NexusOpsAgent >>\"%%LOG%%\" 2>&1\r\n"+
+			"timeout /t 8 /nobreak >nul\r\n"+
+			"sc query NexusOpsAgent | find \"RUNNING\" >nul\r\n"+
+			"if errorlevel 1 goto health_failed\r\n"+
+			"echo [%%date%% %%time%%] Update healthy>>\"%%LOG%%\"\r\n"+
+			"del /Q \"%s\" >nul 2>&1\r\n"+
+			"goto done\r\n"+
+			":health_failed\r\n"+
+			"echo [%%date%% %%time%%] New service failed health check; rolling back>>\"%%LOG%%\"\r\n"+
+			"sc stop NexusOpsAgent >>\"%%LOG%%\" 2>&1\r\n"+
+			"timeout /t 3 /nobreak >nul\r\n"+
+			"move /Y \"%s\" \"%s\" >>\"%%LOG%%\" 2>&1\r\n"+
+			"sc start NexusOpsAgent >>\"%%LOG%%\" 2>&1\r\n"+
+			"goto done\r\n"+
+			":swap_failed\r\n"+
+			"echo [%%date%% %%time%%] Binary swap failed; restarting existing service>>\"%%LOG%%\"\r\n"+
+			"sc start NexusOpsAgent >>\"%%LOG%%\" 2>&1\r\n"+
+			":done\r\n"+
+			"endlocal\r\n"+
 			"del \"%%~f0\" >nul 2>&1\r\n",
-		newPath, exe,
+		logPath, exe, backupPath, newPath, exe, backupPath, backupPath, exe,
 	)
 	if err := os.WriteFile(bat, []byte(content), 0o755); err != nil {
 		return err
 	}
-	cmd := exec.Command("cmd", "/C", "start", "/B", bat)
+	// `start` treats its first quoted argument as a window title. Supplying the
+	// explicit empty title is essential when the batch path contains spaces.
+	commandLine := fmt.Sprintf("start \"\" /B cmd /D /C call \"%s\"", bat)
+	cmd := exec.Command("cmd", "/D", "/C", commandLine)
 	return cmd.Start()
 }
 

@@ -194,6 +194,34 @@ def sign_update_manifest(*, version: str, sha256: str, size: int) -> dict[str, A
     }
 
 
+def agent_command_signing_metadata() -> dict[str, str]:
+    """Return the stable public trust anchor used for privileged commands."""
+    key = _ensure_update_signing_key()
+    public_raw = key.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    return {
+        "signature_algorithm": "ed25519",
+        "signing_public_key": base64.b64encode(public_raw).decode("ascii"),
+        "signing_key_id": hashlib.sha256(public_raw).hexdigest()[:24],
+    }
+
+
+def sign_agent_command_payload(signed_payload: str) -> dict[str, str]:
+    """Sign one canonical command authorization payload."""
+    if not str(signed_payload or "").strip():
+        raise ValueError("Command authorization payload is required")
+    key = _ensure_update_signing_key()
+    metadata = agent_command_signing_metadata()
+    signature = key.sign(signed_payload.encode("utf-8"))
+    return {
+        **metadata,
+        "signature": base64.b64encode(signature).decode("ascii"),
+        "signed_payload": signed_payload,
+    }
+
+
 def build_agent_policy(settings: dict[str, Any], dns_profile: dict[str, Any]) -> dict[str, Any]:
     """Return a deterministic, cacheable policy document for every heartbeat."""
     document = {
@@ -213,6 +241,13 @@ def build_agent_policy(settings: dict[str, Any], dns_profile: dict[str, Any]) ->
             "enabled": bool(settings.get("auto_update_enabled", True)),
             "signed_manifest_required": bool(settings.get("require_signed_updates", True)),
             "rollback_on_failed_health_check": True,
+            **agent_command_signing_metadata(),
+        },
+        "commands": {
+            "signed_envelope_required": True,
+            "maximum_clock_skew_seconds": 300,
+            "replay_cache_entries": 500,
+            **agent_command_signing_metadata(),
         },
         "self_repair": {
             "enabled": bool(settings.get("self_repair_enabled", True)),

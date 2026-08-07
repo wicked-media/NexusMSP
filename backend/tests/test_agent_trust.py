@@ -61,6 +61,22 @@ def test_update_manifest_is_ed25519_signed(tmp_path, monkeypatch):
     assert manifest["signed_payload"] == f"0.1.7-nexus-identity|{'a' * 64}|1024"
 
 
+def test_command_authorization_is_ed25519_signed_with_stable_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_trust, "PKI_DIR", tmp_path)
+    monkeypatch.setattr(agent_trust, "UPDATE_KEY_PATH", tmp_path / "update.key")
+    monkeypatch.setattr(agent_trust, "UPDATE_PUBLIC_PATH", tmp_path / "update.pub")
+
+    signed = agent_trust.sign_agent_command_payload(
+        "1|command-1|device-1|client-1|ping|payload-hash|issued|expires|nonce|operator||system"
+    )
+    metadata = agent_trust.agent_command_signing_metadata()
+
+    public_key = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(signed["signing_public_key"]))
+    public_key.verify(base64.b64decode(signed["signature"]), signed["signed_payload"].encode("utf-8"))
+    assert signed["signing_public_key"] == metadata["signing_public_key"]
+    assert signed["signing_key_id"] == metadata["signing_key_id"]
+
+
 def test_agent_policy_checksum_is_deterministic():
     settings = {
         "heartbeat_secs": 60,
@@ -75,6 +91,8 @@ def test_agent_policy_checksum_is_deterministic():
     assert first["checksum_sha256"] == second["checksum_sha256"]
     assert first["version"] == second["version"]
     assert first["updates"]["signed_manifest_required"] is True
+    assert first["commands"]["signed_envelope_required"] is True
+    assert first["commands"]["signature_algorithm"] == "ed25519"
 
 
 def test_trust_state_distinguishes_issued_and_verified_transport():

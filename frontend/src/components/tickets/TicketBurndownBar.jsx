@@ -30,17 +30,25 @@ export default function TicketBurndownBar({ ticketId, headers }) {
     if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`;
     return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
   };
-  const tone = data.breach ? "from-rose-500 to-pink-500" : data.pct > 75 ? "from-amber-500 to-orange-500" : "from-emerald-500 to-teal-500";
+  const tone = data.is_resolved
+    ? (data.breach ? "from-amber-500 to-orange-500" : "from-emerald-500 to-teal-500")
+    : data.breach
+      ? "from-rose-500 to-pink-500"
+      : data.pct > 75
+        ? "from-amber-500 to-orange-500"
+        : "from-emerald-500 to-teal-500";
 
   return (
     <Card data-testid="ticket-burndown" className="border-violet-500/15">
       <CardContent className="pt-3 pb-3 space-y-1.5">
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-muted-foreground flex items-center gap-1"><Timer className="w-3 h-3" />SLA Burn-down</span>
-          {data.breach ? (
+          {data.is_resolved ? (
+            <Badge className={data.breach ? "bg-amber-500/15 text-amber-300 border-amber-500/30 text-[10px]" : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px]"}>
+              {data.breach ? "Resolved · target missed" : "Resolved · target met"}
+            </Badge>
+          ) : data.breach ? (
             <Badge className="bg-rose-500/15 text-rose-300 border-rose-500/30 text-[10px]"><AlertTriangle className="w-2.5 h-2.5 mr-0.5" />Breached</Badge>
-          ) : data.is_resolved ? (
-            <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px]">Resolved</Badge>
           ) : (
             <Badge variant="outline" className="text-[10px]">{data.pct}%</Badge>
           )}

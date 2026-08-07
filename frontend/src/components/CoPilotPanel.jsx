@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  MessageCircle, Send, X, Loader2, Minimize2, Maximize2, Sparkles, Copy, Check, Bot, Code
+import { Send, X, Loader2, Minimize2, Sparkles, Copy, Check, Bot
 } from "lucide-react";
 
 // Renders text with code blocks properly formatted
@@ -76,7 +75,7 @@ export default function CoPilotPanel({ ticket, device }) {
         content: `I'm your Co-Pilot for this ticket. I can help you:\n- Diagnose issues and suggest fixes\n- Draft customer replies\n- Find relevant KB articles\n- Recommend scripts to run\n\nWhat do you need help with?`,
       }]);
     }
-  }, [open]);
+  }, [open, messages.length]);
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;

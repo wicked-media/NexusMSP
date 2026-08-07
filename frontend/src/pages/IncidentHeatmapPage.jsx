@@ -6,12 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import {
-  Flame, BarChart3, Clock, RefreshCw, Loader2, AlertTriangle,
-  TrendingUp, Users, Target, Activity, Shield, Zap
+  Flame, BarChart3, Clock, RefreshCw, Loader2, AlertTriangle, Users, Target, Activity
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid } from "recharts";
 
@@ -24,12 +22,11 @@ export default function IncidentHeatmapPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("heatmap");
   const [hoveredCell, setHoveredCell] = useState(null);
-  const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/incident-heatmap/data`, { headers });
+      const res = await axios.get(`${API}/incident-heatmap/data`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
     } catch { toast.error("Failed to load heatmap data"); }
     finally { setLoading(false); }

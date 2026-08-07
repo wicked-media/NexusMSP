@@ -17,7 +17,7 @@ import { MetricStrip, MetricTile } from "@/components/design-system";
 import {
   Plus, Search, Package, ArrowRight, Loader2, RefreshCw, Trash2,
   ShoppingCart, Truck, CheckCircle, Wrench, Archive, AlertTriangle,
-  DollarSign, Calendar, History, ChevronRight
+  DollarSign, History
 } from "lucide-react";
 
 const stageConfig = {
@@ -89,7 +89,7 @@ export default function AssetLifecyclePage() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this asset?")) return;
+    if (!window.confirm("Delete this asset?")) return;
     try {
       await axios.delete(`${API}/asset-lifecycle/${id}`, { headers });
       toast.success("Asset deleted");

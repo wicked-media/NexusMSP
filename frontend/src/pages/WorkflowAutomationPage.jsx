@@ -3,11 +3,11 @@ import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Activity, AlertTriangle, ArrowDown, Blocks, Bot, Box, CheckCircle2,
-  ChevronRight, ClipboardCheck, Clock3, Code2, Copy, FileClock, GitBranch,
-  History, Layers3, Loader2, LockKeyhole, PackageCheck, Play, Plus,
-  RefreshCw, Save, Search, Settings2, ShieldCheck, Sparkles, Trash2,
-  Workflow, XCircle, Zap,
+  Activity, AlertTriangle, ArrowDown, BellRing, Blocks, Bot, Box, Building2,
+  CheckCircle2, ChevronRight, ClipboardCheck, Clock3, Code2, Copy,
+  DatabaseBackup, FileClock, FileText, GitBranch, History, Layers3, Loader2,
+  LockKeyhole, PackageCheck, Play, Plus, RefreshCw, Save, Search, Settings2,
+  ShieldCheck, Sparkles, Trash2, Workflow, XCircle, Zap,
 } from "lucide-react";
 
 import { API, useAuth } from "@/App";
@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,14 +30,14 @@ import { Textarea } from "@/components/ui/textarea";
 const PAGE_TABS = ["studio", "marketplace", "runtime", "simulations"];
 const EMPTY_CREATE = { name: "", description: "", category: "Custom" };
 const RISK_STYLE = {
-  low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-  medium: "border-amber-500/30 bg-amber-500/10 text-amber-200",
-  high: "border-rose-500/30 bg-rose-500/10 text-rose-200",
+  low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
+  medium: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+  high: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-200",
 };
 const STATUS_STYLE = {
-  ready_for_approval: "border-sky-500/30 bg-sky-500/10 text-sky-200",
-  safe_to_run: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200",
-  blocked: "border-rose-500/30 bg-rose-500/10 text-rose-200",
+  ready_for_approval: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200",
+  safe_to_run: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200",
+  blocked: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-200",
 };
 const CATEGORY_ICON = {
   Flow: GitBranch,
@@ -50,8 +51,27 @@ const CATEGORY_ICON = {
   Documentation: FileClock,
   Integrations: Blocks,
 };
+const PACK_KIND = {
+  workflow: { label: "Automation", icon: Workflow, tone: "text-cyan-300 bg-cyan-500/10 border-cyan-500/20" },
+  ticket_blueprint: { label: "Ticket blueprint", icon: ClipboardCheck, tone: "text-sky-300 bg-sky-500/10 border-sky-500/20" },
+  documentation_template: { label: "Document template", icon: FileText, tone: "text-violet-300 bg-violet-500/10 border-violet-500/20" },
+  policy: { label: "Monitoring policy", icon: Settings2, tone: "text-amber-300 bg-amber-500/10 border-amber-500/20" },
+  security_baseline: { label: "Security baseline", icon: ShieldCheck, tone: "text-rose-300 bg-rose-500/10 border-rose-500/20" },
+  backup_policy: { label: "Recovery policy", icon: DatabaseBackup, tone: "text-emerald-300 bg-emerald-500/10 border-emerald-500/20" },
+  alert_rule: { label: "Alert rule", icon: BellRing, tone: "text-orange-300 bg-orange-500/10 border-orange-500/20" },
+};
+const PACK_LIFECYCLE = ["Discover", "Install", "Configure", "Simulate", "Approve", "Active"];
 const titleCase = (value) => String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const readableDate = (value) => value ? new Date(value).toLocaleString() : "Not yet";
+
+function packLifecycleIndex(pack) {
+  if (!pack?.installed) return 0;
+  const status = pack.status || "configuration_required";
+  if (status === "active") return 5;
+  if (status === "approved") return 4;
+  if (status === "simulation_complete" || status === "pending_review") return 3;
+  return 2;
+}
 
 function StepCard({ action, index, definition, onRemove, onConfig }) {
   const Icon = CATEGORY_ICON[definition?.category] || Zap;
@@ -174,6 +194,186 @@ function SimulationDialog({ simulation, open, onOpenChange, onSubmit, submitting
   );
 }
 
+function PackPreviewDialog({
+  pack,
+  open,
+  onOpenChange,
+  clients,
+  scope,
+  setScope,
+  clientId,
+  setClientId,
+  installing,
+  removing,
+  onInstall,
+  onRemove,
+  onConfigure,
+}) {
+  if (!pack) return null;
+  const lifecycleIndex = packLifecycleIndex(pack);
+  const installedRefs = pack.installation?.artifact_refs || [];
+  const artifacts = installedRefs.length ? installedRefs : (pack.artifacts || []);
+  const canInstall = scope !== "client" || !!clientId;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[94vh] max-w-6xl overflow-hidden p-0" data-testid="workflow-pack-preview-dialog">
+        <div className="border-b border-border/80 bg-gradient-to-br from-violet-950/85 via-slate-950 to-cyan-950/55 px-6 py-5">
+          <DialogHeader>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex min-w-0 gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-violet-400/25 bg-violet-400/10 shadow-[0_0_32px_-12px_rgba(167,139,250,0.9)]">
+                  {pack.industry ? <Building2 className="h-6 w-6 text-violet-200" /> : <Box className="h-6 w-6 text-violet-200" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-violet-300">Nexus verified · v{pack.version}</p>
+                  <DialogTitle className="mt-1 text-2xl">{pack.name}</DialogTitle>
+                  <DialogDescription className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">{pack.outcome}</DialogDescription>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {pack.industry && <Badge variant="outline" className="border-violet-400/30 bg-violet-400/10 text-violet-100">{pack.industry}</Badge>}
+                <Badge variant="outline" className={pack.installed ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100" : "border-cyan-400/30 bg-cyan-400/10 text-cyan-100"}>
+                  {pack.installed ? <><CheckCircle2 className="mr-1 h-3 w-3" />{titleCase(pack.status)}</> : "Available"}
+                </Badge>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="mt-5 grid grid-cols-6 gap-1.5" aria-label="Pack lifecycle">
+            {PACK_LIFECYCLE.map((label, index) => {
+              const complete = index <= lifecycleIndex;
+              return (
+                <div key={label} className={`rounded-lg border px-2 py-2 text-center ${complete ? "border-cyan-400/25 bg-cyan-400/[0.10]" : "border-white/[0.07] bg-white/[0.025]"}`}>
+                  <div className={`mx-auto mb-1 h-1.5 w-1.5 rounded-full ${complete ? "bg-cyan-300 shadow-[0_0_10px_rgba(103,232,249,0.9)]" : "bg-slate-700"}`} />
+                  <p className={`text-[9px] font-semibold uppercase tracking-wider ${complete ? "text-cyan-100" : "text-slate-500"}`}>{label}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <ScrollArea className="max-h-[60vh]">
+          <div className="grid gap-5 p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="space-y-5">
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold">Everything included</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{pack.component_total} connected components install together; none are activated automatically.</p>
+                  </div>
+                  <Badge variant="outline">{pack.steps} automation steps</Badge>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {artifacts.map((artifact, index) => {
+                    const meta = PACK_KIND[artifact.kind] || PACK_KIND.workflow;
+                    const Icon = meta.icon;
+                    return (
+                      <div key={`${artifact.kind}-${artifact.id || artifact.name}-${index}`} className="flex gap-3 rounded-xl border border-border/75 bg-muted/[0.055] p-3">
+                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${meta.tone}`}><Icon className="h-4 w-4" /></div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="text-xs font-semibold">{artifact.name}</p>
+                            {artifact.state && <Badge variant="outline" className="text-[8px]">{titleCase(artifact.state)}</Badge>}
+                          </div>
+                          <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{artifact.description || meta.label}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold">Automation sequence</p>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {(pack.actions || []).map((action, index) => (
+                    <div key={`${action.type}-${index}`} className="flex items-center gap-1.5">
+                      <span className="rounded-lg border border-border/70 bg-card px-2.5 py-1.5 text-[10px] font-medium">{index + 1}. {titleCase(action.type)}</span>
+                      {index < pack.actions.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground/50" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {!pack.installed && (
+                <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-cyan-100"><LockKeyhole className="h-4 w-4" />Choose the installation scope</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Scope is written into every generated draft and the Black Box event. It can be narrowed again before approval.</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label>Applies to</Label>
+                      <Select value={scope} onValueChange={(value) => { setScope(value); if (value !== "client") setClientId(""); }}>
+                        <SelectTrigger className="mt-1" data-testid="workflow-pack-scope"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="all_clients">All clients · reusable baseline</SelectItem><SelectItem value="client">One client · dedicated copy</SelectItem></SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label>Client</Label>
+                      <Select value={clientId || "__none"} onValueChange={(value) => setClientId(value === "__none" ? "" : value)} disabled={scope !== "client"}>
+                        <SelectTrigger className="mt-1" data-testid="workflow-pack-client"><SelectValue placeholder="Choose a client" /></SelectTrigger>
+                        <SelectContent><SelectItem value="__none">Choose a client…</SelectItem>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <Card className="border-emerald-500/20 bg-emerald-500/[0.035]">
+                <CardContent className="space-y-3 p-4">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-emerald-100"><ShieldCheck className="h-4 w-4" />Trust contract</p>
+                  {[
+                    ["External changes on install", "None"],
+                    ["Initial state", "Disabled drafts"],
+                    ["Simulation", "Required"],
+                    ["Independent approval", "Required"],
+                    ["Rollback", "Declared per step"],
+                  ].map(([label, value]) => <div key={label} className="flex items-center justify-between gap-3 border-t border-emerald-500/10 pt-2 text-[11px]"><span className="text-muted-foreground">{label}</span><span className="font-medium text-emerald-100">{value}</span></div>)}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="space-y-3 p-4">
+                  <div><p className="text-xs font-semibold">Connections to verify</p><div className="mt-2 flex flex-wrap gap-1.5">{pack.required_connections?.map((item) => <Badge key={item} variant="outline" className="text-[9px]">{item}</Badge>)}</div></div>
+                  <Separator />
+                  <div><p className="text-xs font-semibold">Declared permissions</p><div className="mt-2 space-y-1.5">{pack.permissions?.map((item) => <p key={item} className="flex items-start gap-2 text-[10px] text-muted-foreground"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-cyan-300" />{item}</p>)}</div></div>
+                  <Separator />
+                  <p className="text-[10px] leading-4 text-muted-foreground">Estimated configuration: {pack.estimated_setup_minutes} minutes. Provider credentials remain in Settings and are never copied into marketplace metadata.</p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </ScrollArea>
+
+        <DialogFooter className="border-t border-border/80 px-6 py-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          {pack.installed ? (
+            <>
+              <HoldToConfirmButton
+                variant="destructive"
+                size="sm"
+                duration={1100}
+                onComplete={() => onRemove(pack)}
+                disabled={removing === pack.id}
+                holdingLabel="Keep holding to remove"
+                completeLabel="Removal confirmed"
+                data-testid="workflow-pack-remove"
+              >{removing === pack.id ? "Removing…" : "Hold to remove pack"}</HoldToConfirmButton>
+              <Button onClick={() => onConfigure(pack)}><Settings2 className="mr-1.5 h-4 w-4" />Configure installed pack</Button>
+            </>
+          ) : (
+            <Button onClick={() => onInstall(pack)} disabled={!canInstall || installing === pack.id} data-testid="workflow-pack-install">
+              {installing === pack.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PackageCheck className="mr-2 h-4 w-4" />}
+              Install {pack.component_total} disabled drafts
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function WorkflowAutomationPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -196,11 +396,16 @@ export default function WorkflowAutomationPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [packSearch, setPackSearch] = useState("");
+  const [packFilter, setPackFilter] = useState("All packs");
+  const [packPreview, setPackPreview] = useState(null);
+  const [packScope, setPackScope] = useState("all_clients");
+  const [packClientId, setPackClientId] = useState("");
   const [editWf, setEditWf] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [saving, setSaving] = useState(false);
   const [installing, setInstalling] = useState("");
+  const [removing, setRemoving] = useState("");
   const [simulation, setSimulation] = useState(null);
   const [simulationOpen, setSimulationOpen] = useState(false);
   const [simulating, setSimulating] = useState(false);
@@ -316,14 +521,50 @@ export default function WorkflowAutomationPage() {
   const installPack = async (pack) => {
     setInstalling(pack.id);
     try {
-      const response = await axios.post(`${API}/workflows/templates/${pack.id}/install`, {}, { headers });
-      toast.success(`${pack.name} installed as a disabled draft`);
+      const response = await axios.post(`${API}/workflows/templates/${pack.id}/install`, {
+        scope: packScope,
+        client_id: packScope === "client" ? packClientId : null,
+      }, { headers });
+      const installedCount = response.data?.installation?.component_total || pack.component_total || 1;
+      toast.success(`${pack.name} installed`, {
+        description: `${installedCount} governed components are disabled and ready to configure.`,
+      });
       await load({ quiet: true });
-      setEditWf(response.data);
+      setEditWf(response.data?.workflow || response.data);
+      setPackPreview(null);
       selectTab("studio");
     } catch (error) {
       toast.error(error.response?.data?.detail || "Automation pack could not be installed");
     } finally { setInstalling(""); }
+  };
+  const removePack = async (pack) => {
+    setRemoving(pack.id);
+    try {
+      const response = await axios.delete(`${API}/workflows/templates/${pack.id}/install`, { headers });
+      toast.success(`${pack.name} removed`, {
+        description: `${response.data?.removed_components || pack.component_total || 0} components disabled; Black Box evidence preserved.`,
+      });
+      if (editWf?.source_pack_id === pack.id) setEditWf(null);
+      setPackPreview(null);
+      await load({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Automation pack could not be removed");
+    } finally { setRemoving(""); }
+  };
+  const configurePack = (pack) => {
+    const workflow = workflows.find((item) => item.id === pack.workflow_id || item.source_pack_id === pack.id);
+    if (!workflow) {
+      toast.error("The installed workflow could not be found. Refresh the marketplace and try again.");
+      return;
+    }
+    setEditWf(workflow);
+    setPackPreview(null);
+    selectTab("studio");
+  };
+  const previewPack = (pack) => {
+    setPackPreview(pack);
+    setPackScope(pack.installation?.scope?.type || "all_clients");
+    setPackClientId(pack.installation?.scope?.client_id || "");
   };
   const runSimulation = async () => {
     if (!editWf) return;
@@ -417,7 +658,15 @@ export default function WorkflowAutomationPage() {
   };
 
   const filteredWorkflows = workflows.filter((item) => [item.name, item.description, item.category].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase()));
-  const filteredPacks = templates.filter((item) => [item.name, item.description, item.category].filter(Boolean).join(" ").toLowerCase().includes(packSearch.toLowerCase()));
+  const packFilters = ["All packs", "Installed", "Industry blueprints", ...new Set(templates.filter((item) => !item.industry).map((item) => item.category))];
+  const filteredPacks = templates.filter((item) => {
+    const text = [item.name, item.description, item.outcome, item.category, item.industry, ...(item.required_connections || [])].filter(Boolean).join(" ").toLowerCase();
+    const filterMatch = packFilter === "All packs"
+      || (packFilter === "Installed" && item.installed)
+      || (packFilter === "Industry blueprints" && item.industry)
+      || item.category === packFilter;
+    return filterMatch && text.includes(packSearch.toLowerCase());
+  });
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-cyan-300" /></div>;
 
@@ -582,22 +831,72 @@ export default function WorkflowAutomationPage() {
         </TabsContent>
 
         <TabsContent value="marketplace" className="mt-5 space-y-4">
-          <Card><CardContent className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="font-medium">Nexus Automation Marketplace</p><p className="mt-1 text-sm text-muted-foreground">Install a verified, disabled draft. Configure it, simulate it, then request approval before activation.</p></div><div className="relative w-full lg:w-80"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={packSearch} onChange={(event) => setPackSearch(event.target.value)} placeholder="Search packs and outcomes" /></div></CardContent></Card>
+          <Card className="overflow-hidden border-violet-500/20 bg-gradient-to-br from-violet-500/[0.075] via-card to-cyan-500/[0.035]">
+            <CardContent className="space-y-4 p-5">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="max-w-3xl">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Connected operational packs</p>
+                  <p className="mt-1 text-xl font-semibold">Nexus Workflow Marketplace</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">Install the complete operating system for an outcome—not just a script. Every pack brings its workflow, ticket blueprint, technician and client documentation, policies and exception alerting into one governed lifecycle.</p>
+                </div>
+                <div className="relative w-full xl:w-96">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="h-10 border-violet-500/20 bg-background/60 pl-9" value={packSearch} onChange={(event) => setPackSearch(event.target.value)} placeholder="Search outcomes, industries and connections" data-testid="workflow-marketplace-search" />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 border-t border-border/60 pt-4">
+                {packFilters.map((item) => (
+                  <Button key={item} size="sm" variant={packFilter === item ? "default" : "outline"} onClick={() => setPackFilter(item)} aria-pressed={packFilter === item} className="h-8 text-[11px]">
+                    {item === "Industry blueprints" && <Building2 className="mr-1.5 h-3.5 w-3.5" />}{item}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              ["Verified packs", templates.length, PackageCheck, "Nexus signed catalogue", "border-violet-500/20 bg-violet-500/[0.035]"],
+              ["Industry blueprints", templates.filter((item) => item.industry).length, Building2, "Vertical-ready baselines", "border-cyan-500/20 bg-cyan-500/[0.035]"],
+              ["Installed", templates.filter((item) => item.installed).length, CheckCircle2, "Audited lifecycle records", "border-emerald-500/20 bg-emerald-500/[0.035]"],
+              ["Draft components", templates.filter((item) => item.installed).reduce((sum, item) => sum + (item.installation?.component_total || 1), 0), Layers3, "Nothing auto-activated", "border-amber-500/20 bg-amber-500/[0.035]"],
+            ].map(([label, value, Icon, helper, tone]) => (
+              <Card key={label} className={tone}><CardContent className="p-4"><Icon className="h-4 w-4 text-muted-foreground" /><p className="mt-3 text-2xl font-semibold">{value}</p><p className="mt-1 text-xs font-medium">{label}</p><p className="mt-1 text-[10px] text-muted-foreground">{helper}</p></CardContent></Card>
+            ))}
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredPacks.map((pack) => (
-              <Card key={pack.id} className="group overflow-hidden border-border/80 transition-all hover:-translate-y-0.5 hover:border-violet-500/35 hover:shadow-lg hover:shadow-violet-500/5">
+              <Card key={pack.id} className={`group overflow-hidden border-border/80 transition-all hover:-translate-y-0.5 hover:border-violet-500/35 hover:shadow-lg hover:shadow-violet-500/5 ${pack.installed ? "border-emerald-500/25 bg-emerald-500/[0.025]" : ""}`} data-testid={`workflow-pack-${pack.id}`}>
                 <div className="h-1 bg-gradient-to-r from-violet-500 via-cyan-400 to-emerald-400" />
-                <CardContent className="p-5">
-                  <div className="flex items-start justify-between gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-500/20 bg-violet-500/10"><Box className="h-5 w-5 text-violet-300" /></div>{pack.installed ? <Badge variant="outline" className={RISK_STYLE.low}><CheckCircle2 className="mr-1 h-3 w-3" />Installed</Badge> : <Badge variant="outline">{pack.publisher}</Badge>}</div>
-                  <p className="mt-4 font-semibold">{pack.name}</p>
-                  <p className="mt-1 min-h-10 text-sm text-muted-foreground">{pack.description}</p>
-                  <div className="mt-4 flex flex-wrap gap-2"><Badge variant="outline">{pack.category}</Badge><Badge variant="outline">{pack.steps} steps</Badge><Badge variant="outline">{titleCase(pack.trigger?.type)}</Badge></div>
-                  <div className="mt-4 flex flex-wrap gap-1.5">{pack.actions.slice(0, 4).map((action) => <span key={action.type} className="rounded-md bg-muted/40 px-2 py-1 text-[10px] text-muted-foreground">{titleCase(action.type)}</span>)}{pack.actions.length > 4 && <span className="rounded-md bg-muted/40 px-2 py-1 text-[10px] text-muted-foreground">+{pack.actions.length - 4} more</span>}</div>
-                  <Button className="mt-5 w-full" variant={pack.installed ? "outline" : "default"} disabled={pack.installed || installing === pack.id} onClick={() => installPack(pack)}>{installing === pack.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : pack.installed ? <PackageCheck className="mr-2 h-4 w-4" /> : <Plus className="mr-2 h-4 w-4" />}{pack.installed ? "Installed as workflow" : "Install disabled draft"}</Button>
+                <CardContent className="flex h-full flex-col p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-violet-500/20 bg-violet-500/10">{pack.industry ? <Building2 className="h-5 w-5 text-violet-300" /> : <Box className="h-5 w-5 text-violet-300" />}</div>
+                    {pack.installed
+                      ? <Badge variant="outline" className={RISK_STYLE.low}><CheckCircle2 className="mr-1 h-3 w-3" />{titleCase(pack.status)}</Badge>
+                      : <Badge variant="outline"><ShieldCheck className="mr-1 h-3 w-3" />{pack.publisher}</Badge>}
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-2"><p className="font-semibold">{pack.name}</p>{pack.industry && <Badge variant="outline" className="border-violet-500/25 text-[9px] text-violet-200">{pack.industry}</Badge>}</div>
+                  <p className="mt-2 min-h-16 text-sm leading-5 text-muted-foreground">{pack.outcome}</p>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-lg border border-border/70 bg-muted/[0.04] p-2 text-center"><p className="text-sm font-semibold">{pack.component_total}</p><p className="text-[9px] text-muted-foreground">Components</p></div>
+                    <div className="rounded-lg border border-border/70 bg-muted/[0.04] p-2 text-center"><p className="text-sm font-semibold">{pack.steps}</p><p className="text-[9px] text-muted-foreground">Actions</p></div>
+                    <div className="rounded-lg border border-border/70 bg-muted/[0.04] p-2 text-center"><p className="text-sm font-semibold">{pack.estimated_setup_minutes}m</p><p className="text-[9px] text-muted-foreground">Configure</p></div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-1.5">
+                    {Object.entries(pack.component_counts || {}).slice(0, 4).map(([kind, count]) => <span key={kind} className="rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-[9px] text-muted-foreground">{count} {PACK_KIND[kind]?.label || titleCase(kind)}</span>)}
+                    {Object.keys(pack.component_counts || {}).length > 4 && <span className="rounded-md border border-border/60 bg-muted/30 px-2 py-1 text-[9px] text-muted-foreground">+{Object.keys(pack.component_counts).length - 4} types</span>}
+                  </div>
+                  <div className="mt-auto flex gap-2 pt-5">
+                    <Button className="flex-1" variant={pack.installed ? "outline" : "default"} onClick={() => previewPack(pack)}>
+                      {pack.installed ? <Settings2 className="mr-1.5 h-4 w-4" /> : <Sparkles className="mr-1.5 h-4 w-4" />}{pack.installed ? "Review & configure" : "Preview & install"}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
+          {!filteredPacks.length && <Card><CardContent className="py-16 text-center"><Search className="mx-auto h-9 w-9 text-muted-foreground/30" /><p className="mt-4 font-medium">No matching workflow packs</p><p className="mt-1 text-sm text-muted-foreground">Try another industry, outcome, provider or lifecycle filter.</p><Button className="mt-4" variant="outline" onClick={() => { setPackSearch(""); setPackFilter("All packs"); }}>Reset marketplace</Button></CardContent></Card>}
         </TabsContent>
 
         <TabsContent value="runtime" className="mt-5 space-y-4">
@@ -689,6 +988,21 @@ export default function WorkflowAutomationPage() {
         </DialogContent>
       </Dialog>
 
+      <PackPreviewDialog
+        pack={packPreview}
+        open={!!packPreview}
+        onOpenChange={(next) => { if (!next) setPackPreview(null); }}
+        clients={clients}
+        scope={packScope}
+        setScope={setPackScope}
+        clientId={packClientId}
+        setClientId={setPackClientId}
+        installing={installing}
+        removing={removing}
+        onInstall={installPack}
+        onRemove={removePack}
+        onConfigure={configurePack}
+      />
       <SimulationDialog simulation={simulation} open={simulationOpen} onOpenChange={setSimulationOpen} onSubmit={submitApproval} submitting={submitting} />
     </div>
   );

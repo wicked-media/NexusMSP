@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { HoldToConfirmButton } from "@/components/ui/hold-to-confirm-button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -26,7 +27,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import {
   Sparkles, Search, Loader2, Users, Shield, AlertTriangle, Zap, Activity,
-  Crown, Lock, Unlock, History, Target, ChevronRight, RefreshCw,
+  Crown, Lock, Unlock, History, Target, RefreshCw,
   TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
   Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Trophy,
   CheckCircle2, XCircle, Clock, Upload, Building2, MapPin,
@@ -36,10 +37,10 @@ import {
 const SKILL_AXES = ["networking", "cloud", "security", "endpoints", "backup", "m365", "voip", "hardware"];
 
 const STATE_COLORS = {
-  idle:       "text-emerald-300 border-emerald-500/30 bg-emerald-500/10",
-  active:     "text-cyan-300 border-cyan-500/30 bg-cyan-500/10",
-  busy:       "text-amber-300 border-amber-500/30 bg-amber-500/10",
-  overloaded: "text-rose-300 border-rose-500/30 bg-rose-500/10",
+  idle:       "text-emerald-700 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/10",
+  active:     "text-cyan-700 dark:text-cyan-300 border-cyan-500/30 bg-cyan-500/10",
+  busy:       "text-amber-700 dark:text-amber-300 border-amber-500/30 bg-amber-500/10",
+  overloaded: "text-rose-700 dark:text-rose-300 border-rose-500/30 bg-rose-500/10",
 };
 
 const PERM_COLORS = {
@@ -49,6 +50,12 @@ const PERM_COLORS = {
   admin: "bg-rose-500/20 text-rose-300 border border-rose-500/40",
 };
 const PERM_INITIAL = { none: "·", read: "R", write: "W", admin: "A" };
+
+const cleanDisplayText = (value) => String(value || "")
+  .replaceAll("â€”", "—")
+  .replaceAll("â€“", "–")
+  .replaceAll("â€™", "’")
+  .replaceAll("Â·", "·");
 
 const ROLE_OPTIONS = [
   { value: "technician", label: "Technician", description: "Works assigned service requests and client systems." },
@@ -149,17 +156,17 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-          <Input className="pl-9" placeholder="Search name or email…" value={search} onChange={e => setSearch(e.target.value)} data-testid="directory-search" />
+          <Input aria-label="Search team members" className="pl-9" placeholder="Search name or email…" value={search} onChange={e => setSearch(e.target.value)} data-testid="directory-search" />
         </div>
         <Select value={filterTitle} onValueChange={setFilterTitle}>
-          <SelectTrigger className="w-[180px]" data-testid="directory-title-filter"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Filter team members by role" className="w-[180px]" data-testid="directory-title-filter"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Roles</SelectItem>
             {titles.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[140px]" data-testid="directory-status-filter"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Filter team members by status" className="w-[140px]" data-testid="directory-status-filter"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="archived">Archived</SelectItem>
@@ -170,7 +177,7 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
 
       {/* Tech grid — same style as Devices grid */}
       {filtered.length === 0 ? (
-        <Card><CardContent className="py-12 text-center text-sm text-zinc-500">No technicians match those filters.</CardContent></Card>
+        <Card><CardContent className="flex flex-col items-center py-12 text-center"><Search className="h-6 w-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">No team members match</p><p className="mt-1 text-xs text-muted-foreground">Clear the search and filters to return to the complete directory.</p><Button variant="outline" size="sm" className="mt-4" onClick={() => { setSearch(""); setFilterTitle("all"); setFilterStatus("active"); }}>Clear filters</Button></CardContent></Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map(t => (
@@ -199,7 +206,7 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
   const archived = !!tech.archived;
 
   return (
-    <Card className={`bg-zinc-950/60 border-zinc-800 transition-colors ${archived ? "border-amber-500/25 opacity-85" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
+    <Card className={`border-border/80 bg-card/80 transition-colors ${archived ? "border-amber-500/25 opacity-85" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="relative shrink-0">
@@ -207,16 +214,16 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
               <AvatarImage src={tech.avatar} alt={`${tech.name || "Technician"} profile photo`} className="object-cover" />
               <AvatarFallback className="rounded-md bg-transparent text-sm font-bold text-white">{(tech.name || "?").slice(0, 2).toUpperCase()}</AvatarFallback>
             </Avatar>
-            {tech.on_call_status && <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-400 ring-2 ring-zinc-950 animate-pulse" />}
+            {tech.on_call_status && <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full bg-emerald-500 ring-2 ring-background" aria-label="Currently on call" />}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-zinc-100 truncate">{tech.name}</span>
-              {tech.is_admin && <Crown className="w-3 h-3 text-amber-400" />}
-              {archived && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[9px] uppercase text-amber-200">Archived</Badge>}
+              <span className="truncate font-medium text-foreground">{tech.name}</span>
+              {tech.is_admin && <Crown className="h-3 w-3 text-amber-600 dark:text-amber-400" aria-label="Administrator" />}
+              {archived && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[9px] uppercase text-amber-700 dark:text-amber-200">Archived</Badge>}
             </div>
-            <div className="text-[11px] text-zinc-500 font-mono truncate">{tech.job_title || "Technician"}</div>
-            <div className="text-[10px] text-zinc-500 truncate">{tech.email}</div>
+            <div className="truncate font-mono text-[11px] text-muted-foreground">{tech.job_title || "Technician"}</div>
+            <div className="truncate text-[10px] text-muted-foreground">{tech.email}</div>
             <div className="flex flex-wrap gap-1 mt-1">
               <Badge variant="outline" className={`text-[9px] uppercase ${stateClass}`}>{wl.state || "idle"} · {wl.utilization_pct ?? 0}%</Badge>
             </div>
@@ -224,10 +231,10 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
           <SkillRadar skills={tech.skills} size={64} />
         </div>
 
-        <div className="mt-3 pt-3 border-t border-zinc-900 grid grid-cols-3 gap-2 text-center">
-          <div><div className="text-base font-bold text-cyan-300 font-mono">{wl.open_tickets ?? 0}</div><div className="text-[9px] uppercase tracking-widest text-zinc-500">open</div></div>
-          <div><div className={`text-base font-bold font-mono ${wl.overdue ? "text-rose-300" : "text-zinc-400"}`}>{wl.overdue ?? 0}</div><div className="text-[9px] uppercase tracking-widest text-zinc-500">overdue</div></div>
-          <div><div className="text-base font-bold text-emerald-300 font-mono">{tech.on_call_status ? "ON" : "—"}</div><div className="text-[9px] uppercase tracking-widest text-zinc-500">on-call</div></div>
+        <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/70 pt-3 text-center">
+          <div><div className="font-mono text-base font-bold text-cyan-700 dark:text-cyan-300">{wl.open_tickets ?? 0}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">open</div></div>
+          <div><div className={`font-mono text-base font-bold ${wl.overdue ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground"}`}>{wl.overdue ?? 0}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">overdue</div></div>
+          <div><div className="font-mono text-base font-bold text-emerald-700 dark:text-emerald-300">{tech.on_call_status ? "ON" : "—"}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">on-call</div></div>
         </div>
 
         {archived ? (
@@ -237,8 +244,8 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
           </div>
         ) : (
           <div className="mt-3 flex items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px]" onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1 h-3 w-3" />Manage</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-amber-300 hover:bg-amber-500/10" onClick={onArchive} data-testid={`tech-archive-${tech.id}`}><Archive className="mr-1 h-3 w-3" />Archive</Button>
+            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px]" aria-label={`Manage ${tech.name}`} onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1 h-3 w-3" />Manage</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-amber-700 hover:bg-amber-500/10 dark:text-amber-300" aria-label={`Archive ${tech.name}`} onClick={onArchive} data-testid={`tech-archive-${tech.id}`}><Archive className="mr-1 h-3 w-3" />Archive</Button>
           </div>
         )}
       </CardContent>
@@ -328,7 +335,9 @@ function DeleteArchivedTechnicianDialog({ tech, onClose, headers, onCompleted })
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="destructive" disabled={busy || confirmation !== confirmationPhrase} onClick={remove} data-testid="delete-tech-submit">{busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Delete archived account</Button>
+          <HoldToConfirmButton disabled={busy || confirmation !== confirmationPhrase} onComplete={remove} data-testid="delete-tech-submit">
+            {busy ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />Deleting account</> : "Hold to delete account"}
+          </HoldToConfirmButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -671,7 +680,8 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
     if (next.has(siteId)) next.delete(siteId); else next.add(siteId);
     setForm({ ...form, site_scope_ids: [...next] });
   };
-  const statusLabel = workload.state ? `${workload.state} · ${workload.utilisation ?? workload.utilization ?? 0}% utilised` : "No live workload signal";
+  const utilisation = workload.utilization_pct ?? workload.utilisation_pct ?? workload.utilisation ?? workload.utilization ?? 0;
+  const statusLabel = workload.state ? `${workload.state} · ${utilisation}% utilised` : "No live workload signal";
 
   return (
     <Dialog open={!!tech} onOpenChange={(v) => !v && onClose()}>
@@ -680,14 +690,14 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
           <DialogTitle className="flex items-center gap-2"><Edit className="w-5 h-5 text-violet-400" />Manage {tech.name}</DialogTitle>
           <DialogDescription>Update team profile and work access. Personal preferences, signatures and notifications stay in My Workspace.</DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-4 rounded-xl border border-violet-500/20 bg-gradient-to-r from-violet-500/[0.08] to-zinc-950/30 p-4 sm:flex-row sm:items-center">
-          <Avatar className="h-16 w-16 shrink-0 rounded-2xl border-2 border-violet-400/30 bg-violet-500/10 shadow-lg shadow-violet-500/10"><AvatarImage src={avatarUrl} alt={`${tech.name} profile photo`} className="object-cover" /><AvatarFallback className="rounded-2xl bg-violet-500/10 text-lg font-bold text-violet-100">{tech.name?.split(" ").map(part => part[0]).join("") || "T"}</AvatarFallback></Avatar>
-          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-zinc-100">Profile photo</p><p className="mt-1 text-xs leading-relaxed text-zinc-400">Shown on Team Command, ticket activity, comments, chat presence, and other technician work records.</p><div className="mt-3 flex flex-wrap items-center gap-2"><input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadAvatar} data-testid="team-avatar-file" /><Button type="button" size="sm" variant="outline" className="border-violet-500/40 text-violet-100 hover:bg-violet-500/10" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} data-testid="team-avatar-upload-btn">{avatarUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{avatarUploading ? "Uploading…" : avatarUrl ? "Replace photo" : "Upload photo"}</Button><span className="text-[11px] text-zinc-500">PNG, JPG, WebP, or GIF · up to 10 MB</span></div></div>
+        <div className="flex flex-col gap-4 rounded-xl border border-violet-500/20 bg-gradient-to-r from-violet-500/[0.08] to-card p-4 sm:flex-row sm:items-center">
+          <Avatar className="h-16 w-16 shrink-0 rounded-2xl border-2 border-violet-400/30 bg-violet-500/10 shadow-lg shadow-violet-500/10"><AvatarImage src={avatarUrl} alt={`${tech.name} profile photo`} className="object-cover" /><AvatarFallback className="rounded-2xl bg-violet-500/10 text-lg font-bold text-violet-700 dark:text-violet-100">{tech.name?.split(" ").map(part => part[0]).join("") || "T"}</AvatarFallback></Avatar>
+          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground">Profile photo</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Shown on Team Command, ticket activity, comments, chat presence, and other technician work records.</p><div className="mt-3 flex flex-wrap items-center gap-2"><input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadAvatar} data-testid="team-avatar-file" /><Button type="button" size="sm" variant="outline" className="border-violet-500/40 text-violet-700 hover:bg-violet-500/10 dark:text-violet-100" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} data-testid="team-avatar-upload-btn">{avatarUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{avatarUploading ? "Uploading…" : avatarUrl ? "Replace photo" : "Upload photo"}</Button><span className="text-[11px] text-muted-foreground">PNG, JPG, WebP, or GIF · up to 10 MB</span></div></div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs">
-          <div><p className="text-zinc-500">Live workload</p><p className="mt-1 font-medium text-zinc-200 capitalize">{statusLabel}</p></div>
-          <div><p className="text-zinc-500">Open tickets</p><p className="mt-1 font-medium text-zinc-200">{workload.open_tickets ?? workload.open ?? 0}</p></div>
-          <div><p className="text-zinc-500">On-call</p><p className="mt-1 font-medium text-zinc-200">{workload.on_call ? "Currently rostered" : "Not rostered"}</p></div>
+        <div className="grid grid-cols-1 gap-2 rounded-lg border border-border/80 bg-muted/25 p-3 text-xs sm:grid-cols-3">
+          <div><p className="text-muted-foreground">Live workload</p><p className="mt-1 font-medium capitalize text-foreground">{statusLabel}</p></div>
+          <div><p className="text-muted-foreground">Open tickets</p><p className="mt-1 font-medium text-foreground">{workload.open_tickets ?? workload.open ?? 0}</p></div>
+          <div><p className="text-muted-foreground">On-call</p><p className="mt-1 font-medium text-foreground">{tech.on_call_status || workload.on_call ? "Currently rostered" : "Not rostered"}</p></div>
         </div>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -714,17 +724,17 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
             </div>
             <div><Label className="text-xs">Billable rate (AUD / hr)</Label><Input type="number" min="0" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} /></div>
           </div>
-          <section className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.06] to-zinc-950/30 p-4" data-testid="technician-client-scope">
+          <section className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.06] to-card p-4" data-testid="technician-client-scope">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 text-cyan-300" />
-                  <p className="text-xs font-semibold text-zinc-100">Client &amp; site scope</p>
-                  <Badge variant="outline" className={form.client_scope_mode === "all" ? "border-emerald-500/30 text-emerald-300" : "border-cyan-500/30 text-cyan-300"}>
+                  <Building2 className="h-4 w-4 text-cyan-700 dark:text-cyan-300" />
+                  <p className="text-xs font-semibold text-foreground">Client &amp; site scope</p>
+                  <Badge variant="outline" className={form.client_scope_mode === "all" ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300" : "border-cyan-500/30 text-cyan-700 dark:text-cyan-300"}>
                     {hasAdministratorAccess ? "All via administrator" : form.client_scope_mode === "all" ? "All clients" : `${form.client_scope_ids.length} selected`}
                   </Badge>
                 </div>
-                <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-zinc-400">Limit which customer environments this technician can operate on. The API checks this boundary for remote, billing, identity, DNS, and automation actions.</p>
+                <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-muted-foreground">Limit which customer environments this technician can operate on. The API checks this boundary for remote, billing, identity, DNS, and automation actions.</p>
               </div>
               <Select value={form.client_scope_mode} onValueChange={value => setForm({ ...form, client_scope_mode: value, client_scope_ids: value === "all" ? [] : form.client_scope_ids, site_scope_ids: value === "all" ? [] : form.site_scope_ids })} disabled={hasAdministratorAccess}>
                 <SelectTrigger className="w-full sm:w-44" data-testid="client-scope-mode"><SelectValue /></SelectTrigger>
@@ -1317,7 +1327,7 @@ function RoleDriftTab({ headers }) {
                     <Badge variant="outline" className="text-[10px] text-zinc-400">{d.current_title}</Badge>
                     <Badge variant="outline" className={`text-[10px] uppercase ${d.flag === "upgrade" ? "text-amber-300 border-amber-500/40" : "text-zinc-300 border-zinc-500/40"}`}>{d.flag}</Badge>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1">{d.rationale}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{cleanDisplayText(d.rationale)}</p>
                 </div>
                 <div className="text-right text-[10px] font-mono text-zinc-500">
                   <div>{d.crit_30d} critical · {d.total_30d} total</div>
@@ -1340,6 +1350,7 @@ function JITTab({ headers, capacity, presets, onChanged }) {
   const [bgOpen, setBgOpen] = useState(false);
   const [grant, setGrant] = useState({ tech_id: "", preset: "Senior Engineer", duration_minutes: 240, reason: "" });
   const [bg, setBg] = useState({ duration_minutes: 15, reason: "" });
+  const [bgAcknowledged, setBgAcknowledged] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1364,22 +1375,46 @@ function JITTab({ headers, capacity, presets, onChanged }) {
   };
   const doBg = async () => {
     if (!bg.reason || bg.reason.length < 10) { toast.error("Detailed reason required (10+ chars)"); return; }
+    if (!bgAcknowledged) { toast.error("Acknowledge the emergency access conditions"); return; }
     try { await axios.post(`${API}/permission-elevation/break-glass`, bg, { headers }); toast.success("BREAK GLASS active"); setBgOpen(false); setBg({ duration_minutes: 15, reason: "" }); load(); }
     catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
+  const closeBreakGlass = (open) => {
+    setBgOpen(open);
+    if (!open) setBgAcknowledged(false);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <p className="text-xs text-zinc-500">Grant elevated permissions for a fixed window. Auto-revert on expiry. Audited.</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Temporary access control</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Grant only the access required, for a fixed window, with automatic rollback and a permanent audit record.</p>
+        </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="h-8 text-xs text-violet-300 border-violet-500/40 hover:bg-violet-500/10" onClick={() => setGrantOpen(true)}><Unlock className="w-3 h-3 mr-1" />Grant</Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs text-rose-300 border-rose-500/40 hover:bg-rose-500/10" onClick={() => setBgOpen(true)}><ShieldAlert className="w-3 h-3 mr-1" />Break Glass</Button>
+          <Button size="sm" variant="outline" className="h-9 text-xs text-violet-700 border-violet-500/40 hover:bg-violet-500/10 dark:text-violet-300" onClick={() => setGrantOpen(true)}><Unlock className="w-3.5 h-3.5 mr-1.5" />Grant access</Button>
+          <Button size="sm" variant="outline" className="h-9 text-xs text-rose-700 border-rose-500/40 hover:bg-rose-500/10 dark:text-rose-300" onClick={() => closeBreakGlass(true)}><ShieldAlert className="w-3.5 h-3.5 mr-1.5" />Break glass</Button>
         </div>
       </div>
 
+      <div className="grid gap-3 md:grid-cols-3">
+        {[
+          { Icon: Target, title: "Bounded scope", body: "Permission presets keep elevated access deliberate and reviewable.", tone: "text-cyan-700 bg-cyan-500/10 dark:text-cyan-300" },
+          { Icon: Clock, title: "Automatic expiry", body: "Access reverts automatically at the end of the approved window.", tone: "text-violet-700 bg-violet-500/10 dark:text-violet-300" },
+          { Icon: History, title: "Evidence retained", body: "Requester, approver, reason, duration and revocation remain auditable.", tone: "text-emerald-700 bg-emerald-500/10 dark:text-emerald-300" },
+        ].map(({ Icon, title, body, tone }) => (
+          <Card key={title} className="border-border/70 bg-card/70 shadow-sm">
+            <CardContent className="flex gap-3 p-4">
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone}`}><Icon className="h-4 w-4" /></div>
+              <div><p className="text-xs font-semibold text-foreground">{title}</p><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{body}</p></div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
       {loading ? <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-zinc-500" /></div> :
-       active.length === 0 ? <Card><CardContent className="p-6 text-center text-sm text-zinc-500">No active elevations.</CardContent></Card> :
+       active.length === 0 ? <Card className="border-dashed border-border bg-muted/20"><CardContent className="flex flex-col items-center p-8 text-center"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-5 w-5" /></div><p className="text-sm font-semibold text-foreground">No elevated access is active</p><p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">The team is operating at standard privilege. Start a time-bound grant only when a technician needs additional access to complete approved work.</p><Button size="sm" variant="outline" className="mt-4 h-9 border-violet-500/40 text-violet-700 hover:bg-violet-500/10 dark:text-violet-300" onClick={() => setGrantOpen(true)}><Unlock className="mr-1.5 h-3.5 w-3.5" />Grant temporary access</Button></CardContent></Card> :
        <div className="space-y-2">
          {active.map(e => (
            <Card key={e.id} className={e.break_glass ? "border-rose-500/40 bg-rose-500/5" : "border-violet-500/30 bg-violet-500/5"}>
@@ -1402,40 +1437,52 @@ function JITTab({ headers, capacity, presets, onChanged }) {
        </div>}
 
       <Dialog open={grantOpen} onOpenChange={setGrantOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Grant Just-in-Time Elevation</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <Select value={grant.tech_id} onValueChange={v => setGrant({ ...grant, tech_id: v })}>
-              <SelectTrigger><SelectValue placeholder="Select technician" /></SelectTrigger>
+        <DialogContent className="max-w-2xl overflow-hidden border-border bg-background p-0">
+          <DialogHeader className="border-b border-border bg-gradient-to-r from-violet-500/10 via-background to-background px-6 py-5">
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-700 dark:text-violet-300"><Zap className="h-5 w-5" /></div><div><DialogTitle>Grant just-in-time access</DialogTitle><DialogDescription className="mt-1">Give one technician a defined permission preset for a limited, fully audited window.</DialogDescription></div></div>
+          </DialogHeader>
+          <div className="space-y-5 px-6 py-5">
+            <div className="grid grid-cols-3 gap-2" aria-label="Elevation workflow">
+              {["1  Technician", "2  Permission", "3  Expiry & evidence"].map((step, index) => <div key={step} className={`rounded-lg border px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider ${index === 0 ? "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-border bg-muted/30 text-muted-foreground"}`}>{step}</div>)}
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="jit-technician">Technician <span className="text-rose-500">*</span></Label><Select value={grant.tech_id} onValueChange={v => setGrant({ ...grant, tech_id: v })}>
+              <SelectTrigger id="jit-technician" aria-label="Technician"><SelectValue placeholder="Select technician" /></SelectTrigger>
               <SelectContent>{(capacity?.techs || []).map(t => <SelectItem key={t.id} value={t.id}>{t.name} · {t.job_title}</SelectItem>)}</SelectContent>
-            </Select>
-            <Select value={grant.preset} onValueChange={v => setGrant({ ...grant, preset: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            </Select><p className="text-[11px] text-muted-foreground">Only the selected team member receives the temporary grant.</p></div>
+              <div className="space-y-2"><Label htmlFor="jit-preset">Permission preset</Label><Select value={grant.preset} onValueChange={v => setGrant({ ...grant, preset: v })}>
+              <SelectTrigger id="jit-preset" aria-label="Permission preset"><SelectValue /></SelectTrigger>
               <SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-            </Select>
-            <Input type="number" min={5} max={1440} value={grant.duration_minutes} onChange={e => setGrant({ ...grant, duration_minutes: Number(e.target.value) })} placeholder="Duration (min)" />
-            <Textarea value={grant.reason} onChange={e => setGrant({ ...grant, reason: e.target.value })} placeholder="Reason (audited)" />
+            </Select><p className="text-[11px] text-muted-foreground">Uses the governed role permissions already defined for your team.</p></div>
+            </div>
+            <div className="space-y-2"><Label htmlFor="jit-duration">Access window (minutes)</Label><Input id="jit-duration" aria-label="Access window in minutes" type="number" min={5} max={1440} value={grant.duration_minutes} onChange={e => setGrant({ ...grant, duration_minutes: Number(e.target.value) })} /><p className="text-[11px] text-muted-foreground">Between 5 minutes and 24 hours. Nexus automatically removes the grant at expiry.</p></div>
+            <div className="space-y-2"><Label htmlFor="jit-reason">Business reason <span className="text-rose-500">*</span></Label><Textarea id="jit-reason" aria-label="Business reason" rows={4} value={grant.reason} onChange={e => setGrant({ ...grant, reason: e.target.value })} placeholder="Example: Temporary tenant administration required for approved Microsoft 365 remediation on INC-1042." /><p className="text-[11px] text-muted-foreground">Recorded permanently with the technician, preset, grantor and expiry.</p></div>
+            <div className="grid gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4 sm:grid-cols-3">{[[Lock,"Least privilege"],[Clock,`${grant.duration_minutes || 0} min expiry`],[History,"Audit retained"]].map(([Icon,label]) => <div key={label} className="flex items-center gap-2 text-xs font-medium text-emerald-800 dark:text-emerald-200"><Icon className="h-3.5 w-3.5" />{label}</div>)}</div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
             <Button variant="ghost" onClick={() => setGrantOpen(false)}>Cancel</Button>
-            <Button onClick={doGrant} variant="outline" className="text-violet-300 border-violet-500/40 hover:bg-violet-500/10"><Zap className="w-3 h-3 mr-1" />Grant</Button>
+            <Button onClick={doGrant} disabled={!grant.tech_id || !grant.reason.trim()} className="bg-violet-600 text-white hover:bg-violet-500"><Zap className="mr-1.5 h-4 w-4" />Grant temporary access</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={bgOpen} onOpenChange={setBgOpen}>
-        <DialogContent className="border-rose-500/40 bg-zinc-950">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-rose-300"><ShieldAlert className="w-5 h-5" />BREAK GLASS</DialogTitle>
-            <DialogDescription>Self-grant full admin. Audited. Use only for emergencies.</DialogDescription>
+      <Dialog open={bgOpen} onOpenChange={closeBreakGlass}>
+        <DialogContent className="max-w-xl overflow-hidden border-rose-500/40 bg-background p-0">
+          <DialogHeader className="border-b border-rose-500/25 bg-gradient-to-r from-rose-500/15 via-background to-background px-6 py-5">
+            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-700 dark:text-rose-300"><ShieldAlert className="h-5 w-5" /></div><div><DialogTitle className="text-rose-800 dark:text-rose-200">Emergency break-glass access</DialogTitle><DialogDescription className="mt-1">Self-grant full administrator privileges only when normal approval cannot protect service continuity.</DialogDescription></div></div>
           </DialogHeader>
-          <div className="space-y-3">
-            <Input type="number" min={5} max={60} value={bg.duration_minutes} onChange={e => setBg({ ...bg, duration_minutes: Number(e.target.value) })} placeholder="Duration (max 60 min)" />
-            <Textarea value={bg.reason} onChange={e => setBg({ ...bg, reason: e.target.value })} placeholder="Detailed reason (10+ chars, audited)" />
+          <div className="space-y-5 px-6 py-5">
+            <div className="grid gap-2 sm:grid-cols-3">{[[Crown,"Full admin","All protected actions"],[Clock,"Auto-expiring",`Maximum ${bg.duration_minutes || 0} minutes`],[History,"Permanently audited","Reason and activity retained"]].map(([Icon,title,body]) => <div key={title} className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3"><Icon className="mb-2 h-4 w-4 text-rose-700 dark:text-rose-300" /><p className="text-xs font-semibold text-foreground">{title}</p><p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{body}</p></div>)}</div>
+            <div className="space-y-2"><Label htmlFor="break-glass-duration">Emergency access window (minutes)</Label><Input id="break-glass-duration" aria-label="Emergency access window in minutes" type="number" min={5} max={60} value={bg.duration_minutes} onChange={e => setBg({ ...bg, duration_minutes: Number(e.target.value) })} /><p className="text-[11px] text-muted-foreground">Keep this as short as possible. Access is revoked automatically.</p></div>
+            <div className="space-y-2"><Label htmlFor="break-glass-reason">Detailed emergency reason <span className="text-rose-500">*</span></Label><Textarea id="break-glass-reason" aria-label="Detailed emergency reason" rows={4} value={bg.reason} onChange={e => setBg({ ...bg, reason: e.target.value })} placeholder="Describe the outage or security incident, why normal approval is unavailable, and the actions you expect to take." /><div className="flex justify-between text-[10px] text-muted-foreground"><span>Minimum 10 characters; include a ticket or incident reference where possible.</span><span>{bg.reason.length}/10</span></div></div>
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border accent-rose-600" checked={bgAcknowledged} onChange={e => setBgAcknowledged(e.target.checked)} />
+              <span className="text-xs leading-relaxed text-foreground"><span className="font-semibold">I understand this grants full administrator access.</span><span className="mt-1 block text-muted-foreground">My identity, reason, activity and automatic expiry will be recorded in the immutable audit history.</span></span>
+            </label>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setBgOpen(false)}>Cancel</Button>
-            <Button onClick={doBg} variant="outline" className="text-rose-300 border-rose-500/40 hover:bg-rose-500/10"><ShieldAlert className="w-3 h-3 mr-1" />Activate</Button>
+          <DialogFooter className="border-t border-rose-500/20 bg-rose-500/5 px-6 py-4">
+            <Button variant="ghost" onClick={() => closeBreakGlass(false)}>Cancel</Button>
+            <Button onClick={doBg} disabled={bg.reason.trim().length < 10 || !bgAcknowledged} className="bg-rose-600 text-white hover:bg-rose-500"><ShieldAlert className="mr-1.5 h-4 w-4" />Activate emergency access</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

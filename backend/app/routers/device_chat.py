@@ -1,15 +1,27 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import os
-from app.database import db
+from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope
+from app.services.upload_security import ATTACHMENT_EXTENSIONS, safe_original_filename, safe_upload_extension
 
-router = APIRouter()
 
-UPLOAD_DIR = "/app/backend/uploads/chat_attachments"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+async def _enforce_device_scope(request: Request, current_user: dict = Depends(get_current_user)):
+    device_id = request.path_params.get("device_id")
+    if device_id:
+        await assert_record_scope(
+            current_user, db.devices, device_id, request=request,
+            operation=f"device_chat:{request.method.lower()}", resource_name="Device",
+        )
+
+
+router = APIRouter(dependencies=[Depends(_enforce_device_scope)])
+
+UPLOAD_DIR = UPLOADS_DIR / "chat_attachments"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # In-memory typing status: { device_id: { user_id: { user_name, typing, last_update } } }
 _typing_status = {}
@@ -152,15 +164,15 @@ async def upload_chat_attachment(device_id: str, file: UploadFile = File(...), c
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
-    ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
+    ext = safe_upload_extension(file.filename, allowed=ATTACHMENT_EXTENSIONS, default="bin")
     filename = f"{device_id}_{uuid.uuid4().hex[:8]}.{ext}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
+    filepath = UPLOAD_DIR / filename
     with open(filepath, "wb") as f:
         f.write(content)
 
     return {
-        "url": f"/uploads/chat_attachments/{filename}",
-        "filename": file.filename,
+        "url": f"/api/uploads/chat_attachments/{filename}",
+        "filename": safe_original_filename(file.filename),
         "size": len(content),
         "content_type": file.content_type or "application/octet-stream",
     }

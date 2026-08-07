@@ -240,7 +240,12 @@ async def ticket_burndown(ticket_id: str, current_user: dict = Depends(get_curre
     if not t:
         raise HTTPException(404, "Ticket not found")
     created = t.get("created_at")
-    due = t.get("sla_resolution_due") or t.get("sla_response_due")
+    due = (
+        t.get("sla_resolution_due")
+        or t.get("sla_response_due")
+        or t.get("sla_due")
+        or t.get("sla_due_at")
+    )
     if not created:
         return {"available": False}
     try:
@@ -248,7 +253,17 @@ async def ticket_burndown(ticket_id: str, current_user: dict = Depends(get_curre
     except Exception:
         return {"available": False}
     now = datetime.now(timezone.utc)
-    elapsed_min = max(0, int((now - created_dt).total_seconds() / 60))
+    is_resolved = t.get("status") in {"resolved", "closed"}
+    completed_dt = None
+    if is_resolved:
+        completed = t.get("closed_at") or t.get("resolved_at") or t.get("updated_at")
+        if completed:
+            try:
+                completed_dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+            except Exception:
+                completed_dt = None
+    measurement_dt = completed_dt or now
+    elapsed_min = max(0, int((measurement_dt - created_dt).total_seconds() / 60))
     target_min = None
     breach = False
     pct = 0
@@ -259,7 +274,7 @@ async def ticket_burndown(ticket_id: str, current_user: dict = Depends(get_curre
             if total_min > 0:
                 target_min = total_min
                 pct = min(100, int((elapsed_min / total_min) * 100))
-                breach = now > due_dt
+                breach = measurement_dt > due_dt
         except Exception:
             pass
     return {
@@ -269,5 +284,6 @@ async def ticket_burndown(ticket_id: str, current_user: dict = Depends(get_curre
         "pct": pct,
         "breach": breach,
         "status": t.get("status"),
-        "is_resolved": t.get("status") in {"resolved", "closed"},
+        "is_resolved": is_resolved,
+        "completed_at": completed_dt.isoformat() if completed_dt else None,
     }

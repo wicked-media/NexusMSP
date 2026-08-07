@@ -437,11 +437,6 @@ async def maintenance_window_scheduler():
         await asyncio.sleep(60)
 
 
-@router.on_event("startup")
-async def _start_scheduler():
-    asyncio.create_task(maintenance_window_scheduler())
-
-
 # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.get("/maintenance-windows/stats/summary")

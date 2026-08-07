@@ -13,8 +13,6 @@ router = APIRouter()
 async def self_healing_dashboard(current_user: dict = Depends(get_current_user)):
     """Real-time self-healing dashboard with live execution status"""
     events = await db.self_healing_events.find({}, {"_id": 0}).sort("detected_at", -1).to_list(100)
-    if not events:
-        events = await _seed_healing_events()
     active = [e for e in events if e.get("status") in ["executing", "detected", "matched"]]
     resolved = [e for e in events if e.get("status") == "healed"]
     failed = [e for e in events if e.get("status") == "failed"]
@@ -23,6 +21,8 @@ async def self_healing_dashboard(current_user: dict = Depends(get_current_user))
     return {
         "events": events[:50],
         "active_healings": active,
+        "data_source": "event_ledger",
+        "simulated_events": len([event for event in events if event.get("simulated")]),
         "summary": {
             "total_events": len(events),
             "healed": len(resolved),
@@ -189,7 +189,7 @@ async def _get_24h_timeline(events):
         hour_str = hour.strftime("%H:00")
         count = len([e for e in events if (e.get("detected_at") or "")[:13] == hour.strftime("%Y-%m-%dT%H")])
         healed = len([e for e in events if (e.get("healed_at") or "")[:13] == hour.strftime("%Y-%m-%dT%H")])
-        timeline.append({"hour": hour_str, "detected": count or random.randint(0, 3), "healed": healed or random.randint(0, 2)})
+        timeline.append({"hour": hour_str, "detected": count, "healed": healed})
     return timeline
 
 
@@ -305,6 +305,8 @@ async def _seed_healing_events():
             "execution_time_seconds": round(exec_time / 1000, 1) if status == "healed" else 0,
             "healed_at": (detected + timedelta(seconds=random.randint(15, 120))).isoformat() if status == "healed" else None,
             "time_saved_minutes": random.randint(10, 45) if status == "healed" else 0,
+            "simulated": True,
+            "simulation_source": "development_seed",
         }
         events.append(event)
         await db.self_healing_events.insert_one(event)

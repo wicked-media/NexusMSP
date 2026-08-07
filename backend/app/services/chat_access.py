@@ -100,6 +100,8 @@ async def initialize_chat_storage() -> None:
     await db.chat_read_state.create_index([("user_id", 1), ("channel_id", 1)])
     await db.presence_state.create_index([("user_id", 1), ("last_heartbeat", -1)])
     await db.chat_typing.create_index([("channel_id", 1), ("ts", -1)])
+    await db.ticket_handoffs.create_index([("to_user_id", 1), ("status", 1), ("created_at", -1)])
+    await db.ticket_handoffs.create_index([("ticket_id", 1), ("created_at", -1)])
     await ensure_default_channels()
 
 

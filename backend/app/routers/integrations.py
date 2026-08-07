@@ -113,8 +113,35 @@ async def get_domotz_alerts(agent_id: Optional[int] = None, current_user: dict =
 
 @router.get("/office365/status")
 async def get_office365_status(current_user: dict = Depends(get_current_user)):
-    settings = await db.settings.find_one({"type": "office365"}, {"_id": 0})
-    return {"configured": bool(settings and settings.get('tenant_id') and settings.get('client_id'))}
+    # The Mailbox & Email settings workspace is the canonical source for
+    # Microsoft Graph intake and delivery. Keep support for the earlier
+    # single Office 365 record so older installations remain readable.
+    mailbox_settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
+    legacy_settings = await db.settings.find_one({"type": "office365"}, {"_id": 0})
+    settings = mailbox_settings or legacy_settings or {}
+    mailboxes = settings.get("mailboxes") or []
+    configured = bool(
+        settings.get("connected")
+        and settings.get("tenant_id")
+        and settings.get("client_id")
+        and settings.get("client_secret")
+        and (settings.get("outbound_mailbox_email") or settings.get("mailbox_email"))
+    )
+    if not mailbox_settings:
+        configured = bool(
+            legacy_settings
+            and legacy_settings.get("tenant_id")
+            and legacy_settings.get("client_id")
+            and legacy_settings.get("client_secret")
+        )
+    return {
+        "configured": configured,
+        "provider": "microsoft_365",
+        "sender_email": settings.get("outbound_mailbox_email") or settings.get("mailbox_email") or "",
+        "mailbox_count": len(mailboxes) or (1 if settings.get("mailbox_email") else 0),
+        "last_sync": settings.get("last_sync"),
+        "live_sync_enabled": bool(settings.get("live_sync_enabled")),
+    }
 
 @router.post("/office365/settings")
 async def save_office365_settings(settings: Office365Settings, current_user: dict = Depends(get_current_user)):
@@ -241,9 +268,14 @@ async def send_email(email_id: str, current_user: dict = Depends(get_current_use
         if delivery_status != "sent":
             raise HTTPException(status_code=502, detail=delivery.get("message") or "Microsoft 365 could not send this email")
         return {"message": "Email sent through Microsoft 365", "delivery_id": delivery.get("delivery_id")}
+    except HTTPException:
+        # Preserve the actionable delivery status (for example 502 when Graph
+        # has not accepted the message) instead of wrapping it as an opaque 500.
+        await db.emails.update_one({"id": email_id}, {"$set": {"status": "failed"}})
+        raise
     except Exception as e:
         await db.emails.update_one({"id": email_id}, {"$set": {"status": "failed"}})
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Email delivery failed unexpectedly") from e
 
 
 # ============== ACRONIS ENDPOINTS ==============

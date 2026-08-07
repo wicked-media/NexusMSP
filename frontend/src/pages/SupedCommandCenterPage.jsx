@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Mail, Shield, RefreshCw, Loader2, ExternalLink, Settings as SettingsIcon,
+  Mail, Shield, RefreshCw, Loader2, Settings as SettingsIcon,
   CheckCircle2, AlertTriangle, XCircle, TrendingUp,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";

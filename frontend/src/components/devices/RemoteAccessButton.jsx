@@ -33,6 +33,17 @@ const PROVIDER_ICON = {
   meshcentral: Monitor,
 };
 
+function remoteErrorMessage(error, fallback) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => typeof item === "string" ? item : item?.msg || item?.message).filter(Boolean);
+    if (messages.length) return messages.join("; ");
+  }
+  if (detail && typeof detail === "object") return detail.message || detail.msg || fallback;
+  return error?.message || fallback;
+}
+
 /**
  * Unified Remote Access button.
  *
@@ -130,7 +141,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
       const health = await axios.get(`${API}/devices/${device.id}/remote-health`, { headers });
       setRemoteHealth(health.data);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Remote repair could not be queued");
+      toast.error(remoteErrorMessage(error, "Remote repair could not be queued"));
     } finally {
       setRepairing(false);
     }
@@ -140,7 +151,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
     if (!pendingProvider || !device?.id) return;
     setStarting(true);
     try {
-      const idempotencyKey = globalThis.crypto?.randomUUID?.() || `${device.id}-${Date.now()}`;
+      const idempotencyKey = window.crypto?.randomUUID?.() || `${device.id}-${Date.now()}`;
       const res = await axios.post(`${API}/devices/${device.id}/remote-sessions/start`, {
         provider: pendingProvider,
         consent_confirmed: consentConfirmed,
@@ -158,12 +169,12 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         nextSession = { ...res.data, session: opened.data };
         toast.success(`Launching ${PROVIDER_LABEL[pendingProvider] || pendingProvider} for ${device?.name}`);
       } else {
-        toast.info(res.data.message);
+        toast.info(typeof res.data.message === "string" ? res.data.message : "Remote provider handoff is ready");
       }
       setSession(nextSession);
       setPendingProvider(null);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Unable to start remote session");
+      toast.error(remoteErrorMessage(error, "Unable to start remote session"));
     } finally { setStarting(false); }
   };
 
@@ -211,18 +222,20 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
     );
   }
 
-  // Providers exist globally but this device isn't linked to any → deep-link to device detail
+  // Providers exist globally but this device is not linked yet. Send the
+  // technician directly to the assignment workflow instead of looping back to
+  // the device page they are already viewing.
   if (!primary && providers.length > 0 && device?.id) {
     return (
       <Button
         size="sm"
         variant="outline"
         asChild
-        className={`text-amber-400 border-amber-500/30 hover:bg-amber-500/10 ${sizeCls}`}
+        className={`border-amber-500/30 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 ${sizeCls}`}
         data-testid={`${testid}-link`}
       >
-        <Link to={`/devices/${device.id}`}>
-          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> Link
+        <Link to={`/remote-access?assignDevice=${encodeURIComponent(device.id)}`}>
+          <Settings className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {compact ? "Link" : "Link remote"}
         </Link>
       </Button>
     );
@@ -252,7 +265,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
       <Button
         size="sm"
         variant="outline"
-        className={`text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 ${hasAlternatives ? "rounded-r-none border-r-0" : ""} ${sizeCls}`}
+        className={`border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400 ${hasAlternatives ? "rounded-r-none border-r-0" : ""} ${sizeCls}`}
         onClick={primary?.action}
         disabled={busy || !primary?.action}
         data-testid={testid}
@@ -266,7 +279,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
             <Button
               size="sm"
               variant="outline"
-              className={`text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10 rounded-l-none px-2 ${sizeCls}`}
+              className={`rounded-l-none border-emerald-500/30 px-2 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400 ${sizeCls}`}
               data-testid={`${testid}-menu-trigger`}
             >
               <ChevronDown className={compact ? "w-3 h-3" : "w-4 h-4"} />
@@ -320,14 +333,14 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
       )}
     </div>
     <Dialog open={!!pendingProvider} onOpenChange={v => !v && setPendingProvider(null)}>
-      <DialogContent className="max-w-xl border-cyan-400/20 bg-[#071019]">
+      <DialogContent className="max-w-xl border-cyan-500/25 bg-card">
         <DialogHeader><DialogTitle>Authorise remote support</DialogTitle><DialogDescription>One governed session captures the client, endpoint, technician, consent, purpose and service evidence.</DialogDescription></DialogHeader>
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
           <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-3 text-sm">
-            <p className="font-semibold text-zinc-100">{device?.name}</p>
-            <p className="mt-1 text-xs text-zinc-400">{PROVIDER_LABEL[pendingProvider] || pendingProvider} · {device?.client_name || "Managed client"}</p>
+            <p className="font-semibold text-foreground">{device?.name}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{PROVIDER_LABEL[pendingProvider] || pendingProvider} · {device?.client_name || "Managed client"}</p>
           </div>
-          <div className={`min-w-32 rounded-xl border p-3 text-xs ${remoteHealth?.status === "healthy" ? "border-emerald-400/25 bg-emerald-400/[0.06] text-emerald-200" : "border-amber-400/25 bg-amber-400/[0.06] text-amber-200"}`}>
+          <div className={`min-w-32 rounded-xl border p-3 text-xs ${remoteHealth?.status === "healthy" ? "border-emerald-400/25 bg-emerald-400/[0.06] text-emerald-700 dark:text-emerald-200" : "border-amber-400/25 bg-amber-400/[0.06] text-amber-700 dark:text-amber-200"}`}>
             <p className="font-semibold uppercase tracking-wider">Preflight</p>
             <p className="mt-1 capitalize">{healthLoading ? "Checking…" : (remoteHealth?.status || "Unavailable")}</p>
           </div>
@@ -336,14 +349,14 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
           <div className="space-y-2">
             <div className="grid gap-2 sm:grid-cols-3">
               {remoteHealth.checks.map(check => (
-                <div key={check.id} className="rounded-lg border border-white/[0.07] bg-white/[0.025] px-3 py-2">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{check.label}</p>
-                  <p className="mt-1 text-xs text-zinc-300">{check.detail}</p>
+                <div key={check.id} className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{check.label}</p>
+                  <p className="mt-1 text-xs text-foreground/85">{check.detail}</p>
                 </div>
               ))}
             </div>
             {remoteHealth.status !== "healthy" && remoteHealth.repair_available && (
-              <Button type="button" size="sm" variant="outline" className="h-8 border-amber-400/25 text-amber-200" onClick={repairRemote} disabled={repairing}>
+              <Button type="button" size="sm" variant="outline" className="h-8 border-amber-400/25 text-amber-700 dark:text-amber-200" onClick={repairRemote} disabled={repairing}>
                 {repairing ? <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Wrench className="mr-1.5 h-3.5 w-3.5" />}
                 {repairing ? "Queueing repair…" : "Repair through Nexus Agent"}
               </Button>
@@ -352,31 +365,31 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-300">Session mode</label>
+            <label className="text-xs font-medium text-foreground">Session mode</label>
             <Select value={sessionType} onValueChange={setSessionType}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="remote_desktop">Remote desktop</SelectItem><SelectItem value="terminal">Terminal</SelectItem><SelectItem value="file_transfer">File transfer</SelectItem></SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-zinc-300">Consent evidence</label>
+            <label className="text-xs font-medium text-foreground">Consent evidence</label>
             <Select value={consentMethod} onValueChange={setConsentMethod}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="attended_prompt">Client prompt</SelectItem><SelectItem value="verbal">Verbal approval</SelectItem><SelectItem value="standing_authorisation">Standing authorisation</SelectItem><SelectItem value="emergency_override">Emergency override</SelectItem></SelectContent>
             </Select>
           </div>
         </div>
-        <div className="space-y-1.5"><label className="text-xs font-medium text-zinc-300">Purpose</label><Input value={purpose} onChange={event => setPurpose(event.target.value)} placeholder="For example: investigate Outlook sign-in failure" maxLength={500} /></div>
-        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-white/[0.07] bg-white/[0.025] p-3 text-sm"><Checkbox checked={consentConfirmed} onCheckedChange={v => setConsentConfirmed(v === true)} /><span>I confirm the client is aware of and has approved this remote session using the method selected above.</span></label>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-400"><Checkbox checked={createTimeEntry} onCheckedChange={v => setCreateTimeEntry(v === true)} /><span>Create a billable time entry when this session closes if it is linked to a ticket.</span></label>
+        <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">Purpose</label><Input value={purpose} onChange={event => setPurpose(event.target.value)} placeholder="For example: investigate Outlook sign-in failure" maxLength={500} /></div>
+        <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm"><Checkbox checked={consentConfirmed} onCheckedChange={v => setConsentConfirmed(v === true)} /><span>I confirm the client is aware of and has approved this remote session using the method selected above.</span></label>
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={createTimeEntry} onCheckedChange={v => setCreateTimeEntry(v === true)} /><span>Create a billable time entry when this session closes if it is linked to a ticket.</span></label>
         <DialogFooter><Button variant="outline" onClick={() => setPendingProvider(null)}>Cancel</Button><Button onClick={startSession} disabled={!consentConfirmed || starting}>{starting ? "Starting…" : "Start remote session"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     <Dialog open={!!session} onOpenChange={v => !v && setSession(null)}>
-      <DialogContent className="max-w-lg border-emerald-400/20 bg-[#071019]">
+      <DialogContent className="max-w-lg border-emerald-500/25 bg-card">
         <DialogHeader><DialogTitle>{session?.provider === "splashtop" ? "Provider handoff ready" : "Remote session active"}</DialogTitle><DialogDescription>{session?.message}</DialogDescription></DialogHeader>
-        <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3"><p className="text-xs font-semibold uppercase tracking-wider text-emerald-300">Evidence live</p><p className="mt-1 text-sm text-zinc-200">{device?.name} · {session?.session?.session_type?.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[10px] text-zinc-500">{session?.session?.id}</p></div>
-        <div className="space-y-1.5"><label className="text-xs font-medium text-zinc-300">Outcome for the ticket and time entry</label><Textarea value={endNotes} onChange={event => setEndNotes(event.target.value)} placeholder="Record what was checked, changed and verified…" rows={4} /></div>
+        <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3"><p className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Evidence live</p><p className="mt-1 text-sm text-foreground/90">{device?.name} · {session?.session?.session_type?.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[10px] text-muted-foreground">{session?.session?.id}</p></div>
+        <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">Outcome for the ticket and time entry</label><Textarea value={endNotes} onChange={event => setEndNotes(event.target.value)} placeholder="Record what was checked, changed and verified…" rows={4} /></div>
         <DialogFooter><Button variant="outline" onClick={() => setSession(null)}>Keep running</Button><Button variant="destructive" onClick={endSession}>End & save evidence</Button></DialogFooter>
       </DialogContent>
     </Dialog>

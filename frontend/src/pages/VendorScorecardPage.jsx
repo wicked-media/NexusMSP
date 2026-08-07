@@ -14,8 +14,8 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Building2, DollarSign, Star, Package, Truck, Search, RefreshCw,
-  Loader2, TrendingUp, TrendingDown, AlertTriangle, Eye, BarChart3,
-  ShieldCheck, Clock, ArrowUpDown, ChevronRight
+  Loader2, AlertTriangle, BarChart3,
+  ShieldCheck, ChevronRight
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, PieChart, Pie, Cell, CartesianGrid } from "recharts";
 

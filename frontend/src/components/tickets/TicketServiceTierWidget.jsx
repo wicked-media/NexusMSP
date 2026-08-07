@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Shield, Award, Crown, Gem, CheckCircle2, Clock, Sparkles, Pencil, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { collectionFromResponse } from "@/lib/ticketWorkspaceHelpers";
+import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
 
 const ICON_MAP = { shield: Shield, award: Award, crown: Crown, gem: Gem, sparkles: Sparkles };
 
@@ -104,24 +105,25 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
   }
 
   const Icon = ICON_MAP[tier.icon] || Shield;
+  const visual = getServiceTierVisual(tier);
   return (
     <Card
       data-testid="service-tier-widget"
       className="overflow-hidden border-0"
       style={{
-        background: `linear-gradient(135deg, ${tier.color}18, transparent 60%), hsl(var(--card))`,
-        boxShadow: `inset 0 0 0 1px ${tier.color}40`,
+        background: `linear-gradient(135deg, ${visual.color}1c, transparent 60%), hsl(var(--card))`,
+        boxShadow: `inset 0 0 0 1px ${visual.color}40`,
       }}
     >
-      <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${tier.color}, transparent)` }} />
+      <div className="h-0.5" style={{ background: `linear-gradient(90deg, ${visual.color}, transparent)` }} />
       <CardHeader className="pb-1.5 flex flex-row items-center justify-between">
         <CardTitle className="text-xs flex items-center gap-1.5">
-          <Icon className="w-4 h-4" style={{ color: tier.color }} />
-          <span style={{ color: tier.color }}>{tier.name}</span>
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg border bg-black/15" style={{ color: visual.color, borderColor: `${visual.color}55` }}><Icon className="w-3.5 h-3.5" /></span>
+          <span><span className="block leading-none" style={{ color: visual.color }}>{visual.label}</span><span className="mt-1 block text-[8px] font-medium uppercase tracking-[0.12em] text-zinc-500">{visual.level}</span></span>
         </CardTitle>
         <div className="flex items-center gap-1">
-          <Badge variant="outline" className="text-[9px] font-mono uppercase tracking-widest border-current" style={{ color: tier.color }}>
-            {tier.slug}
+          <Badge variant="outline" className="text-[9px] font-mono uppercase tracking-widest border-current" style={{ color: visual.color }}>
+            {visual.isStandard ? `L${tier.sort_order || "?"}` : tier.slug}
           </Badge>
           {isAdmin && (
             <Button
@@ -162,7 +164,7 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
             <div className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 flex items-center gap-1">
               <Clock className="w-2.5 h-2.5" />Response
             </div>
-            <div className="text-sm font-bold mt-0.5" style={{ color: tier.color }}>
+            <div className="text-sm font-bold mt-0.5" style={{ color: visual.color }}>
               {formatSla(tier.response_sla_minutes)}
             </div>
           </div>
@@ -170,7 +172,7 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
             <div className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 flex items-center gap-1">
               <CheckCircle2 className="w-2.5 h-2.5" />Resolution
             </div>
-            <div className="text-sm font-bold mt-0.5" style={{ color: tier.color }}>
+            <div className="text-sm font-bold mt-0.5" style={{ color: visual.color }}>
               {formatSla(tier.resolution_sla_minutes)}
             </div>
           </div>
@@ -182,7 +184,7 @@ export default function TicketServiceTierWidget({ ticketId, clientId, token, isA
             <ul className="space-y-0.5">
               {tier.features.slice(0, 4).map((f, i) => (
                 <li key={`tf-${i}`} className="text-[10.5px] text-zinc-300 flex items-start gap-1.5">
-                  <CheckCircle2 className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: tier.color }} />
+                  <CheckCircle2 className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" style={{ color: visual.color }} />
                   <span>{f}</span>
                 </li>
               ))}
@@ -210,16 +212,17 @@ export function ServiceTierChip({ ticketId, token }) {
 
   if (!tier) return null;
   const Icon = ICON_MAP[tier.icon] || Shield;
+  const visual = getServiceTierVisual(tier);
   return (
     <Badge
       variant="outline"
       className="h-7 gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold border-current"
-      style={{ color: tier.color, borderColor: `${tier.color}66`, backgroundColor: `${tier.color}10` }}
+      style={{ color: visual.color, borderColor: `${visual.color}66`, backgroundColor: `${visual.color}10` }}
       data-testid="service-tier-chip"
       title={`Client entitlement: ${tier.name} · Response target ${formatSla(tier.response_sla_minutes)} · Resolution target ${formatSla(tier.resolution_sla_minutes)}`}
     >
-      <Icon className="w-3 h-3" />
-      <span>{tier.name}</span>
+      <span className="flex h-4 w-4 items-center justify-center rounded border bg-black/10" style={{ borderColor: `${visual.color}55` }}><Icon className="w-2.5 h-2.5" /></span>
+      <span>{visual.label}</span>
       {tier.response_sla_minutes != null && <span className="border-l border-current/30 pl-1.5 font-mono opacity-80">{formatSla(tier.response_sla_minutes)} response</span>}
     </Badge>
   );

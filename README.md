@@ -54,7 +54,7 @@ Run frontend tests and a production build:
 
 ```powershell
 Set-Location frontend
-pnpm test -- --watchAll=false
+pnpm test --watchAll=false --runInBand
 pnpm build
 ```
 
@@ -64,6 +64,12 @@ Run endpoint-agent tests:
 Set-Location agent
 go test ./...
 ```
+
+## Production pilot
+
+Use [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) as the release gate. It covers secret setup, container deployment, recovery proof, golden-workflow acceptance, pilot controls, and rollback. Copy `.env.production.example` to a deployment-host `.env`; never put real secrets in the repository.
+
+The current security review and remaining pre-launch work are documented in [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
 
 ## Agent command security
 

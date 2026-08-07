@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { TrendingUp, DollarSign, Loader2, RefreshCw, Zap, Shield, Monitor, Users, ChevronRight } from "lucide-react";
+import { TrendingUp, DollarSign, Loader2, RefreshCw, Zap, Shield, Monitor, ChevronRight } from "lucide-react";
 
 export default function UpsellPage() {
   const { token } = useAuth();

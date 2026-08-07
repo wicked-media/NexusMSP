@@ -1,0 +1,74 @@
+services:
+  mongo:
+    image: mongo:7.0
+    restart: unless-stopped
+    command: ["mongod", "--bind_ip_all"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:?Set MONGO_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Set a URL-safe MONGO_PASSWORD}
+    volumes:
+      - nexus-mongo:/data/db
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    environment: &backend-env
+      APP_ENV: production
+      MONGO_URL: mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@mongo:27017/nexusmsp?authSource=admin
+      DB_NAME: nexusmsp
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      NEXUS_SECRET_ENCRYPTION_KEY: ${NEXUS_SECRET_ENCRYPTION_KEY:?Set NEXUS_SECRET_ENCRYPTION_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set the public NexusMSP origin}
+      NEXUS_RUN_BACKGROUND_WORKERS: "false"
+      NEXUS_TRUST_PROXY_HEADERS: ${NEXUS_TRUST_PROXY_HEADERS:-false}
+      NEXUS_LOGIN_WINDOW_SECONDS: ${NEXUS_LOGIN_WINDOW_SECONDS:-300}
+      NEXUS_LOGIN_IDENTITY_ATTEMPTS: ${NEXUS_LOGIN_IDENTITY_ATTEMPTS:-8}
+      NEXUS_LOGIN_IP_ATTEMPTS: ${NEXUS_LOGIN_IP_ATTEMPTS:-30}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - nexus-uploads:/app/uploads
+      - nexus-installers:/app/data/agent-installers
+    networks: [backend]
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    environment:
+      <<: *backend-env
+      NEXUS_RUN_BACKGROUND_WORKERS: "true"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - nexus-uploads:/app/uploads
+      - nexus-installers:/app/data/agent-installers
+    networks: [backend]
+
+  web:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${NEXUS_HTTP_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [backend]
+
+networks:
+  backend:
+    internal: false
+
+volumes:
+  nexus-mongo:
+  nexus-uploads:
+  nexus-installers:

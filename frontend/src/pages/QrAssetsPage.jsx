@@ -12,12 +12,12 @@ export default function QrAssetsPage() {
   const [labels, setLabels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [printMode, setPrintMode] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
-
   const fetchLabels = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await axios.get(`${API}/qr-assets/generate-batch`, { headers });
+      const res = await axios.get(`${API}/qr-assets/generate-batch`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       setLabels(res.data);
     } catch { toast.error("Failed to generate QR codes"); }
     finally { setLoading(false); }

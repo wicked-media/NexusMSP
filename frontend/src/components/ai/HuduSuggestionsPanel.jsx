@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { BookOpen, Sparkles, RefreshCw, Loader2, ExternalLink, Copy, CheckCircle2, ChevronDown, ChevronUp } from "lucide-react";
+import { BookOpen, Sparkles, RefreshCw, Loader2, ExternalLink, Copy, ChevronDown, ChevronUp } from "lucide-react";
 
 /**
  * Compact Hudu KB suggestions panel for the ticket detail view.
@@ -15,13 +15,12 @@ import { BookOpen, Sparkles, RefreshCw, Loader2, ExternalLink, Copy, CheckCircle
  */
 export function HuduSuggestionsPanel({ ticket }) {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [fullArticle, setFullArticle] = useState(null);
 
-  const run = async () => {
+  const run = useCallback(async () => {
     if (!ticket?.id) return;
     setLoading(true);
     try {
@@ -30,7 +29,7 @@ export function HuduSuggestionsPanel({ ticket }) {
         title: ticket.title,
         description: ticket.description,
         use_ai: true,
-      }, { headers });
+      }, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
       if (res.data && !res.data.configured) {
         toast.error("Hudu not configured — add credentials in Settings → Integrations");
@@ -38,14 +37,14 @@ export function HuduSuggestionsPanel({ ticket }) {
     } catch (e) {
       toast.error(e.response?.data?.detail || "Hudu suggestion failed");
     } finally { setLoading(false); }
-  };
+  }, [ticket?.description, ticket?.id, ticket?.title, token]);
 
   // Auto-run once on mount
-  useEffect(() => { run(); /* eslint-disable-next-line */ }, [ticket?.id]);
+  useEffect(() => { run(); }, [run]);
 
   const openArticle = async (id) => {
     try {
-      const res = await axios.get(`${API}/hudu/articles/${id}`, { headers });
+      const res = await axios.get(`${API}/hudu/articles/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setFullArticle(res.data);
     } catch (e) { toast.error("Couldn't load article"); }
   };

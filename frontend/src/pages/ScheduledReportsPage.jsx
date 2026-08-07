@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import HeroTile from "@/components/HeroTile";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -12,11 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Calendar, Plus, Trash2, Play, Pause, Mail, Clock, FileText,
-  Send, RefreshCw, Loader2, CheckCircle, Edit, BarChart3, Users, Eye
+  Calendar, Plus, Trash2, Play, FileText,
+  Send, Loader2, Eye
 } from "lucide-react";
 
 const REPORT_TYPES = [

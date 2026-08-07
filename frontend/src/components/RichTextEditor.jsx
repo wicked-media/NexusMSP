@@ -40,6 +40,8 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
     editorProps: {
       attributes: {
         class: `prose prose-sm prose-invert max-w-none focus:outline-none p-3`,
+        'aria-label': placeholder || 'Rich text editor',
+        'data-placeholder': placeholder || '',
         style: `min-height: ${minHeight}; ${resizable ? 'resize: vertical; overflow: auto;' : ''}`,
       },
       handlePaste(view, event) {

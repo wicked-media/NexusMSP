@@ -6,15 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AreaChart, Area, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertTriangle, BarChart3, DollarSign, FileWarning, Loader2, RefreshCw, Ticket, TrendingUp, Users } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AlertTriangle, BarChart3, DollarSign, FileWarning, Loader2, RefreshCw, Ticket, TrendingUp } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const money = (value) => value == null ? "—" : `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
 export default function RevenueCommandCenterPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
   const [tab, setTab] = useState("current");
   const [forecast, setForecast] = useState(null);
   const [tracker, setTracker] = useState(null);
@@ -24,10 +23,11 @@ export default function RevenueCommandCenterPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const requestHeaders = { Authorization: `Bearer ${token}` };
       const [forecastResponse, trackerResponse, trackingResponse] = await Promise.all([
-        axios.get(`${API}/revenue-forecast/dashboard`, { headers }),
-        axios.get(`${API}/revenue-tracker/overview`, { headers }),
-        axios.get(`${API}/revenue-tracking/dashboard`, { headers }),
+        axios.get(`${API}/revenue-forecast/dashboard`, { headers: requestHeaders }),
+        axios.get(`${API}/revenue-tracker/overview`, { headers: requestHeaders }),
+        axios.get(`${API}/revenue-tracking/dashboard`, { headers: requestHeaders }),
       ]);
       setForecast(forecastResponse.data);
       setTracker(trackerResponse.data);

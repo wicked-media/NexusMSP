@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   Radio, Terminal, FileCode, Play, Loader2, CheckCircle2, XCircle,
-  AlertTriangle, RefreshCw, ChevronDown, ChevronRight,
+  AlertTriangle, ChevronDown, ChevronRight,
 } from "lucide-react";
 
 const SHELLS = [

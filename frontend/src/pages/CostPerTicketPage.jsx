@@ -1,22 +1,20 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DollarSign, Ticket, Clock, BarChart3 } from "lucide-react";
+import { DollarSign, Ticket, Clock } from "lucide-react";
 
 export default function CostPerTicketPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("tickets");
-  const headers = { Authorization: `Bearer ${token}` };
-
   useEffect(() => {
-    axios.get(`${API}/cost-per-ticket/dashboard`, { headers }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+    axios.get(`${API}/cost-per-ticket/dashboard`, { headers: { Authorization: `Bearer ${token}` } }).then(r => setData(r.data)).catch(() => {}).finally(() => setLoading(false));
+  }, [token]);
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
   if (!data) return null;

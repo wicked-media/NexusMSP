@@ -14,9 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import {
-  Siren, AlertTriangle, ArrowLeft, Clock, Users, Radio, MessageSquare, Send,
-  CheckCircle2, Loader2, ChevronRight, Share2, Copy, Link2, XCircle,
-  Activity, Server, FileText, Zap, Plus, Eye, Megaphone, ChevronUp, RefreshCw,
+  Siren, AlertTriangle, ArrowLeft, Clock, Users, MessageSquare, Send,
+  CheckCircle2, Loader2, ChevronRight, Share2, Copy, Link2,
+  Activity, Server, FileText, Zap, Eye, Megaphone, ChevronUp, RefreshCw,
 } from "lucide-react";
 import { PostmortemButton } from "@/components/ai/PostmortemButton";
 import OperationalPageHeader from "@/components/OperationalPageHeader";

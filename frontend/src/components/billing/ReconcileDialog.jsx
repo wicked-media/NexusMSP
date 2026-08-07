@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -57,9 +57,6 @@ export default function ReconcileDialog({ open, onOpenChange, recurringInvoice, 
   };
 
   const summary = data?.summary || {};
-  const driftRows = useMemo(() => (data?.line_items || []).filter(r => r.policy_linked), [data]);
-  const unlinkedRows = useMemo(() => (data?.line_items || []).filter(r => !r.policy_linked), [data]);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl">
