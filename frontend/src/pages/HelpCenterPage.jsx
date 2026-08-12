@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertTriangle, ArrowRight, BookOpen, CheckCircle2, ChevronRight, CircleHelp,
-  FileText, FolderOpen, Gauge, Image as ImageIcon, ListChecks, Loader2, Pencil,
+  FileCheck2, FileText, FolderOpen, Gauge, Image as ImageIcon, ListChecks, Loader2, Pencil,
   Plus, RefreshCw, RotateCcw, Search, Send, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +38,24 @@ const QUICK_STARTS = [
   { slug: "work-ticket", label: "I need to work a ticket", detail: "Capture actions, communicate clearly, and close with evidence.", icon: ListChecks, tone: "cyan" },
   { slug: "client-360", label: "I am setting up a client", detail: "Build the connected client record and complete onboarding.", icon: FolderOpen, tone: "violet" },
   { slug: "backup-operations", label: "I need to verify protection", detail: "Check backup health and prove a restore path.", icon: ShieldCheck, tone: "amber" },
+];
+
+// These are the operational entry points every MSP should be able to run from
+// the Help Centre. New product work can be added here before its guide exists;
+// the coverage panel will then surface the gap instead of silently hiding it.
+const CORE_GUIDE_COVERAGE = [
+  { slug: "getting-started", label: "Start a shift", category: "Start here", icon: "🚀", summary: "Prepare a technician workspace and triage the day." },
+  { slug: "ticket-triage", label: "Ticket triage", category: "Service desk", icon: "🎫", summary: "Create a complete, accountable service record." },
+  { slug: "client-onboarding", label: "Client onboarding", category: "Client operations", icon: "🤝", summary: "Set up a customer with linked services and evidence." },
+  { slug: "managed-assets", label: "Managed assets", category: "Infrastructure & security", icon: "💻", summary: "Inspect endpoint health and safely start remote support." },
+  { slug: "backup-operations", label: "Backup recovery", category: "Infrastructure & security", icon: "💾", summary: "Verify protection and retain recoverability evidence." },
+  { slug: "nexus-shield-and-canary", label: "Nexus Shield", category: "Infrastructure & security", icon: "🛡️", summary: "Investigate endpoint protection and response controls." },
+  { slug: "m365-command-center", label: "Microsoft 365", category: "Platform setup", icon: "☁️", summary: "Operate tenant services through governed actions." },
+  { slug: "deployment-hub", label: "Deployment Hub", category: "Platform setup", icon: "🚀", summary: "Prepare and validate a Nexus platform deployment." },
+  { slug: "nexus-verify", label: "Nexus Verify", category: "Infrastructure & security", icon: "✅", summary: "Verify a caller before a high-risk change." },
+  { slug: "nexus-work-session", label: "Nexus Work Session", category: "Service desk", icon: "🛠️", summary: "Capture work, resolution, and evidence from a ticket." },
+  { slug: "nexus-dmarc-operations", label: "Nexus DMARC", category: "Infrastructure & security", icon: "✉️", summary: "Operate domain authentication and sending controls." },
+  { slug: "nexus-diagnostics", label: "Nexus Diagnose", category: "Automation & intelligence", icon: "🔎", summary: "Collect evidence and compare an issue with healthy state." },
 ];
 
 const GUIDE_SCAFFOLD = `## Outcome
@@ -354,12 +372,31 @@ export default function HelpCenterPage() {
   const suggestions = useMemo(() => query.trim()
     ? library.articles.filter((article) => guideMatches(article, query)).slice(0, 6)
     : [], [library.articles, query]);
+  const guideCoverage = useMemo(() => CORE_GUIDE_COVERAGE.map((item) => ({
+    ...item,
+    article: library.articles.find((article) => article.slug === item.slug),
+  })), [library.articles]);
+  const missingGuideCoverage = useMemo(() => guideCoverage.filter((item) => !item.article), [guideCoverage]);
 
   const openGuide = (guideSlug) => {
     setSearchFocused(false);
     setQuery("");
     setSelectedCategory("All guides");
     navigate(`/help/${guideSlug}`);
+  };
+
+  const draftMissingGuide = (item) => {
+    setEditing({
+      title: `Operate ${item.label}`,
+      slug: item.slug,
+      category: item.category,
+      icon: item.icon,
+      summary: item.summary,
+      body_md: GUIDE_SCAFFOLD,
+      order: 90,
+      screenshots: [],
+    });
+    setEditorOpen(true);
   };
 
   const saveGuide = async (draft) => {
@@ -498,6 +535,7 @@ export default function HelpCenterPage() {
           <aside className="space-y-4 lg:col-span-2 2xl:col-span-1">
             <Card className="border-cyan-500/20 bg-gradient-to-b from-cyan-500/[0.08] to-card"><CardContent className="p-4"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Help Co-pilot</p></div><p className="mt-2 text-xs leading-5 text-muted-foreground">Ask for the next safe step. Answers stay grounded in your NexusMSP guide library.</p><form onSubmit={askCopilot} className="mt-3 space-y-2"><Textarea value={copilotQuestion} onChange={(event) => setCopilotQuestion(event.target.value)} placeholder="What should I verify before…" className="min-h-[86px] resize-none text-sm" /><Button type="submit" size="sm" className="w-full bg-cyan-400 text-cyan-950 hover:bg-cyan-300" disabled={askingCopilot}>{askingCopilot ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}Ask Co-pilot</Button></form>{copilotAnswer && <div className="mt-4 rounded-lg border border-cyan-400/15 bg-black/15 p-3 text-xs leading-5 text-muted-foreground whitespace-pre-wrap">{copilotAnswer}</div>}</CardContent></Card>
             {active && <Card className="border-white/[0.08] bg-card/80"><CardContent className="p-4"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Guide checklist</p><div className="mt-3 space-y-3 text-sm"><ChecklistItem label="Confirm scope, access, and approval" /><ChecklistItem label="Capture the safe starting state" /><ChecklistItem label="Complete the controlled steps" /><ChecklistItem label="Verify the live result and recovery" /><ChecklistItem label="Attach evidence and hand over" /></div></CardContent></Card>}
+            {isAdmin && <Card className="border-violet-500/20 bg-gradient-to-b from-violet-500/[0.07] to-card" data-testid="help-guide-coverage"><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div><p className="flex items-center gap-2 text-sm font-semibold"><FileCheck2 className="h-4 w-4 text-violet-300" />Guide coverage</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Priority Nexus workspaces with a task-first guide.</p></div><Badge variant="outline" className={missingGuideCoverage.length ? "border-amber-400/30 bg-amber-500/[0.08] text-amber-200" : "border-emerald-400/30 bg-emerald-500/[0.08] text-emerald-200"}>{guideCoverage.length - missingGuideCoverage.length}/{guideCoverage.length}</Badge></div><div className="mt-3 space-y-1">{guideCoverage.map((item) => item.article ? <button key={item.slug} type="button" onClick={() => openGuide(item.slug)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-white/[0.05]"><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-300" /><span className="min-w-0 flex-1 truncate text-muted-foreground">{item.label}</span><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button> : <button key={item.slug} type="button" onClick={() => draftMissingGuide(item)} className="flex w-full items-center gap-2 rounded-lg bg-amber-500/[0.055] px-2 py-1.5 text-left text-xs transition hover:bg-amber-500/[0.11]"><AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300" /><span className="min-w-0 flex-1 truncate text-amber-100">Draft {item.label} guide</span><Plus className="h-3.5 w-3.5 text-amber-300" /></button>)}</div>{!missingGuideCoverage.length && <p className="mt-3 rounded-lg border border-emerald-400/15 bg-emerald-500/[0.045] px-3 py-2 text-[11px] leading-5 text-emerald-100">All priority workspaces have an associated guide. Use product-guide refresh after shipped changes, then review the relevant runbook.</p>}</CardContent></Card>}
           </aside>
         </div>
       </div>
