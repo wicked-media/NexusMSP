@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -82,8 +83,17 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl" data-testid="maintenance-window-dialog">
-        <DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Device operations"
+        title="Schedule maintenance window"
+        description="Bundle selected devices, approved actions and a run time. Nexus records the result and posts a factual summary to the linked ticket."
+        icon={Wrench}
+        tone="amber"
+        className="max-w-2xl"
+        data-testid="maintenance-window-dialog"
+        footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={schedule} disabled={busy} data-testid="mw-schedule-btn">{busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Calendar className="w-3 h-3 mr-1" />}Schedule maintenance</Button></>}
+      >
+        <DialogHeader className="sr-only" aria-hidden="true">
           <DialogTitle className="flex items-center gap-2"><Wrench className="w-5 h-5 text-amber-400" />Schedule Maintenance Window</DialogTitle>
           <DialogDescription>Autonomous overnight maintenance — bundle N devices + N actions + a time. AI summary auto-posts to the parent ticket on completion.</DialogDescription>
         </DialogHeader>
@@ -146,11 +156,7 @@ export default function MaintenanceWindowDialog({ open, onClose, selectedIds = [
             </ScrollArea>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={schedule} disabled={busy} data-testid="mw-schedule-btn">{busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Calendar className="w-3 h-3 mr-1" />}Schedule</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
