@@ -72,9 +72,8 @@ export function EmailDialog({
 export function ChildTicketDialog({ open, onOpenChange, childForm, setChildForm, handleCreateChild }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
-        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Service escalation</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><GitBranch className="h-4 w-4 text-cyan-200" /></span>Create linked child ticket</DialogTitle><p className="mt-2 text-sm text-zinc-400">Split related work into an independently owned ticket while preserving the parent relationship and audit trail.</p></DialogHeader>
-        <div className="space-y-4 px-6 py-5">
+      <NexusWorkflowDialog eyebrow="Service escalation" title="Create linked child ticket" description="Split related work into an independently owned ticket while preserving the parent relationship and audit trail." icon={GitBranch} tone="cyan" footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateChild} data-testid="create-child-submit"><GitBranch className="mr-2 h-4 w-4" />Create child ticket</Button></>}>
+        <div className="space-y-4">
           <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Child ticket title</Label><Input autoFocus value={childForm.title} onChange={e => setChildForm({ ...childForm, title: e.target.value })} data-testid="child-title" /></div>
           <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Work brief</Label><Textarea rows={4} value={childForm.description} onChange={e => setChildForm({ ...childForm, description: e.target.value })} data-testid="child-desc" /></div>
           <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Initial priority</Label>
@@ -84,8 +83,7 @@ export function ChildTicketDialog({ open, onOpenChange, childForm, setChildForm,
             </Select>
           </div>
         </div>
-        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleCreateChild} data-testid="create-child-submit"><GitBranch className="mr-2 h-4 w-4" />Create child ticket</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -168,8 +166,15 @@ export function AddItemsDialog({
   const selectedUnitPrice = selectedTier ? Number(selectedTier.unit_price) : Number(selectedProduct?.retail_price || 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-cyan-400" />Add Billable Items</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Ticket billing"
+        title="Add billable items"
+        description="Attach products and services used on this ticket. Nexus keeps stock, pricing and invoice readiness in sync."
+        icon={ShoppingCart}
+        tone="emerald"
+        className="max-w-lg"
+        footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>}
+      >
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground">Add products/items used on this ticket. Stock will be deducted automatically.</p>
           <div className="flex items-center gap-2">
@@ -226,10 +231,7 @@ export function AddItemsDialog({
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }

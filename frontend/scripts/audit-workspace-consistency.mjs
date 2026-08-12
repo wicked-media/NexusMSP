@@ -15,18 +15,25 @@ const walk = async (dir) => {
 const files = (await walk(root)).filter((path) => /\.(js|jsx)$/.test(path));
 const source = await Promise.all(files.map(async (path) => [path, await readFile(path, "utf8")]));
 const countFiles = (needle) => source.filter(([, text]) => text.includes(needle)).length;
+const countOccurrences = (text, needle) => text.split(needle).length - 1;
 const toSourcePath = (path) => `src/${relative(root, path).replaceAll("\\", "/")}`;
 const directDialogs = source.filter(([, text]) => text.includes("<DialogContent")).map(([path]) => toSourcePath(path));
 const legacyDirectDialogs = source
   .filter(([, text]) => text.includes("<DialogContent") && !text.includes("NexusWorkflowDialog"))
   .map(([path]) => toSourcePath(path));
+const directDialogInstances = source.reduce((total, [, text]) => total + countOccurrences(text, "<DialogContent"), 0);
+const legacyDirectDialogInstances = source
+  .filter(([, text]) => !text.includes("NexusWorkflowDialog"))
+  .reduce((total, [, text]) => total + countOccurrences(text, "<DialogContent"), 0);
 
 console.log(JSON.stringify({
   scannedFiles: files.length,
   operationalHeaders: countFiles("OperationalPageHeader"),
   sharedWorkflowDialogs: countFiles("NexusWorkflowDialog"),
   dialogSurfaceFiles: directDialogs.length,
-  legacyDirectDialogFileCount: legacyDirectDialogs.length,
+  unmigratedDialogOnlyFileCount: legacyDirectDialogs.length,
+  dialogSurfaceInstances: directDialogInstances,
+  unmigratedDialogOnlyInstances: legacyDirectDialogInstances,
   workflowMigrationProgress: `${countFiles("NexusWorkflowDialog")} shared workflow consumers`,
   directDialogFiles: directDialogs,
   legacyDirectDialogFiles: legacyDirectDialogs,
