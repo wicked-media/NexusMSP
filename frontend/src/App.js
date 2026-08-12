@@ -15,6 +15,7 @@ import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
 import CommandPalette from "@/components/CommandPalette";
 import NexusQuickDock from "@/components/NexusQuickDock";
+import NexusWorkspaceCompass from "@/components/NexusWorkspaceCompass";
 import NexusObjectDock from "@/components/NexusObjectDock";
 import NexusPrivacyCurtain from "@/components/NexusPrivacyCurtain";
 import UniversalInspector from "@/components/UniversalInspector";
@@ -491,6 +492,7 @@ function AuthedAddons({ token }) {
       <ShortcutPalette />
       <CommandPalette />
       <NexusQuickDock />
+      <NexusWorkspaceCompass />
       <NexusObjectDock />
       <NexusPrivacyCurtain />
       <UniversalInspector token={token} />

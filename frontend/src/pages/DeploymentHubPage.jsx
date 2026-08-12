@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import HeroTile from "@/components/HeroTile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -315,12 +316,9 @@ export default function DeploymentHubPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [overview, clientRows, partnerRows, jumpGatewayRows] =
-        await Promise.all([
+      const [overview, clientRows] = await Promise.all([
         axios.get(`${API}/deployment-hub/overview`, { headers }),
         axios.get(`${API}/clients`, { headers }),
-        axios.get(`${API}/channel-mode/tenants`, { headers }),
-        axios.get(`${API}/deployment-hub/jump-lab-gateways`, { headers }),
       ]);
       setData(overview.data || { deployments: [], summary: {} });
       setClients(
@@ -328,8 +326,14 @@ export default function DeploymentHubPage() {
           ? clientRows.data
           : clientRows.data?.clients || [],
       );
-      setPartners(partnerRows.data?.tenants || []);
-      setJumpGateways(jumpGatewayRows.data?.gateways || []);
+      // Channel and Jump are optional enhancements. Older local backends may
+      // not expose them yet; that must not make the whole workspace fail.
+      const [partnerRows, jumpGatewayRows] = await Promise.allSettled([
+        axios.get(`${API}/channel-mode/tenants`, { headers }),
+        axios.get(`${API}/deployment-hub/jump-lab-gateways`, { headers }),
+      ]);
+      setPartners(partnerRows.status === "fulfilled" ? partnerRows.value.data?.tenants || [] : []);
+      setJumpGateways(jumpGatewayRows.status === "fulfilled" ? jumpGatewayRows.value.data?.gateways || [] : []);
     } catch (error) {
       toast.error(
         error.response?.data?.detail || "Deployment Hub could not be loaded",
@@ -1189,14 +1193,14 @@ export default function DeploymentHubPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Prepare a Nexus deployment</DialogTitle>
-            <DialogDescription>
-              Generate one scoped deployment record first. The one-time
-              activation code is shown only after preparation.
-            </DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Deployment workflow"
+          title="Prepare a Nexus deployment"
+          description="Generate one scoped deployment record first. The one-time activation code is shown only after preparation."
+          icon={Box}
+          tone="emerald"
+          className="max-w-xl"
+        >
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
               <Label>Deployment type</Label>
@@ -1336,6 +1340,9 @@ export default function DeploymentHubPage() {
               />
             </div>
           </div>
+          <div className="rounded-xl border border-sky-400/20 bg-sky-400/[0.045] p-3 text-xs leading-5 text-muted-foreground">
+            <strong className="text-sky-100">Review before preparing.</strong> This records scope and intended roles. Nexus does not call a deployment healthy until it receives an authenticated heartbeat.
+          </div>
           <DialogFooter>
             <Button
               variant="outline"
@@ -1348,7 +1355,7 @@ export default function DeploymentHubPage() {
               {building ? "Preparing…" : "Prepare secure bundle"}
             </Button>
           </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog

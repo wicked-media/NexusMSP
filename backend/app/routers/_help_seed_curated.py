@@ -7,7 +7,7 @@ can stay useful in the moment of work rather than becoming an implementation
 archive.
 """
 
-HELP_CATALOG_VERSION = "2026-08-02-guide-system-v18-recovery-assurance"
+HELP_CATALOG_VERSION = "2026-08-12-guide-system-v19-platform-operations"
 
 
 _WORKSPACE_VISUALS = {
@@ -457,6 +457,123 @@ CURATED_ARTICLES.extend([
     ),
     _reference_guide("nexus-elevate-setup", "Set up Nexus Elevate", "Infrastructure & security", "🛡️", 48, "Configure elevation controls, approvals, and technician notifications before enabling client requests."),
     _reference_guide("nexus-shield-canary", "Deploy Nexus Shield Canary", "Infrastructure & security", "🛡️", 49, "Deploy canary protection to an active managed endpoint, verify alerting, and retain the deployment evidence."),
+])
+
+# Platform-operation additions. Keep every new workspace linked to a task-first
+# procedure at release time rather than leaving technicians to discover it from
+# navigation alone. Screenshots are intentionally empty until a real capture is
+# supplied; a generic image is less useful than no image at all.
+CURATED_ARTICLES.extend([
+    _workspace_guide(
+        "deployment-hub",
+        "Prepare and activate a Nexus deployment",
+        "Platform setup", "🚀", 24,
+        "Prepare Core, Edge, Backup Vault, or Remote Relay records; enrol the target with a one-time code; then verify its authenticated heartbeat before treating it as operational.",
+        "1. Open **Deployment Hub** and select **Prepare deployment**.\n2. Choose the deployment type and its correct client or MSP-owner scope.\n3. For Edge, select only the local roles the appliance is authorised to provide and confirm its declared capacity meets the plan.\n4. Save the one-time activation code in the approved secret handoff. It cannot be recovered.\n5. Download the bundle or use the controlled lab launcher.\n6. Activate the target, wait for its authenticated heartbeat, and verify the deployment estate shows it online.\n7. Record the target owner, support boundary, and any remaining prerequisites before enabling a role.",
+        "The deployment has the correct owner and scope, its activation code is consumed, a recent authenticated heartbeat appears, and its selected roles show declared or observed evidence rather than an assumed healthy state.",
+        related="[Run a Windows Edge lab](/help/nexus-edge-lab), [Use Nexus Jump safely](/help/nexus-jump-lab), and [Install the Nexus Agent](/help/agent-installer).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-edge-lab",
+        "Run a native Windows Nexus Edge lab",
+        "Platform setup", "🧪", 25,
+        "Use this computer as a short-lived, foreground Nexus Edge lab without Docker, a VM, a service installation, or inbound firewall changes.",
+        "1. Start Nexus locally or choose a reachable lab control plane.\n2. Prepare a client-scoped Edge in Deployment Hub with the intended roles.\n3. Copy the deployment ID and one-time activation code through an approved secret channel.\n4. Run `scripts/Start-NexusEdgeLab.ps1` with the control-plane URL, deployment ID, and activation code.\n5. Keep the terminal visible until Nexus records the authenticated heartbeat.\n6. Verify the Edge appears online in Deployment Hub, then test only the permitted ticket-scoped checks.\n7. Stop the foreground process when lab validation is complete.",
+        "The Edge appears online with a persistent identity, the role evidence matches the lab boundary, and no inbound listener, tunnel, scheduled task, or Windows service was created.",
+        related="[Prepare a deployment](/help/deployment-hub) and [Use Nexus Jump safely](/help/nexus-jump-lab).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-jump-lab",
+        "Define a Nexus Jump lab boundary",
+        "Infrastructure & security", "🔐", 48,
+        "Register public lab gateway metadata and a least-privilege access boundary before any remote transport is introduced.",
+        "1. Open **Deployment Hub** and review **Nexus Jump lab readiness**.\n2. Download the policy template and work on a private copy outside source control.\n3. Enter only a lab endpoint, public key, private resource CIDRs, approved protocols, and a session limit.\n4. Keep private keys out of Nexus forms, tickets, chat, and repository files.\n5. Register the boundary in Deployment Hub.\n6. Confirm its status remains `lab_pending_transport`.\n7. Do not request customer access until identity, revocation, approval, and audit evidence have all passed an isolated lab test.",
+        "The registered policy contains no private key or broad route, requires a ticket and approval, and remains transport-pending rather than claiming a live connection.",
+        related="[Prepare a deployment](/help/deployment-hub) and [Work a service ticket](/help/work-ticket).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-verify",
+        "Verify a high-risk customer request",
+        "Service desk", "🪪", 33,
+        "Use Nexus Verify to establish identity and retain evidence before a password reset, MFA recovery, privileged change, or other sensitive request.",
+        "1. Open the linked ticket and identify the requested action.\n2. Confirm the customer, affected identity, risk level, and approved verification policy.\n3. Start the verification request using only the customer’s pre-enrolled trusted method.\n4. Wait for a verified or failed result; do not rely on the caller’s assertion.\n5. For high-risk recovery, collect the required manager or authorised-contact approval.\n6. Perform the change only after the required verification and approval gates are satisfied.\n7. Record the action, result, ticket, technician, method, and timestamp.",
+        "The ticket shows the right identity, verification method, result, expiry, approval evidence, and completed action. A failed or expired verification never authorises the requested change.",
+        related="[Work a service ticket](/help/work-ticket) and [Operate Microsoft 365 services](/help/m365-command-center).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-work-session",
+        "Complete a Nexus Work Session",
+        "Service desk", "⏱️", 34,
+        "Capture the ticket, device context, remote work, technical notes, customer update, time, billing classification, and verification in one controlled completion flow.",
+        "1. Open the ticket and confirm client, contact, affected asset, and work scope.\n2. Select **Start work** and review the inferred device, context, and timer.\n3. Launch only approved remote or diagnostic actions from the ticket.\n4. Record findings and customer-impacting decisions as they occur.\n5. Verify the original symptom is resolved or document why it cannot yet be verified.\n6. Review the prepared technical notes, customer update, time entry, billing class, and linked evidence.\n7. Complete the session only after the summary is accurate.",
+        "The ticket has attributable work time, a verified resolution or an explicit follow-up state, customer-safe communication, correct billing classification, and retained technical evidence.",
+        related="[Work a service ticket](/help/work-ticket), [Use device smart actions](/help/device-smart-bar), and [Record payment and billing evidence](/help/record-payment).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-dmarc-operations",
+        "Operate Nexus DMARC safely",
+        "Infrastructure & security", "📨", 49,
+        "Discover sending sources, validate SPF/DKIM/DMARC posture, and progress enforcement only after sender evidence and customer approval are complete.",
+        "1. Open **Nexus DMARC** and select the customer domain.\n2. Run read-only posture discovery and review sender evidence, SPF lookup depth, DKIM selectors, and DMARC aggregate data.\n3. Classify every legitimate sender before changing policy.\n4. Use the SPF flattening plan only after validating its source records and TTL behaviour.\n5. Generate the proposed DNS change and have the authorised domain owner approve it.\n6. Publish through the approved DNS workflow, validate public DNS propagation, and monitor reports.\n7. Escalate enforcement from monitor to quarantine or reject only when the evidence window is complete.",
+        "Every legitimate sender is classified, DNS records resolve as intended, the approval is retained, and enforcement state matches the recorded evidence—not an assumed compliance score.",
+        related="[Configure Nexus DNS](/help/nexus-dns-setup) and [Operate email security](/help/nexus-mail-shield).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-mail-shield",
+        "Operate Nexus Mail Shield",
+        "Infrastructure & security", "🛡️", 50,
+        "Review email-security signals as explainable incidents, contain only verified threats, and preserve customer and technician evidence.",
+        "1. Open **Nexus Mail Shield** and scope the client, mailbox, or incident.\n2. Read the incident narrative, signal sources, confidence, and recommended safe actions.\n3. Open the source evidence before removing, blocking, or notifying.\n4. Use the linked ticket and approval process for customer-impacting containment.\n5. Verify the action outcome in the authoritative email provider.\n6. Record false positives, accepted risk, or remediation evidence.\n7. Review recurring patterns for policy or user-training improvements.",
+        "The incident is linked to source evidence and a ticket where required; any containment is confirmed in the email provider and no unresolved alert is marked remediated by assumption.",
+        related="[Operate Nexus DMARC](/help/nexus-dmarc-operations) and [Investigate an exposure in Security Graph](/help/security-graph-investigation).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "expected-state",
+        "Define and review expected state",
+        "Infrastructure & security", "✅", 51,
+        "Define the controls Nexus must be able to prove for a client and route unproven coverage to accountable remediation.",
+        "1. Open **Expected State** and choose the client or baseline.\n2. Review each control’s source, scope, freshness, confidence, and exception path.\n3. Do not mark a control compliant when its source has not reported or cannot prove it.\n4. Assign a named owner and due date for any gap.\n5. Create a ticket, change, or remediation campaign from the control owner flow.\n6. Re-evaluate after the source system reports the corrected state.\n7. Record accepted risk with an expiry and reviewer.",
+        "Each control has attributable evidence or a visible exception; gaps have an owner and remediation path; accepted risks have a reason and review date.",
+        related="[Use AI Operations safely](/help/auto-ops-hub) and [Review client insights](/help/client-insights-hub).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-diagnostics",
+        "Run Nexus Diagnose",
+        "Infrastructure & security", "🩺", 52,
+        "Collect and compare approved diagnostics from the ticket or device context without treating a recommendation as an executed fix.",
+        "1. Start from the correct ticket or device.\n2. Confirm the target, client boundary, approval level, and symptom.\n3. Collect the offered diagnostics and review timestamps, source health, recent changes, and comparison evidence.\n4. Read the likely causes and confidence with their evidence.\n5. Choose a safe diagnostic or remediation action only when its scope and rollback are clear.\n6. Verify the result at the source, update the ticket, and route recurring conditions to a campaign or change.\n7. Record exceptions where evidence is incomplete.",
+        "All diagnostic facts link to a source record, selected actions have a ticket and verified result, and uncertainty remains visible rather than being converted into a false conclusion.",
+        related="[Review What Changed](/help/nexus-what-changed), [Use device smart actions](/help/device-smart-bar), and [Complete a Nexus Work Session](/help/nexus-work-session).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "nexus-what-changed",
+        "Review What Changed",
+        "Infrastructure & security", "🕒", 53,
+        "Trace recent attributable changes around a client, device, ticket, or service issue before deciding whether a change is causal.",
+        "1. Open **What Changed** from the client, device, or Diagnostics workspace.\n2. Set the scope and time window around the symptom.\n3. Review the source event, technician, action, before/after state, and linked ticket or change.\n4. Compare timing with the observed symptom; correlation is not proof of cause.\n5. Open the owning record for validation and rollback instructions.\n6. Document the finding or uncertainty in the ticket.\n7. Create a controlled follow-up only when evidence supports it.",
+        "The investigation retains its scope and sources, every event opens an authoritative record, and no action is attributed as a cause without supporting evidence.",
+        related="[Run Nexus Diagnose](/help/nexus-diagnostics) and [Open Change Management](/help/maintenance-windows).",
+        screenshots=[],
+    ),
+    _workspace_guide(
+        "channel-mode",
+        "Operate Nexus Channel mode",
+        "Platform setup", "🏢", 26,
+        "Provision and oversee isolated MSP partner estates while preserving each partner’s scope, branding, support policy, and billing boundary.",
+        "1. Open **Channel Mode** and create or select the MSP partner tenant.\n2. Confirm the partner’s branding, operators, support-access policy, and billing relationship.\n3. Prepare any Core, Edge, Backup Vault, or Remote Relay deployment against the right partner boundary.\n4. Review the deployment prerequisites and activation handoff.\n5. Verify heartbeat and supportability before enabling service billing.\n6. Use tenant-scoped navigation, records, and audit filters for daily support.\n7. Review exceptions and offboarding plans before changing cross-tenant access.",
+        "Every deployment and record remains associated with the intended MSP tenant, support access is explicit, and no customer or partner scope is silently shared.",
+        related="[Prepare a deployment](/help/deployment-hub) and [Use Settings hub](/help/settings-hub).",
+        screenshots=[],
+    ),
 ])
 
 CURATED_ARTICLES.extend([
