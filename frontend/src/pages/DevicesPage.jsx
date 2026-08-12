@@ -9,7 +9,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
+import { Dialog } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
@@ -859,9 +859,8 @@ export default function DevicesPage() {
 
       {/* DEVICE DISCOVERY DIALOG */}
       <Dialog open={isDiscoveryOpen} onOpenChange={setIsDiscoveryOpen}>
-        <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
-          <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset onboarding</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Radar className="h-4 w-4 text-cyan-200" /></span>Network discovery</DialogTitle><DialogDescription className="mt-2">Scan an approved private client subnet through an active Nexus Edge Discovery probe, review findings, and import only the endpoints you intend to manage. Nexus will not invent production discovery results.</DialogDescription></DialogHeader>
-          <div className="space-y-4 px-6 py-5"><div className="grid gap-3 md:grid-cols-[1fr_190px_auto] md:items-end">
+        <NexusWorkflowDialog eyebrow="Asset onboarding" title="Network discovery" description="Scan an approved private client subnet through an active Nexus Edge Discovery probe, review findings, and import only the endpoints you intend to manage. Nexus will not invent production discovery results." icon={Radar} tone="cyan" className="max-w-3xl" contentClassName="space-y-4" data-testid="network-discovery-workflow" footer={<Button variant="outline" onClick={() => setIsDiscoveryOpen(false)}>Close discovery</Button>}>
+          <div className="grid gap-3 md:grid-cols-[1fr_190px_auto] md:items-end">
             <div className="flex-1">
               <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Client</Label>
               <Select value={discoveryClientId} onValueChange={setDiscoveryClientId}>
@@ -877,7 +876,7 @@ export default function DevicesPage() {
               {discoveryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Radar className="w-4 h-4 mr-1" />}
               Scan Network
             </Button>
-           </div>
+          </div>
 
           {discoveryResults && (
             <div className="space-y-3 border-t border-white/[0.07] pt-4">
@@ -927,8 +926,8 @@ export default function DevicesPage() {
                 ))}
               </div>
             </div>
-          )}</div>
-        </DialogContent>
+          )}
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
