@@ -294,7 +294,7 @@ function ArchiveTechnicianDialog({ tech, onClose, headers, onCompleted }) {
         </div>
         <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4">
           <Button variant="ghost" onClick={onClose}>Keep active</Button>
-          <Button onClick={archive} disabled={busy} className="bg-amber-500 text-zinc-950 hover:bg-amber-400" data-testid="archive-tech-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Archive className="mr-1.5 h-4 w-4" />}Archive account</Button>
+          <Button variant="warning" onClick={archive} disabled={busy} data-testid="archive-tech-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Archive className="mr-1.5 h-4 w-4" />}Archive account</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -527,7 +527,7 @@ function InviteDialog({ open, onClose, onSent, onManageRoles, headers, presets, 
         </div>
         <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={send} disabled={busy} className="bg-cyan-400 text-zinc-950 hover:bg-cyan-300" data-testid="invite-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send secure invitation</Button>
+          <Button variant="info" onClick={send} disabled={busy} data-testid="invite-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send secure invitation</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1041,7 +1041,7 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
       <Card className="border-violet-500/20 bg-violet-500/[0.03]">
         <CardHeader className="flex flex-row items-start justify-between gap-4 pb-3">
           <div><CardTitle className="flex items-center gap-2 text-base"><Shield className="h-4 w-4 text-violet-300" />Access role catalogue</CardTitle><p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-500">Rename standard roles or add your own operational roles. Role IDs stay stable for automation and auditing; only the protected administrator role can grant platform-wide administrator access.</p></div>
-          <Button size="sm" onClick={save} disabled={busy} className="shrink-0 bg-violet-500 text-white hover:bg-violet-400">{busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Save roles & access</Button>
+          <Button size="sm" onClick={save} disabled={busy} className="shrink-0">{busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Save roles & access</Button>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 lg:grid-cols-2">
@@ -1278,7 +1278,7 @@ function PermissionMatrixTab({ headers, presets, roleOptions, onRolesChanged }) 
           )}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDiffOpen(false)}>Cancel</Button>
-            <Button onClick={apply} variant="outline" className="text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/10">Apply</Button>
+            <Button onClick={apply} variant="success">Apply</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1457,7 +1457,7 @@ function JITTab({ headers, capacity, presets, onChanged }) {
           </div>
           <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
             <Button variant="ghost" onClick={() => setGrantOpen(false)}>Cancel</Button>
-            <Button onClick={doGrant} disabled={!grant.tech_id || !grant.reason.trim()} className="bg-violet-600 text-white hover:bg-violet-500"><Zap className="mr-1.5 h-4 w-4" />Grant temporary access</Button>
+            <Button onClick={doGrant} disabled={!grant.tech_id || !grant.reason.trim()}><Zap className="mr-1.5 h-4 w-4" />Grant temporary access</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1478,7 +1478,7 @@ function JITTab({ headers, capacity, presets, onChanged }) {
           </div>
           <DialogFooter className="border-t border-rose-500/20 bg-rose-500/5 px-6 py-4">
             <Button variant="ghost" onClick={() => closeBreakGlass(false)}>Cancel</Button>
-            <Button onClick={doBg} disabled={bg.reason.trim().length < 10 || !bgAcknowledged} className="bg-rose-600 text-white hover:bg-rose-500"><ShieldAlert className="mr-1.5 h-4 w-4" />Activate emergency access</Button>
+            <Button variant="destructive" onClick={doBg} disabled={bg.reason.trim().length < 10 || !bgAcknowledged}><ShieldAlert className="mr-1.5 h-4 w-4" />Activate emergency access</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
