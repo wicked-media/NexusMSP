@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -475,12 +476,17 @@ export default function MicrosoftActionCentre() {
       </Card>
 
       <Dialog open={!!planDetail} onOpenChange={(open) => !open && setPlanDetail(null)}>
-        <DialogContent className="max-h-[86vh] max-w-2xl overflow-y-auto" data-testid="microsoft-action-plan-detail">
-          <DialogHeader>
-            <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className={IMPACT_STYLES[planDetail?.impact] || IMPACT_STYLES.medium}>{planDetail?.impact || "planned"} impact</Badge><Badge variant="outline" className={planDetail?.status === "blocked" ? "border-rose-500/25 text-rose-200" : planDetail?.status === "pending_approval" ? "border-amber-500/25 text-amber-200" : "border-emerald-500/25 text-emerald-200"}>{String(planDetail?.status || "previewed").replaceAll("_", " ")}</Badge></div>
-            <DialogTitle className="mt-3">{planDetail?.action_label || "Microsoft action plan"}</DialogTitle>
-            <DialogDescription>Retained Nexus action evidence. Viewing this record does not run or approve a Microsoft change.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Microsoft action evidence"
+          title={planDetail?.action_label || "Microsoft action plan"}
+          description="Retained Nexus action evidence. Viewing this record does not run or approve a Microsoft change."
+          icon={FileCheck2}
+          tone="cyan"
+          className="max-w-2xl"
+          data-testid="microsoft-action-plan-detail"
+          footer={<Button variant="outline" onClick={() => setPlanDetail(null)}>Close</Button>}
+        >
+          <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className={IMPACT_STYLES[planDetail?.impact] || IMPACT_STYLES.medium}>{planDetail?.impact || "planned"} impact</Badge><Badge variant="outline" className={planDetail?.status === "blocked" ? "border-rose-500/25 text-rose-200" : planDetail?.status === "pending_approval" ? "border-amber-500/25 text-amber-200" : "border-emerald-500/25 text-emerald-200"}>{String(planDetail?.status || "previewed").replaceAll("_", " ")}</Badge></div>
           {planDetail && <div className="space-y-4 text-sm">
             <div className="grid gap-2 sm:grid-cols-2"><AuditField label="Tenant" value={planDetail.tenant_name || planDetail.tenant_id} /><AuditField label="Client" value={planDetail.client_name || "No client recorded"} /><AuditField label="Target" value={planDetail.target_id || "Tenant scoped"} /><AuditField label="Requested by" value={planDetail.created_by_name || "Not recorded"} /><AuditField label="Service ticket" value={planDetail.ticket_id || "Not linked"} /><AuditField label="Change reference" value={planDetail.change_reference || "Not linked"} /></div>
             <div className="rounded-xl border border-border/70 bg-muted/15 p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Technician reason</p><p className="mt-1.5 text-xs leading-5">{planDetail.reason || "No reason was retained."}</p></div>
@@ -488,8 +494,7 @@ export default function MicrosoftActionCentre() {
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-amber-200">Rollback boundary</p><p className="mt-1.5 text-xs leading-5 text-muted-foreground">{planDetail.rollback_plan || "No rollback guidance retained."}</p></div>
             <p className="text-[11px] text-muted-foreground">Created {formatWhen(planDetail.created_at)}{planDetail.preview_expires_at ? ` · Preview expiry ${formatWhen(planDetail.preview_expires_at)}` : ""}</p>
           </div>}
-          <DialogFooter><Button variant="outline" onClick={() => setPlanDetail(null)}>Close</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={!!selected} onOpenChange={(open) => !open && closeAction()}>
