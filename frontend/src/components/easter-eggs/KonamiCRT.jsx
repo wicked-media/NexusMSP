@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { keyboardKey } from "@/lib/keyboard";
 
 const SEQUENCE = [
   "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
@@ -19,13 +20,14 @@ export default function KonamiCRT() {
       const tag = (e.target?.tagName || "").toUpperCase();
       if (tag === "INPUT" || tag === "TEXTAREA" || e.target?.isContentEditable) return;
 
-      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      const key = keyboardKey(e);
+      const k = key.length === 1 ? key.toLowerCase() : key;
       buf.current = [...buf.current, k].slice(-SEQUENCE.length);
       if (buf.current.join(",") === SEQUENCE.join(",")) {
         e.preventDefault();
         activate();
       }
-      if (e.key === "Escape" && active) deactivate();
+      if (key === "Escape" && active) deactivate();
     };
     window.addEventListener("keydown", onKey);
     return () => {

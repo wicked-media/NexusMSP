@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { Command, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { keyboardKey, keyboardKeyLower } from "@/lib/keyboard";
 
 // Lightweight grammar: "reboot <name>", "iso <name>", "diagnose <name>", "wake <client>", "open <name>", "ticket <name>"
 function parse(query, devices) {
@@ -53,11 +54,11 @@ export default function DeviceCommandPalette({ devices = [] }) {
 
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if ((e.metaKey || e.ctrlKey) && keyboardKeyLower(e) === "k") {
         e.preventDefault();
         setOpen(o => !o);
       }
-      if (e.key === "Escape") setOpen(false);
+      if (keyboardKey(e) === "Escape") setOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

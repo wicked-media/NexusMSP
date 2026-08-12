@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { keyboardKeyLower } from "@/lib/keyboard";
 import {
   Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Bell, BookOpen, Check, CheckCircle2, ChevronDown, ChevronRight,
   CircleDollarSign, Copy, CreditCard, Download, FileCheck2, FileText,
@@ -278,7 +279,7 @@ export default function CustomerPortalWorkspace() {
 
   useEffect(() => {
     const focusSearch = (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if ((event.ctrlKey || event.metaKey) && keyboardKeyLower(event) === "k") {
         event.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();

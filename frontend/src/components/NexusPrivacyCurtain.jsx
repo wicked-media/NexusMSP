@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { EyeOff, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
+import { keyboardKeyLower } from "@/lib/keyboard";
 
 const STORAGE_KEY = "nexus-privacy-curtain";
 
@@ -28,7 +29,7 @@ export default function NexusPrivacyCurtain() {
   useEffect(() => {
     const toggle = () => setActive((current) => !current);
     const handleShortcut = (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "p") {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && keyboardKeyLower(event) === "p") {
         event.preventDefault();
         toggle();
       }

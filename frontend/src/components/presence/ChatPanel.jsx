@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { PresenceDot } from "./PresenceDot";
 import { X, Send, Hash, Users, Maximize2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { keyboardKeyLower } from "@/lib/keyboard";
 
 const SHORTCUT = "c";
 
@@ -75,7 +76,7 @@ export function ChatPanel() {
   // Ctrl/Cmd + Shift + C toggles quick chat without conflicting with global search.
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === SHORTCUT && !["INPUT", "TEXTAREA"].includes(e.target.tagName)) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && keyboardKeyLower(e) === SHORTCUT && !["INPUT", "TEXTAREA"].includes(e.target?.tagName)) {
         e.preventDefault();
         setOpen(v => !v);
       }

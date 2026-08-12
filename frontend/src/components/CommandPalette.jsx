@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { keyboardKeyLower } from "@/lib/keyboard";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -141,7 +142,7 @@ export default function CommandPalette() {
       // Some browser extensions and telemetry tools dispatch incomplete keyboard
       // events. Treat those as non-shortcuts instead of allowing a global handler
       // to throw and destabilise the current workspace.
-      const commandShortcut = String(event.key || "").toLowerCase() === "k";
+      const commandShortcut = keyboardKeyLower(event) === "k";
       const everythingShortcut = event.code === "Space";
       if (modifier && (commandShortcut || everythingShortcut)) {
         event.preventDefault();
