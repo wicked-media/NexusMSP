@@ -115,6 +115,7 @@ function guideMatches(article, query) {
 function GuideEditor({ open, onOpenChange, article, onSave, token }) {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
@@ -169,6 +170,31 @@ function GuideEditor({ open, onOpenChange, article, onSave, token }) {
     }
   };
 
+  const generateDraft = async () => {
+    if (!draft?.title?.trim()) {
+      toast.error("Add a guide title before generating a draft");
+      return;
+    }
+    setGeneratingDraft(true);
+    try {
+      const response = await axios.post(`${API}/help/draft`, {
+        title: draft.title,
+        category: draft.category,
+        summary: draft.summary,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      setDraft((current) => ({
+        ...current,
+        summary: response.data.summary || current.summary,
+        body_md: response.data.body_md || current.body_md,
+      }));
+      toast.success(response.data.message || "Guide draft prepared for review");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to prepare a guide draft");
+    } finally {
+      setGeneratingDraft(false);
+    }
+  };
+
   if (!draft) return null;
 
   return (
@@ -216,8 +242,12 @@ function GuideEditor({ open, onOpenChange, article, onSave, token }) {
               <div>
                 <div className="mb-1.5 flex items-center justify-between gap-3">
                   <label className="text-xs font-semibold text-muted-foreground">Guide content</label>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => update("body_md", GUIDE_SCAFFOLD)} className="h-7 text-xs text-emerald-300 hover:text-emerald-200">Restore procedure scaffold</Button>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" variant="ghost" size="sm" onClick={generateDraft} disabled={generatingDraft} className="h-7 text-xs text-cyan-300 hover:text-cyan-200" data-testid="help-generate-draft-btn">{generatingDraft ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}Generate review draft</Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => update("body_md", GUIDE_SCAFFOLD)} className="h-7 text-xs text-emerald-300 hover:text-emerald-200">Restore scaffold</Button>
+                  </div>
                 </div>
+                <p className="mb-2 text-[11px] leading-5 text-muted-foreground">Drafts are never published automatically. Review exact product steps, approvals, recovery, and evidence before saving.</p>
                 <Textarea value={draft.body_md} onChange={(event) => update("body_md", event.target.value)} className="min-h-[360px] resize-y font-mono text-xs leading-6" placeholder="Markdown and safe HTML are supported." data-testid="help-guide-body" />
               </div>
             </div>

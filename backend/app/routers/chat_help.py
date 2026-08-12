@@ -14,6 +14,7 @@ Help center:
 from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timezone
 from typing import Optional
+import os
 import uuid, re
 
 from app.database import db
@@ -1392,6 +1393,99 @@ async def upsert_help_article(payload: dict = Body(...), current_user: dict = De
         doc["created_at"] = _now_iso()
         await db.help_articles.insert_one(dict(doc))
     return _repair_mojibake(doc)
+
+
+def _guide_draft_template(title: str, category: str, summary: str) -> str:
+    """Safe authoring fallback. It offers structure, never invented product facts."""
+    purpose = summary or f"Define the intended outcome for {title}."
+    return f"""## Outcome
+{purpose}
+
+## At a glance
+- **Expected time:** [Confirm expected duration]
+- **Risk:** [Confirm risk level]
+- **Required access:** [Confirm role, client scope, and approval]
+- **Evidence location:** [Confirm ticket, client history, audit log, or report]
+
+## Before you start
+- Confirm the client, site, device, tenant, or ticket scope.
+- Confirm the approved change window and any required customer approval.
+- Capture the starting state and link the governing service record.
+
+## Procedure
+1. [Describe the first controlled action in Nexus.]
+2. [Describe the next action and its expected result.]
+3. [Describe the safety check before any material change.]
+4. [Describe the final action and expected system state.]
+
+## Verify the result
+- [Record the observable proof that the outcome was achieved.]
+- [Confirm the affected user, device, service, or customer experience.]
+
+## Troubleshooting
+- **Expected result is missing:** Recheck scope, permissions, integration health, and the audit trail.
+- **Unexpected result:** Stop, retain evidence, and follow the rollback or escalation path.
+
+## Rollback and escalation
+- [Describe the safe recovery point, owner, and escalation condition.]
+
+## Audit and handover
+- Record the acting technician, scope, approval, actions, verification, and follow-up owner.
+
+## Related guides
+- [Link the next Nexus workspace or supporting guide.]
+"""
+
+
+@router.post("/help/draft")
+async def generate_help_draft(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Generate a reviewable guide draft; no draft is published automatically."""
+    title = (payload.get("title") or "").strip()
+    category = (payload.get("category") or "Custom knowledge").strip()
+    summary = (payload.get("summary") or "").strip()
+    if not title:
+        raise HTTPException(400, "title required before generating a draft")
+    if len(title) > 180 or len(summary) > 800:
+        raise HTTPException(400, "guide title or summary is too long")
+
+    fallback = _guide_draft_template(title, category, summary)
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return {
+            "body_md": fallback,
+            "summary": summary,
+            "generated": False,
+            "message": "A structured review template was prepared. Connect an AI provider to generate a richer first draft.",
+        }
+
+    try:
+        from app.services.ai_provider import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"help-draft-{uuid.uuid4().hex[:8]}",
+            system_message=(
+                "You draft safe NexusMSP technician runbooks. Return markdown only. "
+                "Use exactly these H2 sections: Outcome; At a glance; Before you start; Procedure; "
+                "Verify the result; Troubleshooting; Rollback and escalation; Audit and handover; Related guides. "
+                "Do not claim an integration, permission, screen label, automation, or live capability exists unless it is supplied. "
+                "Use [Confirm ...] placeholders for missing product-specific facts. Keep it concise, operational, and reviewable."
+            ),
+        ).with_model("openai", os.environ.get("NEXUS_AI_MODEL", "gpt-4o-mini"))
+        prompt = f"Create a draft guide.\nTitle: {title}\nCategory: {category}\nPurpose: {summary or '[not supplied]'}\n"
+        result = await chat.send_message(UserMessage(text=prompt))
+        return {
+            "body_md": result or fallback,
+            "summary": summary,
+            "generated": bool(result),
+            "message": "AI draft prepared. Review all placeholders, product facts, and recovery steps before publishing.",
+        }
+    except Exception:
+        return {
+            "body_md": fallback,
+            "summary": summary,
+            "generated": False,
+            "message": "A structured review template was prepared because the AI draft service is unavailable.",
+        }
 
 
 @router.delete("/help/articles/{slug}")
