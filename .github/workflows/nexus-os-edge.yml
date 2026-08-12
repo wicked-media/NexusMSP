@@ -70,7 +70,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Cache upload is an optimisation, never a reason to fail a valid image.
+          cache-to: type=gha,mode=max,ignore-error=true
           provenance: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
           sbom: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
 

@@ -100,5 +100,6 @@ jobs:
           MONGO_PASSWORD: ci-password
           JWT_SECRET: ci-only-not-for-production
           NEXUS_SECRET_ENCRYPTION_KEY: ci-only-encryption-key
+          NEXUS_DMARC_RECEIVER_TOKEN: ci-only-dmarc-receiver-token
           CORS_ORIGINS: https://nexus.example.invalid
         run: docker compose -f docker-compose.production.yml config --quiet
