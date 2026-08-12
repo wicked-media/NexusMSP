@@ -5,7 +5,7 @@ import os
 import jwt
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
-from app.services.nexus_document_pdf import render_nexus_purchase_order_pdf
+from app.services.nexus_document_pdf import render_nexus_invoice_pdf, render_nexus_purchase_order_pdf
 
 router = APIRouter()
 
@@ -64,8 +64,8 @@ def _safe_latin(text):
     return str(text or "").encode('latin-1', 'ignore').decode('latin-1')
 
 
-def generate_invoice_pdf(invoice, branding=None, theme_config=None, generated_by=None):
-    """Generate a professional branded invoice PDF with theme support"""
+def _generate_legacy_invoice_pdf(invoice, branding=None, theme_config=None, generated_by=None):
+    """Legacy invoice renderer retained only for backwards-compatible reference."""
     from app.services.finance_integrity import normalise_invoice_document
 
     invoice = normalise_invoice_document(invoice) or {}
@@ -495,6 +495,24 @@ def generate_invoice_pdf(invoice, branding=None, theme_config=None, generated_by
     pdf.cell(0, 4, "Thank you for your business!", ln=True, align="C")
 
     return pdf.output()
+
+
+def generate_invoice_pdf(invoice, branding=None, theme_config=None, generated_by=None):
+    """Generate a polished invoice through the shared Nexus document system.
+
+    ``theme_config`` remains accepted for API compatibility while invoices now
+    intentionally use the common commercial-document language.  Branding is
+    still applied by the shared renderer, so reports, invoices, purchase
+    orders and portal evidence all feel like one product.
+    """
+    from app.services.finance_integrity import normalise_invoice_document
+
+    del theme_config
+    return render_nexus_invoice_pdf(
+        normalise_invoice_document(invoice) or {},
+        branding=branding,
+        generated_by=generated_by,
+    )
 
 
 @router.get("/invoices/{invoice_id}/pdf")

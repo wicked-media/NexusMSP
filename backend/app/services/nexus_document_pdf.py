@@ -417,3 +417,98 @@ def render_nexus_purchase_order_pdf(
         footer="This purchase order is a retained NexusMSP procurement record. Validate supplier acceptance before fulfilment.",
         generated_by=generated_by,
     )
+
+
+def render_nexus_invoice_pdf(
+    invoice: dict[str, Any],
+    *,
+    branding: dict[str, Any] | None = None,
+    generated_by: str | None = None,
+) -> bytes:
+    """Render invoices in the shared Nexus client-document language.
+
+    Invoices are commercial evidence, not an isolated template family.  They
+    retain all of the important financial detail while sharing the same
+    masthead, section hierarchy, provenance, footer and accessible tables as
+    reports, purchase orders and portal audit records.
+    """
+    record = invoice or {}
+
+    def as_number(value: Any) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def money(value: Any) -> str:
+        return f"${as_number(value):,.2f}"
+
+    invoice_number = _as_text(record.get("invoice_number") or record.get("id") or "Draft")
+    total = as_number(record.get("total"))
+    paid = as_number(record.get("amount_paid"))
+    balance = max(total - paid, 0)
+    status = _as_text(record.get("payment_status") or record.get("status") or "issued").replace("_", " ").title()
+    items: list[dict[str, Any]] = []
+    for item in record.get("line_items") or []:
+        quantity = as_number(item.get("quantity") or 1)
+        rate = as_number(item.get("unit_price") or item.get("rate"))
+        amount = as_number(item.get("total")) or quantity * rate
+        items.append({
+            "Item": item.get("product_name") or item.get("name") or "Managed service",
+            "Description": item.get("description") or "-",
+            "Quantity": f"{quantity:g}",
+            "Rate": money(rate),
+            "Amount": money(amount),
+        })
+
+    bill_to = {
+        "Organisation": record.get("client_name") or "Not recorded",
+        "Email": record.get("client_email") or "Not recorded",
+        "Billing contact": record.get("billing_contact") or "Not recorded",
+        "Billing address": record.get("billing_address") or record.get("client_address") or "Not recorded",
+    }
+    financials = {
+        "Subtotal": money(record.get("subtotal") or total),
+        "Discount": money(record.get("discount")) if as_number(record.get("discount")) else "None",
+        "Tax": money(record.get("tax") or record.get("tax_amount")),
+        "Amount paid": money(paid),
+        "Balance due": money(balance),
+        "Payment status": status,
+    }
+    sections: list[tuple[str, Any]] = [
+        ("Bill to", bill_to),
+        ("Invoice items", items or [{"Item": "No line items recorded", "Description": "-", "Quantity": "-", "Rate": "-", "Amount": money(total)}]),
+        ("Financial summary", financials),
+    ]
+    payments = record.get("payments") or []
+    if payments:
+        sections.append(("Payment history", [{
+            "Date": payment.get("date") or payment.get("created_at") or "Not recorded",
+            "Method": _as_text(payment.get("method") or "Payment").replace("_", " ").title(),
+            "Reference": payment.get("reference") or payment.get("session_id") or "-",
+            "Amount": money(payment.get("amount")),
+        } for payment in payments]))
+    if record.get("notes"):
+        sections.append(("Notes", record.get("notes")))
+
+    return render_nexus_document_pdf(
+        title=f"Invoice {invoice_number}",
+        document_kind="Tax invoice",
+        subtitle=f"{_as_text(record.get('client_name') or 'Client account')} | {status}",
+        metadata=[
+            ("Invoice", invoice_number),
+            ("Issued", record.get("issued_date") or record.get("created_at")),
+            ("Due", record.get("due_date")),
+            ("Status", status),
+        ],
+        metric_cards=[
+            ("Invoice total", money(total)),
+            ("Balance due", money(balance)),
+            ("Amount paid", money(paid)),
+            ("Status", status),
+        ],
+        sections=sections,
+        branding=branding,
+        footer=(branding or {}).get("invoice_footer_text") or "This invoice is a retained NexusMSP commercial record. Please quote the invoice number with any enquiry.",
+        generated_by=generated_by,
+    )
