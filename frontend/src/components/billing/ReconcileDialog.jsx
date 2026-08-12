@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -59,18 +60,15 @@ export default function ReconcileDialog({ open, onOpenChange, recurringInvoice, 
   const summary = data?.summary || {};
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <DollarSign className="w-5 h-5 text-emerald-400" />
-            Bill-Shock Reconciliation
-          </DialogTitle>
-          <DialogDescription>
-            Compares billed line item quantities to actual Acronis-protected device counts for{" "}
-            <strong>{recurringInvoice?.client_name || recurringInvoice?.description || "this invoice"}</strong>.
-            Link a line item to an Acronis plan to enable automatic drift detection.
-          </DialogDescription>
-        </DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Billing assurance"
+        title="Bill-shock reconciliation"
+        description={`Compare billed quantities with protected endpoints for ${recurringInvoice?.client_name || recurringInvoice?.description || "this billing record"}, then link a line item to enable continuous drift detection.`}
+        icon={DollarSign}
+        tone="emerald"
+        className="max-w-5xl"
+        footer={<><Button variant="outline" onClick={fetchReconcile} disabled={loading}><RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />Re-scan</Button><Button onClick={() => onOpenChange(false)}>Done</Button></>}
+      >
 
         {loading ? (
           <div className="flex items-center justify-center py-16 text-muted-foreground">
@@ -207,13 +205,7 @@ export default function ReconcileDialog({ open, onOpenChange, recurringInvoice, 
           </>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={fetchReconcile} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />Re-scan
-          </Button>
-          <Button onClick={() => onOpenChange(false)}>Done</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
