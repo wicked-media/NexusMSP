@@ -5,7 +5,7 @@ import { API, useAuth } from "@/App";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -57,6 +57,7 @@ import {
   XCircle,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   chatAuthorName,
   channelDisplayName,
@@ -1159,13 +1160,18 @@ function TicketPassDialog({ open, onOpenChange, ticket, headers, currentUserId, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl overflow-hidden border-cyan-500/20 bg-[#121b24] p-0 text-zinc-100">
-        <DialogHeader className="border-b border-cyan-500/10 bg-gradient-to-r from-emerald-500/[0.09] to-cyan-500/[0.06] px-6 py-5 text-left">
-          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300"><ArrowRightLeft className="h-4 w-4" />Nexus Ticket Pass</div>
-          <DialogTitle>Hand over {ticket.ticket_number}</DialogTitle>
-          <DialogDescription className="text-zinc-400">The recipient must explicitly accept. Nexus preserves both technicians, the reason, work completed and the live assignment trail.</DialogDescription>
-        </DialogHeader>
-        <div className="grid max-h-[65vh] gap-5 overflow-y-auto px-6 py-5 md:grid-cols-2">
+      <NexusWorkflowDialog
+        eyebrow="Nexus ticket pass"
+        title={`Hand over ${ticket.ticket_number}`}
+        description="The recipient must explicitly accept. Nexus preserves both technicians, the reason, work completed and the live assignment trail."
+        icon={ArrowRightLeft}
+        tone="emerald"
+        className="max-w-2xl"
+        contentClassName="max-h-[65vh] overflow-y-auto"
+        data-testid="ticket-pass-workflow"
+        footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={submit} disabled={!toUserId || reason.trim().length < 3 || submitting} className="bg-emerald-600 hover:bg-emerald-500">{submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRightLeft className="mr-2 h-4 w-4" />}Send ticket pass</Button></>}
+      >
+        <div className="grid gap-5 md:grid-cols-2">
           <label className="space-y-2 text-xs font-medium text-zinc-300">Receiving technician
             <select value={toUserId} onChange={event => setToUserId(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/25 px-3 text-sm text-zinc-100 outline-none focus:border-emerald-500/60">
               <option value="">Choose a technician</option>
@@ -1193,11 +1199,7 @@ function TicketPassDialog({ open, onOpenChange, ticket, headers, currentUserId, 
             <Textarea value={nextAction} onChange={event => setNextAction(event.target.value)} placeholder="Check the print server spooler and driver deployment." className="mt-2 min-h-28 border-white/10 bg-black/25" />
           </label>
         </div>
-        <DialogFooter className="border-t border-white/5 bg-black/15 px-6 py-4">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={!toUserId || reason.trim().length < 3 || submitting} className="bg-emerald-600 hover:bg-emerald-500">{submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRightLeft className="mr-2 h-4 w-4" />}Send ticket pass</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -1264,7 +1266,7 @@ function TicketPassCard({ handoffId, headers, currentUserId }) {
         {pendingForMe && <><Button size="sm" className="ml-auto h-8 bg-emerald-600 text-xs hover:bg-emerald-500" disabled={Boolean(processing)} onClick={() => decide("accept")}>{processing === "accept" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}Accept</Button><Button variant="outline" size="sm" className="h-8 text-xs" disabled={Boolean(processing)} onClick={() => setDeclineOpen(true)}><XCircle className="mr-1.5 h-3.5 w-3.5" />Decline</Button></>}
       </div>
       <Dialog open={declineOpen} onOpenChange={setDeclineOpen}>
-        <DialogContent className="border-rose-500/20 bg-[#121b24] text-zinc-100"><DialogHeader><DialogTitle>Decline ticket pass?</DialogTitle><DialogDescription className="text-zinc-400">Give {handoff.from_user_name} enough context to choose the right next step.</DialogDescription></DialogHeader><Textarea value={declineReason} onChange={event => setDeclineReason(event.target.value)} placeholder="Why can you not accept this ticket?" className="min-h-24 border-white/10 bg-black/25" /><DialogFooter><Button variant="ghost" onClick={() => setDeclineOpen(false)}>Cancel</Button><Button variant="destructive" disabled={declineReason.trim().length < 3 || Boolean(processing)} onClick={() => decide("decline", declineReason.trim())}>Decline pass</Button></DialogFooter></DialogContent>
+        <NexusWorkflowDialog eyebrow="Ticket handover" title="Decline ticket pass?" description={`Give ${handoff.from_user_name} enough context to choose the right next step.`} icon={XCircle} tone="amber" className="max-w-lg" data-testid="decline-ticket-pass-workflow" footer={<><Button variant="ghost" onClick={() => setDeclineOpen(false)}>Cancel</Button><Button variant="destructive" disabled={declineReason.trim().length < 3 || Boolean(processing)} onClick={() => decide("decline", declineReason.trim())}>Decline pass</Button></>}><Textarea value={declineReason} onChange={event => setDeclineReason(event.target.value)} placeholder="Why can you not accept this ticket?" className="min-h-24 border-white/10 bg-black/25" /></NexusWorkflowDialog>
       </Dialog>
     </div>
   );
@@ -1437,13 +1439,18 @@ function NewConversationDialog({ open, onOpenChange, users, currentUserId, heade
   const invalid = tab === "dm" ? selected.length !== 1 : tab === "group" ? selected.length < 2 : name.trim().length < 2;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-cyan-500/20 bg-[#0e161e] p-0 shadow-2xl shadow-cyan-950/40">
-        <DialogHeader className="border-b border-cyan-500/10 bg-gradient-to-r from-emerald-500/[0.10] via-cyan-500/[0.06] to-transparent px-6 py-5 text-left">
-          <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Audited collaboration workflow</div>
-          <DialogTitle className="flex items-center gap-3 text-xl"><span className="grid h-10 w-10 place-items-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><MessageSquarePlus className="h-5 w-5 text-emerald-300" /></span>Start collaborating</DialogTitle>
-          <DialogDescription className="max-w-xl text-zinc-400">Open a private conversation, assemble an operational group, or create a governed channel with a clear purpose and access boundary.</DialogDescription>
-        </DialogHeader>
-        <Tabs value={tab} onValueChange={value => { setTab(value); setSelected([]); setName(""); }} className="px-6 pt-5">
+      <NexusWorkflowDialog
+        eyebrow="Audited collaboration workflow"
+        title="Start collaborating"
+        description="Open a private conversation, assemble an operational group, or create a governed channel with a clear purpose and access boundary."
+        icon={MessageSquarePlus}
+        tone="emerald"
+        className="max-h-[90vh] max-w-2xl"
+        contentClassName="overflow-y-auto"
+        data-testid="collaboration-workflow"
+        footer={<><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="min-w-32 bg-emerald-600 hover:bg-emerald-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></>}
+      >
+        <Tabs value={tab} onValueChange={value => { setTab(value); setSelected([]); setName(""); }}>
           <TabsList className="grid h-11 w-full grid-cols-3 rounded-xl border border-white/5 bg-black/25 p-1"><TabsTrigger value="dm" className="rounded-lg">Direct</TabsTrigger><TabsTrigger value="group" className="rounded-lg">Group chat</TabsTrigger><TabsTrigger value="channel" className="rounded-lg">Channel</TabsTrigger></TabsList>
           <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.02] p-4">
             <TabsContent value="dm" className="mt-0 space-y-3"><p className="text-xs text-zinc-500">Choose one technician. Existing conversations reopen instead of creating duplicates.</p><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={id => setSelected([id])} /></TabsContent>
@@ -1451,8 +1458,7 @@ function NewConversationDialog({ open, onOpenChange, users, currentUserId, heade
             <TabsContent value="channel" className="mt-0 space-y-3"><p className="text-xs text-zinc-500">Create a durable workspace for a service, project, incident stream, or technical discipline.</p><Input value={name} onChange={event => setName(event.target.value.replace(/\s+/g, "-").toLowerCase().slice(0, 50))} placeholder="Channel name" className="border-white/10 bg-black/20" data-testid="channel-name-new" /><Textarea value={description} onChange={event => setDescription(event.target.value.slice(0, 240))} placeholder="Purpose, scope, and what belongs in this channel" className="min-h-24 border-white/10 bg-black/20" /><label className="flex cursor-pointer items-center gap-3 rounded-xl border border-white/5 bg-black/15 p-3 transition hover:border-cyan-500/20"><input type="checkbox" checked={privateChannel} onChange={event => setPrivateChannel(event.target.checked)} className="accent-emerald-500" /><div><p className="text-sm font-medium">Private channel</p><p className="text-xs text-zinc-500">Only selected members can discover and read this channel.</p></div></label>{privateChannel && <><UserSearch value={search} onChange={setSearch} /><UserPicker candidates={candidates} selected={selected} onToggle={toggle} /></>}</TabsContent>
           </div>
         </Tabs>
-        <DialogFooter className="border-t border-white/5 bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={create} disabled={invalid || busy} className="min-w-32 bg-emerald-600 hover:bg-emerald-500">{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{tab === "channel" ? "Create channel" : "Start chat"}</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
