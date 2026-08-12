@@ -335,7 +335,7 @@ export default function DevicesPage() {
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Additional notes..." /></div>
           </section>
         </div>
-        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-device-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button variant="success" onClick={handleSave} data-testid="save-device-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -374,7 +374,7 @@ export default function DevicesPage() {
           <Button size="sm" variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn">
             <Radar className="w-3 h-3 mr-1" />Discover
           </Button>
-          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-500" onClick={openCreate} data-testid="add-device-btn">
+          <Button size="sm" variant="success" onClick={openCreate} data-testid="add-device-btn">
             <Plus className="w-4 h-4 mr-1" />Add managed asset
           </Button>
           <Button size="sm" variant="outline" onClick={fetchData} data-testid="devices-refresh-btn">
@@ -558,7 +558,7 @@ export default function DevicesPage() {
         )}
         <div className="ml-auto flex gap-1 items-center">
           {selectedDevices.length > 0 && (
-            <Button size="sm" variant="outline" className="h-9 text-xs text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10" onClick={() => setQuickScriptOpen(true)} data-testid="bulk-quick-script-btn">
+            <Button size="sm" variant="info" className="h-9 text-xs" onClick={() => setQuickScriptOpen(true)} data-testid="bulk-quick-script-btn">
               <Zap className="w-3 h-3 mr-1" />Quick Script ({selectedDevices.length})
             </Button>
           )}
@@ -871,7 +871,7 @@ export default function DevicesPage() {
               <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Approved subnet</Label>
               <Input value={discoverySubnet} onChange={e => setDiscoverySubnet(e.target.value)} placeholder="192.168.1.0/24" data-testid="discovery-subnet" />
             </div>
-            <Button className="h-10 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleDiscoverDevices} disabled={discoveryLoading || !discoveryClientId} data-testid="run-discovery-btn">
+            <Button variant="success" className="h-10" onClick={handleDiscoverDevices} disabled={discoveryLoading || !discoveryClientId} data-testid="run-discovery-btn">
               {discoveryLoading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Radar className="w-4 h-4 mr-1" />}
               Scan Network
             </Button>
@@ -885,7 +885,7 @@ export default function DevicesPage() {
                   <span className="text-xs text-muted-foreground">on {discoveryResults.subnet}</span>
                 </div>
                 {selectedDiscovered.length > 0 && (
-                  <Button size="sm" className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleImportDiscovered} disabled={importLoading} data-testid="import-discovered-btn">
+                  <Button size="sm" variant="success" onClick={handleImportDiscovered} disabled={importLoading} data-testid="import-discovered-btn">
                     {importLoading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Download className="w-3 h-3 mr-1" />}
                     Import {selectedDiscovered.length} Device{selectedDiscovered.length > 1 ? "s" : ""}
                   </Button>
