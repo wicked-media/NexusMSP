@@ -35,6 +35,8 @@ jobs:
           CI: "true"
       - name: Hook and lint regression budget
         run: pnpm lint:ci
+      - name: Control consistency inventory
+        run: pnpm audit:controls
       - name: Production build
         run: pnpm build
         env:
