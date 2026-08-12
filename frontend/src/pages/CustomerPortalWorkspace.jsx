@@ -674,7 +674,7 @@ export default function CustomerPortalWorkspace() {
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
               {canCreateTickets && (
-                <Button onClick={() => setShowRequest(true)} className="h-10 rounded-xl bg-emerald-400 px-4 font-semibold text-emerald-950 hover:bg-emerald-300">
+                <Button variant="success" onClick={() => setShowRequest(true)} className="h-10 rounded-xl px-4 font-semibold">
                   <Plus className="mr-2 h-4 w-4" />New request
                 </Button>
               )}
@@ -900,7 +900,7 @@ export default function CustomerPortalWorkspace() {
                   />
                   <div className="mt-2 flex items-center justify-between border-t border-white/[0.06] pt-3">
                     <p className="text-[10px] text-slate-600">Visible to your organisation and authorised technicians</p>
-                    <Button onClick={sendMessage} disabled={sendingMessage || !newMessage.trim()} className="h-8 rounded-lg bg-emerald-400 px-3 text-xs font-semibold text-emerald-950 hover:bg-emerald-300">
+                    <Button variant="success" onClick={sendMessage} disabled={sendingMessage || !newMessage.trim()} className="h-8 rounded-lg px-3 text-xs font-semibold">
                       {sendingMessage ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}Send reply
                     </Button>
                   </div>
@@ -916,7 +916,7 @@ export default function CustomerPortalWorkspace() {
             title="Requests"
             description="Create, track, and continue every service conversation without losing the audit trail."
             action={canCreateTickets ? (
-              <Button onClick={() => setShowRequest(true)} className="h-10 rounded-xl bg-emerald-400 font-semibold text-emerald-950 hover:bg-emerald-300">
+              <Button variant="success" onClick={() => setShowRequest(true)} className="h-10 rounded-xl font-semibold">
                 <Plus className="mr-2 h-4 w-4" />New request
               </Button>
             ) : null}
@@ -1158,7 +1158,7 @@ export default function CustomerPortalWorkspace() {
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={downloadInvoice} disabled={downloadingInvoice} className="h-10 rounded-xl border-white/10 bg-white/[0.03]"><Download className="mr-2 h-4 w-4" />PDF</Button>
                   {Math.max(Number(selectedInvoice.total || 0) - Number(selectedInvoice.amount_paid || 0), 0) > 0.01 && (
-                    <Button onClick={payInvoice} disabled={payingInvoice} className="h-10 rounded-xl bg-emerald-400 font-semibold text-emerald-950 hover:bg-emerald-300"><CreditCard className="mr-2 h-4 w-4" />Pay securely</Button>
+                    <Button variant="success" onClick={payInvoice} disabled={payingInvoice} className="h-10 rounded-xl font-semibold"><CreditCard className="mr-2 h-4 w-4" />Pay securely</Button>
                   )}
                 </div>
               </div>
@@ -1294,7 +1294,7 @@ export default function CustomerPortalWorkspace() {
             <div className="mt-8 rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.04] p-5">
               <p className="text-sm font-semibold text-white">Still need a hand?</p>
               <p className="mt-1 text-xs text-slate-500">Start a request and this guide can remain part of the troubleshooting context.</p>
-              {canCreateTickets && <Button onClick={() => { setRequestForm((current) => ({ ...current, title: `Help with: ${selectedArticle.title}`, description: `I followed the guide “${selectedArticle.title}” and still need assistance.\n\nWhat happened:\n` })); setShowRequest(true); }} className="mt-4 h-9 rounded-xl bg-emerald-400 text-xs font-semibold text-emerald-950 hover:bg-emerald-300"><LifeBuoy className="mr-2 h-4 w-4" />Get support</Button>}
+              {canCreateTickets && <Button variant="success" onClick={() => { setRequestForm((current) => ({ ...current, title: `Help with: ${selectedArticle.title}`, description: `I followed the guide “${selectedArticle.title}” and still need assistance.\n\nWhat happened:\n` })); setShowRequest(true); }} className="mt-4 h-9 rounded-xl text-xs font-semibold"><LifeBuoy className="mr-2 h-4 w-4" />Get support</Button>}
             </div>
           </div>
         </article>
@@ -1369,7 +1369,7 @@ export default function CustomerPortalWorkspace() {
               <div className="space-y-2"><Label className="text-xs text-slate-400">Phone</Label><Input value={accountForm.phone} onChange={(event) => setAccountForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+61…" className="h-11 rounded-xl border-white/[0.08] bg-black/15" /></div>
               <div className="space-y-2 sm:col-span-2"><Label className="text-xs text-slate-400">Email</Label><Input value={profile?.user?.email || ""} disabled className="h-11 rounded-xl border-white/[0.08] bg-white/[0.02] text-slate-500" /><p className="text-[10px] text-slate-600">Email changes require identity verification by your portal administrator.</p></div>
             </div>
-            <div className="mt-6 flex justify-end"><Button onClick={saveAccount} disabled={savingAccount} className="h-10 rounded-xl bg-emerald-400 font-semibold text-emerald-950 hover:bg-emerald-300">{savingAccount ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></div>
+            <div className="mt-6 flex justify-end"><Button variant="success" onClick={saveAccount} disabled={savingAccount} className="h-10 rounded-xl font-semibold">{savingAccount ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}Save changes</Button></div>
           </CardContent>
         </Card>
       </div>
@@ -1433,7 +1433,7 @@ export default function CustomerPortalWorkspace() {
             <div className="rounded-2xl border border-emerald-400/12 bg-emerald-400/[0.035] p-4">
               <div className="flex items-center gap-2 text-emerald-300"><Headphones className="h-4 w-4" /><p className="text-xs font-semibold">Need support?</p></div>
               <p className="mt-2 text-[10px] leading-5 text-slate-600">Create a tracked request and keep every update in one place.</p>
-              {canCreateTickets && <Button onClick={() => setShowRequest(true)} className="mt-3 h-8 w-full rounded-lg bg-emerald-400 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-300"><Plus className="mr-1.5 h-3.5 w-3.5" />New request</Button>}
+              {canCreateTickets && <Button variant="success" onClick={() => setShowRequest(true)} className="mt-3 h-8 w-full rounded-lg text-[11px] font-semibold"><Plus className="mr-1.5 h-3.5 w-3.5" />New request</Button>}
             </div>
             <button type="button" onClick={logout} className="mt-3 flex h-9 w-full items-center gap-3 rounded-xl px-3 text-xs text-slate-600 transition hover:bg-rose-400/[0.05] hover:text-rose-300"><LogOut className="h-4 w-4" />Sign out</button>
           </div>
@@ -1522,7 +1522,7 @@ export default function CustomerPortalWorkspace() {
           </div>
           <DialogFooter className="border-t border-white/[0.07] bg-black/10 p-4 sm:px-6">
             <Button variant="ghost" onClick={() => setShowRequest(false)} className="rounded-xl">Cancel</Button>
-            <Button onClick={createRequest} disabled={creatingRequest} className="rounded-xl bg-emerald-400 font-semibold text-emerald-950 hover:bg-emerald-300" data-testid="portal-ticket-submit">{creatingRequest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Submit request</Button>
+            <Button variant="success" onClick={createRequest} disabled={creatingRequest} className="rounded-xl font-semibold" data-testid="portal-ticket-submit">{creatingRequest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Submit request</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1729,7 +1729,7 @@ export default function CustomerPortalWorkspace() {
               <span className="text-xs leading-5 text-slate-300"><strong>I authorise this session</strong> and understand that the remote-access event will be retained for audit and service-quality purposes.</span>
             </label>
           </div>
-          <DialogFooter><Button variant="ghost" onClick={() => setConsentDevice(null)}>Cancel</Button><Button onClick={connectDevice} disabled={!consentChecked || connectingDeviceId === consentDevice?.id} className="bg-emerald-400 font-semibold text-emerald-950 hover:bg-emerald-300">{connectingDeviceId === consentDevice?.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}Authorise and connect</Button></DialogFooter>
+          <DialogFooter><Button variant="ghost" onClick={() => setConsentDevice(null)}>Cancel</Button><Button variant="success" onClick={connectDevice} disabled={!consentChecked || connectingDeviceId === consentDevice?.id} className="font-semibold">{connectingDeviceId === consentDevice?.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Power className="mr-2 h-4 w-4" />}Authorise and connect</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
