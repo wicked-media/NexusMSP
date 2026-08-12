@@ -138,7 +138,10 @@ export default function CommandPalette() {
   useEffect(() => {
     const onKey = event => {
       const modifier = event.metaKey || event.ctrlKey;
-      const commandShortcut = event.key.toLowerCase() === "k";
+      // Some browser extensions and telemetry tools dispatch incomplete keyboard
+      // events. Treat those as non-shortcuts instead of allowing a global handler
+      // to throw and destabilise the current workspace.
+      const commandShortcut = String(event.key || "").toLowerCase() === "k";
       const everythingShortcut = event.code === "Space";
       if (modifier && (commandShortcut || everythingShortcut)) {
         event.preventDefault();

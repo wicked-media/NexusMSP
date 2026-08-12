@@ -298,10 +298,10 @@ export default function SettingsPage() {
           axios.get(`${API}/scheduling/calendar-connection`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/nexus-elevate/settings`, { headers }).catch(() => ({ data: null })),
         ]);
-        setUsers(usersRes.data);
-        setThreshold(thresholdRes.data);
-        setXero(xeroRes.data);
-        setStripe(stripeRes.data);
+        setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
+        setThreshold(prev => ({ ...prev, ...(thresholdRes.data || {}) }));
+        setXero(prev => ({ ...prev, ...(xeroRes.data || {}), client_id: xeroRes.data?.client_id || "", client_secret: xeroRes.data?.client_secret || "", redirect_uri: xeroRes.data?.redirect_uri || "" }));
+        setStripe(prev => ({ ...prev, ...(stripeRes.data || {}), api_key: stripeRes.data?.api_key || "" }));
         if (acronisRes.data) setAcronis(prev => ({ ...prev, api_url: acronisRes.data.api_url || "", client_id: acronisRes.data.client_id || "", connected: acronisRes.data.connected || false }));
         if (smsRes?.data) setSms(prev => ({ ...prev, ...smsRes.data, password: "" }));
         if (pax8Res?.data) setPax8(prev => ({ ...prev, ...pax8Res.data, client_secret: "" }));
@@ -312,9 +312,9 @@ export default function SettingsPage() {
         if (trmmNotifRes?.data) setTrmmNotif(prev => ({ ...prev, ...trmmNotifRes.data }));
         if (calendarRes?.data) setCalendarConnection(prev => ({ ...prev, ...calendarRes.data }));
         if (nexusElevateRes?.data) setNexusElevate(prev => ({ ...prev, ...nexusElevateRes.data }));
-        setSuped(supedRes.data);
-        setSplynx(splynxRes.data);
-        setHudu(huduRes.data);
+        setSuped(prev => ({ ...prev, ...(supedRes.data || {}), api_key: supedRes.data?.api_key || "" }));
+        setSplynx(prev => ({ ...prev, ...(splynxRes.data || {}), url: splynxRes.data?.url || "", api_key: splynxRes.data?.api_key || "", api_secret: splynxRes.data?.api_secret || "" }));
+        setHudu(prev => ({ ...prev, ...(huduRes.data || {}), url: huduRes.data?.url || "", api_key: huduRes.data?.api_key || "" }));
         if (aiRes.data.provider) {
           setAiConfig(aiRes.data);
           setOpenaiForm(prev => ({
@@ -324,8 +324,8 @@ export default function SettingsPage() {
             project_id: aiRes.data.connection?.project_id || "",
           }));
         }
-        setSyncro(syncroRes.data);
-        if (jnRes.data) setJobNumbering(jnRes.data);
+        setSyncro(prev => ({ ...prev, ...(syncroRes.data || {}), subdomain: syncroRes.data?.subdomain || "", api_key: syncroRes.data?.api_key || "" }));
+        if (jnRes.data) setJobNumbering(prev => ({ ...prev, ...jnRes.data }));
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data, client_secret: "" }));
         if (brandingRes.data && brandingRes.data.company_name) setBranding(prev => ({ ...prev, ...brandingRes.data }));
         if (mbxRes.data) {
