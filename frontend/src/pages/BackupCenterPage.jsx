@@ -1525,8 +1525,8 @@ export default function BackupCenterPage() {
           eyebrow="Backup estate hygiene"
           title={orphanCleanupTarget?.kind === "zombie" ? "Remove zombie backup plan?" : "Uninstall offline backup agent?"}
           description={orphanCleanupTarget?.kind === "zombie"
-            ? `${orphanCleanupTarget.bulk ? selectedZombies.length : 1} plan${(orphanCleanupTarget.bulk ? selectedZombies.length : 1) === 1 ? "" : "s"} will be unassigned from missing resources.`
-            : `${orphanCleanupTarget.bulk ? selectedAgents.length : 1} offline agent${(orphanCleanupTarget.bulk ? selectedAgents.length : 1) === 1 ? "" : "s"} will be removed from the backup estate.`}
+            ? `${orphanCleanupTarget?.bulk ? selectedZombies.length : 1} plan${(orphanCleanupTarget?.bulk ? selectedZombies.length : 1) === 1 ? "" : "s"} will be unassigned from missing resources.`
+            : `${orphanCleanupTarget?.bulk ? selectedAgents.length : 1} offline agent${(orphanCleanupTarget?.bulk ? selectedAgents.length : 1) === 1 ? "" : "s"} will be removed from the backup estate.`}
           icon={orphanCleanupTarget?.kind === "zombie" ? Skull : WifiOff}
           tone="amber"
           className="max-w-xl"
