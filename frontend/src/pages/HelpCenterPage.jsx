@@ -33,6 +33,13 @@ const categoryDetails = {
   "Automation & intelligence": { label: "Automation & intelligence", description: "Scripts, runbooks, alert rules, and AI-assisted operational workflows." },
 };
 
+const QUICK_STARTS = [
+  { slug: "ticket-triage", label: "A customer needs help", detail: "Triage, scope, and create a safe service response.", icon: CircleHelp, tone: "emerald" },
+  { slug: "work-ticket", label: "I need to work a ticket", detail: "Capture actions, communicate clearly, and close with evidence.", icon: ListChecks, tone: "cyan" },
+  { slug: "client-360", label: "I am setting up a client", detail: "Build the connected client record and complete onboarding.", icon: FolderOpen, tone: "violet" },
+  { slug: "backup-operations", label: "I need to verify protection", detail: "Check backup health and prove a restore path.", icon: ShieldCheck, tone: "amber" },
+];
+
 const GUIDE_SCAFFOLD = `## Outcome
 State the exact, observable result a technician should achieve.
 
@@ -391,6 +398,30 @@ export default function HelpCenterPage() {
             {isAdmin && <Button size="sm" className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => { setEditing(null); setEditorOpen(true); }} data-testid="help-new-article-btn"><Plus className="mr-1.5 h-4 w-4" />New guide</Button>}
           </div>
         </header>
+
+        <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-card/80 p-4 shadow-[0_20px_60px_-42px_rgba(34,211,238,0.55)]" aria-label="Start a guided task">
+          <div className="flex flex-wrap items-end justify-between gap-3 px-1 pb-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">Start with the outcome</p>
+              <h2 className="mt-1 text-lg font-semibold">What are you trying to do?</h2>
+            </div>
+            <p className="max-w-md text-xs leading-5 text-muted-foreground">Choose the outcome in front of you. Nexus will open the matching task-first guide with readiness, execution, verification, and evidence steps.</p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            {QUICK_STARTS.map(({ slug: quickStartSlug, label, detail, icon: Icon, tone }) => {
+              const toneClass = {
+                emerald: "hover:border-emerald-400/30 hover:bg-emerald-500/[0.055] group-hover:bg-emerald-500/12 group-hover:text-emerald-300",
+                cyan: "hover:border-cyan-400/30 hover:bg-cyan-500/[0.055] group-hover:bg-cyan-500/12 group-hover:text-cyan-300",
+                violet: "hover:border-violet-400/30 hover:bg-violet-500/[0.055] group-hover:bg-violet-500/12 group-hover:text-violet-300",
+                amber: "hover:border-amber-400/30 hover:bg-amber-500/[0.055] group-hover:bg-amber-500/12 group-hover:text-amber-300",
+              }[tone];
+              return <button key={quickStartSlug} type="button" onClick={() => openGuide(quickStartSlug)} className={`group flex min-h-[104px] items-start gap-3 rounded-xl border border-white/[0.07] bg-black/[0.12] p-3.5 text-left transition ${toneClass}`} data-testid={`help-quick-start-${quickStartSlug}`}>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.035] text-muted-foreground transition"><Icon className="h-4 w-4" /></span>
+                <span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="text-sm font-semibold text-foreground">{label}</span><ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5" /></span><span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{detail}</span></span>
+              </button>;
+            })}
+          </div>
+        </section>
 
         <section className="grid gap-3 sm:grid-cols-3" aria-label="Help Centre status">
           <Card className="border-emerald-500/15 bg-gradient-to-br from-emerald-500/[0.08] to-card"><CardContent className="flex items-center gap-3 p-4"><BookOpen className="h-5 w-5 text-emerald-300" /><div><p className="text-xl font-bold">{library.count || library.articles.length}</p><p className="text-xs text-muted-foreground">Operational guides</p></div></CardContent></Card>
