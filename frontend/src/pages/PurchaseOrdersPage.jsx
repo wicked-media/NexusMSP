@@ -864,7 +864,7 @@ export default function PurchaseOrdersPage() {
           </div>
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} /></div>
         </div>
-        <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><p className="mr-auto text-xs text-zinc-500">New orders begin as drafts and move through approval before they are sent to a vendor.</p><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-po-btn">{editing ? "Save audited changes" : "Create draft purchase order"}</Button></DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><p className="mr-auto text-xs text-zinc-500">New orders begin as drafts and move through approval before they are sent to a vendor.</p><Button variant="success" onClick={handleSave} data-testid="save-po-btn">{editing ? "Save audited changes" : "Create draft purchase order"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -947,7 +947,7 @@ export default function PurchaseOrdersPage() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setReceiveItems(prev => prev.map(ri => ({ ...ri, receive_now: ri.quantity - (ri.received_qty || 0) })))}>Receive All</Button>
-          <Button onClick={handleReceiveStock} className="bg-green-600 hover:bg-green-700" data-testid="confirm-receive-btn"><PackageCheck className="w-4 h-4 mr-1" />Confirm Receipt</Button>
+          <Button variant="success" onClick={handleReceiveStock} data-testid="confirm-receive-btn"><PackageCheck className="w-4 h-4 mr-1" />Confirm Receipt</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -997,8 +997,8 @@ export default function PurchaseOrdersPage() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setApprovalDialog(null)}>Cancel</Button>
-          {approvalDialog === "submit" && <Button onClick={handleSubmitApproval} className="bg-blue-600 hover:bg-blue-700" data-testid="confirm-submit-approval"><Send className="w-4 h-4 mr-1" />Submit</Button>}
-          {approvalDialog === "approve" && <Button onClick={handleApprove} className="bg-green-600 hover:bg-green-700" data-testid="confirm-approve-btn"><ThumbsUp className="w-4 h-4 mr-1" />Approve</Button>}
+          {approvalDialog === "submit" && <Button variant="info" onClick={handleSubmitApproval} data-testid="confirm-submit-approval"><Send className="w-4 h-4 mr-1" />Submit</Button>}
+          {approvalDialog === "approve" && <Button variant="success" onClick={handleApprove} data-testid="confirm-approve-btn"><ThumbsUp className="w-4 h-4 mr-1" />Approve</Button>}
           {approvalDialog === "reject" && <Button variant="destructive" onClick={handleReject} data-testid="confirm-reject-btn"><ThumbsDown className="w-4 h-4 mr-1" />Reject</Button>}
         </DialogFooter>
       </DialogContent>
@@ -1008,7 +1008,7 @@ export default function PurchaseOrdersPage() {
   // ========== EMAIL VENDOR DIALOG ==========
   const emailVendorDialogEl = (
     <Dialog open={emailVendorDialog} onOpenChange={setEmailVendorDialog}>
-      <NexusWorkflowDialog eyebrow="Supplier communication" title="Email purchase order" description="Send the approved purchase order with a recorded recipient, subject and message for the procurement audit trail." icon={Mail} tone="cyan" className="max-w-md" footer={<><Button variant="outline" onClick={() => setEmailVendorDialog(false)}>Cancel</Button><Button onClick={handleEmailVendor} className="bg-blue-600 hover:bg-blue-700" data-testid="send-vendor-email-btn"><Send className="mr-1 h-4 w-4" />Send email</Button></>}>
+      <NexusWorkflowDialog eyebrow="Supplier communication" title="Email purchase order" description="Send the approved purchase order with a recorded recipient, subject and message for the procurement audit trail." icon={Mail} tone="cyan" className="max-w-md" footer={<><Button variant="outline" onClick={() => setEmailVendorDialog(false)}>Cancel</Button><Button variant="info" onClick={handleEmailVendor} data-testid="send-vendor-email-btn"><Send className="mr-1 h-4 w-4" />Send email</Button></>}>
         <div className="space-y-3">
           <div><Label>Vendor Email</Label><Input value={emailForm.email} onChange={e => setEmailForm({ ...emailForm, email: e.target.value })} placeholder="vendor@example.com" data-testid="vendor-email-input" /></div>
           <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} /></div>
@@ -1045,7 +1045,7 @@ export default function PurchaseOrdersPage() {
           })}
           <div><Label>Internal notes</Label><Textarea value={returnForm.notes} onChange={event => setReturnForm(current => ({ ...current, notes: event.target.value }))} rows={2} placeholder="Supplier conversation, courier, or credit expectations" /></div>
         </div>
-        <DialogFooter className="border-t border-white/[0.08] px-6 py-4"><Button variant="outline" onClick={() => setReturnDialog(false)}>Cancel</Button><Button className="bg-amber-500 text-amber-950 hover:bg-amber-400" onClick={handleReturnStock} data-testid="confirm-po-return"><RotateCcw className="mr-1.5 h-4 w-4" />Record return</Button></DialogFooter>
+        <DialogFooter className="border-t border-white/[0.08] px-6 py-4"><Button variant="outline" onClick={() => setReturnDialog(false)}>Cancel</Button><Button variant="warning" onClick={handleReturnStock} data-testid="confirm-po-return"><RotateCcw className="mr-1.5 h-4 w-4" />Record return</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1118,8 +1118,8 @@ export default function PurchaseOrdersPage() {
               {po.escalated && <Badge className="border-orange-500/30 bg-orange-500/20 text-orange-400"><BellRing className="mr-1 h-3 w-3" />Escalated</Badge>}
               {vendorInvoiceMatch && <Badge className={vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted" ? "border-emerald-500/30 bg-emerald-500/20 text-emerald-400" : "border-amber-500/30 bg-amber-500/20 text-amber-400"}><DollarSign className="mr-1 h-3 w-3" />{vendorInvoiceMatch.status === "matched" ? "Invoice matched" : vendorInvoiceMatch.review?.status === "accepted" ? "Variance accepted" : "Invoice variance"}</Badge>}
               <div className="order-last basis-full min-w-0 pt-1 lg:order-none lg:ml-2 lg:basis-auto lg:flex-1"><p className="truncate text-xl font-semibold tracking-tight text-white">{po.vendor || "Vendor purchase order"}</p><p className="mt-1 text-xs text-zinc-400">Expected {po.expected_delivery || "delivery date not set"} <span className="px-1.5 text-zinc-600">/</span> Total <span className="font-mono text-emerald-200">${(po.total || 0).toFixed(2)}</span></p></div>
-              {(po.status === "submitted" || po.status === "partial") && <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={() => openReceiveDialog(po)} data-testid="header-receive-stock-btn"><PackageCheck className="mr-1.5 h-3.5 w-3.5" />Receive stock</Button>}
-              {["approved", "submitted", "partial"].includes(po.status) && <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] px-3 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => { setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` }); setEmailVendorDialog(true); }} data-testid="header-email-po-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
+              {(po.status === "submitted" || po.status === "partial") && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openReceiveDialog(po)} data-testid="header-receive-stock-btn"><PackageCheck className="mr-1.5 h-3.5 w-3.5" />Receive stock</Button>}
+              {["approved", "submitted", "partial"].includes(po.status) && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => { setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` }); setEmailVendorDialog(true); }} data-testid="header-email-po-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
               <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePreviewPdf(po)} data-testid="header-preview-po-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3"><span className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] px-2.5 py-1 text-xs font-medium text-emerald-100">{po.vendor || "No vendor"}</span><span className="rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">{totalReceived} / {totalOrdered} received</span>{po.client_name && <span className="rounded-lg bg-white/[0.05] px-2.5 py-1 text-[10px] text-zinc-400">For {po.client_name}</span>}<span className="ml-auto rounded-lg bg-white/[0.05] px-2.5 py-1 font-mono text-[10px] text-zinc-400">${(po.total || 0).toFixed(2)}</span></div>
@@ -1368,13 +1368,13 @@ export default function PurchaseOrdersPage() {
               <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
                 {/* Approval Workflow */}
                 {po.status === "draft" && (
-                  <Button className="w-full bg-cyan-500 text-cyan-950 hover:bg-cyan-400" onClick={() => handleSubmitForApproval(po)} data-testid="submit-for-approval-btn">
+                  <Button variant="info" className="w-full" onClick={() => handleSubmitForApproval(po)} data-testid="submit-for-approval-btn">
                     <Send className="mr-1.5 h-4 w-4" />Submit for approval
                   </Button>
                 )}
                 {po.status === "pending_approval" && canApprove && (
                   <>
-                    <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => { setApprovalDialog("approve"); setApprovalNotes(""); }} data-testid="approve-po-btn">
+                    <Button variant="success" className="w-full" onClick={() => { setApprovalDialog("approve"); setApprovalNotes(""); }} data-testid="approve-po-btn">
                       <ThumbsUp className="mr-1.5 h-4 w-4" />Approve
                     </Button>
                     <Button variant="destructive" className="w-full" onClick={() => { setApprovalDialog("reject"); setApprovalNotes(""); }} data-testid="reject-po-btn">
@@ -1384,7 +1384,7 @@ export default function PurchaseOrdersPage() {
                 )}
                 {po.status === "approved" && (
                   <>
-                    <Button className="w-full bg-cyan-500 text-cyan-950 hover:bg-cyan-400" onClick={() => {
+                    <Button variant="info" className="w-full" onClick={() => {
                       setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
                       setEmailVendorDialog(true);
                     }} data-testid="email-and-submit-po">
@@ -1396,7 +1396,7 @@ export default function PurchaseOrdersPage() {
                   </>
                 )}
                 {(po.status === "submitted" || po.status === "partial") && (
-                  <Button variant="outline" className="w-full text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => {
+                  <Button variant="info" className="w-full" onClick={() => {
                     setEmailForm({ email: po.vendor_email || "", subject: `Purchase Order ${po.po_number}`, message: `Please find attached PO ${po.po_number}.` });
                     setEmailVendorDialog(true);
                   }} data-testid="email-po-vendor">
@@ -1404,23 +1404,23 @@ export default function PurchaseOrdersPage() {
                   </Button>
                 )}
                 {(po.status === "submitted" || po.status === "partial") && (
-                  <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => openReceiveDialog(po)} data-testid="receive-stock-btn">
+                  <Button variant="success" className="w-full" onClick={() => openReceiveDialog(po)} data-testid="receive-stock-btn">
                     <PackageCheck className="mr-1.5 h-4 w-4" />Receive Stock
                   </Button>
                 )}
                 {(po.status === "partial" || po.status === "received") && (po.line_items || []).some(item => Number(item.received_qty || 0) > Number(item.returned_qty || 0)) && (
-                  <Button variant="outline" className="w-full border-amber-500/30 text-amber-300 hover:bg-amber-500/10" onClick={() => openReturnDialog(po)} data-testid="return-po-stock-btn">
+                  <Button variant="warning" className="w-full" onClick={() => openReturnDialog(po)} data-testid="return-po-stock-btn">
                     <RotateCcw className="mr-1.5 h-4 w-4" />Return / RMA items
                   </Button>
                 )}
-                <Button variant="outline" className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => openVendorInvoiceMatch(po)} data-testid="match-vendor-invoice-btn">
+                <Button variant="warning" className="w-full" onClick={() => openVendorInvoiceMatch(po)} data-testid="match-vendor-invoice-btn">
                   <DollarSign className="w-4 h-4 mr-1" />{vendorInvoiceMatch ? "Review Supplier Invoice" : "Match Supplier Invoice"}
                 </Button>
                 {vendorInvoiceMatch?.status === "variance" && <Button variant="outline" className="w-full" onClick={() => openVendorInvoiceReview(po)} data-testid="review-supplier-invoice-variance">
                   <CheckCircle className="w-4 h-4 mr-1" />{vendorInvoiceMatch.review ? "Update Variance Review" : "Review Invoice Variance"}
                 </Button>}
                 {vendorInvoiceMatch && (vendorInvoiceMatch.status === "matched" || vendorInvoiceMatch.review?.status === "accepted") && (
-                  <Button variant="outline" className="w-full border-sky-500/30 text-sky-300 hover:bg-sky-500/10" onClick={handleQueueSupplierBill} data-testid="queue-xero-supplier-bill">
+                  <Button variant="info" className="w-full" onClick={handleQueueSupplierBill} data-testid="queue-xero-supplier-bill">
                     <Building2 className="mr-1.5 h-4 w-4" />{po.supplier_bill_sync?.status === "queued" ? "Supplier bill queued" : po.supplier_bill_sync?.status === "needs_connection" ? "Connect Xero to send bill" : "Queue supplier bill for Xero"}
                   </Button>
                 )}
@@ -1445,7 +1445,7 @@ export default function PurchaseOrdersPage() {
                   <Edit className="w-4 h-4 mr-1" />Edit
                 </Button>}
                 {["draft", "rejected", "approved", "submitted"].includes(po.status) && !((po.line_items || []).some(item => Number(item.received_qty || 0) > 0)) && (
-                  <Button variant="outline" className="w-full text-amber-400" onClick={() => requestDestructiveAction("cancel", po)} data-testid="cancel-po-btn">
+                  <Button variant="warning" className="w-full" onClick={() => requestDestructiveAction("cancel", po)} data-testid="cancel-po-btn">
                     <XCircle className="w-4 h-4 mr-1" />Cancel PO
                   </Button>
                 )}
