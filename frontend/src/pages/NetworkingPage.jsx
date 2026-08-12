@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -27,6 +27,7 @@ import {
 } from "recharts";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -381,8 +382,15 @@ export default function NetworkingPage() {
   // ===== SITE FORM DIALOG =====
   const siteFormDialog = (
     <Dialog open={siteDialog} onOpenChange={v => { setSiteDialog(v); if (!v) setEditingSite(null); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>{editingSite ? "Edit Site" : "Add Network Site"}</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Network inventory"
+        title={editingSite ? "Edit network site" : "Add network site"}
+        description="Capture the site record, connectivity details and controller information so Nexus can manage the network with the right context."
+        icon={Network}
+        tone="cyan"
+        className="max-w-2xl"
+        footer={<><Button variant="outline" onClick={() => { setSiteDialog(false); setEditingSite(null); }}>Cancel</Button>{editingSite && <Button variant="outline" onClick={() => handleTestConnection(editingSite.id)} disabled={testing} data-testid="test-connection-btn"><Plug className="w-4 h-4 mr-1" />{testing ? "Testing..." : "Test Connection"}</Button>}<Button onClick={handleSaveSite} data-testid="save-site-btn">{editingSite ? "Update" : "Add"} site</Button></>}
+      >
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Site Name *</Label><Input value={siteForm.name} onChange={e => setSiteForm({ ...siteForm, name: e.target.value })} placeholder="e.g. Acme Corp - Main Office" data-testid="site-name-input" /></div>
@@ -417,20 +425,21 @@ export default function NetworkingPage() {
           </div>
           <div><Label>Notes</Label><Textarea value={siteForm.notes} onChange={e => setSiteForm({ ...siteForm, notes: e.target.value })} rows={2} placeholder="Site notes..." /></div>
         </div>
-        <DialogFooter>
-          {editingSite && <Button variant="outline" onClick={() => handleTestConnection(editingSite.id)} disabled={testing} data-testid="test-connection-btn"><Plug className="w-4 h-4 mr-1" />{testing ? "Testing..." : "Test Connection"}</Button>}
-          <Button onClick={handleSaveSite} data-testid="save-site-btn">{editingSite ? "Update" : "Add"} Site</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 
   // ===== ADOPT DEVICE DIALOG =====
   const adoptDeviceDialog = (
     <Dialog open={adoptDialog} onOpenChange={setAdoptDialog}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Add network device record</DialogTitle></DialogHeader>
-        <p className="text-xs text-muted-foreground">This saves an audited local inventory record only. Use Sync to discover devices from a connected UniFi controller.</p>
+      <NexusWorkflowDialog
+        eyebrow="Network inventory"
+        title="Add network device record"
+        description="This creates an audited local inventory record. Use Sync to discover devices from a connected UniFi controller."
+        icon={Radio}
+        tone="cyan"
+        footer={<><Button variant="outline" onClick={() => setAdoptDialog(false)}>Cancel</Button><Button onClick={handleAdoptDevice} data-testid="adopt-device-btn"><Radio className="w-4 h-4 mr-1" />Save device record</Button></>}
+      >
         <div className="space-y-3">
           <div><Label>Device Name *</Label><Input value={adoptForm.name} onChange={e => setAdoptForm({ ...adoptForm, name: e.target.value })} placeholder="e.g. U6-Pro-Lobby" data-testid="adopt-device-name" /></div>
           <div><Label>MAC Address *</Label><Input value={adoptForm.mac} onChange={e => setAdoptForm({ ...adoptForm, mac: e.target.value })} placeholder="F0:9F:C2:AA:BB:CC" data-testid="adopt-device-mac" /></div>
@@ -452,16 +461,21 @@ export default function NetworkingPage() {
             <div><Label>Firmware</Label><Input value={adoptForm.firmware} onChange={e => setAdoptForm({ ...adoptForm, firmware: e.target.value })} placeholder="7.0.83" /></div>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleAdoptDevice} data-testid="adopt-device-btn"><Radio className="w-4 h-4 mr-1" />Save device record</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 
   // ===== EDIT DEVICE DIALOG =====
   const editDeviceDlg = (
     <Dialog open={editDeviceDialog} onOpenChange={v => { setEditDeviceDialog(v); if (!v) setEditingDevice(null); }}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Edit Device</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Network inventory"
+        title="Edit network device"
+        description="Update the device record so technicians, documentation and monitoring share the same operational facts."
+        icon={Edit}
+        tone="cyan"
+        footer={<><Button variant="outline" onClick={() => { setEditDeviceDialog(false); setEditingDevice(null); }}>Cancel</Button><Button onClick={handleUpdateDevice} data-testid="update-device-btn">Save changes</Button></>}
+      >
         {editingDevice && (
           <div className="space-y-3">
             <div><Label>Name</Label><Input value={editingDevice.name} onChange={e => setEditingDevice({ ...editingDevice, name: e.target.value })} /></div>
@@ -481,8 +495,7 @@ export default function NetworkingPage() {
             <div><Label>Notes</Label><Textarea value={editingDevice.notes || ""} onChange={e => setEditingDevice({ ...editingDevice, notes: e.target.value })} rows={2} /></div>
           </div>
         )}
-        <DialogFooter><Button onClick={handleUpdateDevice} data-testid="update-device-btn">Update</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 
