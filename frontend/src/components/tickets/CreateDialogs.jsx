@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -381,19 +381,17 @@ export function CreateTicketDialog({
 export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm, users, clients = [], handleCreateWsJob }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-5 border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))]">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center shadow-sm">
-              <Wrench className="w-5 h-5 text-cyan-200" />
-            </div>
-            <div className="space-y-1"><div className="flex items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Workshop intake</span><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-[9px] text-cyan-100">AUDIT READY</Badge></div>
-              <DialogTitle className="text-lg">Check in workshop repair</DialogTitle>
-              <p className="text-sm text-muted-foreground">Create a job card with the essentials. Intake, quote and repair evidence can be captured after check-in.</p>
-            </div>
-          </div>
-        </DialogHeader>
-        <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5">
+      <NexusWorkflowDialog
+        eyebrow="Workshop intake · audit ready"
+        title="Check in workshop repair"
+        description="Create a job card with the essentials. Intake, quote and repair evidence can be captured after check-in."
+        icon={Wrench}
+        tone="cyan"
+        className="max-w-3xl"
+        contentClassName="space-y-4"
+        data-testid="workshop-job-workflow"
+        footer={<><span className="hidden text-xs text-muted-foreground sm:block">A job number and repair timeline will be created immediately.</span><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateWsJob} disabled={!wsForm.customer_name.trim() || !wsForm.fault_description.trim()} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ws-submit"><Wrench className="mr-1 w-4 h-4" />Check in and open job</Button></div></>}
+      >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3">
               <div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">1. Customer</h3></div>
@@ -438,12 +436,7 @@ export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm,
             </div>
           </section>
           <div className="flex gap-2 text-xs text-muted-foreground px-1"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />The job starts as checked in. Capture arrival condition, accessories and a signed intake from the job card.</div>
-        </div>
-        <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between">
-          <span className="text-xs text-muted-foreground hidden sm:block">A job number and repair timeline will be created immediately.</span>
-          <div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateWsJob} disabled={!wsForm.customer_name.trim() || !wsForm.fault_description.trim()} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ws-submit"><Wrench className="w-4 h-4 mr-1" />Check in and open job</Button></div>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -451,20 +444,24 @@ export function CreateWorkshopJobDialog({ open, onOpenChange, wsForm, setWsForm,
 export function CreateFieldJobDialog({ open, onOpenChange, fjForm, setFjForm, users, clients = [], handleCreateFjJob }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-5 border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))]">
-          <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center"><Radio className="w-5 h-5 text-cyan-300" /></div><div><div className="flex items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Field service intake</span><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-[9px] text-cyan-100">AUDIT READY</Badge></div><DialogTitle className="text-lg mt-1">Dispatch field work</DialogTitle><p className="text-sm text-muted-foreground mt-1">Create a clear site brief, schedule the visit and give the field technician what they need before departure.</p></div></div>
-        </DialogHeader>
-        <div className="space-y-4 overflow-y-auto max-h-[64vh] px-6 py-5">
+      <NexusWorkflowDialog
+        eyebrow="Field service intake · audit ready"
+        title="Dispatch field work"
+        description="Create a clear site brief, schedule the visit and give the field technician what they need before departure."
+        icon={Radio}
+        tone="cyan"
+        className="max-w-3xl"
+        contentClassName="space-y-4"
+        data-testid="field-job-workflow"
+        footer={<><span className="hidden text-xs text-muted-foreground sm:block">A field job number and dispatch timeline will be created immediately.</span><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateFjJob} disabled={!fjForm.customer_name.trim() || !fjForm.service_address.trim() || !fjForm.description.trim()} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-fj-submit"><Radio className="mr-1 w-4 h-4" />Dispatch and open job</Button></div></>}
+      >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><UserRound className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">1. Customer & location</h3></div><div><Label>Linked client</Label><Select value={fjForm.client_id || "none"} onValueChange={value => { const client = clients.find(item => item.id === value); setFjForm({ ...fjForm, client_id: value === "none" ? "" : value, customer_name: client?.company_name || client?.name || fjForm.customer_name, customer_phone: client?.phone || client?.mobile || fjForm.customer_phone, customer_email: client?.email || client?.contact_email || fjForm.customer_email, service_address: client?.address || fjForm.service_address }); }}><SelectTrigger data-testid="fj-client-select"><SelectValue placeholder="Select a managed client" /></SelectTrigger><SelectContent><SelectItem value="none">Unlinked / ad hoc site</SelectItem>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.company_name || client.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">Keeps scheduling, communications and billing under the correct client.</p></div><div className="grid grid-cols-2 gap-3"><div><Label>Customer name <span className="text-destructive">*</span></Label><Input value={fjForm.customer_name} onChange={e => setFjForm({ ...fjForm, customer_name: e.target.value })} placeholder="Customer or site" data-testid="fj-customer" /></div><div><Label>Contact phone</Label><Input value={fjForm.customer_phone} onChange={e => setFjForm({ ...fjForm, customer_phone: e.target.value })} placeholder="On-site contact" /></div></div><div><Label>Service address <span className="text-destructive">*</span></Label><Input value={fjForm.service_address} onChange={e => setFjForm({ ...fjForm, service_address: e.target.value })} placeholder="Full site address" data-testid="fj-address" /></div><div><Label>Zone / area</Label><Input value={fjForm.zone} onChange={e => setFjForm({ ...fjForm, zone: e.target.value })} placeholder="e.g. North, CBD, Rural" /></div></section>
             <section className="rounded-xl border border-border/70 bg-muted/[0.12] p-4 space-y-3"><div className="flex items-center gap-2"><CalendarClock className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">2. Dispatch plan</h3></div><div><Label>Job category</Label><Select value={fjForm.job_category} onValueChange={v => setFjForm({ ...fjForm, job_category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="installation">Installation</SelectItem><SelectItem value="maintenance">Maintenance</SelectItem><SelectItem value="troubleshooting">Troubleshooting</SelectItem><SelectItem value="decommission">Decommission</SelectItem><SelectItem value="survey">Site survey</SelectItem></SelectContent></Select></div><div className="grid grid-cols-3 gap-3"><div><Label>Date</Label><Input type="date" value={fjForm.scheduled_date} onChange={e => setFjForm({ ...fjForm, scheduled_date: e.target.value })} /></div><div><Label>Arrival time</Label><Input type="time" value={fjForm.scheduled_time} onChange={e => setFjForm({ ...fjForm, scheduled_time: e.target.value })} /></div><div><Label>Duration</Label><Input type="number" value={fjForm.estimated_duration || 60} onChange={e => setFjForm({ ...fjForm, estimated_duration: e.target.value })} placeholder="Minutes" /></div></div><div><Label>Field technician</Label><Select value={fjForm.assigned_to || "none"} onValueChange={v => { const u = users.find(x => x.id === v); setFjForm({ ...fjForm, assigned_to: v === "none" ? "" : v, assigned_to_name: u?.name || "" }); }}><SelectTrigger><SelectValue placeholder="Leave in dispatch queue" /></SelectTrigger><SelectContent><SelectItem value="none">Unassigned — dispatch queue</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select></div></section>
           </div>
           <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4 space-y-3"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-cyan-300" /><h3 className="text-sm font-semibold">3. Site work brief</h3><span className="text-xs text-muted-foreground ml-auto">Make the first visit count</span></div><div><Label>Scope of work <span className="text-destructive">*</span></Label><Textarea value={fjForm.description} onChange={e => setFjForm({ ...fjForm, description: e.target.value })} rows={4} placeholder="What needs to be installed, investigated or completed? Include site access, risks and any equipment expected on site." data-testid="fj-description" /></div><div><Label>Priority</Label><Select value={fjForm.priority} onValueChange={v => setFjForm({ ...fjForm, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Low — schedule when available</SelectItem><SelectItem value="normal">Normal — planned visit</SelectItem><SelectItem value="high">High — expedite dispatch</SelectItem><SelectItem value="critical">Critical — urgent site response</SelectItem></SelectContent></Select></div></section>
           <div className="flex gap-2 text-xs text-muted-foreground px-1"><AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />After dispatch, capture site details, photos, materials and sign-off from the field job card.</div>
-        </div>
-        <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12] flex items-center sm:justify-between"><span className="text-xs text-muted-foreground hidden sm:block">A field job number and dispatch timeline will be created immediately.</span><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateFjJob} disabled={!fjForm.customer_name.trim() || !fjForm.service_address.trim() || !fjForm.description.trim()} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-fj-submit"><Radio className="w-4 h-4 mr-1" />Dispatch and open job</Button></div></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
