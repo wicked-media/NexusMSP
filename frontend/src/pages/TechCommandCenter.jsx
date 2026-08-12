@@ -274,14 +274,7 @@ function ArchiveTechnicianDialog({ tech, onClose, headers, onCompleted }) {
 
   return (
     <Dialog open={!!tech} onOpenChange={open => !open && onClose()}>
-      <DialogContent className="max-w-xl border-amber-500/25 bg-zinc-950 p-0 overflow-hidden" data-testid="archive-tech-dialog">
-        <div className="border-b border-amber-500/20 bg-gradient-to-br from-amber-500/[0.13] via-zinc-950 to-zinc-950 p-5">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg"><Archive className="h-5 w-5 text-amber-300" />Archive {tech.name}?</DialogTitle>
-            <DialogDescription className="max-w-lg">Archive is the safe offboarding action. It immediately blocks sign-in without removing the technician's history, ticket activity or audit records.</DialogDescription>
-          </DialogHeader>
-        </div>
-        <div className="space-y-4 p-5">
+      <NexusWorkflowDialog eyebrow="Safe offboarding" title={`Archive ${tech.name}?`} description="Archive is the safe offboarding action. It immediately blocks sign-in without removing the technician's history, ticket activity or audit records." icon={Archive} tone="amber" className="max-w-xl" contentClassName="space-y-4" data-testid="archive-tech-dialog" footer={<><Button variant="ghost" onClick={onClose}>Keep active</Button><Button variant="warning" onClick={archive} disabled={busy} data-testid="archive-tech-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Archive className="mr-1.5 h-4 w-4" />}Archive account</Button></>}>
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"><Lock className="mb-2 h-4 w-4 text-rose-300" /><p className="text-xs font-medium text-zinc-100">Access stopped</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-500">The account can no longer sign in.</p></div>
             <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"><History className="mb-2 h-4 w-4 text-cyan-300" /><p className="text-xs font-medium text-zinc-100">Records retained</p><p className="mt-1 text-[11px] leading-relaxed text-zinc-500">Existing work stays visible and attributable.</p></div>
@@ -291,12 +284,7 @@ function ArchiveTechnicianDialog({ tech, onClose, headers, onCompleted }) {
             <Label className="text-xs">Offboarding note <span className="text-zinc-500">(optional, retained in audit history)</span></Label>
             <Textarea className="mt-1.5 min-h-20" value={reason} onChange={event => setReason(event.target.value)} placeholder="e.g. Left the organisation on 19 July; active work reassigned to Service Desk." data-testid="archive-tech-reason" />
           </div>
-        </div>
-        <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4">
-          <Button variant="ghost" onClick={onClose}>Keep active</Button>
-          <Button variant="warning" onClick={archive} disabled={busy} data-testid="archive-tech-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Archive className="mr-1.5 h-4 w-4" />}Archive account</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -322,11 +310,7 @@ function DeleteArchivedTechnicianDialog({ tech, onClose, headers, onCompleted })
 
   return (
     <Dialog open={!!tech} onOpenChange={open => !open && onClose()}>
-      <DialogContent className="max-w-lg border-rose-500/30 bg-zinc-950" data-testid="delete-archived-tech-dialog">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Trash2 className="h-5 w-5 text-rose-300" />Permanently delete archived account?</DialogTitle>
-          <DialogDescription>This removes the account record. Archive is the preferred option for departures because it preserves the full staff history.</DialogDescription>
-        </DialogHeader>
+      <NexusWorkflowDialog eyebrow="Irreversible account action" title="Permanently delete archived account?" description="This removes the account record. Archive is the preferred option for departures because it preserves the full staff history." icon={Trash2} tone="amber" className="max-w-lg" data-testid="delete-archived-tech-dialog" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><HoldToConfirmButton disabled={busy || confirmation !== confirmationPhrase} onComplete={remove} data-testid="delete-tech-submit">{busy ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />Deleting account</> : "Hold to delete account"}</HoldToConfirmButton></>}>
         <div className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/90">
           Ticket and audit events remain attributed to the historic technician name, but this person can no longer be restored as an account.
         </div>
@@ -334,13 +318,7 @@ function DeleteArchivedTechnicianDialog({ tech, onClose, headers, onCompleted })
           <Label className="text-xs">Type <span className="font-mono text-rose-200">{confirmationPhrase}</span> to confirm</Label>
           <Input className="mt-1.5 font-mono text-xs" value={confirmation} onChange={event => setConfirmation(event.target.value)} placeholder={confirmationPhrase} data-testid="delete-tech-confirmation" />
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <HoldToConfirmButton disabled={busy || confirmation !== confirmationPhrase} onComplete={remove} data-testid="delete-tech-submit">
-            {busy ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" />Deleting account</> : "Hold to delete account"}
-          </HoldToConfirmButton>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -495,17 +473,12 @@ function InviteDialog({ open, onClose, onSent, onManageRoles, headers, presets, 
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto border-cyan-500/25 bg-zinc-950 p-0" data-testid="invite-user-dialog">
-        <DialogHeader className="border-b border-cyan-500/20 bg-gradient-to-br from-cyan-500/[0.14] via-zinc-950 to-zinc-950 p-5 sm:p-6">
-          <DialogTitle className="flex items-center gap-2 text-xl"><Mail className="h-5 w-5 text-cyan-300" />Invite team member</DialogTitle>
-          <DialogDescription className="max-w-2xl">Send a secure, time-limited invitation. The recipient creates their own password, while the selected role and work profile are recorded before access is activated.</DialogDescription>
+      <NexusWorkflowDialog eyebrow="Secure team invitation" title="Invite team member" description="Send a secure, time-limited invitation. The recipient creates their own password, while the selected role and work profile are recorded before access is activated." icon={Mail} tone="cyan" className="max-h-[92vh] max-w-3xl" contentClassName="space-y-4 overflow-y-auto" data-testid="invite-user-dialog" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="info" onClick={send} disabled={busy} data-testid="invite-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send secure invitation</Button></>}>
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <div className="rounded-lg border border-cyan-500/20 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">1. Identity</p><p className="mt-1 text-[11px] text-zinc-400">Verify who the invitation is for.</p></div>
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">2. Access</p><p className="mt-1 text-[11px] text-zinc-400">Apply the right starting role.</p></div>
             <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">3. Acceptance</p><p className="mt-1 text-[11px] text-zinc-400">Recipient chooses their password.</p></div>
           </div>
-        </DialogHeader>
-        <div className="space-y-4 p-5 sm:p-6">
           <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
             <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Recipient details</p><p className="mt-1 text-xs text-zinc-500">Use their business email. The invitation is addressed to this identity and its delivery status is retained for audit.</p></div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -524,12 +497,7 @@ function InviteDialog({ open, onClose, onSent, onManageRoles, headers, presets, 
           </section>
           <section className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-4"><Label className="text-sm font-semibold text-zinc-100">Welcome message <span className="text-xs font-normal text-zinc-500">(optional)</span></Label><p className="mt-1 text-xs text-zinc-500">Add a concise note the technician will see alongside their secure sign-in link.</p><Textarea rows={4} className="mt-3" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Welcome to the team. Please complete your profile and review the service desk handover before your first shift." data-testid="invite-message" /></section>
           <div className="flex items-start gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.05] px-3 py-3 text-xs leading-relaxed text-cyan-50/85"><History className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />The invitation, delivery outcome, acceptance, and any cancellation are retained in the team audit history.</div>
-        </div>
-        <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="info" onClick={send} disabled={busy} data-testid="invite-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send secure invitation</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
