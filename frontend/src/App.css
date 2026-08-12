@@ -2,7 +2,7 @@
 
 /* Sidebar styles */
 .sidebar {
-    transition: width 0.3s ease;
+    transition: width var(--nx-motion-standard) var(--nx-ease-out);
 }
 
 .sidebar-collapsed {
@@ -35,7 +35,7 @@
     align-items: center;
     justify-content: center;
     border-radius: 0.45rem;
-    transition: color 180ms ease, filter 180ms ease, transform 180ms ease;
+    transition: color var(--nx-motion-fast) var(--nx-ease-out), filter var(--nx-motion-fast) var(--nx-ease-out), transform var(--nx-motion-fast) var(--nx-ease-out);
 }
 
 .group:hover .nexus-sidebar-workspace-icon {
@@ -76,7 +76,7 @@
 
 /* Table row hover effect */
 .table-row-hover {
-    transition: background-color 0.15s ease;
+    transition: background-color var(--nx-motion-fast) var(--nx-ease-out);
 }
 
 .table-row-hover:hover {
@@ -85,12 +85,30 @@
 
 /* Card hover lift effect */
 .card-hover {
-    transition: transform 0.2s ease, border-color 0.2s ease;
+    transition: transform var(--nx-motion-fast) var(--nx-ease-out), border-color var(--nx-motion-fast) var(--nx-ease-out), box-shadow var(--nx-motion-fast) var(--nx-ease-out);
 }
 
 .card-hover:hover {
     transform: translateY(-2px);
     border-color: hsl(var(--primary) / 0.5);
+    box-shadow: 0 14px 28px -24px hsl(var(--primary) / 0.8);
+}
+
+/* Decorative motion follows the same user preference as workflow motion. */
+html[data-motion="minimal"] .animated-border,
+html[data-motion="minimal"] .skeleton-shimmer,
+html[data-motion="minimal"] .pulse-critical,
+html[data-motion="minimal"] .pulse-warning,
+html[data-motion="minimal"] .status-online,
+html[data-motion="minimal"] .nexus-sidebar-workspace-icon.is-active,
+html[data-motion="minimal"] .nexus-sidebar-workspace-icon.has-attention.is-active::after {
+    animation: none !important;
+}
+
+html[data-motion="minimal"] .sidebar,
+html[data-motion="minimal"] .card-hover,
+html[data-motion="minimal"] .table-row-hover {
+    transition-duration: 1ms !important;
 }
 
 /* Status badge styles */
