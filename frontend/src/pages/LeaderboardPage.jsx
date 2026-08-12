@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -55,7 +55,7 @@ export default function LeaderboardPage() {
   const [profile, setProfile] = useState(null);
   const [heatmap, setHeatmap] = useState({});
   const [loading, setLoading] = useState(true);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -68,7 +68,7 @@ export default function LeaderboardPage() {
       setStats(sRes.data);
     } catch { toast.error("Failed to fetch leaderboard"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -110,7 +110,7 @@ export default function LeaderboardPage() {
           <Badge className="ml-auto text-lg px-4 py-1 bg-amber-500/20 text-amber-400 border-amber-500/30">{profile.total_xp || 0} XP</Badge>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-4 lg:grid-cols-3">
           <Card className="border-amber-500/20">
             <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Star className="w-4 h-4 text-amber-400" />Experience</CardTitle></CardHeader>
             <CardContent>
@@ -168,17 +168,14 @@ export default function LeaderboardPage() {
   // LEADERBOARD VIEW
   return (
     <div className="space-y-5" data-testid="leaderboard-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3"><Trophy className="w-8 h-8 text-amber-400" />Leaderboard</h1>
-          <p className="text-muted-foreground">{stats?.total_techs || 0} technicians &middot; {stats?.total_xp_awarded?.toLocaleString() || 0} total XP awarded</p>
-        </div>
-        <Button variant="outline" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-      </div>
+      <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)] sm:flex-row sm:items-center sm:justify-between">
+        <div><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Trophy className="h-5 w-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Team contribution</p><h1 className="text-2xl font-bold tracking-tight">Recognition board</h1></div></div><p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">Celebrate service outcomes and sustained contribution. Recognition is earned from accountable work—not simply time spent in the platform.</p></div>
+        <div className="flex flex-wrap items-center gap-2"><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold text-primary">{stats?.total_techs || 0}</p><p className="text-[10px] text-muted-foreground">technicians</p></div><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold">{stats?.total_xp_awarded?.toLocaleString() || 0}</p><p className="text-[10px] text-muted-foreground">recognition XP</p></div><Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button></div>
+      </section>
 
       {/* Top 3 Podium */}
       {leaderboard.length >= 1 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-3 sm:grid-cols-3">
           {[1, 0, 2].map((idx) => {
             const t = leaderboard[idx];
             if (!t) return <div key={`k-${idx}`} />;

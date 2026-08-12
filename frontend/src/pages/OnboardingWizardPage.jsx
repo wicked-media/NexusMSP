@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1235,7 +1235,7 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
   const readinessLabel = canCompleteOnboarding ? "Ready to launch" : `${Math.max(0, totalSteps - Math.round((progress / 100) * totalSteps))} workflow items remaining`;
 
   return (
-    <div className="mx-auto max-w-[1440px] space-y-5" data-testid="onboarding-wizard">
+    <div className="nx-page-stage mx-auto max-w-[1440px] space-y-5" data-testid="onboarding-wizard">
       <section className="relative overflow-hidden rounded-2xl border border-cyan-400/20 bg-[radial-gradient(circle_at_100%_0%,rgba(34,211,238,0.17),transparent_34%),radial-gradient(circle_at_0%_100%,rgba(16,185,129,0.13),transparent_42%),linear-gradient(135deg,rgba(8,25,35,0.98),rgba(12,17,25,0.98))] px-5 py-5 sm:px-6">
         <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-cyan-400/10 blur-3xl" />
         <div className="relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -1327,6 +1327,8 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
 export default function OnboardingWizardPage() {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedSessionId = searchParams.get("session");
   const [sessions, setSessions] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
@@ -1352,6 +1354,13 @@ export default function OnboardingWizardPage() {
     } catch { toast.error("Failed to load session"); }
   };
 
+  useEffect(() => {
+    if (!requestedSessionId || activeSession?.id === requestedSessionId) return;
+    loadSession(requestedSessionId);
+    // The requested session is only set by navigation from a client workflow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedSessionId]);
+
   const createSession = async (data) => {
     try {
       const res = await axios.post(`${API}/onboarding-enhanced/sessions`, data, { headers });
@@ -1366,7 +1375,7 @@ export default function OnboardingWizardPage() {
     return (
       <WizardView
         session={activeSession}
-        onBack={() => { setActiveSession(null); fetchSessions(); }}
+        onBack={() => { setActiveSession(null); setSearchParams({}); fetchSessions(); }}
         onRefresh={fetchSessions}
       />
     );

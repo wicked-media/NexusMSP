@@ -66,13 +66,7 @@ export function PdfViewerDialog({ open, onOpenChange, pdfUrl, title, downloadUrl
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           )}
-          <iframe
-            src={pdfUrl}
-            className="w-full h-full border-0"
-            title="PDF Preview"
-            onLoad={() => setLoading(false)}
-            data-testid="pdf-viewer-iframe"
-          />
+          <iframe src={pdfUrl} className="w-full h-full border-0" title="PDF Preview" onLoad={() => setLoading(false)} data-testid="pdf-viewer-iframe" />
         </div>
       </DialogContent>
     </Dialog>

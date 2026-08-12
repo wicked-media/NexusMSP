@@ -2,7 +2,7 @@
  * Standard page header for operational tools that are not part of a module hub.
  * Keep titles, descriptions, and primary actions in one predictable treatment.
  */
-export default function OperationalPageHeader({ eyebrow = "Operations", title, description, icon: Icon, actions, tone = "violet" }) {
+export default function OperationalPageHeader({ eyebrow = "Operations", title, description, icon: Icon, actions, tone = "violet", signal, className = "" }) {
   const tones = {
     violet: "border-violet-500/20 from-violet-500/[0.10]",
     sky: "border-sky-500/20 from-sky-500/[0.10]",
@@ -11,7 +11,7 @@ export default function OperationalPageHeader({ eyebrow = "Operations", title, d
   };
   const iconTones = { violet: "text-violet-300", sky: "text-sky-300", emerald: "text-emerald-300", amber: "text-amber-300" };
   return (
-    <section className={`rounded-2xl border bg-gradient-to-br ${tones[tone] || tones.violet} via-background to-background p-5 md:p-6`}>
+    <section className={`nx-page-stage ${signal ? "nx-ambient-surface" : ""} rounded-2xl border bg-gradient-to-br ${tones[tone] || tones.violet} via-background to-background p-5 md:p-6 ${className}`} data-nx-signal={signal}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0">
           <p className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${iconTones[tone] || iconTones.violet}`}>{eyebrow}</p>

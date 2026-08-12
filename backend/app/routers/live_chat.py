@@ -242,7 +242,7 @@ async def get_session_messages(session_id: str, user=Depends(get_current_user)):
     )
 
     # Enrich session with client context
-    context = {"open_tickets": 0, "devices": 0, "last_ticket": None}
+    context = {"open_tickets": 0, "devices": 0, "last_ticket": None, "endpoint": None}
     if session.get("client_id"):
         context["open_tickets"] = await db.tickets.count_documents({"client_id": session["client_id"], "status": {"$nin": ["closed", "resolved"]}})
         context["devices"] = await db.devices.count_documents({"client_id": session["client_id"]})
@@ -251,6 +251,22 @@ async def get_session_messages(session_id: str, user=Depends(get_current_user)):
             sort=[("created_at", -1)]
         )
         context["last_ticket"] = last_t
+
+    # A device-originated chat is tied to one managed endpoint. Its verified
+    # Elevate lifecycle belongs in the technician's immediate support context.
+    endpoint = None
+    if session.get("asset_id"):
+        endpoint = await db.devices.find_one({"id": session["asset_id"]}, {"_id": 0})
+    if not endpoint and session.get("agent_device_id"):
+        endpoint = await db.devices.find_one({"nexus_agent_id": session["agent_device_id"]}, {"_id": 0})
+    if endpoint:
+        context["endpoint"] = {
+            "id": endpoint.get("id"),
+            "name": endpoint.get("name") or endpoint.get("hostname") or "Managed endpoint",
+            "agent_id": endpoint.get("nexus_agent_id") or session.get("agent_device_id"),
+            "elevate_state": endpoint.get("nexus_elevate_state") or "not_activated",
+            "elevate_last_error": endpoint.get("nexus_elevate_last_error"),
+        }
 
     return {"session": session, "messages": messages, "context": context}
 

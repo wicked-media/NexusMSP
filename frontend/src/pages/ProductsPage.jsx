@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { toast } from "sonner";
 import Barcode from "react-barcode";
 import {
@@ -919,12 +920,13 @@ export default function ProductsPage() {
   // ========== LIST VIEW ==========
   return (
     <div className="space-y-6" data-testid="products-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Products</h1>
-          <p className="text-muted-foreground">{products.length} products in catalog</p>
-        </div>
-        <div className="flex gap-2 flex-wrap justify-end">
+      <OperationalPageHeader
+        eyebrow="Commercial catalogue · stock and service billing"
+        title="Products & Inventory"
+        description={`${products.length} catalogue record${products.length === 1 ? "" : "s"} across purchasing, receipting, service delivery and billing.`}
+        icon={Package}
+        tone="cyan"
+        actions={<>
           <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} data-testid="products-import-csv"><Upload className="w-3.5 h-3.5 mr-1" />Import CSV</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -950,8 +952,8 @@ export default function ProductsPage() {
             </DropdownMenuContent>
           </DropdownMenu>
           <Button onClick={openCreate} data-testid="add-product-btn"><Plus className="w-4 h-4 mr-1" />Add Product</Button>
-        </div>
-      </div>
+        </>}
+      />
 
       <MetricStrip columns={5}>
         <MetricTile label="Total Products" value={products.length} accent="cyan" icon={<Package className="h-3.5 w-3.5" />} testid="products-metric-total" />

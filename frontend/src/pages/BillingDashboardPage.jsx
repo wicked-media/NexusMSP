@@ -187,15 +187,21 @@ export default function BillingDashboardPage() {
   const m = metrics;
   const streakCfg = STREAK_CONFIG[m.streak.level] || STREAK_CONFIG.starter;
   const healthColor = m.payment_health_score >= 80 ? "text-green-400" : m.payment_health_score >= 60 ? "text-amber-400" : m.payment_health_score >= 40 ? "text-orange-400" : "text-red-400";
+  const billingSignal = m.payment_health_score < 40 || m.overdue_count > 0
+    ? "critical"
+    : m.payment_health_score < 80
+      ? "attention"
+      : "healthy";
 
   return (
-    <div className="space-y-6" data-testid="billing-dashboard">
+    <div className="nx-page-stage space-y-6" data-testid="billing-dashboard">
       <OperationalPageHeader
         eyebrow="Financial operations"
         title="Billing Command"
         description="Revenue, collections, cash flow, and financial follow-through across NexusMSP."
         icon={Banknote}
         tone="emerald"
+        signal={billingSignal}
         actions={<>
           <Button variant="outline" size="sm" onClick={fetchMetrics} disabled={loading} data-testid="refresh-billing-dashboard">
             <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh

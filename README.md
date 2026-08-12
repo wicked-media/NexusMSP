@@ -39,6 +39,19 @@ NexusMSP runs independently: it has no Emergent runtime, package, storage, or AI
 
 The frontend defaults to `http://localhost:3000` and calls the backend URL configured in `frontend/.env`.
 
+### Local restart
+
+Use `Restart-Nexus.cmd` from Windows Explorer, or run the following from the
+repository root. It manages only the local Nexus frontend (port 3000) and API
+(port 8000), retains live logs in the repository root, waits for both services
+to respond, and opens Nexus when ready.
+
+```powershell
+.\scripts\NexusLocal.ps1 -Action Restart
+```
+
+Other actions are `Start`, `Stop`, and `Status`.
+
 ## Verification
 
 Run the backend safety tests:

@@ -243,6 +243,163 @@ def build_value_proof(
     }
 
 
+def build_continuous_improvements(
+    *,
+    revenue_found: float,
+    insights: list[dict],
+    recent_resolved_tickets: list[dict],
+    recent_script_runs: list[dict],
+    healed_month: int,
+    detected_month: int,
+) -> list[dict]:
+    """Return a small, explainable improvement queue from retained records.
+
+    These are deliberately review leads, not AI-created projects, causal claims,
+    or automated remediations.  A technician must validate the evidence and
+    choose the next controlled workflow.
+    """
+    candidates: list[dict] = []
+    if revenue_found:
+        candidates.append({
+            "id": "improvement-billing-review",
+            "title": "Resolve identified billing exceptions",
+            "detail": f"${revenue_found:,.2f} of unbilled time or ticket product value needs finance review before it can be recognised.",
+            "evidence": "Retained time-entry and ticket-product records",
+            "route": "/billing-recon",
+            "outcome": "increase_revenue",
+            "state": "review_required",
+            "priority": 100,
+        })
+
+    ticket_groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for ticket in recent_resolved_tickets:
+        title = " ".join(str(ticket.get("title") or "").lower().split())
+        client_id = str(ticket.get("client_id") or "")
+        if title:
+            ticket_groups[(client_id, title)].append(ticket)
+    recurring = sorted(ticket_groups.items(), key=lambda item: len(item[1]), reverse=True)
+    for (client_id, title), rows in recurring:
+        if len(rows) < 3:
+            continue
+        candidates.append({
+            "id": f"improvement-recurring-{client_id or 'unassigned'}-{abs(hash(title)) % 100000}",
+            "title": "Investigate a recurring resolved issue",
+            "detail": f"{len(rows)} resolved tickets share the same title in the last 30 days: {rows[0].get('title') or title}.",
+            "evidence": "Repeated resolved ticket records; common cause is not yet confirmed",
+            "route": f"/clients?client={client_id}" if client_id else "/tickets",
+            "outcome": "reduce_effort",
+            "state": "review_required",
+            "priority": 90,
+        })
+        break
+
+    script_groups: dict[str, int] = defaultdict(int)
+    for run in recent_script_runs:
+        name = str(run.get("script_name") or "").strip()
+        if name:
+            script_groups[name] += 1
+    repeated_script = next(((name, count) for name, count in sorted(script_groups.items(), key=lambda item: item[1], reverse=True) if count >= 3), None)
+    if repeated_script:
+        name, count = repeated_script
+        candidates.append({
+            "id": "improvement-repeat-script",
+            "title": "Review a repeated technician script for standardisation",
+            "detail": f"{name} completed {count} times in the last 30 days. Review its evidence, permissions and rollback before creating an automation.",
+            "evidence": "Completed script-execution records",
+            "route": "/scripting",
+            "outcome": "reduce_effort",
+            "state": "review_required",
+            "priority": 80,
+        })
+
+    if insights:
+        lead = insights[0]
+        candidates.append({
+            "id": "improvement-correlation-lead",
+            "title": "Turn a multi-signal client lead into one prevention plan",
+            "detail": lead["title"],
+            "evidence": lead["confidence_basis"],
+            "route": lead["route"],
+            "outcome": "reduce_risk",
+            "state": "review_required",
+            "priority": 70,
+        })
+
+    if detected_month >= 5 and healed_month < detected_month:
+        candidates.append({
+            "id": "improvement-self-healing",
+            "title": "Review unresolved self-healing detections",
+            "detail": f"{detected_month - healed_month} of {detected_month} retained self-healing detections were not recorded as healed in the last 30 days.",
+            "evidence": "Retained self-healing event outcomes",
+            "route": "/auto-ops?tab=self-healing",
+            "outcome": "reduce_risk",
+            "state": "review_required",
+            "priority": 60,
+        })
+
+    return sorted(candidates, key=lambda item: item["priority"], reverse=True)[:5]
+
+
+def build_diagnostic_queue(insights: list[dict]) -> list[dict]:
+    """Turn retained correlations into safe diagnostic starting points.
+
+    This is intentionally a *plan*, never an assertion that a check was run,
+    a cause was found, or an endpoint was changed.  Each card links back to
+    the evidence workspace where a technician can perform the authorised
+    diagnostic.
+    """
+    queue: list[dict] = []
+    for insight in insights:
+        labels = {str(row.get("label") or "") for row in insight.get("evidence") or []}
+        client_name = insight.get("client_name") or "this client"
+        if {"Storage pressure", "Failed backups"} <= labels:
+            queue.append({
+                "id": f"diagnostic-storage-backup-{insight['id']}",
+                "client_id": insight.get("client_id"),
+                "title": "Validate backup capacity and failure evidence together",
+                "detail": f"Start with the recorded backup error and current storage evidence for {client_name}; neither signal proves the other caused it.",
+                "steps": [
+                    "Open the failed backup job and read the retained error detail.",
+                    "Confirm current free capacity and recent growth on the affected managed asset.",
+                    "Record whether the backup target, source capacity, or another dependency is implicated.",
+                ],
+                "evidence": "Storage pressure and failed-backup records for the same client",
+                "route": "/backup-center",
+                "state": "read_only_plan",
+            })
+        elif {"Offline assets", "Critical tickets"} <= labels:
+            queue.append({
+                "id": f"diagnostic-offline-critical-{insight['id']}",
+                "client_id": insight.get("client_id"),
+                "title": "Validate whether the offline asset is part of the critical incident",
+                "detail": f"Coordinate the existing critical work and endpoint evidence for {client_name} before opening duplicate investigations.",
+                "steps": [
+                    "Review the critical ticket timeline and affected service.",
+                    "Confirm the offline asset identity, last check-in and ownership.",
+                    "Link or separate the records only after the relationship is verified.",
+                ],
+                "evidence": "Offline-asset and critical-ticket records for the same client",
+                "route": insight.get("route") or "/clients",
+                "state": "read_only_plan",
+            })
+        else:
+            queue.append({
+                "id": f"diagnostic-timeline-{insight['id']}",
+                "client_id": insight.get("client_id"),
+                "title": "Review the client timeline before selecting a remediation",
+                "detail": insight.get("summary") or "Multiple retained signals need technician validation.",
+                "steps": [
+                    "Open the source records and confirm their timestamps and ownership.",
+                    "Determine whether the signals describe one issue or separate work.",
+                    "Choose an approved playbook only after recording the diagnostic conclusion.",
+                ],
+                "evidence": insight.get("confidence_basis") or "Multiple retained operational signals",
+                "route": insight.get("route") or "/clients",
+                "state": "read_only_plan",
+            })
+    return queue[:3]
+
+
 async def build_nexus_brain(current_user: dict, *, window_hours: int = 12) -> dict:
     """Build the daily briefing and cross-module correlations."""
     now = datetime.now(timezone.utc)
@@ -264,6 +421,8 @@ async def build_nexus_brain(current_user: dict, *, window_hours: int = 12) -> di
         product_tickets,
         platform_events,
         healing_month,
+        script_month,
+        resolved_tickets_month,
     ) = await asyncio.gather(
         db.clients.find(
             _query(current_user, {"status": {"$nin": ["archived", "inactive"]}}, field="id"),
@@ -360,6 +519,20 @@ async def build_nexus_brain(current_user: dict, *, window_hours: int = 12) -> di
             }),
             {"_id": 0, "id": 1, "status": 1, "time_saved_minutes": 1},
         ).to_list(5000),
+        db.script_executions.find(
+            _query(current_user, {
+                "status": {"$in": ["completed", "success", "succeeded"]},
+                "$or": [{"completed_at": {"$gte": month_since}}, {"created_at": {"$gte": month_since}}],
+            }),
+            {"_id": 0, "script_name": 1},
+        ).to_list(5000),
+        db.tickets.find(
+            _query(current_user, {
+                "status": {"$in": ["resolved", "closed"]},
+                "updated_at": {"$gte": month_since},
+            }),
+            {"_id": 0, "client_id": 1, "title": 1},
+        ).to_list(5000),
     )
 
     insights = correlate_client_signals(
@@ -451,6 +624,15 @@ async def build_nexus_brain(current_user: dict, *, window_hours: int = 12) -> di
     detected_month = len(healing_month)
     healed_month = sum(row.get("status") == "healed" for row in healing_month)
     self_healing_score = round(healed_month / max(1, detected_month) * 100, 1)
+    improvements = build_continuous_improvements(
+        revenue_found=revenue_found,
+        insights=insights,
+        recent_resolved_tickets=resolved_tickets_month,
+        recent_script_runs=script_month,
+        healed_month=healed_month,
+        detected_month=detected_month,
+    )
+    diagnostic_queue = build_diagnostic_queue(insights)
     outcome_counts = {"reduce_effort": 0, "reduce_risk": 0, "increase_revenue": 0}
     for insight in insights:
         for outcome in insight.get("outcomes") or []:
@@ -459,6 +641,46 @@ async def build_nexus_brain(current_user: dict, *, window_hours: int = 12) -> di
         outcome_counts["reduce_effort"] += 1
     if revenue_found:
         outcome_counts["increase_revenue"] += 1
+
+    outcome_paths = [
+        {
+            "id": "operational-effort",
+            "label": "Operational effort returned",
+            "technical_event": "Self-healing, scripts and approved workflows completed",
+            "outcome": "reduce_effort",
+            "value": automated_actions,
+            "value_label": f"{automated_actions} evidenced action{'s' if automated_actions != 1 else ''}",
+            "detail": (
+                f"{documented_minutes_saved:.0f} documented minutes returned"
+                if documented_minutes_saved else
+                "Execution records are retained; time savings are recorded only when supplied by the run."
+            ),
+            "route": "/workflow-automation?tab=runs",
+            "state": "evidenced" if automated_actions else "not_measured",
+        },
+        {
+            "id": "revenue-protection",
+            "label": "Revenue protection opportunity",
+            "technical_event": "Unbilled time and ticket products reconciled",
+            "outcome": "increase_revenue",
+            "value": revenue_found,
+            "value_label": f"${revenue_found:,.2f} for review",
+            "detail": "This is an identified opportunity, not revenue recovered, until finance approves the correction.",
+            "route": "/billing-recon",
+            "state": "review_required" if revenue_found else "not_measured",
+        },
+        {
+            "id": "client-risk",
+            "label": "Client risk brought into view",
+            "technical_event": "Device, backup, ticket and billing records correlated by client",
+            "outcome": "reduce_risk",
+            "value": len(insights),
+            "value_label": f"{len(insights)} correlation lead{'s' if len(insights) != 1 else ''}",
+            "detail": "Correlation leads require technician validation; Nexus does not present them as causal findings.",
+            "route": "/clients",
+            "state": "review_required" if insights else "not_measured",
+        },
+    ]
 
     return {
         "generated_at": now.isoformat(),
@@ -483,6 +705,17 @@ async def build_nexus_brain(current_user: dict, *, window_hours: int = 12) -> di
         "insights": insights,
         "activity": activity,
         "outcome_counts": outcome_counts,
+        "outcome_paths": outcome_paths,
+        "continuous_improvements": {
+            "headline": "Five evidence-backed opportunities to improve the MSP",
+            "detail": "Nexus identifies review leads from retained work records. It does not claim causality, savings or apply a change until a technician validates the evidence.",
+            "items": improvements,
+        },
+        "diagnostic_workspace": {
+            "headline": "Start with evidence, not a guessed fix",
+            "detail": "These read-only diagnostic plans are generated from retained client signals. They do not execute a check, change an endpoint or establish causality.",
+            "items": diagnostic_queue,
+        },
         "value_proof": build_value_proof(
             automated_actions=automated_actions,
             documented_minutes_saved=documented_minutes_saved,

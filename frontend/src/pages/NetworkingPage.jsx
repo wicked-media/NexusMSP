@@ -514,9 +514,9 @@ export default function NetworkingPage() {
         />
 
         {/* Controller Info */}
-        <Card className="border-zinc-800">
-          <CardContent className="py-3 flex items-center justify-between text-sm">
-            <div className="flex items-center gap-4">
+        <Card className="border-sky-500/15 bg-gradient-to-r from-sky-500/[0.05] via-transparent to-transparent">
+          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <span className="text-muted-foreground">Controller:</span>
               <span className="font-mono text-xs">{selectedSite.controller_url || "Not configured"}</span>
               <Separator orientation="vertical" className="h-4" />
@@ -565,14 +565,14 @@ export default function NetworkingPage() {
 
         {/* Tabs */}
         <Tabs value={tab} onValueChange={setTab}>
-          <div className="flex items-center justify-between">
-            <TabsList>
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <TabsList className="h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-muted/30 p-1.5 xl:w-auto">
               <TabsTrigger value="devices" data-testid="tab-devices">Devices ({siteDevices.length})</TabsTrigger>
               <TabsTrigger value="clients" data-testid="tab-clients">Clients ({siteClients.length})</TabsTrigger>
               <TabsTrigger value="wlans" data-testid="tab-wlans">WLANs</TabsTrigger>
               <TabsTrigger value="dpi" data-testid="tab-dpi">Traffic</TabsTrigger>
             </TabsList>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {tab === "devices" && (
                 <>
                   <Button size="sm" onClick={() => { setAdoptForm({ ...emptyDeviceForm }); setAdoptDialog(true); }} data-testid="adopt-btn"><Plus className="w-3 h-3 mr-1" />Add device record</Button>
@@ -589,7 +589,7 @@ export default function NetworkingPage() {
               )}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input className="pl-9 w-[180px]" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
+                <Input className="w-full pl-9 sm:w-[220px]" placeholder={`Search ${tab === "devices" ? "devices" : tab === "clients" ? "network clients" : "this view"}...`} value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             </div>
           </div>
@@ -688,7 +688,7 @@ export default function NetworkingPage() {
       <OperationalPageHeader
         eyebrow="Network workspace"
         title="Managed network"
-        description="Client network records, controller connectivity, site health and UniFi operations in one workspace."
+        description="A single operating view for client sites, controller evidence, network health and the services that protect each connection."
         icon={Network}
         tone="sky"
         actions={(
@@ -709,6 +709,25 @@ export default function NetworkingPage() {
           </>
         )}
       />
+
+      <Card className="overflow-hidden border-sky-500/20 bg-gradient-to-r from-sky-500/[0.08] via-background to-background" data-testid="network-service-launchpad">
+        <CardContent className="flex flex-col gap-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Radio className="h-4 w-4 text-sky-400" />
+              <p className="text-sm font-semibold">Network service command</p>
+              <Badge variant="outline" className="border-sky-500/30 bg-sky-500/10 text-[10px] text-sky-300">Evidence-led</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Move from a client site into topology, DNS, traffic and email-domain health without losing operational context.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {NETWORK_WORKSPACE_TOOLS.slice(0, 4).map(tool => {
+              const Icon = tool.icon;
+              return <Button key={tool.path} variant="outline" size="sm" className="gap-1.5" onClick={() => navigate(tool.path)}><Icon className="h-3.5 w-3.5" />{tool.label}</Button>;
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Stats */}
       {stats && (
@@ -815,9 +834,9 @@ export default function NetworkingPage() {
       {/* Sites List */}
       <div className="space-y-3">
         {sites.map(site => (
-          <Card key={site.id} className="hover:border-primary/50 transition-all" data-testid={`site-card-${site.id}`}>
+          <Card key={site.id} className="group border-border/70 transition-all hover:border-sky-500/50 hover:shadow-[0_0_0_1px_rgba(56,189,248,0.08)]" data-testid={`site-card-${site.id}`}>
             <CardContent className="py-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => { setSelectedSite(site); setTab("devices"); setSearch(""); setDeviceFilter("all"); }}>
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${site.status === "online" ? "bg-emerald-500/10" : site.status === "warning" ? "bg-amber-500/10" : "bg-red-500/10"}`}>
                     <Globe className={`w-6 h-6 ${site.status === "online" ? "text-emerald-500" : site.status === "warning" ? "text-amber-500" : "text-red-500"}`} />
@@ -830,7 +849,7 @@ export default function NetworkingPage() {
                     <p className="text-xs text-muted-foreground">{site.location} {site.controller_url ? `| ${site.controller_url}` : ""}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-6 text-sm">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm xl:justify-end">
                   <div className="text-center"><p className="text-xs text-muted-foreground">ISP</p><p className="font-medium">{site.isp || "-"}</p></div>
                   <div className="text-center"><p className="text-xs text-muted-foreground">WAN</p><p className="font-mono text-xs">{site.wan_ip || "-"}</p></div>
                   <div className="text-center"><p className="text-xs text-muted-foreground">Speed</p><p className="font-mono">{site.download_speed_mbps}/{site.upload_speed_mbps} Mbps</p></div>
@@ -838,7 +857,7 @@ export default function NetworkingPage() {
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEditSite(site)}><Settings className="w-3 h-3" /></Button>
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDeleteSite(site.id)}><Trash2 className="w-3 h-3" /></Button>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-muted-foreground cursor-pointer" onClick={() => { setSelectedSite(site); setTab("devices"); }} />
+                  <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground group-hover:text-foreground" onClick={() => { setSelectedSite(site); setTab("devices"); }}><span className="hidden sm:inline">Open</span><ChevronRight className="h-4 w-4" /></Button>
                 </div>
               </div>
             </CardContent>

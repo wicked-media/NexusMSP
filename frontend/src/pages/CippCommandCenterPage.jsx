@@ -235,14 +235,14 @@ export default function CippCommandCenterPage({ embedded = false }) {
   return (
     <div className={embedded ? "space-y-5" : "p-6 space-y-5"} data-testid="cipp-command-center">
       {!embedded && <OperationalPageHeader
-        eyebrow="Microsoft tenant operations"
-        title="Nexus Control Plane"
-        description="Manage partner tenants, identity lifecycle work, licensing, security posture, and client linking from one NexusMSP control surface."
+        eyebrow="Nexus 365 · tenant operations"
+        title="Nexus Tenant Operations"
+        description="One governed workspace for partner tenants, identity lifecycle work, licensing, posture and client context. Provider adapters stay behind the scenes; technicians work in Nexus."
         icon={Cloud}
         tone="cyan"
         actions={<>
           <Badge variant="outline" className={providerOperational ? "border-emerald-500/30 text-emerald-300" : partnerConnected ? "border-cyan-500/30 text-cyan-200" : "border-amber-500/30 text-amber-300"}>
-            {providerOperational ? "Operations connected" : partnerConnected ? "Discovery connected" : "Configuration required"}
+            {providerOperational ? "Live operations" : partnerConnected ? "Discovery connected" : "Connection required"}
           </Badge>
           <Button variant="outline" size="sm" asChild data-testid="cipp-configure-btn">
             <Link to="/control-plane?module=microsoft365&view=connections"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Connections</Link>
@@ -268,11 +268,11 @@ export default function CippCommandCenterPage({ embedded = false }) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold">
-                {providerOperational ? "Microsoft tenant operations are available" : partnerConnected ? "Tenant discovery connected — operational access pending" : "Connect Microsoft tenant discovery"}
+                {providerOperational ? "Nexus 365 operations are ready" : partnerConnected ? "Tenant discovery is ready — operational access pending" : "Connect Microsoft tenant discovery"}
               </p>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
                 {providerOperational
-                  ? "The operational provider can read tenant users and licences. High-impact actions remain permission, client-scope and approval governed."
+                  ? "Nexus can read tenant users and licences through the connected provider. High-impact actions remain permission-, client-scope- and approval-governed."
                   : partnerConnected
                     ? "Partner Center can discover customers, but users, licences and write actions stay disabled until the tenant has verified GDAP or customer-admin Graph access."
                     : "Configure the MSP partner tenant once, discover customers, then map and verify each tenant before technicians carry out identity work."}
@@ -297,7 +297,7 @@ export default function CippCommandCenterPage({ embedded = false }) {
               <CardContent className="p-3 flex items-center gap-2">
                 <div className="relative flex-1">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                  <Input className="pl-8 h-9" placeholder="Search tenants…" value={query} onChange={(e) => setQuery(e.target.value)} data-testid="cipp-tenant-search" />
+                  <Input className="pl-8 h-9" placeholder="Search a tenant, primary domain or ID…" value={query} onChange={(e) => setQuery(e.target.value)} data-testid="cipp-tenant-search" />
                 </div>
               </CardContent>
             </Card>
@@ -308,7 +308,7 @@ export default function CippCommandCenterPage({ embedded = false }) {
                 <CardContent className="p-0">
                   {loadingSummary ? (
                     <div className="flex items-center justify-center py-12 text-muted-foreground">
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading tenants…
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />Loading tenant estate…
                     </div>
                   ) : filteredTenants.length === 0 ? (
                     <div className="space-y-3 px-5 py-12 text-center">
@@ -350,7 +350,7 @@ export default function CippCommandCenterPage({ embedded = false }) {
               <Card>
                 <CardContent className="p-4 space-y-3">
                   {!selectedTenant ? (
-                    <div className="text-center py-12 text-xs text-muted-foreground">Select a tenant to view users & licenses.</div>
+                    <div className="text-center py-12 text-xs text-muted-foreground">Select a tenant to open its identity, licence and client context.</div>
                   ) : (
                     <>
                       <div className="flex items-start justify-between gap-3 flex-wrap">

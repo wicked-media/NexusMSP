@@ -203,16 +203,16 @@ def build_xdr_overview(
 
     missions: list[dict[str, Any]] = []
     if len(assessed) < len(devices):
-        missions.append({"id": "endpoint-evidence", "title": "Complete endpoint security assessments", "detail": f"{len(devices) - len(assessed)} managed endpoints have no current Shield posture evidence.", "impact": "Increase endpoint confidence", "severity": "high", "route": "/nexus-shield?tab=endpoints"})
+        missions.append({"id": "endpoint-evidence", "title": "Complete endpoint security assessments", "detail": f"{len(devices) - len(assessed)} managed endpoints have no current Shield posture evidence.", "impact": "Increase endpoint confidence", "severity": "high", "route": "/nexus-shield?tab=endpoints", "response_pack": ["Identify unmanaged or stale endpoints", "Request or restore Nexus Agent check-in", "Validate Defender, firewall, encryption and patch evidence", "Record coverage change and customer impact"]})
     if enabled_users and len(mfa_users) < len(enabled_users):
-        missions.append({"id": "mfa-coverage", "title": "Raise verified MFA coverage", "detail": f"{len(enabled_users) - len(mfa_users)} enabled Microsoft users lack MFA evidence.", "impact": "Reduce identity takeover exposure", "severity": "critical" if not mfa_users else "high", "route": "/control-plane?module=microsoft365"})
+        missions.append({"id": "mfa-coverage", "title": "Raise verified MFA coverage", "detail": f"{len(enabled_users) - len(mfa_users)} enabled Microsoft users lack MFA evidence.", "impact": "Reduce identity takeover exposure", "severity": "critical" if not mfa_users else "high", "route": "/control-plane?module=microsoft365", "response_pack": ["Confirm the client and affected identity scope", "Review Conditional Access and MFA registration evidence", "Plan user-safe enrollment and recovery steps", "Capture approval, completion and residual risk"]})
     if open_dns:
-        missions.append({"id": "dns-review", "title": "Resolve DNS security signals", "detail": f"{len(open_dns)} DNS alerts are unacknowledged.", "impact": "Improve DNS confidence", "severity": "high", "route": "/dns-monitor"})
+        missions.append({"id": "dns-review", "title": "Resolve DNS security signals", "detail": f"{len(open_dns)} DNS alerts are unacknowledged.", "impact": "Improve DNS confidence", "severity": "high", "route": "/dns-monitor", "response_pack": ["Validate the destination, user and endpoint relationship", "Preserve DNS evidence before changing enforcement", "Apply the approved allow, block or containment action", "Record validation and customer communication"]})
     failed_backups = len(known_backups) - len(healthy_backups)
     if failed_backups:
-        missions.append({"id": "recovery-health", "title": "Restore recovery confidence", "detail": f"{failed_backups} backup jobs do not report a successful state.", "impact": "Protect recoverability", "severity": "critical", "route": "/backup-center"})
+        missions.append({"id": "recovery-health", "title": "Restore recovery confidence", "detail": f"{failed_backups} backup jobs do not report a successful state.", "impact": "Protect recoverability", "severity": "critical", "route": "/backup-center", "response_pack": ["Validate the failed job and protected workload", "Preserve provider error evidence", "Run the approved recovery playbook", "Schedule or record a restore verification"]})
     if incidents:
-        missions.append({"id": "incident-triage", "title": "Triage correlated security cases", "detail": f"{len(incidents)} evidence-backed cases require technician validation.", "impact": "Reduce response uncertainty", "severity": incidents[0]["severity"], "route": "/nexus-shield?tab=xdr"})
+        missions.append({"id": "incident-triage", "title": "Triage correlated security cases", "detail": f"{len(incidents)} evidence-backed cases require technician validation.", "impact": "Reduce response uncertainty", "severity": incidents[0]["severity"], "route": "/nexus-shield?tab=xdr", "response_pack": ["Validate the client, subject and evidence correlation", "Open an accountable investigation", "Approve containment only after evidence review", "Record recovery outcome and customer communication"]})
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),

@@ -205,6 +205,12 @@ class Device(BaseModel):
     last_reboot: Optional[str] = None
     last_heartbeat: Optional[str] = None
     agent_version: Optional[str] = None
+    nexus_agent_id: Optional[str] = None
+    nexus_elevate_state: Optional[str] = None
+    nexus_elevate_updated_at: Optional[str] = None
+    nexus_elevate_active_at: Optional[str] = None
+    nexus_elevate_companion_sha256: Optional[str] = None
+    nexus_elevate_last_error: Optional[str] = None
     antivirus: Optional[str] = None
     antivirus_status: Optional[str] = None
     firewall_enabled: Optional[bool] = True
@@ -395,6 +401,7 @@ class Invoice(BaseModel):
     invoice_number: str = Field(default_factory=lambda: f"INV-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:4].upper()}")
     client_id: Optional[str] = None
     client_name: Optional[str] = None
+    client_logo_url: Optional[str] = None
     contract_id: Optional[str] = None
     ticket_id: Optional[str] = None
     invoice_name: Optional[str] = None

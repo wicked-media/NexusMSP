@@ -212,15 +212,21 @@ export default function BillingReconPage() {
     suppliers: ["/purchase-orders", "purchase orders"],
   };
   const generatedAt = d.generated_at ? new Date(d.generated_at) : null;
+  const reconciliationSignal = (overdue.total_count || 0) > 0
+    ? "critical"
+    : actionCount > 0
+      ? "attention"
+      : "healthy";
 
   return (
-    <div className="space-y-5" data-testid="billing-recon-page">
+    <div className="nx-page-stage space-y-5" data-testid="billing-recon-page">
       <OperationalPageHeader
         eyebrow="Revenue assurance"
         title="Billing reconciliation"
         description="Find recoverable work, validate source evidence and resolve billing leakage from one auditable queue."
         icon={Receipt}
         tone="amber"
+        signal={reconciliationSignal}
         actions={(
           <>
             <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => navigate("/invoices")}>

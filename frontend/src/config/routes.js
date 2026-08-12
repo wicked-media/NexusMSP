@@ -2,6 +2,10 @@ import { lazy } from "react";
 
 // Lazy-loaded page components
 const page = (name) => lazy(() => import(`@/pages/${name}`));
+// Keep this direct import explicit.  Deployment Hub can be introduced after a
+// local dev server has already started; a direct lazy chunk avoids the generic
+// dynamic-import context falling through to the application catch-all route.
+const DeploymentHubPage = lazy(() => import("@/pages/DeploymentHubPage"));
 
 // Route configuration
 // layout: true = wrapped in MainLayout, auth: true = requires authentication
@@ -9,11 +13,13 @@ export const routeConfig = [
   // Core
   { path: "/", component: page("DashboardPage"), auth: true, layout: true },
   { path: "/nexus-suite", component: page("NexusSuitePage"), auth: true, layout: true },
+  { path: "/deployment-hub", component: DeploymentHubPage, auth: true, layout: true },
   { path: "/shadow-it", component: page("ShadowITPage"), auth: true, layout: true },
   { path: "/nexus-elevate", component: page("NexusElevatePage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/control-plane", component: page("NexusControlPlanePage"), auth: true, layout: true },
   { path: "/production-readiness", component: page("ProductionReadinessPage"), auth: true, layout: true },
+  { path: "/diagnostics", component: page("DiagnosticsWorkspacePage"), auth: true, layout: true },
   { path: "/executive", component: page("ExecutivePage"), auth: true, layout: true },
   // Preserve historic bookmarks while keeping Microsoft tenant operations in
   // one provider-agnostic Nexus Control Plane workspace.
@@ -188,6 +194,7 @@ export const routeConfig = [
   { path: "/security-dashboard", component: page("SecurityDashboardPage"), auth: true, layout: true },
   { path: "/security-graph", component: page("SecurityGraphPage"), auth: true, layout: true },
   { path: "/nexus-shield", component: page("NexusShieldPage"), auth: true, layout: true },
+  { path: "/mail-shield", component: page("NexusMailShieldPage"), auth: true, layout: true },
   { path: "/endpoint-security", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-shield?tab=endpoints" },
   { path: "/threat-timeline", component: page("ThreatTimelinePage"), auth: true, layout: true },
   { path: "/identity-threats", component: page("IdentityThreatPage"), auth: true, layout: true },
@@ -318,6 +325,9 @@ export const routeConfig = [
 
   // Consolidation hubs (Feb 2026 dedup)
   { path: "/client-insights", component: page("ClientInsightsHubPage"), auth: true, layout: true },
+  { path: "/nexus-verify", component: page("NexusVerifyPage"), auth: true, layout: true },
+  { path: "/work-session", component: page("WorkSessionPage"), auth: true, layout: true },
+  { path: "/expected-state", component: page("ExpectedStatePage"), auth: true, layout: true },
   { path: "/auto-ops", component: page("AutoOpsHubPage"), auth: true, layout: true },
   { path: "/credentials", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/hudu" },
   { path: "/team-hub", component: page("TeamHubPage"), auth: true, layout: true },

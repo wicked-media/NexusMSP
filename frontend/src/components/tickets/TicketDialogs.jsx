@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +23,14 @@ export function EmailDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Send Email from Ticket</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        className="max-w-3xl"
+        eyebrow="Ticket communication"
+        title="Send customer update"
+        description="Compose a customer-facing update with the linked ticket context and signature retained on send."
+        icon={Send}
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSendEmail} disabled={!emailForm.to?.trim()} data-testid="send-email-submit"><Send className="w-4 h-4 mr-1" />Send update</Button></>}
+      >
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-2">
             <div><Label>To</Label><Input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="recipient@email.com" data-testid="email-to" list="ticket-contact-emails" /><datalist id="ticket-contact-emails">{clientContacts.map(contact => contact.email && <option key={contact.id} value={contact.email}>{contact.name} ({contact.email})</option>)}</datalist></div>
@@ -57,8 +64,7 @@ export function EmailDialog({
             )}
           </div>
         </div>
-        <DialogFooter><Button onClick={handleSendEmail} disabled={!emailForm.to?.trim()} data-testid="send-email-submit"><Send className="w-4 h-4 mr-1" />Send</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -87,8 +93,14 @@ export function ChildTicketDialog({ open, onOpenChange, childForm, setChildForm,
 export function MergeDialog({ open, onOpenChange, viewingTicket, tickets, mergeIds, setMergeIds, handleMerge }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Merge Tickets Into This One</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Ticket consolidation"
+        title="Merge related tickets"
+        description={`Combine duplicate service records into ${viewingTicket.ticket_number} while retaining notes, mail and audit history.`}
+        icon={Merge}
+        tone="violet"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleMerge} disabled={!mergeIds.length} data-testid="merge-submit"><Merge className="w-4 h-4 mr-1" />Merge {mergeIds.length} tickets</Button></>}
+      >
         <p className="text-sm text-muted-foreground">Select tickets to merge into {viewingTicket.ticket_number}. Their notes and emails will be combined.</p>
         <ScrollArea className="h-[250px]">
           {tickets.filter(t => t.id !== viewingTicket.id && t.status !== "closed").map(t => (
@@ -99,8 +111,7 @@ export function MergeDialog({ open, onOpenChange, viewingTicket, tickets, mergeI
             </div>
           ))}
         </ScrollArea>
-        <DialogFooter><Button onClick={handleMerge} disabled={!mergeIds.length} data-testid="merge-submit"><Merge className="w-4 h-4 mr-1" />Merge {mergeIds.length} tickets</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -108,15 +119,20 @@ export function MergeDialog({ open, onOpenChange, viewingTicket, tickets, mergeI
 export function LogTimeDialog({ open, onOpenChange, timeForm, setTimeForm, handleAddTime }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Log Time</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Service delivery"
+        title="Log technician time"
+        description="Keep the service record, commercial status and billing context accurate without leaving the ticket."
+        icon={Timer}
+        tone="emerald"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleAddTime} data-testid="log-time-submit"><Timer className="w-4 h-4 mr-1" />Log time</Button></>}
+      >
         <div className="space-y-3">
           <div><Label>Minutes</Label><Input type="number" value={timeForm.minutes} onChange={e => setTimeForm({ ...timeForm, minutes: parseInt(e.target.value) || 0 })} data-testid="time-minutes" /></div>
           <div><Label>Description</Label><Input value={timeForm.description} onChange={e => setTimeForm({ ...timeForm, description: e.target.value })} data-testid="time-desc" /></div>
           <div className="flex items-center gap-2"><Checkbox checked={timeForm.billable} onCheckedChange={v => setTimeForm({ ...timeForm, billable: v })} id="billable" /><Label htmlFor="billable">Billable</Label></div>
         </div>
-        <DialogFooter><Button onClick={handleAddTime} data-testid="log-time-submit"><Timer className="w-4 h-4 mr-1" />Log Time</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }

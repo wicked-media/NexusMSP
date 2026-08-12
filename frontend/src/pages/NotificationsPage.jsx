@@ -32,6 +32,7 @@ const typeConfig = {
 const severityAccent = { critical: "border-l-rose-500", warning: "border-l-amber-500", info: "border-l-sky-500" };
 
 const notificationLink = (notification) => {
+  if (notification.action_url && String(notification.action_url).startsWith("/")) return notification.action_url;
   if (!notification.ref_type || !notification.ref_id) return null;
   if (notification.ref_type === "lead") return `/leads?lead=${encodeURIComponent(notification.ref_id)}`;
   if (notification.ref_type === "device") return `/devices/${notification.ref_id}`;

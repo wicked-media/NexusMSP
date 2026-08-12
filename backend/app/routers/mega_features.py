@@ -22,6 +22,7 @@ from typing import Optional
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope, scoped_query
 
 router = APIRouter()
 
@@ -73,10 +74,14 @@ def _parse_iso(s) -> Optional[datetime]:
 
 @router.get("/tickets/{ticket_id}/doppelganger")
 async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    """Find the 3 most similar resolved tickets across ALL clients + the fix that worked."""
-    target = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not target:
-        raise HTTPException(404, "Ticket not found")
+    """Find similar resolved tickets within the technician's permitted scope."""
+    target = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.doppelganger.read",
+        resource_name="Ticket",
+    )
 
     title = (target.get("title") or "").lower()
     keywords = [w for w in re.findall(r"[a-z0-9]{4,}", title) if w not in
@@ -87,14 +92,14 @@ async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_c
 
     regex = "|".join(re.escape(k) for k in keywords)
     candidates = await db.tickets.find(
-        {
+        scoped_query(current_user, {
             "id": {"$ne": ticket_id},
             "status": {"$in": ["resolved", "closed"]},
             "$or": [
                 {"title": {"$regex": regex, "$options": "i"}},
                 {"description": {"$regex": regex, "$options": "i"}},
             ],
-        },
+        }),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1,
          "category": 1, "priority": 1, "resolved_at": 1, "resolution_notes": 1, "description": 1},
     ).limit(40).to_list(40)

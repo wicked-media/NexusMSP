@@ -64,6 +64,7 @@ const EMPTY_COMPOSE = {
   body: "",
   client_id: "",
 };
+const EMAIL_VIEWS = ["all", "inbox", "sent", "drafts", "attention"];
 
 const STATUS_CONFIG = {
   draft: { label: "Draft", className: "border-amber-500/25 bg-amber-500/10 text-amber-200" },
@@ -201,6 +202,7 @@ export default function EmailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedClientId = searchParams.get("client");
   const shouldComposeForClient = searchParams.get("compose") === "1";
+  const requestedView = searchParams.get("view");
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [status, setStatus] = useState({ configured: false, mailbox_count: 0 });
@@ -211,7 +213,7 @@ export default function EmailPage() {
   const [loadError, setLoadError] = useState("");
   const [selectedEmail, setSelectedEmail] = useState(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("all");
+  const [activeTab, setActiveTab] = useState(() => EMAIL_VIEWS.includes(requestedView) ? requestedView : "all");
   const [search, setSearch] = useState("");
   const [composeData, setComposeData] = useState(EMPTY_COMPOSE);
   const [saving, setSaving] = useState(false);
@@ -255,8 +257,22 @@ export default function EmailPage() {
       to_addresses: current.to_addresses || emailAddressFor(client),
     }));
     setIsComposeOpen(true);
-    setSearchParams({}, { replace: true });
-  }, [clients, requestedClientId, setSearchParams, shouldComposeForClient]);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("client");
+    nextParams.delete("compose");
+    setSearchParams(nextParams, { replace: true });
+  }, [clients, requestedClientId, searchParams, setSearchParams, shouldComposeForClient]);
+
+  useEffect(() => {
+    setActiveTab(EMAIL_VIEWS.includes(requestedView) ? requestedView : "all");
+  }, [requestedView]);
+
+  const selectMailboxView = (nextView) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextView === "all") nextParams.delete("view");
+    else nextParams.set("view", nextView);
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const metrics = useMemo(() => ({
     all: emails.length,
@@ -417,10 +433,10 @@ export default function EmailPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <HeroTile label="All messages" value={metrics.all} icon={Mail} glow="violet" onClick={() => setActiveTab("all")} active={activeTab === "all"} testId="email-stat-all" />
-        <HeroTile label="Inbox" value={metrics.inbox} icon={ArrowDownLeft} glow="sky" onClick={() => setActiveTab("inbox")} active={activeTab === "inbox"} testId="email-stat-inbox" />
-        <HeroTile label="Delivered" value={metrics.sent} icon={MailCheck} glow="emerald" onClick={() => setActiveTab("sent")} active={activeTab === "sent"} testId="email-stat-sent" />
-        <HeroTile label="Needs action" value={metrics.attention} icon={CircleAlert} glow={metrics.attention ? "amber" : "zinc"} onClick={() => setActiveTab("attention")} active={activeTab === "attention"} testId="email-stat-attention" />
+        <HeroTile label="All messages" value={metrics.all} icon={Mail} glow="violet" onClick={() => selectMailboxView("all")} active={activeTab === "all"} testId="email-stat-all" />
+        <HeroTile label="Inbox" value={metrics.inbox} icon={ArrowDownLeft} glow="sky" onClick={() => selectMailboxView("inbox")} active={activeTab === "inbox"} testId="email-stat-inbox" />
+        <HeroTile label="Delivered" value={metrics.sent} icon={MailCheck} glow="emerald" onClick={() => selectMailboxView("sent")} active={activeTab === "sent"} testId="email-stat-sent" />
+        <HeroTile label="Needs action" value={metrics.attention} icon={CircleAlert} glow={metrics.attention ? "amber" : "zinc"} onClick={() => selectMailboxView("attention")} active={activeTab === "attention"} testId="email-stat-attention" />
       </div>
 
       <Card className={status.configured ? "border-emerald-500/25 bg-emerald-500/[0.035]" : "border-amber-500/25 bg-amber-500/[0.035]"}>
@@ -461,7 +477,7 @@ export default function EmailPage() {
       <Card className="overflow-hidden border-zinc-800/70">
         <CardHeader className="space-y-4 border-b border-white/[0.06] bg-black/10 pb-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <Tabs value={activeTab} onValueChange={selectMailboxView}>
               <TabsList className="h-auto w-full justify-start gap-1 rounded-none border-b border-zinc-800 bg-transparent p-0 lg:w-auto">
                 {[
                   { value: "all", label: "All", icon: Mail },

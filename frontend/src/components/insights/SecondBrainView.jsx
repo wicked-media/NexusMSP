@@ -46,6 +46,7 @@ const SOURCE = {
   knowledge: { label: "Knowledge", icon: FileSearch, tone: "text-emerald-300 bg-emerald-500/10 border-emerald-500/25" },
   client: { label: "Client", icon: Network, tone: "text-cyan-300 bg-cyan-500/10 border-cyan-500/25" },
   audit: { label: "Audit", icon: History, tone: "text-amber-300 bg-amber-500/10 border-amber-500/25" },
+  decision: { label: "Decision", icon: Check, tone: "text-rose-300 bg-rose-500/10 border-rose-500/25" },
 };
 
 function ConfidenceBadge({ confidence }) {
@@ -101,7 +102,7 @@ function MemorySearch({ api }) {
               </div>
               <h2 className="mt-2 text-xl font-semibold">Find what the MSP already knows</h2>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Search tickets, runbooks, knowledge, clients and audit evidence in one place. Results are direct records, not generated answers.
+                Search tickets, runbooks, knowledge, approved operational decisions, clients and audit evidence in one place. Results are direct records, not generated answers.
               </p>
             </div>
             <Badge variant="outline" className="w-fit border-emerald-500/25 bg-emerald-500/10 text-emerald-300">
@@ -456,7 +457,7 @@ export default function SecondBrainView({ api }) {
         <HeroTile label="Patterns" value={metrics.patterns || 0} icon={Network} glow="cyan" subtitle="Meeting evidence threshold" animated={false} />
         <HeroTile label="Knowledge gaps" value={metrics.knowledge_gaps || 0} icon={BookOpenCheck} glow="amber" subtitle="Repeat work without guidance" animated={false} />
         <HeroTile label="Team profiles" value={metrics.expertise_profiles || 0} icon={UserRoundCheck} glow="emerald" subtitle="Recorded outcome evidence" animated={false} />
-        <HeroTile label="Suggestions" value={metrics.recommendations || 0} icon={Lightbulb} glow="sky" subtitle="Review before action" animated={false} />
+        <HeroTile label="Suggestions" value={metrics.recommendations || 0} icon={Lightbulb} glow="sky" subtitle={`${metrics.operational_decisions || 0} recorded decisions`} animated={false} />
       </div>
 
       <MemorySearch api={api} />

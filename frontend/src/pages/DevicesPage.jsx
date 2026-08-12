@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
@@ -40,7 +40,15 @@ import { PageShell } from "@/components/design-system";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
 const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
-const STATUS_DOT = { online: "bg-emerald-500", offline: "bg-red-500", warning: "bg-amber-500" };
+const ELEVATE_STATE_META = {
+  active: { label: "Elevate active", className: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300" },
+  deploying: { label: "Elevate deploying", className: "border-sky-500/30 bg-sky-500/15 text-sky-300" },
+  requires_agent_update: { label: "Elevate needs update", className: "border-amber-500/30 bg-amber-500/15 text-amber-200" },
+  deployment_failed: { label: "Elevate needs repair", className: "border-rose-500/30 bg-rose-500/15 text-rose-200" },
+  awaiting_companion_build: { label: "Elevate awaiting build", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-300" },
+  unsupported_platform: { label: "Elevate unsupported", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-400" },
+  paused: { label: "Elevate paused", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-400" },
+};
 const MANAGED_ASSET_TOOLS = [
   { path: "/nexus-agent", label: "NexusOps Agent", icon: Terminal },
   { path: "/maintenance-scheduler", label: "Maintenance", icon: CalendarClock },
@@ -60,7 +68,6 @@ export default function DevicesPage() {
   const { token } = useAuth();
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
-  const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -88,7 +95,7 @@ export default function DevicesPage() {
   const [quickScriptOpen, setQuickScriptOpen] = useState(false);
   const [pulseCount, setPulseCount] = useState(0);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const filterSource = searchParams.get("source");
 
   useEffect(() => {
@@ -115,14 +122,12 @@ export default function DevicesPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [devRes, clientRes, statsRes] = await Promise.all([
+      const [devRes, clientRes] = await Promise.all([
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
-        axios.get(`${API}/devices/stats/summary`, { headers }).catch(() => ({ data: {} }))
       ]);
       setDevices(devRes.data);
       setClients(clientRes.data);
-      setStats(statsRes.data);
       // Fetch active remote viewers
       try {
         const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
@@ -144,7 +149,7 @@ export default function DevicesPage() {
         setSiteMap(sRes.data?.sites || []);
       } catch { setSiteMap([]); }
     } catch (e) { console.error(e); } finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -181,7 +186,7 @@ export default function DevicesPage() {
       } catch {}
     }, 15000);
     return () => clearInterval(poll);
-  }, []);
+  }, [headers]);
 
   const filtered = devices.filter(d => {
     if (filterSource && d.source !== filterSource) return false;
@@ -194,6 +199,13 @@ export default function DevicesPage() {
     }
     return true;
   });
+  const fleetSignal = devices.some(device => device.status === "offline")
+    ? "critical"
+    : devices.some(device => device.status === "warning" || device.elevate_state === "deployment_failed" || device.elevate_state === "requires_agent_update")
+      ? "attention"
+      : devices.some(device => device.status === "online")
+        ? "healthy"
+        : "recommendation";
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setIsFormOpen(true); };
   const openEdit = (d) => {
@@ -234,51 +246,6 @@ export default function DevicesPage() {
   const selectAll = () => {
     if (selectedDevices.length === filtered.length) setSelectedDevices([]);
     else setSelectedDevices(filtered.map(d => d.id));
-  };
-
-  const handleBulkDelete = async () => {
-    if (!window.confirm(`Delete ${selectedDevices.length} devices?`)) return;
-    try {
-      await Promise.all(selectedDevices.map(id => axios.delete(`${API}/devices/${id}`, { headers })));
-      toast.success(`${selectedDevices.length} devices deleted`);
-      setSelectedDevices([]);
-      fetchData();
-    } catch { toast.error("Bulk delete failed"); }
-  };
-
-  const handleBulkReboot = async () => {
-    toast.success(`Reboot command sent to ${selectedDevices.length} devices`);
-    setSelectedDevices([]);
-  };
-
-  const handleBulkScan = async () => {
-    toast.success(`Security scan queued for ${selectedDevices.length} devices`);
-    setSelectedDevices([]);
-  };
-
-  const handleBulkDeployAgent = async (osType) => {
-    const count = selectedDevices.length;
-    const ext = osType === "windows" ? "ps1" : "sh";
-    try {
-      // Download a zip-like bundle or individual scripts
-      for (const deviceId of selectedDevices) {
-        const res = await axios.get(`${API}/devices/${deviceId}/agent-script?os_type=${osType}`, {
-          headers, responseType: "blob",
-        });
-        const url = window.URL.createObjectURL(new Blob([res.data]));
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `nexusops-agent-${deviceId}.${ext}`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      }
-      toast.success(`${count} agent script${count > 1 ? "s" : ""} downloaded (${osType === "windows" ? "PowerShell" : "Bash"})`);
-      setSelectedDevices([]);
-    } catch {
-      toast.error("Failed to download agent scripts");
-    }
   };
 
   const handleDiscoverDevices = async () => {
@@ -374,11 +341,11 @@ export default function DevicesPage() {
   );
 
   return (
-    <PageShell data-testid="devices-page">
+    <PageShell className="nx-page-stage" data-testid="devices-page">
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
       {/* Header — matches Team Command Center pattern */}
-      <div className="flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-sky-500/20 bg-gradient-to-r from-sky-500/[0.10] via-card to-cyan-500/[0.05] p-5 flex-wrap">
+      <div className="nx-ambient-surface flex items-center justify-between gap-4 overflow-hidden rounded-2xl border border-sky-500/20 bg-gradient-to-r from-sky-500/[0.10] via-card to-cyan-500/[0.05] p-5 flex-wrap" data-nx-signal={fleetSignal}>
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Sparkles className="w-6 h-6 text-cyan-300" />Managed Assets
@@ -693,6 +660,7 @@ export default function DevicesPage() {
                                 <Sparkles className="w-2.5 h-2.5" />Agent
                               </Badge>
                             )}
+                            <ElevatePill device={d} />
                             {(() => {
                               const rdLive = d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null;
                               const effectiveStatus = rdLive || d.status;
@@ -827,6 +795,7 @@ export default function DevicesPage() {
                       </div>
                     </div>
                   )}
+                  {d.nexus_elevate_state && <div className="mb-3 flex flex-wrap gap-1.5"><ElevatePill device={d} /></div>}
                   <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground mb-3">
                     <div><span className="block text-[10px]">OS</span><span className="text-foreground">{d.os}</span></div>
                     <div><span className="block text-[10px]">IP</span><span className="font-mono text-foreground">{d.ip_address || "-"}</span></div>
@@ -889,7 +858,7 @@ export default function DevicesPage() {
       {/* DEVICE DISCOVERY DIALOG */}
       <Dialog open={isDiscoveryOpen} onOpenChange={setIsDiscoveryOpen}>
         <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
-          <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset onboarding</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Radar className="h-4 w-4 text-cyan-200" /></span>Network discovery</DialogTitle><DialogDescription className="mt-2">Scan an approved client subnet, review findings, and import only the endpoints you intend to manage.</DialogDescription></DialogHeader>
+          <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset onboarding</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Radar className="h-4 w-4 text-cyan-200" /></span>Network discovery</DialogTitle><DialogDescription className="mt-2">Scan an approved private client subnet through an active Nexus Edge Discovery probe, review findings, and import only the endpoints you intend to manage. Nexus will not invent production discovery results.</DialogDescription></DialogHeader>
           <div className="space-y-4 px-6 py-5"><div className="grid gap-3 md:grid-cols-[1fr_190px_auto] md:items-end">
             <div className="flex-1">
               <Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Client</Label>
@@ -967,5 +936,13 @@ export default function DevicesPage() {
       </div>
     </PageShell>
   );
+}
+
+function ElevatePill({ device }) {
+  const meta = ELEVATE_STATE_META[device.nexus_elevate_state];
+  if (!meta) return null;
+  return <Badge className={`${meta.className} border text-[9px] uppercase tracking-wider gap-1 px-1.5`} title={device.nexus_elevate_last_error || "Nexus Elevate status is verified by the enrolled Nexus Agent"}>
+    <Shield className="h-2.5 w-2.5" />{meta.label}
+  </Badge>;
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import ElevatePolicyWorkspace from "@/components/nexus-elevate/ElevatePolicyWork
 
 const EMPTY_OVERVIEW = {
   settings: { native_enabled: true, max_duration_minutes: 15, keeper_bridge_enabled: false },
-  summary: { pending: 0, approved: 0, expiring_soon: 0, failed_or_expired: 0, native_agent_coverage: 0, native_agents_online: 0, companion_agents_ready: 0, companion_agents_online: 0, keeper_bridge_requests: 0, active_policies: 0, enforced_policies: 0 },
+  summary: { pending: 0, approved: 0, expiring_soon: 0, failed_or_expired: 0, native_agent_coverage: 0, native_agents_online: 0, companion_agents_ready: 0, companion_agents_online: 0, elevate_active: 0, elevate_deploying: 0, keeper_bridge_requests: 0, active_policies: 0, enforced_policies: 0 },
   recent_requests: [],
 };
 
@@ -45,6 +45,8 @@ const displayTime = (value) => safeDate(value)?.toLocaleString() || "Not recorde
 export default function NexusElevatePage() {
   const { token } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const endpointScope = searchParams.get("device") || "";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [overview, setOverview] = useState(EMPTY_OVERVIEW);
   const [requests, setRequests] = useState([]);
@@ -70,7 +72,7 @@ export default function NexusElevatePage() {
     try {
       const [overviewResult, requestsResult] = await Promise.all([
         axios.get(`${API}/nexus-elevate/overview`, { headers }),
-        axios.get(`${API}/nexus-elevate/requests`, { headers }),
+        axios.get(`${API}/nexus-elevate/requests`, { headers, params: endpointScope ? { device_id: endpointScope } : undefined }),
       ]);
       setOverview(overviewResult.data || EMPTY_OVERVIEW);
       setRequests(requestsResult.data?.requests || []);
@@ -79,11 +81,23 @@ export default function NexusElevatePage() {
     } finally {
       setLoading(false);
     }
-  }, [headers]);
+  }, [headers, endpointScope]);
 
   useEffect(() => { load(); }, [load]);
 
-  const openRequest = async (request) => {
+  useEffect(() => {
+    const refreshQueue = () => {
+      if (document.visibilityState === "visible") load({ quiet: true });
+    };
+    const interval = window.setInterval(refreshQueue, 15000);
+    document.addEventListener("visibilitychange", refreshQueue);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshQueue);
+    };
+  }, [load]);
+
+  const openRequest = useCallback(async (request) => {
     setSelected(request);
     setDetail(null);
     setReason("");
@@ -96,7 +110,18 @@ export default function NexusElevatePage() {
     } catch (error) {
       toast.error(error.response?.data?.detail || "Request details could not be loaded");
     }
-  };
+  }, [headers, overview.settings?.max_duration_minutes]);
+
+  useEffect(() => {
+    const requestedStatus = searchParams.get("status");
+    if (requestedStatus && ["pending", "approved", "executed", "denied", "failed", "expired"].includes(requestedStatus)) {
+      setStatus(requestedStatus);
+    }
+    const requestId = searchParams.get("request");
+    if (!requestId || !requests.length || selected?.id === requestId) return;
+    const request = requests.find((item) => item.id === requestId);
+    if (request) openRequest(request);
+  }, [openRequest, requests, searchParams, selected?.id]);
 
   const openCompanionRollout = async () => {
     setCompanionOpen(true);
@@ -185,7 +210,7 @@ export default function NexusElevatePage() {
           <Button variant="outline" size="sm" onClick={() => navigate("/help/nexus-elevate-setup")}><HelpCircle className="mr-1 h-4 w-4" />Setup guide</Button>
           <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}><FileKey2 className="mr-1 h-4 w-4" />Settings</Button>
           <Button variant="outline" size="sm" onClick={jumpToPolicies}><ShieldCheck className="mr-1 h-4 w-4" />Policies</Button>
-          <Button variant="outline" size="sm" onClick={openCompanionRollout}><MonitorCog className="mr-1 h-4 w-4" />Deploy companion</Button>
+          <Button variant="outline" size="sm" onClick={openCompanionRollout}><MonitorCog className="mr-1 h-4 w-4" />Companion repair</Button>
           <Button size="sm" onClick={() => load()} disabled={loading}><RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh queue</Button>
         </>}
       />
@@ -195,14 +220,14 @@ export default function NexusElevatePage() {
         <HeroTile label="Approved launch" value={summary.approved} icon={Clock3} glow={summary.approved ? "sky" : "zinc"} subtitle="Queued or time-bound" onClick={() => setStatus("approved")} active={status === "approved"} testId="nexus-elevate-approved-tile" />
         <HeroTile label="Expiring soon" value={summary.expiring_soon} icon={TimerReset} glow={summary.expiring_soon ? "amber" : "zinc"} subtitle="Within ten minutes" onClick={() => setStatus("approved")} testId="nexus-elevate-expiring-tile" />
         <HeroTile label="Execution exceptions" value={summary.failed_or_expired} icon={ShieldX} glow={summary.failed_or_expired ? "rose" : "zinc"} subtitle="Failures and expired requests" onClick={() => setStatus("failed")} active={status === "failed"} testId="nexus-elevate-failed-tile" />
-        <HeroTile label="Companion coverage" value={`${summary.companion_agents_ready || 0}/${summary.native_agent_coverage || 0}`} icon={MonitorCog} glow={summary.companion_agents_ready ? "sky" : "zinc"} subtitle={`${summary.companion_agents_online || 0} companion online · ${summary.native_agents_online || 0}/${summary.native_agent_coverage || 0} agents online`} animated={false} onClick={openCompanionRollout} testId="nexus-elevate-coverage-tile" />
+        <HeroTile label="Elevate active" value={`${summary.elevate_active || 0}/${summary.native_agent_coverage || 0}`} icon={MonitorCog} glow={summary.elevate_active ? "emerald" : "zinc"} subtitle={summary.elevate_deploying ? `${summary.elevate_deploying} companion deployment${summary.elevate_deploying === 1 ? "" : "s"} queued` : `${summary.companion_agents_online || 0} active companion${summary.companion_agents_online === 1 ? "" : "s"} online`} animated={false} onClick={openCompanionRollout} testId="nexus-elevate-coverage-tile" />
         <HeroTile label="Service-launch policy" value={settings.native_enabled ? "Enabled" : "Paused"} icon={CheckCircle2} glow={settings.native_enabled ? "emerald" : "rose"} subtitle={`Approval cap ${settings.max_duration_minutes || 15} minutes`} animated={false} onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")} testId="nexus-elevate-policy-tile" />
         <HeroTile label="Policy controls" value={String(policyCount ?? summary.active_policies ?? 0)} icon={ShieldCheck} glow={(policyCount ?? summary.active_policies ?? 0) ? "emerald" : "zinc"} subtitle={`${summary.enforced_policies || 0} enforced`} animated={false} onClick={jumpToPolicies} testId="nexus-elevate-policy-controls-tile" />
       </div>
 
       <Card className="border-emerald-500/20 bg-emerald-500/[0.035]">
         <CardContent className="flex flex-col gap-3 p-4 text-sm lg:flex-row lg:items-center lg:justify-between">
-          <div><span className="font-semibold text-emerald-200">Universal by design.</span><span className="ml-1 text-muted-foreground">Every enrolled Windows Nexus Agent can submit a request for an exact, hash-pinned unattended executable task. It runs through the agent service; it is not interactive UAC elevation or a permanent local-admin grant. The optional Keeper bridge is {settings.keeper_bridge_enabled ? "configured as a provider path" : "off and not required"}.</span></div>
+          <div><span className="font-semibold text-emerald-200">Universal by design.</span><span className="ml-1 text-muted-foreground">Every entitled Windows Nexus Agent receives the signed Client Chat + Elevate companion automatically when it is online. It only becomes active after the agent verifies installation. Requests run through the agent service; this is not interactive UAC elevation or a permanent local-admin grant. The optional Keeper bridge is {settings.keeper_bridge_enabled ? "configured as a provider path" : "off and not required"}.</span></div>
           <Button variant="ghost" size="sm" className="self-start text-emerald-200 hover:bg-emerald-500/10" onClick={() => navigate("/help/nexus-elevate-setup")}>Read the technician flow <ExternalLink className="ml-1 h-3.5 w-3.5" /></Button>
         </CardContent>
       </Card>
@@ -212,6 +237,7 @@ export default function NexusElevatePage() {
       <div className="flex flex-wrap gap-3">
         <div className="relative min-w-[260px] flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search program, asset, client, requester, or ticket..." data-testid="nexus-elevate-search" /></div>
         <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-[180px]" data-testid="nexus-elevate-status-filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All request states</SelectItem><SelectItem value="pending">Awaiting review</SelectItem><SelectItem value="approved">Approved / queued</SelectItem><SelectItem value="executed">Executed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="expired">Expired</SelectItem></SelectContent></Select>
+        {endpointScope && <Button variant="outline" size="sm" onClick={() => navigate("/nexus-elevate")}>Endpoint scope <span className="ml-1 text-muted-foreground">×</span></Button>}
         <span className="self-center text-xs text-muted-foreground">{filtered.length} shown</span>
       </div>
 
@@ -221,8 +247,8 @@ export default function NexusElevatePage() {
 
       <Dialog open={companionOpen} onOpenChange={setCompanionOpen}>
         <DialogContent className="max-w-xl" data-testid="nexus-elevate-companion-dialog">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5 text-emerald-300" />Deploy Nexus Client Chat companion</DialogTitle></DialogHeader>
-          <div className="space-y-4"><p className="text-sm text-muted-foreground">The current Nexus Agent downloads the companion, verifies its SHA-256, and copies it to the agent installation directory. It does not launch the window in a customer session; the user or technician opens it when needed.</p><div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3 text-xs text-emerald-100">Only online agents running the current companion-rollout version are eligible. Agents receive that update through the normal Nexus Agent auto-update channel before they appear ready.</div><Select value={companionScope} onValueChange={setCompanionScope}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All online, updated agents</SelectItem><SelectItem value="one">One online agent</SelectItem></SelectContent></Select>{companionScope === "one" && <Select value={companionAgentId} onValueChange={setCompanionAgentId} disabled={companionLoading}><SelectTrigger><SelectValue placeholder={companionLoading ? "Loading agents..." : "Choose an online agent"} /></SelectTrigger><SelectContent>{companionAgents.length === 0 ? <SelectItem value="none" disabled>No online agents found</SelectItem> : companionAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.hostname || agent.id} · {agent.client_name || agent.client_id || "Unassigned"} · {agent.agent_version || "unknown"}</SelectItem>)}</SelectContent></Select>}<div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setCompanionOpen(false)} disabled={companionDeploying}>Cancel</Button><Button onClick={deployCompanion} disabled={companionDeploying || companionLoading}>{companionDeploying && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue companion rollout</Button></div></div>
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5 text-emerald-300" />Repair or retry Elevate companion</DialogTitle></DialogHeader>
+          <div className="space-y-4"><p className="text-sm text-muted-foreground">Nexus automatically delivers the signed Client Chat + Elevate companion when an eligible Windows agent enrols or checks in. Use this only to force an immediate retry or repair. The agent verifies the SHA-256 and copies the companion to its installation directory; it never launches a customer-session window itself.</p><div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3 text-xs text-emerald-100">Only online agents running the current companion-rollout version are eligible. Devices become <strong>Elevate active</strong> only after a verified agent result—not when this command is merely queued.</div><Select value={companionScope} onValueChange={setCompanionScope}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All online, updated agents</SelectItem><SelectItem value="one">One online agent</SelectItem></SelectContent></Select>{companionScope === "one" && <Select value={companionAgentId} onValueChange={setCompanionAgentId} disabled={companionLoading}><SelectTrigger><SelectValue placeholder={companionLoading ? "Loading agents..." : "Choose an online agent"} /></SelectTrigger><SelectContent>{companionAgents.length === 0 ? <SelectItem value="none" disabled>No online agents found</SelectItem> : companionAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.hostname || agent.id} · {agent.client_name || agent.client_id || "Unassigned"} · {agent.agent_version || "unknown"}</SelectItem>)}</SelectContent></Select>}<div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setCompanionOpen(false)} disabled={companionDeploying}>Cancel</Button><Button onClick={deployCompanion} disabled={companionDeploying || companionLoading}>{companionDeploying && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue immediate retry</Button></div></div>
         </DialogContent>
       </Dialog>
 

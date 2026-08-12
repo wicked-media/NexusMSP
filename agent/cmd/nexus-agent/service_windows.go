@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"nexusagent/internal/config"
 )
@@ -62,16 +64,48 @@ func svcInstall(cfg *config.Config) error {
 		return fmt.Errorf("sc create failed: %v: %s", err, string(out))
 	}
 	_ = exec.Command("sc", "description", svcName, "NexusOps Remote Monitoring & Management Agent").Run()
+	// The service runs in Session 0 and cannot own a user-visible tray icon.
+	// The adjacent tray companion is registered for each interactive user instead.
+	if trayPath := filepath.Join(filepath.Dir(exe), "nexus-agent-tray.exe"); fileExists(trayPath) {
+		if err := installTrayLauncher(trayPath); err != nil {
+			return fmt.Errorf("register tray companion: %w", err)
+		}
+	}
 	return svcStart()
 }
 
 func svcUninstall() error {
 	_ = svcStop()
+	_ = removeTrayLauncher()
 	out, err := exec.Command("sc", "delete", svcName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("sc delete: %v: %s", err, string(out))
 	}
 	return nil
+}
+
+func fileExists(path string) bool { _, err := os.Stat(path); return err == nil }
+
+func installTrayLauncher(trayPath string) error {
+	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer key.Close()
+	return key.SetStringValue("NexusOpsAgentTray", fmt.Sprintf(`"%s"`, trayPath))
+}
+
+func removeTrayLauncher() error {
+	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer key.Close()
+	err = key.DeleteValue("NexusOpsAgentTray")
+	if err == registry.ErrNotExist {
+		return nil
+	}
+	return err
 }
 
 func svcStart() error {

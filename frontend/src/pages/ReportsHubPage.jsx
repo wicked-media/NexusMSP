@@ -24,7 +24,7 @@ const LEGACY_TAB_MAP = { operational: "operations", executive: "overview", clien
 const money = (value) => new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 0 }).format(Number(value || 0));
 const date = (value) => value ? new Date(value).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) : "Not generated";
 
-function ReportCard({ icon: Icon, title, description, tag, onOpen, tone = "sky", running = false }) {
+function ReportCard({ icon: Icon, title, description, tag, onOpen, tone = "sky" }) {
   const tones = { sky: "text-sky-300 bg-sky-400/10 border-sky-400/20", emerald: "text-emerald-300 bg-emerald-400/10 border-emerald-400/20", amber: "text-amber-300 bg-amber-400/10 border-amber-400/20", violet: "text-violet-300 bg-violet-400/10 border-violet-400/20", rose: "text-rose-300 bg-rose-400/10 border-rose-400/20" };
   const cardId = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return <Card className="border-border/70 bg-card/70 transition-colors hover:border-primary/35">
@@ -132,11 +132,16 @@ export default function ReportsHubPage() {
   const resolvedTickets = statusRows
     .filter((item) => ["resolved", "closed", "completed"].includes(String(item.name || item.status || "").toLowerCase()))
     .reduce((total, item) => total + Number(item.value ?? item.count ?? 0), 0);
+  const reportingSignal = Number(financial.total_outstanding || 0) > 0
+    ? "attention"
+    : latestCompliance?.score != null || (audit.total_events || 0) > 0
+      ? "healthy"
+      : "recommendation";
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
-  return <div className="space-y-5" data-testid="reports-hub">
-    <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-slate-950 via-slate-950 to-indigo-950/60 p-5 sm:p-6">
+  return <div className="nx-page-stage space-y-5" data-testid="reports-hub">
+    <section className="nx-ambient-surface relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-slate-950 via-slate-950 to-indigo-950/60 p-5 sm:p-6" data-nx-signal={reportingSignal}>
       <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-violet-500/15 blur-3xl" />
       <div className="relative flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Assurance intelligence</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Reporting & evidence centre</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">One reporting library for service performance, devices, security posture, audit evidence, finance and client outcomes.</p></div>
@@ -153,8 +158,15 @@ export default function ReportsHubPage() {
     </div>
 
     <Tabs value={tab} onValueChange={selectTab}>
-      <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border bg-muted/35 p-1">
-        <TabsTrigger value="overview"><FileBarChart className="mr-1.5 h-3.5 w-3.5" />Library</TabsTrigger><TabsTrigger value="operations"><Activity className="mr-1.5 h-3.5 w-3.5" />Operations</TabsTrigger><TabsTrigger value="security"><ShieldCheck className="mr-1.5 h-3.5 w-3.5" />Security</TabsTrigger><TabsTrigger value="governance"><Scale className="mr-1.5 h-3.5 w-3.5" />Audit</TabsTrigger><TabsTrigger value="commercial"><Landmark className="mr-1.5 h-3.5 w-3.5" />Commercial</TabsTrigger><TabsTrigger value="clients"><Users className="mr-1.5 h-3.5 w-3.5" />Clients</TabsTrigger><TabsTrigger value="postmortems"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Post-Mortems</TabsTrigger><TabsTrigger value="delivery"><CalendarClock className="mr-1.5 h-3.5 w-3.5" />Delivery</TabsTrigger>
+      <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl border bg-muted/35 p-1 sm:grid-cols-4 xl:grid-cols-8">
+        <TabsTrigger value="overview" className="min-w-0"><FileBarChart className="mr-1.5 h-3.5 w-3.5" />Library</TabsTrigger>
+        <TabsTrigger value="operations" className="min-w-0"><Activity className="mr-1.5 h-3.5 w-3.5" />Operations</TabsTrigger>
+        <TabsTrigger value="security" className="min-w-0"><ShieldCheck className="mr-1.5 h-3.5 w-3.5" />Security</TabsTrigger>
+        <TabsTrigger value="governance" className="min-w-0"><Scale className="mr-1.5 h-3.5 w-3.5" />Audit</TabsTrigger>
+        <TabsTrigger value="commercial" className="min-w-0"><Landmark className="mr-1.5 h-3.5 w-3.5" />Commercial</TabsTrigger>
+        <TabsTrigger value="clients" className="min-w-0"><Users className="mr-1.5 h-3.5 w-3.5" />Clients</TabsTrigger>
+        <TabsTrigger value="postmortems" className="min-w-0"><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Post-Mortems</TabsTrigger>
+        <TabsTrigger value="delivery" className="min-w-0"><CalendarClock className="mr-1.5 h-3.5 w-3.5" />Delivery</TabsTrigger>
       </TabsList>
 
       <TabsContent value="overview" className="mt-5 space-y-5">

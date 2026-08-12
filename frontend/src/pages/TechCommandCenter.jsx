@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -400,17 +401,8 @@ function AddUserDialog({ open, onClose, onCreated, onManageRoles, headers, prese
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto border-emerald-500/25 bg-zinc-950 p-0" data-testid="add-user-dialog">
-        <DialogHeader className="border-b border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.14] via-zinc-950 to-zinc-950 p-5 sm:p-6">
-          <DialogTitle className="flex items-center gap-2 text-xl"><UserPlus className="h-5 w-5 text-emerald-300" />Provision team member</DialogTitle>
-          <DialogDescription className="max-w-2xl">Create a secure, auditable NexusMSP account. Access is applied from the selected role and permission preset as soon as the account is created.</DialogDescription>
-          <div className="mt-4 grid gap-2 sm:grid-cols-3">
-            <div className="rounded-lg border border-emerald-500/20 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">1. Identity</p><p className="mt-1 text-[11px] text-zinc-400">Who is joining the team.</p></div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">2. Access</p><p className="mt-1 text-[11px] text-zinc-400">Role, title and permissions.</p></div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">3. Secure sign-in</p><p className="mt-1 text-[11px] text-zinc-400">Initial credentials meet policy.</p></div>
-          </div>
-        </DialogHeader>
-        <div className="space-y-4 p-5 sm:p-6">
+      <NexusWorkflowDialog eyebrow="Team operations" title="Provision team member" description="Create a secure, auditable NexusMSP account. Access is applied from the selected role and permission preset as soon as the account is created." icon={UserPlus} tone="emerald" className="max-w-3xl" contentClassName="space-y-4" data-testid="add-user-dialog" footer={<><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={submit} disabled={busy} data-testid="add-user-submit">{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}Create team member</Button></>}>
+        <section className="grid gap-2 rounded-xl border border-primary/20 bg-primary/[0.045] p-3 sm:grid-cols-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">1. Identity</p><p className="mt-1 text-[11px] text-muted-foreground">Who is joining the team.</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-500 dark:text-violet-300">2. Access</p><p className="mt-1 text-[11px] text-muted-foreground">Role, title and permissions.</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-600 dark:text-cyan-300">3. Secure sign-in</p><p className="mt-1 text-[11px] text-muted-foreground">Initial credentials meet policy.</p></div></section>
           <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
             <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Member details</p><p className="mt-1 text-xs text-zinc-500">Use the address that will receive team notifications and be used for sign-in. A profile photo can be added from Manage after the account is created.</p></div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -459,14 +451,7 @@ function AddUserDialog({ open, onClose, onCreated, onManageRoles, headers, prese
             <Button size="sm" variant="outline" onClick={() => { setAdminAcknowledged(false); setAdminConfirmOpen(true); }} className={form.is_admin ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10" : "border-violet-500/40 text-violet-200 hover:bg-violet-500/10"}>{form.is_admin ? "Enabled" : "Grant"}</Button>
             </div>
           </section>
-        </div>
-        <DialogFooter className="border-t border-zinc-800 bg-zinc-950 px-5 py-4 sm:px-6">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={busy} className="bg-emerald-500 text-zinc-950 hover:bg-emerald-400" data-testid="add-user-submit">
-            {busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-4 w-4" />}Create team member
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
       <Dialog open={adminConfirmOpen} onOpenChange={setAdminConfirmOpen}>
         <DialogContent className="max-w-md" data-testid="confirm-new-admin-dialog">
           <DialogHeader>
@@ -885,28 +870,32 @@ function TechFinderTab({ headers, capacity }) {
   const [results, setResults] = useState([]);
   const [intent, setIntent] = useState(null);
 
-  const submit = async (e) => {
-    e?.preventDefault?.();
-    if (!query.trim()) { setResults([]); setIntent(null); return; }
+  const searchFor = async (value) => {
+    if (!value.trim()) { setResults([]); setIntent(null); return; }
     setLoading(true);
     try {
-      const r = await axios.post(`${API}/tech-intel/find`, { query }, { headers });
+      const r = await axios.post(`${API}/tech-intel/find`, { query: value }, { headers });
       setResults(r.data.results || []);
       setIntent(r.data.intent || null);
     } catch { toast.error("Search failed"); }
     finally { setLoading(false); }
   };
+  const submit = async (e) => { e?.preventDefault?.(); await searchFor(query); };
 
   const display = results.length ? results : (capacity?.techs?.slice(0, 6) || []);
 
   return (
     <div className="space-y-4" data-testid="tech-finder-tab">
-      <form onSubmit={submit} className="relative">
-        <Sparkles className="w-4 h-4 absolute left-3 top-3 text-violet-400" />
+      <section className="overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)]">
+        <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Sparkles className="h-5 w-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Smart dispatch</p><h2 className="text-xl font-bold tracking-tight">Find the right technician</h2><p className="mt-1 text-sm leading-relaxed text-muted-foreground">Describe the work, required capability, or availability. Nexus turns the request into a ranked operational match.</p></div></div>
+        <div className="mt-4 flex flex-wrap gap-2">{["L2 with Microsoft 365 experience available now", "Network specialist for a firewall incident", "Technician with backup and recovery expertise"].map(example => <Button key={example} type="button" size="sm" variant="outline" className="h-auto whitespace-normal border-primary/20 text-left text-xs" onClick={() => { setQuery(example); searchFor(example); }}>{example}</Button>)}</div>
+      </section>
+      <form onSubmit={submit} className="relative rounded-xl border border-primary/20 bg-card/65 p-2 shadow-sm">
+        <Sparkles className="absolute left-5 top-5 h-4 w-4 text-primary" />
         <Input
           value={query} onChange={e => setQuery(e.target.value)}
           placeholder='Try: "L2 with VMware experience available now"'
-          className="pl-10 pr-24 h-11 bg-zinc-950 border-violet-500/30 focus-visible:border-violet-400"
+          className="h-11 border-border/70 bg-background/70 pl-10 pr-24 focus-visible:border-primary"
           data-testid="tech-finder-input"
         />
         <Button type="submit" size="sm" className="absolute right-1.5 top-1.5 h-8" variant="outline" disabled={loading} data-testid="tech-finder-submit">
@@ -915,11 +904,11 @@ function TechFinderTab({ headers, capacity }) {
       </form>
 
       {intent && (
-        <div className="text-[10px] font-mono text-zinc-500 flex flex-wrap gap-1.5">
-          <span className="text-zinc-400 uppercase tracking-widest">parsed:</span>
-          {(intent.skills || []).map(s => <Badge key={s} variant="outline" className="text-[10px] text-violet-300 border-violet-500/40">{s}</Badge>)}
-          {intent.level && <Badge variant="outline" className="text-[10px] text-cyan-300 border-cyan-500/40">{intent.level}</Badge>}
-          {intent.needs_available && <Badge variant="outline" className="text-[10px] text-emerald-300 border-emerald-500/40">available now</Badge>}
+        <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-primary/15 bg-primary/[0.035] px-3 py-2.5 text-[10px]">
+          <span className="mr-1 font-semibold uppercase tracking-widest text-primary/80">Nexus understood</span>
+          {(intent.skills || []).map(s => <Badge key={s} variant="outline" className="border-violet-500/30 text-[10px] text-violet-700 dark:text-violet-300">{s}</Badge>)}
+          {intent.level && <Badge variant="outline" className="border-cyan-500/30 text-[10px] text-cyan-700 dark:text-cyan-300">{intent.level}</Badge>}
+          {intent.needs_available && <Badge variant="outline" className="border-emerald-500/30 text-[10px] text-emerald-700 dark:text-emerald-300">available now</Badge>}
         </div>
       )}
 
@@ -933,29 +922,36 @@ function TechFinderTab({ headers, capacity }) {
 // ---------- CAPACITY TAB ----------
 function CapacityTab({ capacity }) {
   if (!capacity) return null;
+  const summary = capacity.summary || {};
+  const techs = capacity.techs || [];
   return (
     <div className="space-y-4" data-testid="capacity-tab">
-      <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><Activity className="w-4 h-4" />Live Workload</CardTitle></CardHeader>
-        <CardContent>
+      <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)] lg:flex-row lg:items-center lg:justify-between">
+        <div><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Activity className="h-5 w-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Live staffing signal</p><h2 className="text-xl font-bold tracking-tight">Capacity decision board</h2></div></div><p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">Use the current workload mix to route the next ticket to the right person before a queue or SLA becomes a problem.</p></div>
+        <div className="grid grid-cols-4 gap-2"><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold text-emerald-500">{summary.idle || 0}</p><p className="text-[10px] text-muted-foreground">ready</p></div><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold text-cyan-500">{summary.active || 0}</p><p className="text-[10px] text-muted-foreground">active</p></div><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold text-amber-500">{summary.busy || 0}</p><p className="text-[10px] text-muted-foreground">busy</p></div><div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.05] px-3 py-2 text-center"><p className="text-lg font-bold text-rose-400">{summary.overloaded || 0}</p><p className="text-[10px] text-muted-foreground">at risk</p></div></div>
+      </section>
+      <Card className="overflow-hidden border-border/70 bg-card/70">
+        <CardHeader className="border-b border-border/70 bg-muted/[0.14] pb-4"><CardTitle className="flex items-center gap-2 text-base"><Users className="h-4 w-4 text-primary" />Technician workload</CardTitle><p className="mt-1 text-xs text-muted-foreground">Open work and overdue items are shown alongside utilisation. Assign new work to a ready technician where possible.</p></CardHeader>
+        <CardContent className="p-3 sm:p-4">
           <div className="space-y-1.5">
-            {capacity.techs.map(t => {
+            {techs.map(t => {
               const w = t.workload || {};
-              const fill = w.state === "overloaded" ? "from-rose-500 to-red-500" :
-                           w.state === "busy" ? "from-amber-500 to-orange-500" :
-                           w.state === "active" ? "from-cyan-500 to-blue-500" :
+              const state = w.state || "idle";
+              const fill = state === "overloaded" ? "from-rose-500 to-red-500" :
+                           state === "busy" ? "from-amber-500 to-orange-500" :
+                           state === "active" ? "from-cyan-500 to-blue-500" :
                            "from-emerald-500 to-green-500";
               return (
-                <div key={t.id} className="flex items-center gap-3 px-2 py-2 rounded-md hover:bg-zinc-900/50">
+                <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-transparent px-3 py-3 transition-colors hover:border-primary/15 hover:bg-muted/30 sm:flex-nowrap">
                   <div className="w-32 truncate">
                     <div className="text-xs font-medium truncate">{t.name}</div>
-                    <div className="text-[10px] text-zinc-500 font-mono">{t.job_title}</div>
+                    <div className="text-[10px] text-muted-foreground">{t.job_title || "Technician"}</div>
                   </div>
-                  <div className="flex-1 h-2.5 rounded-full bg-zinc-900 overflow-hidden">
+                  <div className="flex-1 h-2.5 rounded-full bg-muted overflow-hidden">
                     <div className={`h-full bg-gradient-to-r ${fill} transition-all`} style={{ width: `${Math.min(100, w.utilization_pct || 0)}%` }} />
                   </div>
-                  <div className="w-12 text-right text-xs font-mono text-zinc-300">{w.utilization_pct ?? 0}%</div>
-                  <Badge variant="outline" className={`text-[9px] uppercase ${STATE_COLORS[w.state]}`}>{w.state}</Badge>
+                  <div className="w-12 text-right text-xs font-semibold tabular-nums">{w.utilization_pct ?? 0}%</div>
+                  <Badge variant="outline" className={`text-[9px] uppercase ${STATE_COLORS[state]}`}>{state}</Badge>
                   <div className="w-24 text-right text-[10px] font-mono text-zinc-500">{w.open_tickets ?? 0} open · {w.overdue ?? 0} late</div>
                 </div>
               );
@@ -1511,31 +1507,33 @@ function AuditTab({ headers }) {
     }
     return out;
   }, [events]);
+  const breakGlassCount = events.filter(event => event.action === "break_glass_activated").length;
+  const elevationCount = events.filter(event => event.action === "elevation_granted").length;
 
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-zinc-500" /></div>;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">Permission/role/elevation events. Newest first.</p>
-        <Button size="sm" variant="ghost" onClick={load} className="h-7 text-[10px]"><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
-      </div>
+      <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)] sm:flex-row sm:items-center sm:justify-between">
+        <div><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><History className="h-5 w-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Accountability trail</p><h2 className="text-xl font-bold tracking-tight">Team access audit</h2></div></div><p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">A chronological record of roles, elevation, and emergency access. Every privileged change remains visible for review.</p></div>
+        <div className="flex items-center gap-2"><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold">{events.length}</p><p className="text-[10px] text-muted-foreground">events</p></div><div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] px-3 py-2 text-center"><p className="text-lg font-bold text-violet-700 dark:text-violet-300">{elevationCount}</p><p className="text-[10px] text-muted-foreground">elevations</p></div><div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.05] px-3 py-2 text-center"><p className="text-lg font-bold text-rose-500">{breakGlassCount}</p><p className="text-[10px] text-muted-foreground">emergency</p></div><Button size="sm" variant="outline" onClick={load}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button></div>
+      </section>
       {events.length === 0 ? (
-        <Card><CardContent className="p-6 text-center text-sm text-zinc-500">No audit events.</CardContent></Card>
+        <Card className="border-dashed border-border bg-muted/20"><CardContent className="p-10 text-center"><CheckCircle2 className="mx-auto mb-3 h-6 w-6 text-emerald-500" /><p className="text-sm font-semibold">No access events recorded</p><p className="mt-1 text-xs text-muted-foreground">Role, permission, elevation, and emergency changes will appear here as they occur.</p></CardContent></Card>
       ) : (
         <div className="relative pl-8">
-          <div className="absolute left-3 top-0 bottom-0 w-px bg-zinc-800" />
+          <div className="absolute bottom-0 left-3 top-0 w-px bg-border" />
           {Object.entries(groups).map(([day, evs]) => (
             <div key={day} className="mb-6">
-              <div className="text-[10px] uppercase tracking-widest text-zinc-500 font-mono mb-2">{day}</div>
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{day}</div>
               {evs.map(e => {
                 const isBG = e.action === "break_glass_activated";
                 const isGrant = e.action === "elevation_granted";
                 const dot = isBG ? "bg-rose-400" : isGrant ? "bg-violet-400" : "bg-cyan-400";
                 return (
                   <div key={e.id} className="relative mb-2 ml-2 group">
-                    <div className={`absolute -left-7 top-2 w-3 h-3 rounded-full ${dot} ring-4 ring-zinc-950`} />
-                    <div className="px-3 py-2 rounded-md bg-zinc-900/40 border border-zinc-800 group-hover:border-zinc-600">
+                    <div className={`absolute -left-7 top-2 h-3 w-3 rounded-full ${dot} ring-4 ring-background`} />
+                    <div className="rounded-xl border border-border/70 bg-card/70 px-3 py-2.5 transition-colors group-hover:border-primary/25 group-hover:bg-muted/30">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Badge variant="outline" className={`text-[9px] uppercase ${isBG ? "text-rose-300 border-rose-500/40" : "text-cyan-300 border-cyan-500/40"}`}>{(e.action || "").replace(/_/g, " ")}</Badge>
                         <span className="text-xs">{e.actor_name} → {e.target_name}</span>

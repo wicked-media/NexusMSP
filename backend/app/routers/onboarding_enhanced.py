@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity, ticket_audit
@@ -104,6 +105,9 @@ def _build_empty_session(session_id: str, template_key: str, user_name: str) -> 
         "priority": "normal",
         "created_at": now,
         "created_by": user_name,
+        "owner_name": user_name,
+        "last_activity_by": user_name,
+        "last_activity_at": now,
         "updated_at": now,
     }
 
@@ -166,11 +170,36 @@ async def create_session(data: dict, current_user: dict = Depends(get_current_us
     session_id = f"OB-{uuid.uuid4().hex[:6].upper()}"
     template_key = data.get("template", "mid_market")
     user_name = current_user.get("name", "System")
+    client_id = str(data.get("client_id") or "").strip()
+    linked_client = None
+    if client_id:
+        linked_client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        if not linked_client:
+            raise HTTPException(status_code=404, detail="Client not found")
+        existing = await db.onboarding_enhanced.find_one(
+            {"client_id": client_id, "status": {"$in": ["in_progress", "paused"]}},
+            {"_id": 0},
+        )
+        if existing:
+            return existing
     doc = _build_empty_session(session_id, template_key, user_name)
-    if data.get("client_name"):
+    if linked_client:
+        doc["client_id"] = client_id
+        doc["client_name"] = linked_client.get("name", "")
+        doc["steps"]["company_profile"]["data"] = {
+            "company_name": linked_client.get("name", ""),
+            "email": linked_client.get("email", ""),
+            "phone": linked_client.get("phone", ""),
+            "industry": linked_client.get("industry", ""),
+            "tier": linked_client.get("tier", "standard"),
+        }
+        doc["audit_log"].append({"action": "client_linked", "by": user_name, "at": doc["created_at"], "detail": f"Linked to existing client {linked_client.get('name', client_id)}"})
+    elif data.get("client_name"):
         doc["client_name"] = data["client_name"]
     if data.get("priority"):
         doc["priority"] = data["priority"]
+    doc["owner_id"] = current_user.get("id") or current_user.get("email") or ""
+    doc["last_activity_by_id"] = doc["owner_id"]
     if data.get("tags"):
         doc["tags"] = data["tags"]
     await db.onboarding_enhanced.insert_one(doc)
@@ -179,10 +208,34 @@ async def create_session(data: dict, current_user: dict = Depends(get_current_us
 
 
 @router.get("/sessions")
-async def list_sessions(current_user: dict = Depends(get_current_user)):
-    sessions = await db.onboarding_enhanced.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+async def list_sessions(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {"client_id": client_id} if client_id else {}
+    sessions = await db.onboarding_enhanced.find(query, {"_id": 0}).sort("updated_at", -1).to_list(200)
+    now = datetime.now(timezone.utc)
     for s in sessions:
         s["health_score"] = _calc_health_score(s)
+        if s.get("status") != "in_progress":
+            continue
+        try:
+            last_activity = datetime.fromisoformat(s.get("last_activity_at") or s.get("updated_at") or s.get("created_at"))
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if now - last_activity < timedelta(hours=48):
+            continue
+        recipient = s.get("owner_id") or s.get("last_activity_by_id")
+        if not recipient:
+            continue
+        exists = await db.notifications.find_one({"ref_id": s["id"], "type": "onboarding_stale", "read": False})
+        if not exists:
+            await db.notifications.insert_one({
+                "id": str(uuid.uuid4()), "user_id": recipient, "type": "onboarding_stale",
+                "title": f"Client onboarding needs attention: {s.get('client_name') or s['id']}",
+                "message": f"No activity for {max(2, (now - last_activity).days)} days. Continue or reassign the onboarding record.",
+                "ref_id": s["id"], "ref_type": "onboarding", "severity": "warning", "read": False,
+                "created_at": now.isoformat(),
+            })
     stats = {
         "total": len(sessions),
         "in_progress": len([s for s in sessions if s["status"] == "in_progress"]),
@@ -222,6 +275,9 @@ async def save_step(session_id: str, step_key: str, data: dict, current_user: di
         f"steps.{step_key}.data": step_data,
         f"steps.{step_key}.notes": data.get("notes", session["steps"].get(step_key, {}).get("notes", "")),
         "updated_at": now,
+        "last_activity_by": user_name,
+        "last_activity_by_id": current_user.get("id") or current_user.get("email") or "",
+        "last_activity_at": now,
     }
 
     if action == "complete":

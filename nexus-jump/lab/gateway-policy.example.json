@@ -1,0 +1,21 @@
+{
+  "gateway_id": "nexus-jump-lab-au-01",
+  "display_name": "Nexus Jump — AU lab gateway",
+  "environment": "lab",
+  "endpoint": "jump-lab.example.net:51820",
+  "public_key": "REPLACE_WITH_THE_GATEWAY_PUBLIC_KEY",
+  "allowed_resource_cidrs": [
+    "10.42.10.0/24"
+  ],
+  "allowed_protocols": [
+    "https",
+    "ssh",
+    "rdp",
+    "vnc",
+    "winrm",
+    "ipmi"
+  ],
+  "maximum_session_minutes": 60,
+  "approval_required": true,
+  "ticket_required": true
+}

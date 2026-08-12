@@ -64,6 +64,8 @@ chainlit.md
 .ac
 .codex/
 .tools/
+.codex-audit/
+.codex-audits/
 
 # Deployment
 .vercel
@@ -88,6 +90,7 @@ backend/uploads/help/*
 *.pack
 *.deb
 *.dylib
+agent/*.exe
 
 # Build caches
 .cache/

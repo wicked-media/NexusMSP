@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -30,6 +30,7 @@ import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: Clock, glow: "" },
   pending_approval: { label: "Pending Approval", class: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Clock, glow: "ring-1 ring-purple-500/30 animate-pulse" },
@@ -46,6 +47,8 @@ const ITEM_STATUS_CONFIG = {
   partial: { label: "Partial", class: "bg-amber-500/20 text-amber-400", icon: PackageCheck },
   received: { label: "Received", class: "bg-green-500/20 text-green-400", icon: CheckCircle },
 };
+
+const PO_DETAIL_TABS = new Set(["items", "notes", "audit"]);
 
 function SearchableSelect({
   options,
@@ -148,7 +151,7 @@ export default function PurchaseOrdersPage() {
   const [scannerInput, setScannerInput] = useState("");
   const scanRef = useRef(null);
   const handledVendorPreset = useRef(false);
-  const handledPODetailPreset = useRef(false);
+  const handledPODetailPreset = useRef("");
   const [approvalDialog, setApprovalDialog] = useState(null);
   const [approvalNotes, setApprovalNotes] = useState("");
   const [approvalApprover, setApprovalApprover] = useState("");
@@ -169,7 +172,7 @@ export default function PurchaseOrdersPage() {
     client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: ""
   });
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -198,11 +201,11 @@ export default function PurchaseOrdersPage() {
       }
     } catch { toast.error("Failed to load purchase orders"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const fetchPODetail = async (poId) => {
+  const fetchPODetail = useCallback(async (poId) => {
     try {
       const [poRes, auditRes, notesRes] = await Promise.all([
         axios.get(`${API}/purchase-orders/${poId}`, { headers }),
@@ -213,7 +216,7 @@ export default function PurchaseOrdersPage() {
       setAuditLog(auditRes.data);
       setPoNotes(notesRes.data);
     } catch { toast.error("Failed to load PO details"); }
-  };
+  }, [headers]);
 
   const fetchSpendAnalytics = async () => {
     try {
@@ -222,27 +225,45 @@ export default function PurchaseOrdersPage() {
     } catch { toast.error("Failed to load analytics"); }
   };
 
-  const resetForm = () => setForm({
+  const resetForm = useCallback(() => setForm({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
     client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: ""
-  });
+  }), []);
 
-  const openCreate = (vendorPreset) => {
+  const openCreate = useCallback((vendorPreset) => {
     setEditing(null);
     if (vendorPreset) {
-      setForm({ ...resetFormObj(), vendor: vendorPreset.name, vendor_id: vendorPreset.id, vendor_contact: vendorPreset.contact_name || "", vendor_email: vendorPreset.email || "" });
+      setForm({ vendor: vendorPreset.name, vendor_id: vendorPreset.id, vendor_contact: vendorPreset.contact_name || "", vendor_email: vendorPreset.email || "", status: "draft", line_items: [], notes: "", ship_to: "", expected_delivery: "", client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "" });
     } else { resetForm(); }
     setIsFormOpen(true);
-  };
+  }, [resetForm]);
 
   useEffect(() => {
     const poId = searchParams.get("po");
-    if (!poId || handledPODetailPreset.current) return;
-    handledPODetailPreset.current = true;
+    if (!poId || handledPODetailPreset.current === poId) return;
+    handledPODetailPreset.current = poId;
+    const requestedTab = searchParams.get("tab");
+    if (PO_DETAIL_TABS.has(requestedTab)) setDetailTab(requestedTab);
     fetchPODetail(poId);
+  }, [fetchPODetail, searchParams]); // preserves shareable deep links from billing reconciliation
+
+  const openPODetail = useCallback((poId, tab = "items") => {
+    setDetailTab(tab);
+    setSearchParams({ po: poId, tab });
+  }, [setSearchParams]);
+
+  const closePODetail = useCallback(() => {
+    handledPODetailPreset.current = "";
+    setViewPO(null);
+    setDetailTab("items");
     setSearchParams({});
-  }, [searchParams, setSearchParams]); // handles deep links from billing reconciliation
+  }, [setSearchParams]);
+
+  const selectDetailTab = useCallback((tab) => {
+    setDetailTab(tab);
+    if (viewPO?.id) setSearchParams({ po: viewPO.id, tab });
+  }, [setSearchParams, viewPO?.id]);
 
   useEffect(() => {
     const vendorId = searchParams.get("vendor");
@@ -254,16 +275,11 @@ export default function PurchaseOrdersPage() {
       setSearchParams({});
       return;
     }
-    openCreate(vendor);
+    setEditing(null);
+    setForm({ vendor: vendor.name, vendor_id: vendor.id, vendor_contact: vendor.contact_name || "", vendor_email: vendor.email || "", status: "draft", line_items: [], notes: "", ship_to: "", expected_delivery: "", client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "" });
+    setIsFormOpen(true);
     setSearchParams({});
   }, [vendors, searchParams, setSearchParams]); // handles the explicit Vendor → Create PO hand-off once
-
-  const resetFormObj = () => ({
-    vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
-    line_items: [], notes: "", ship_to: "", expected_delivery: "",
-    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "",
-    shipping: "0", assigned_to: "", assigned_to_name: ""
-  });
 
   const openEdit = (po) => {
     setEditing(po);
@@ -374,7 +390,7 @@ export default function PurchaseOrdersPage() {
   };
 
   // --- Approval Workflow ---
-  const handleSubmitForApproval = async (po) => {
+  const handleSubmitForApproval = async (_po) => {
     setApprovalDialog("submit");
     setApprovalNotes("");
     setApprovalApprover("");
@@ -544,6 +560,13 @@ export default function PurchaseOrdersPage() {
     .filter(p => !search || p.po_number?.toLowerCase().includes(search.toLowerCase()) || p.vendor?.toLowerCase().includes(search.toLowerCase()));
   const overdueCount = pos.filter(isDeliveryOverdue).length;
   const supplierInvoiceVarianceCount = pos.filter(hasActiveSupplierVariance).length;
+  const procurementSignal = overdueCount > 0
+    ? "critical"
+    : supplierInvoiceVarianceCount > 0 || pos.some((po) => po.status === "pending_approval")
+      ? "attention"
+      : pos.length > 0
+        ? "healthy"
+        : "recommendation";
   const hasFilters = search || statusFilter !== "all";
   const applyStatusFilter = (status) => setStatusFilter(status);
   const requestDestructiveAction = (type, po) => setDestructiveAction({ type, po });
@@ -985,18 +1008,13 @@ export default function PurchaseOrdersPage() {
   // ========== EMAIL VENDOR DIALOG ==========
   const emailVendorDialogEl = (
     <Dialog open={emailVendorDialog} onOpenChange={setEmailVendorDialog}>
-      <DialogContent className="max-w-md">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email PO to Vendor</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog eyebrow="Supplier communication" title="Email purchase order" description="Send the approved purchase order with a recorded recipient, subject and message for the procurement audit trail." icon={Mail} tone="cyan" className="max-w-md" footer={<><Button variant="outline" onClick={() => setEmailVendorDialog(false)}>Cancel</Button><Button onClick={handleEmailVendor} className="bg-blue-600 hover:bg-blue-700" data-testid="send-vendor-email-btn"><Send className="mr-1 h-4 w-4" />Send email</Button></>}>
         <div className="space-y-3">
           <div><Label>Vendor Email</Label><Input value={emailForm.email} onChange={e => setEmailForm({ ...emailForm, email: e.target.value })} placeholder="vendor@example.com" data-testid="vendor-email-input" /></div>
           <div><Label>Subject</Label><Input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} /></div>
           <div><Label>Message</Label><Textarea value={emailForm.message} onChange={e => setEmailForm({ ...emailForm, message: e.target.value })} rows={3} /></div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setEmailVendorDialog(false)}>Cancel</Button>
-          <Button onClick={handleEmailVendor} className="bg-blue-600 hover:bg-blue-700" data-testid="send-vendor-email-btn"><Send className="w-4 h-4 mr-1" />Send Email</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 
@@ -1034,16 +1052,14 @@ export default function PurchaseOrdersPage() {
 
   const approvalPolicyDialog = (
     <Dialog open={approvalPolicyOpen} onOpenChange={setApprovalPolicyOpen}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-cyan-300" />Procurement approval policy</DialogTitle><p className="text-sm text-muted-foreground">Set who can approve purchase orders and when the creator must be separated from the approver.</p></DialogHeader>
+      <NexusWorkflowDialog eyebrow="Procurement controls" title="Approval policy" description="Set who can approve purchase orders and when the creator must be separated from the approver." icon={Settings2} tone="cyan" className="max-w-lg" footer={<><Button variant="outline" onClick={() => setApprovalPolicyOpen(false)}>Cancel</Button><Button onClick={saveApprovalPolicy}><Save className="mr-1.5 h-4 w-4" />Save policy</Button></>}>
         <div className="space-y-4">
           <label className="flex items-center justify-between rounded-xl border p-3"><span><span className="block text-sm font-medium">Approval workflow</span><span className="block text-xs text-muted-foreground">Require an approval stage before ordering.</span></span><input type="checkbox" checked={approvalPolicy.enabled} onChange={event => setApprovalPolicy(current => ({ ...current, enabled: event.target.checked }))} /></label>
           <div><Label>High-value threshold</Label><Input type="number" min="0" step="0.01" value={approvalPolicy.threshold} onChange={event => setApprovalPolicy(current => ({ ...current, threshold: Number(event.target.value) || 0 }))} /><p className="mt-1 text-xs text-muted-foreground">Orders at or above this value enforce the controls below.</p></div>
           <label className="flex items-center justify-between rounded-xl border p-3"><span><span className="block text-sm font-medium">Separate creator and approver</span><span className="block text-xs text-muted-foreground">Prevents high-value self-approval.</span></span><input type="checkbox" checked={approvalPolicy.require_separation} onChange={event => setApprovalPolicy(current => ({ ...current, require_separation: event.target.checked }))} /></label>
           <label className="flex items-center justify-between rounded-xl border p-3"><span><span className="block text-sm font-medium">Named approver required</span><span className="block text-xs text-muted-foreground">High-value orders cannot use an unassigned queue.</span></span><input type="checkbox" checked={approvalPolicy.require_assigned_approver_above_threshold} onChange={event => setApprovalPolicy(current => ({ ...current, require_assigned_approver_above_threshold: event.target.checked }))} /></label>
         </div>
-        <DialogFooter><Button variant="outline" onClick={() => setApprovalPolicyOpen(false)}>Cancel</Button><Button onClick={saveApprovalPolicy}><Save className="mr-1.5 h-4 w-4" />Save policy</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 
@@ -1095,7 +1111,7 @@ export default function PurchaseOrdersPage() {
           <CardContent className="space-y-3 p-4">
             <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live procurement record <span className="text-zinc-600">/</span><span className="text-zinc-400">Supply operations</span></div>
             <div className="flex flex-wrap items-center gap-2.5">
-              <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={() => { setViewPO(null); setDetailTab("items"); }} data-testid="back-to-pos" aria-label="Back to purchase orders" title="Back to purchase orders"><ArrowLeft className="h-4 w-4" /></Button>
+              <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.06] hover:text-white" onClick={closePODetail} data-testid="back-to-pos" aria-label="Back to purchase orders" title="Back to purchase orders"><ArrowLeft className="h-4 w-4" /></Button>
               <Badge className="h-6 border-white/[0.10] bg-black/30 px-2.5 font-mono text-[10px] tracking-wide text-zinc-200">{po.po_number}</Badge>
               <Badge className={STATUS_CONFIG[po.status]?.class + " " + (STATUS_CONFIG[po.status]?.glow || "")}><StatusIcon className="mr-1 h-3 w-3" />{STATUS_CONFIG[po.status]?.label}</Badge>
               {isOverdue && <Badge className="animate-pulse border-red-500/30 bg-red-500/20 text-red-400"><AlertTriangle className="mr-1 h-3 w-3" />Overdue</Badge>}
@@ -1151,11 +1167,11 @@ export default function PurchaseOrdersPage() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           <div className="space-y-4 xl:col-span-8">
-            <Tabs value={detailTab} onValueChange={setDetailTab}>
-              <TabsList className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/[0.14] p-1">
-                <TabsTrigger value="items" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-items">Items ({(po.line_items || []).length})</TabsTrigger>
-                <TabsTrigger value="notes" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-notes">Notes ({poNotes.length})</TabsTrigger>
-                <TabsTrigger value="audit" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-audit">Audit Trail ({auditLog.length})</TabsTrigger>
+            <Tabs value={detailTab} onValueChange={selectDetailTab}>
+              <TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-xl border border-white/[0.08] bg-black/[0.14] p-1 sm:grid-cols-3">
+                <TabsTrigger value="items" className="h-9 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-items">Items ({(po.line_items || []).length})</TabsTrigger>
+                <TabsTrigger value="notes" className="h-9 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-notes">Notes ({poNotes.length})</TabsTrigger>
+                <TabsTrigger value="audit" className="h-9 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-po-audit">Audit trail ({auditLog.length})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="items">
@@ -1554,13 +1570,14 @@ export default function PurchaseOrdersPage() {
 
   // ========== LIST VIEW ==========
   return (
-    <div className="space-y-6" data-testid="purchase-orders-page">
+    <div className="nx-page-stage space-y-6" data-testid="purchase-orders-page">
       <OperationalPageHeader
         eyebrow="Procurement operations"
         title="Purchase Orders"
         description={`Create, approve, receive, and audit ${pos.length} purchase order${pos.length === 1 ? "" : "s"} from one connected procurement workspace.`}
         icon={ShoppingCart}
         tone="emerald"
+        signal={procurementSignal}
         actions={<>
           <Button variant="outline" size="sm" onClick={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} data-testid="po-analytics-btn">
             <BarChart3 className="w-4 h-4 mr-1" />Analytics
@@ -1654,7 +1671,7 @@ export default function PurchaseOrdersPage() {
                 const totalOrdered = (po.line_items || []).reduce((s, li) => s + li.quantity, 0);
                 const totalRcvd = (po.line_items || []).reduce((s, li) => s + (li.received_qty || 0), 0);
                 return (
-                  <TableRow key={po.id} className={`cursor-pointer hover:bg-muted/50 transition-colors ${isOverdue ? "bg-red-500/5" : ""}`} onClick={() => fetchPODetail(po.id)} data-testid={`po-row-${po.id}`}>
+                  <TableRow key={po.id} className={`cursor-pointer hover:bg-muted/50 transition-colors ${isOverdue ? "bg-red-500/5" : ""}`} onClick={() => openPODetail(po.id)} data-testid={`po-row-${po.id}`}>
                     <TableCell className="font-mono font-medium">{po.po_number}</TableCell>
                     <TableCell className="font-medium">{po.vendor}</TableCell>
                     <TableCell className="text-sm">{po.assigned_to_name || <span className="text-muted-foreground">-</span>}</TableCell>

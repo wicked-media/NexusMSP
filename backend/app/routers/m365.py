@@ -308,6 +308,35 @@ def _execution_unavailable(detail: str = "A verified Microsoft Graph synchronisa
 
 # Connection -----------------------------------------------------------------
 
+@router.get("/m365/sync/readiness")
+async def microsoft_sync_readiness(current_user: dict = Depends(get_current_user)):
+    """Describe the bounded Graph evidence streams Nexus 365 is ready to collect.
+
+    This is a deployment contract, not a permission grant. The route exposes no
+    secrets and does not attempt a live Graph call; it gives a technician a
+    precise least-privilege checklist before a collector is installed.
+    """
+    connection = await _connection_payload()
+    counts = await asyncio.gather(*[
+        getattr(db, stream["collection"]).count_documents(_verified_query())
+        for stream in M365_COLLECTOR_STREAMS
+    ])
+    connection_ready = connection.get("mode") == "configured_unverified" or bool(connection.get("verified_at"))
+    streams = []
+    for stream, records in zip(M365_COLLECTOR_STREAMS, counts):
+        status = "evidence_active" if records else ("ready_to_connect" if connection_ready else "connection_required")
+        streams.append({**stream, "records": records, "status": status})
+    return {
+        "connection": {
+            "configured": bool(connection.get("secret_configured") and connection.get("app_id") and connection.get("partner_tenant_id")),
+            "verified_at": connection.get("verified_at"),
+            "last_sync": connection.get("last_synced"),
+        },
+        "streams": streams,
+        "boundary": "Nexus requests only the read permissions listed for the enabled evidence streams. Write permissions and tenant changes belong to separately governed action workflows.",
+    }
+
+
 @router.get("/m365/connection")
 async def get_connection(current_user: dict = Depends(get_current_user)):
     await _retire_legacy_mock_data()
@@ -741,6 +770,35 @@ async def list_tenants(current_user: dict = Depends(get_current_user)):
     return await db.m365_tenants.find(_verified_query(), {"_id": 0}).sort("name", 1).to_list(500)
 
 
+@router.get("/m365/groups")
+async def list_groups(
+    tenant_id: str = Query(..., min_length=1),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return only provider-recorded Entra group inventory for a tenant.
+
+    This is deliberately a read model: it gives a technician an auditable
+    choice of an existing group, but never treats a typed group name as proof
+    that the group exists or that its membership can be changed.
+    """
+    query = _verified_query({"tenant_id": tenant_id})
+    if q and q.strip():
+        term = {"$regex": re.escape(q.strip()), "$options": "i"}
+        query["$or"] = [
+            {"display_name": term},
+            {"displayName": term},
+            {"mail": term},
+            {"id": term},
+        ]
+    groups = await db.m365_groups.find(
+        query,
+        {"_id": 0, "id": 1, "display_name": 1, "displayName": 1, "mail": 1, "group_types": 1, "security_enabled": 1},
+    ).sort("display_name", 1).to_list(limit)
+    return groups
+
+
 @router.get("/m365/tenants/health/summary")
 async def tenants_health_summary(current_user: dict = Depends(get_current_user)):
     await _retire_legacy_mock_data()
@@ -810,6 +868,320 @@ async def list_users(tenant_id: str | None = None, q: str | None = None, no_mfa:
             {"department": {"$regex": search, "$options": "i"}},
         ]
     return await db.m365_users.find(query, {"_id": 0}).limit(2000).to_list(2000)
+
+
+@router.get("/m365/exchange/posture")
+async def exchange_posture(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Return provider-recorded Exchange posture without inspecting or changing mailboxes.
+
+    A Graph synchroniser writes normalised mailbox, mailbox-rule, and transport-rule
+    evidence using one of ``VERIFIED_SOURCES``.  This endpoint deliberately returns
+    an empty, connection-gated state until that evidence exists; it does not infer
+    forwarding or mail-flow safety from a saved Graph credential.
+    """
+    scope = {"tenant_id": tenant_id} if tenant_id else {}
+    query = _verified_query(scope)
+    mailboxes, mailbox_rules, transport_rules, tenants = await asyncio.gather(
+        db.m365_mailboxes.find(query, {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_mailbox_rules.find(query, {"_id": 0}).sort("observed_at", -1).limit(5000).to_list(5000),
+        db.m365_transport_rules.find(query, {"_id": 0}).sort("observed_at", -1).limit(2000).to_list(2000),
+        db.m365_tenants.find(_verified_query(scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
+    )
+
+    def external_forward(row: dict) -> bool:
+        return bool(
+            row.get("is_external")
+            or row.get("external_recipient")
+            or row.get("external_forwarding")
+            or row.get("destination_type") == "external"
+            or row.get("forward_to_external")
+        )
+
+    mailbox_forwards = [row for row in mailboxes if external_forward(row)]
+    rule_forwards = [row for row in mailbox_rules if external_forward(row)]
+    audit_unknown = [row for row in mailboxes if row.get("audit_enabled") is not True]
+    disabled_mailboxes = [row for row in mailboxes if row.get("account_enabled") is False]
+    attention = [
+        {
+            "id": row.get("id"),
+            "kind": "mailbox_forward",
+            "tenant_id": row.get("tenant_id"),
+            "subject": row.get("display_name") or row.get("user_principal_name") or "Mailbox",
+            "detail": row.get("forwarding_smtp_address") or row.get("forward_to") or "External forwarding recorded",
+            "severity": "high",
+            "observed_at": row.get("observed_at") or row.get("last_synced"),
+        }
+        for row in mailbox_forwards
+    ] + [
+        {
+            "id": row.get("id"),
+            "kind": "mailbox_rule",
+            "tenant_id": row.get("tenant_id"),
+            "subject": row.get("mailbox") or row.get("display_name") or "Mailbox rule",
+            "detail": row.get("forward_to") or row.get("external_recipient") or row.get("name") or "External forwarding rule recorded",
+            "severity": row.get("severity") or "high",
+            "observed_at": row.get("observed_at"),
+        }
+        for row in rule_forwards
+    ]
+    attention.sort(key=lambda row: str(row.get("observed_at") or ""), reverse=True)
+
+    return {
+        "telemetry_available": bool(mailboxes or mailbox_rules or transport_rules),
+        "connection_required": not bool(mailboxes or mailbox_rules or transport_rules),
+        "tenant_id": tenant_id,
+        "tenants": tenants,
+        "summary": {
+            "mailboxes": len(mailboxes),
+            "external_forwards": len(mailbox_forwards) + len(rule_forwards),
+            "mailbox_rules": len(mailbox_rules),
+            "transport_rules": len(transport_rules),
+            "audit_unknown": len(audit_unknown),
+            "disabled_mailboxes": len(disabled_mailboxes),
+        },
+        "mailboxes": mailboxes[:250],
+        "attention": attention[:100],
+        "boundary": "Read-only provider evidence. Nexus does not create, remove, forward, quarantine, or alter a mailbox or transport rule from this view.",
+        "required_evidence": [
+            "Microsoft Graph mailbox inventory synchronisation",
+            "Microsoft Graph inbox-rule / forwarding evidence synchronisation",
+            "Exchange transport-rule evidence synchronisation",
+        ],
+    }
+
+
+@router.get("/m365/intune/posture")
+async def intune_posture(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Return synchronised Intune device evidence without issuing a device command.
+
+    The collection is intentionally separate from Nexus Agent inventory. A future
+    synchroniser can correlate records by tenant/device identity, while this route
+    keeps the Microsoft source, evidence time and compliance state explicit.
+    """
+    scope = {"tenant_id": tenant_id} if tenant_id else {}
+    devices, tenants = await asyncio.gather(
+        db.m365_intune_devices.find(_verified_query(scope), {"_id": 0}).sort("device_name", 1).limit(10000).to_list(10000),
+        db.m365_tenants.find(_verified_query(scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
+    )
+    noncompliant_states = {"noncompliant", "error", "conflict", "unknown"}
+    compliant = [row for row in devices if str(row.get("compliance_state") or "").lower() == "compliant"]
+    attention = [row for row in devices if str(row.get("compliance_state") or "unknown").lower() in noncompliant_states]
+    encryption_missing = [row for row in devices if str(row.get("encryption_state") or "unknown").lower() not in {"encrypted", "compliant", "protected"}]
+    stale = [row for row in devices if bool(row.get("stale")) or int(row.get("last_sync_age_hours") or 0) >= 24]
+    return {
+        "telemetry_available": bool(devices),
+        "connection_required": not bool(devices),
+        "tenant_id": tenant_id,
+        "tenants": tenants,
+        "summary": {
+            "devices": len(devices),
+            "compliant": len(compliant),
+            "needs_attention": len(attention),
+            "encryption_review": len(encryption_missing),
+            "stale": len(stale),
+        },
+        "devices": devices[:500],
+        "attention": [
+            {
+                "id": row.get("id"),
+                "tenant_id": row.get("tenant_id"),
+                "device_name": row.get("device_name") or row.get("name") or "Intune device",
+                "primary_user": row.get("primary_user") or row.get("user_principal_name"),
+                "compliance_state": row.get("compliance_state") or "unknown",
+                "encryption_state": row.get("encryption_state") or "unknown",
+                "last_sync": row.get("last_sync") or row.get("observed_at"),
+            }
+            for row in attention[:250]
+        ],
+        "boundary": "Read-only Intune evidence. Nexus does not wipe, retire, sync, reboot, deploy applications, or change compliance policy from this view.",
+        "required_evidence": [
+            "Microsoft Graph managed-device inventory synchronisation",
+            "Intune compliance-state synchronisation",
+            "BitLocker or device-encryption posture synchronisation",
+        ],
+    }
+
+
+@router.get("/m365/collaboration/posture")
+async def collaboration_posture(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Return verified Teams, SharePoint and OneDrive governance evidence.
+
+    This is an evidence surface only. It does not enumerate a tenant from a
+    configured secret, create a Team, change a sharing policy, or revoke access.
+    Those actions must remain separately approved when the Graph executor exists.
+    """
+    scope = {"tenant_id": tenant_id} if tenant_id else {}
+    sites, teams, guests, tenants = await asyncio.gather(
+        db.m365_sharepoint_sites.find(_verified_query(scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_teams.find(_verified_query(scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_guest_users.find(_verified_query(scope), {"_id": 0}).sort("created_at", -1).limit(10000).to_list(10000),
+        db.m365_tenants.find(_verified_query(scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
+    )
+
+    def externally_shared(row: dict) -> bool:
+        sharing = str(row.get("sharing_capability") or row.get("sharing_state") or "").lower()
+        return bool(row.get("external_sharing_enabled") or row.get("anonymous_links_enabled") or sharing in {"external", "anonymous", "anyone"})
+
+    external_sites = [row for row in sites if externally_shared(row)]
+    external_teams = [row for row in teams if externally_shared(row) or row.get("guest_access_enabled")]
+    dormant_guests = [row for row in guests if bool(row.get("stale")) or int(row.get("days_since_signin") or 0) >= 90]
+    attention = [
+        {
+            "id": row.get("id"), "kind": "sharepoint_site", "tenant_id": row.get("tenant_id"),
+            "subject": row.get("display_name") or row.get("name") or "SharePoint site",
+            "detail": row.get("sharing_capability") or row.get("sharing_state") or "External sharing enabled",
+            "severity": "medium" if not row.get("anonymous_links_enabled") else "high",
+            "observed_at": row.get("observed_at") or row.get("last_synced"),
+        }
+        for row in external_sites
+    ] + [
+        {
+            "id": row.get("id"), "kind": "team", "tenant_id": row.get("tenant_id"),
+            "subject": row.get("display_name") or row.get("name") or "Team",
+            "detail": "Guest access or external sharing enabled",
+            "severity": "medium", "observed_at": row.get("observed_at") or row.get("last_synced"),
+        }
+        for row in external_teams
+    ] + [
+        {
+            "id": row.get("id"), "kind": "guest", "tenant_id": row.get("tenant_id"),
+            "subject": row.get("display_name") or row.get("user_principal_name") or "Guest user",
+            "detail": f"No sign-in for {row.get('days_since_signin')} days" if row.get("days_since_signin") is not None else "Guest evidence marked stale",
+            "severity": "medium", "observed_at": row.get("last_signin_at") or row.get("observed_at"),
+        }
+        for row in dormant_guests
+    ]
+    attention.sort(key=lambda row: str(row.get("observed_at") or ""), reverse=True)
+    telemetry_available = bool(sites or teams or guests)
+    return {
+        "telemetry_available": telemetry_available,
+        "connection_required": not telemetry_available,
+        "tenant_id": tenant_id,
+        "tenants": tenants,
+        "summary": {
+            "sharepoint_sites": len(sites), "teams": len(teams), "guest_users": len(guests),
+            "external_sites": len(external_sites), "external_teams": len(external_teams), "dormant_guests": len(dormant_guests),
+        },
+        "attention": attention[:250],
+        "boundary": "Read-only collaboration evidence. Nexus does not create sites or Teams, change sharing, remove guests, or modify OneDrive content from this view.",
+        "required_evidence": [
+            "Microsoft Graph SharePoint site inventory and sharing posture synchronisation",
+            "Microsoft Graph Teams and guest-access synchronisation",
+            "Microsoft Entra guest sign-in evidence synchronisation",
+        ],
+    }
+
+
+@router.get("/m365/security/posture")
+async def security_posture(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Expose read-only Defender, Entra risk and Conditional Access evidence.
+
+    Nexus Shield correlates these sources into incidents.  This Microsoft view
+    remains the tenant-control surface and never resolves alerts, isolates a
+    device, changes CA policy, or performs identity containment itself.
+    """
+    scope = {"tenant_id": tenant_id} if tenant_id else {}
+    alerts, identity_risks, ca_policies, defender_devices = await asyncio.gather(
+        db.m365_security_alerts.find(_verified_query(scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
+        db.m365_identity_risks.find(_verified_query(scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
+        db.m365_conditional_access_policies.find(_verified_query(scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_defender_devices.find(_verified_query(scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
+    )
+    closed = {"resolved", "closed", "dismissed", "remediated"}
+    high = {"high", "critical"}
+    open_alerts = [row for row in alerts if str(row.get("status") or "new").lower() not in closed]
+    high_alerts = [row for row in open_alerts if str(row.get("severity") or "").lower() in high]
+    active_risks = [row for row in identity_risks if str(row.get("status") or "active").lower() not in closed]
+    report_only = [row for row in ca_policies if str(row.get("state") or "").lower() in {"reportonly", "report_only"}]
+    vulnerable_devices = [row for row in defender_devices if str(row.get("risk_level") or "").lower() in high]
+    attention = [
+        {
+            "id": row.get("id"), "kind": "defender_alert", "tenant_id": row.get("tenant_id"),
+            "subject": row.get("title") or row.get("device_name") or "Defender alert",
+            "detail": row.get("description") or row.get("category") or "Open security alert",
+            "severity": row.get("severity") or "medium", "observed_at": row.get("observed_at") or row.get("created_at"),
+        }
+        for row in open_alerts
+    ] + [
+        {
+            "id": row.get("id"), "kind": "identity_risk", "tenant_id": row.get("tenant_id"),
+            "subject": row.get("user_principal_name") or row.get("display_name") or "Risky identity",
+            "detail": row.get("risk_detail") or row.get("risk_level") or "Active identity risk",
+            "severity": row.get("risk_level") or "medium", "observed_at": row.get("observed_at") or row.get("detected_at"),
+        }
+        for row in active_risks
+    ]
+    attention.sort(key=lambda row: str(row.get("observed_at") or ""), reverse=True)
+    telemetry_available = bool(alerts or identity_risks or ca_policies or defender_devices)
+    return {
+        "telemetry_available": telemetry_available,
+        "connection_required": not telemetry_available,
+        "tenant_id": tenant_id,
+        "summary": {
+            "open_alerts": len(open_alerts), "high_alerts": len(high_alerts), "identity_risks": len(active_risks),
+            "conditional_access_policies": len(ca_policies), "report_only_policies": len(report_only), "defender_devices_at_risk": len(vulnerable_devices),
+        },
+        "attention": attention[:250],
+        "boundary": "Read-only Microsoft security evidence. Use Nexus Shield to investigate and only execute approved containment through a governed Microsoft action workflow.",
+        "required_evidence": [
+            "Microsoft Defender alert synchronisation", "Microsoft Entra identity-risk synchronisation",
+            "Conditional Access policy inventory synchronisation", "Microsoft Defender device-risk synchronisation",
+        ],
+    }
+
+
+@router.get("/m365/licensing/posture")
+async def licensing_posture(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Return Microsoft licence evidence for operational and billing review.
+
+    The endpoint intentionally reports only provider-recorded assignments and
+    purchased SKU evidence. It does not infer cost, mutate an invoice, or claim a
+    service is reconciled until a contract/service mapping is explicitly present.
+    """
+    scope = {"tenant_id": tenant_id} if tenant_id else {}
+    licenses, users = await asyncio.gather(
+        db.m365_licenses.find(_verified_query(scope), {"_id": 0}).sort("sku_name", 1).limit(10000).to_list(10000),
+        db.m365_users.find(_verified_query(scope), {"_id": 0}).limit(20000).to_list(20000),
+    )
+
+    def assignments(row: dict) -> list:
+        value = row.get("assigned_licenses") or row.get("assignedLicenses") or row.get("licenses") or []
+        return value if isinstance(value, list) else []
+
+    active_users = [row for row in users if row.get("account_enabled") is not False]
+    unlicensed_active = [row for row in active_users if not assignments(row)]
+    disabled_licensed = [row for row in users if row.get("account_enabled") is False and assignments(row)]
+    low_stock = [
+        row for row in licenses
+        if isinstance(row.get("total_units") or row.get("enabled_units"), (int, float))
+        and isinstance(row.get("consumed_units"), (int, float))
+        and (float(row.get("total_units") or row.get("enabled_units")) - float(row.get("consumed_units"))) <= 2
+    ]
+    telemetry_available = bool(licenses) or any(
+        any(key in row for key in ("assigned_licenses", "assignedLicenses", "licenses"))
+        for row in users
+    )
+    return {
+        "telemetry_available": telemetry_available,
+        "connection_required": not telemetry_available,
+        "tenant_id": tenant_id,
+        "summary": {
+            "skus": len(licenses), "active_users": len(active_users), "unlicensed_active": len(unlicensed_active),
+            "disabled_licensed": len(disabled_licensed), "low_stock_skus": len(low_stock),
+        },
+        "licenses": licenses[:500],
+        "attention": [
+            {"id": row.get("id"), "kind": "unlicensed_active_user", "tenant_id": row.get("tenant_id"), "subject": row.get("display_name") or row.get("upn") or "Active user", "detail": "No provider-recorded licence assignment", "severity": "medium"}
+            for row in unlicensed_active
+        ] + [
+            {"id": row.get("id"), "kind": "disabled_licensed_user", "tenant_id": row.get("tenant_id"), "subject": row.get("display_name") or row.get("upn") or "Disabled user", "detail": f"{len(assignments(row))} licence assignment(s) retained", "severity": "medium"}
+            for row in disabled_licensed
+        ] + [
+            {"id": row.get("id"), "kind": "low_stock_sku", "tenant_id": row.get("tenant_id"), "subject": row.get("sku_name") or row.get("display_name") or "Microsoft SKU", "detail": "Two or fewer provider-recorded seats remain", "severity": "low"}
+            for row in low_stock
+        ],
+        "boundary": "Provider-recorded licence evidence only. Use the Nexus Action Centre for previewed assignment changes and the service/billing workspace for an approved reconciliation.",
+    }
 
 
 @router.get("/m365/search")

@@ -10,6 +10,7 @@ import axios from "axios";
 import { API } from "@/App";
 import { navGroups, getAllNavItems, taskShortcuts } from "@/config/navigation";
 import { useNavCounts, NavBadge } from "@/hooks/useNavCounts";
+import NexusGlobalPulse from "@/components/NexusGlobalPulse";
 
 // Notification Bell Component
 function NotificationBell({ token, collapsed }) {
@@ -22,6 +23,7 @@ function NotificationBell({ token, collapsed }) {
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const getNotificationLink = (n) => {
+    if (n.action_url && String(n.action_url).startsWith("/")) return n.action_url;
     const refType = n.ref_type;
     const refId = n.ref_id;
     if (!refType || !refId) return null;
@@ -154,10 +156,14 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
   const navigate = useNavigate();
   const hasChildren = item.children && item.children.length > 0;
   const isExpanded = expandedMenus.has(item.path);
+  const currentLocation = `${location.pathname}${location.search}`;
+  const matchesPath = (path) => path.includes("?")
+    ? currentLocation === path || currentLocation.startsWith(`${path}&`)
+    : location.pathname === path;
 
   // Check if this item or any child is active
-  const isActive = location.pathname === item.path;
-  const isChildActive = hasChildren && item.children.some(c => location.pathname === c.path);
+  const isActive = matchesPath(item.path);
+  const isChildActive = hasChildren && item.children.some(c => matchesPath(c.path));
   const isWorkspaceActive = item.workspacePaths?.some(path => location.pathname === path || location.pathname.startsWith(`${path}/`));
   const isHighlighted = isActive || isChildActive || isWorkspaceActive;
 
@@ -214,7 +220,7 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
           {!collapsed && hasChildren && isExpanded && (
             <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">
               {item.children.map(child => {
-                const childActive = location.pathname === child.path;
+                const childActive = matchesPath(child.path);
                 const childCount = counts[child.path] || 0;
                 return (
                   <Link
@@ -442,6 +448,10 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
         {/* Notification Bell */}
         <NotificationBell token={token} collapsed={collapsed} />
 
+        <div className="px-3 pb-1">
+          <NexusGlobalPulse counts={navCounts} collapsed={collapsed} />
+        </div>
+
         {/* Global Module Search */}
         {!collapsed ? (
           <SidebarSearch />
@@ -449,11 +459,11 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
           <div className="px-3 py-1">
             <Tooltip>
               <TooltipTrigger asChild>
-                <button onClick={onToggle} className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all" data-testid="sidebar-search-collapsed">
+                <button onClick={() => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"))} className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all" data-testid="sidebar-search-collapsed" aria-label="Open Nexus Command">
                   <Search className="w-[18px] h-[18px]" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">Find a task or workspace</TooltipContent>
+              <TooltipContent side="right">Nexus Command · Ctrl + K</TooltipContent>
             </Tooltip>
           </div>
         )}

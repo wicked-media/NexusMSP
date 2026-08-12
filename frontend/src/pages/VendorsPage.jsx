@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -284,10 +285,17 @@ export default function VendorsPage() {
 
       {/* ===== ADD/EDIT VENDOR DIALOG ===== */}
       <Dialog open={formOpen} onOpenChange={v => { setFormOpen(v); if (!v) setEditing(null); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>{editing ? "Edit Vendor" : "Add New Vendor"}</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 gap-3">
+        <NexusWorkflowDialog
+          eyebrow="Procurement directory"
+          title={editing ? "Refine vendor profile" : "Add vendor profile"}
+          description="Capture supplier contacts, commercial terms and delivery details in one retained procurement record."
+          icon={Building2}
+          tone="cyan"
+          footer={<><Button variant="outline" onClick={() => setFormOpen(false)}>Cancel</Button><Button onClick={handleSave} data-testid="save-vendor-btn">{editing ? "Save vendor" : "Create vendor"}</Button></>}
+        >
+          <div className="space-y-5">
+            <section className="rounded-xl border border-border/70 bg-muted/[0.08] p-4">
+            <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Vendor Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Yealink Australia" data-testid="vendor-name-input" /></div>
               <div><Label>Category</Label>
                 <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
@@ -296,28 +304,29 @@ export default function VendorsPage() {
                 </Select>
               </div>
             </div>
+            </section>
             <Separator />
-            <p className="text-sm font-semibold flex items-center gap-2"><Users className="w-4 h-4" />Contact</p>
-            <div className="grid grid-cols-2 gap-3">
+            <section className="space-y-3"><p className="text-sm font-semibold flex items-center gap-2"><Users className="w-4 h-4 text-cyan-300" />Contact</p>
+            <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Contact Name</Label><Input value={form.contact_name} onChange={e => setForm({ ...form, contact_name: e.target.value })} placeholder="Primary contact" /></div>
               <div><Label>Email</Label><Input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="accounts@vendor.com" data-testid="vendor-email-input" /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 md:grid-cols-2">
               <div><Label>Phone</Label><Input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+61 2 1234 5678" /></div>
               <div><Label>Website</Label><Input value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} placeholder="https://www.vendor.com" /></div>
-            </div>
+            </div></section>
             <Separator />
-            <p className="text-sm font-semibold flex items-center gap-2"><MapPin className="w-4 h-4" />Address</p>
+            <section className="space-y-3"><p className="text-sm font-semibold flex items-center gap-2"><MapPin className="w-4 h-4 text-cyan-300" />Address</p>
             <div><Label>Street Address</Label><Input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="123 Business Street" /></div>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div><Label>City</Label><Input value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} /></div>
               <div><Label>State</Label><Input value={form.state} onChange={e => setForm({ ...form, state: e.target.value })} /></div>
               <div><Label>Postal Code</Label><Input value={form.postal_code} onChange={e => setForm({ ...form, postal_code: e.target.value })} /></div>
               <div><Label>Country</Label><Input value={form.country} onChange={e => setForm({ ...form, country: e.target.value })} /></div>
-            </div>
+            </div></section>
             <Separator />
-            <p className="text-sm font-semibold flex items-center gap-2"><CreditCard className="w-4 h-4" />Billing</p>
-            <div className="grid grid-cols-3 gap-3">
+            <section className="space-y-3"><p className="text-sm font-semibold flex items-center gap-2"><CreditCard className="w-4 h-4 text-cyan-300" />Billing</p>
+            <div className="grid gap-3 md:grid-cols-3">
               <div><Label>ABN</Label><Input value={form.abn} onChange={e => setForm({ ...form, abn: e.target.value })} placeholder="XX XXX XXX XXX" /></div>
               <div><Label>Tax ID</Label><Input value={form.tax_id} onChange={e => setForm({ ...form, tax_id: e.target.value })} /></div>
               <div><Label>Payment Terms</Label>
@@ -327,10 +336,9 @@ export default function VendorsPage() {
                 </Select>
               </div>
             </div>
-            <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} /></div>
+            <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="Commercial context, account instructions or supplier notes" /></div></section>
           </div>
-          <DialogFooter><Button onClick={handleSave} data-testid="save-vendor-btn">{editing ? "Update" : "Create"} Vendor</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );

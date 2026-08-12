@@ -6,9 +6,11 @@ import uuid
 import secrets
 import hashlib
 import base64
+import io
 import hmac
 import struct
 import time
+import qrcode
 from app.database import db
 from app.auth import cache_busted_avatar_url, get_current_user, hash_password, verify_password, password_policy_error
 
@@ -89,6 +91,10 @@ async def get_2fa_status(current_user: dict = Depends(get_current_user)):
 async def setup_2fa(current_user: dict = Depends(get_current_user)):
     secret = base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
     provisioning_uri = f"otpauth://totp/NexusOps:{current_user['email']}?secret={secret}&issuer=NexusOps&algorithm=SHA1&digits=6&period=30"
+    qr_image = qrcode.make(provisioning_uri)
+    qr_buffer = io.BytesIO()
+    qr_image.save(qr_buffer, format="PNG")
+    qr_code_data_uri = f"data:image/png;base64,{base64.b64encode(qr_buffer.getvalue()).decode('ascii')}"
     await db.user_2fa.update_one(
         {"user_id": current_user["id"]},
         {"$set": {
@@ -99,7 +105,12 @@ async def setup_2fa(current_user: dict = Depends(get_current_user)):
         }},
         upsert=True
     )
-    return {"secret": secret, "provisioning_uri": provisioning_uri, "qr_data": provisioning_uri}
+    return {
+        "secret": secret,
+        "provisioning_uri": provisioning_uri,
+        "qr_data": provisioning_uri,
+        "qr_code_data_uri": qr_code_data_uri,
+    }
 
 @router.post("/user-settings/2fa/verify")
 async def verify_2fa(data: dict, current_user: dict = Depends(get_current_user)):

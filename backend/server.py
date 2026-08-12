@@ -47,7 +47,18 @@ async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # PDFs are displayed inside the authenticated Nexus document preview. The
+    # SPA and API use separate origins in development (and can do so in a
+    # channel deployment), so SAMEORIGIN would incorrectly block a trusted
+    # Nexus preview. Scope PDF framing to the configured application origins
+    # with CSP instead; every non-document response remains unframeable.
+    if str(response.headers.get("content-type", "")).startswith("application/pdf"):
+        if "X-Frame-Options" in response.headers:
+            del response.headers["X-Frame-Options"]
+        trusted_frames = " ".join(origin for origin in cors_origins() if origin != "*")
+        response.headers["Content-Security-Policy"] = f"frame-ancestors 'self' {trusted_frames}".strip()
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     logger.info(
         "request_complete correlation_id=%s method=%s path=%s status=%s elapsed_ms=%s",

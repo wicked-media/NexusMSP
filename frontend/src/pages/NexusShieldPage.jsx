@@ -77,8 +77,16 @@ export default function NexusShieldPage() {
   const [xdrLoading, setXdrLoading] = useState(false);
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [xdrCases, setXdrCases] = useState([]);
+  const [activatedMissions, setActivatedMissions] = useState([]);
   const [casesLoading, setCasesLoading] = useState(false);
   const [selectedCase, setSelectedCase] = useState(null);
+  const [selectedMission, setSelectedMission] = useState(null);
+  const [selectedActivatedMission, setSelectedActivatedMission] = useState(null);
+  const [missionReason, setMissionReason] = useState("");
+  const [missionStatus, setMissionStatus] = useState("planned");
+  const [missionUpdateNote, setMissionUpdateNote] = useState("");
+  const [savingMission, setSavingMission] = useState(false);
+  const [creatingMissionTicket, setCreatingMissionTicket] = useState(false);
   const [caseStatus, setCaseStatus] = useState("investigating");
   const [caseNote, setCaseNote] = useState("");
   const [savingCase, setSavingCase] = useState(false);
@@ -130,17 +138,27 @@ export default function NexusShieldPage() {
     }
   }, [headers]);
 
+  const loadMissions = useCallback(async (clientId = "") => {
+    try {
+      const response = await axios.get(`${API}/nexus-shield/xdr/missions`, { headers, params: clientId ? { client_id: clientId } : {} });
+      setActivatedMissions(response.data?.missions || []);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Security Mission records could not be loaded");
+    }
+  }, [headers]);
+
   useEffect(() => {
     if (tab === "xdr") {
       loadXdr(xdrClientId);
       loadCases(xdrClientId);
+      loadMissions(xdrClientId);
     }
-  }, [loadCases, loadXdr, tab, xdrClientId]);
+  }, [loadCases, loadMissions, loadXdr, tab, xdrClientId]);
 
   const refreshAll = async () => {
     setRefreshKey(key => key + 1);
     await load({ quiet: true });
-    if (tab === "xdr") await Promise.all([loadXdr(xdrClientId), loadCases(xdrClientId)]);
+    if (tab === "xdr") await Promise.all([loadXdr(xdrClientId), loadCases(xdrClientId), loadMissions(xdrClientId)]);
   };
 
   const openInvestigation = async (incident) => {
@@ -171,6 +189,79 @@ export default function NexusShieldPage() {
     setSelectedCase(item);
     setCaseStatus(item.status || "investigating");
     setCaseNote("");
+  };
+
+  const activateMission = async () => {
+    if (!selectedMission || !missionReason.trim()) {
+      toast.error("Record why this outcome is being opened before activating it");
+      return;
+    }
+    setSavingMission(true);
+    try {
+      const response = await axios.post(`${API}/nexus-shield/xdr/missions`, {
+        mission_id: selectedMission.id,
+        client_id: xdrClientId,
+        reason: missionReason.trim(),
+      }, { headers });
+      const mission = response.data?.mission;
+      if (mission) setActivatedMissions(current => [mission, ...current.filter(item => item.id !== mission.id)]);
+      setSelectedMission(null);
+      setMissionReason("");
+      toast.success(response.data?.message || "Security Mission activated");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Security Mission could not be activated");
+    } finally {
+      setSavingMission(false);
+    }
+  };
+
+  const openMissionEditor = (mission) => {
+    setSelectedActivatedMission(mission);
+    setMissionStatus(mission.status || "planned");
+    setMissionUpdateNote("");
+  };
+
+  const saveMissionUpdate = async () => {
+    if (!selectedActivatedMission || !missionUpdateNote.trim()) {
+      toast.error("Record an outcome note before updating the mission");
+      return;
+    }
+    setSavingMission(true);
+    try {
+      const response = await axios.patch(`${API}/nexus-shield/xdr/missions/${selectedActivatedMission.id}`, { status: missionStatus, note: missionUpdateNote.trim() }, { headers });
+      const mission = response.data?.mission;
+      if (mission) {
+        setActivatedMissions(current => current.map(item => item.id === mission.id ? mission : item));
+        setSelectedActivatedMission(mission);
+      }
+      setMissionUpdateNote("");
+      toast.success(response.data?.message || "Security Mission updated");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Security Mission could not be updated");
+    } finally {
+      setSavingMission(false);
+    }
+  };
+
+  const createMissionTicket = async () => {
+    if (!selectedActivatedMission) return;
+    setCreatingMissionTicket(true);
+    try {
+      const response = await axios.post(`${API}/nexus-shield/xdr/missions/${selectedActivatedMission.id}/ticket`, {
+        note: "Created from Nexus Shield Security Mission.",
+      }, { headers });
+      const ticket = response.data?.ticket;
+      if (ticket) {
+        const updated = { ...selectedActivatedMission, ticket_id: ticket.id, ticket_number: ticket.ticket_number };
+        setSelectedActivatedMission(updated);
+        setActivatedMissions(current => current.map(item => item.id === updated.id ? updated : item));
+      }
+      toast.success(response.data?.message || "Linked remediation ticket created");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Linked remediation ticket could not be created");
+    } finally {
+      setCreatingMissionTicket(false);
+    }
   };
 
   const saveCaseUpdate = async () => {
@@ -283,7 +374,7 @@ export default function NexusShieldPage() {
 
   const coverage = data.coverage || EMPTY.coverage;
   const canary = data.canary || EMPTY.canary;
-  const risks = data.risk_queue || [];
+  const risks = data.risk_queue ?? EMPTY.risk_queue;
   const xdr = data.xdr || EMPTY.xdr;
   const filteredRisks = useMemo(() => {
     const query = responseSearch.trim().toLowerCase();
@@ -294,11 +385,17 @@ export default function NexusShieldPage() {
     });
   }, [responseSearch, responseSeverity, risks]);
   const responseClientCount = new Set(risks.map(risk => risk.client_id || risk.client_name).filter(Boolean)).size;
-  const coverageLabel = coverage.agent_enrolled ? `${coverage.shield_enrolled || 0}/${coverage.agent_enrolled}` : "0";
   const activePolicies = (data.policies || []).filter(policy => policy.enabled).length;
   const activeDetections = (data.policies || []).filter(policy => policy.enabled && policy.mode === "active_detection").length;
   const scopedPolicies = (data.policies || []).filter(policy => policy.scope_mode === "selected_clients").length;
   const policiesDirty = policyFingerprint(data.policies) !== policyFingerprint(policyBaseline);
+  const shieldSignal = risks.some(risk => ["critical", "high"].includes(risk.severity)) || canary.unresolved
+    ? "critical"
+    : risks.length > 0 || (xdr.confidence?.score != null && xdr.confidence.score < 75)
+      ? "attention"
+      : coverage.defender_healthy > 0
+        ? "healthy"
+        : "recommendation";
   const filteredPolicyClients = clients.filter(client => {
     const query = clientSearch.trim().toLowerCase();
     if (!query) return true;
@@ -306,13 +403,14 @@ export default function NexusShieldPage() {
   });
 
   return (
-    <div className="space-y-5" data-testid="nexus-shield">
+    <div className="nx-page-stage space-y-5" data-testid="nexus-shield">
       <OperationalPageHeader
         eyebrow="Endpoint protection & response"
         title="Nexus Shield"
         description="One operational control plane for Nexus Agent endpoint posture, Nexus Canary integrity detection, monitoring policy, and audited response work."
         icon={ShieldCheck}
         tone="emerald"
+        signal={shieldSignal}
         actions={<>
           <Button variant="outline" size="sm" onClick={() => setTab("xdr")}><BrainCircuit className="mr-1.5 h-4 w-4" />XDR intelligence</Button>
           <Button variant="outline" size="sm" onClick={() => setTab("response")}><Siren className="mr-1.5 h-4 w-4" />Response queue</Button>
@@ -420,9 +518,11 @@ export default function NexusShieldPage() {
             <Card className="overflow-hidden border-violet-500/20 bg-violet-500/[0.035] xl:col-span-2">
               <CardHeader className="border-b border-violet-500/15"><CardTitle className="flex items-center gap-2 text-base text-violet-700 dark:text-violet-100"><Target className="h-4 w-4" />Security missions</CardTitle><p className="mt-1 text-sm text-muted-foreground">Move resilience forward with evidence-backed, measurable outcomes.</p></CardHeader>
               <CardContent className="space-y-3 p-4">
-                {(xdr.missions || []).length === 0 ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 text-sm text-emerald-700 dark:text-emerald-100">No current evidence-backed missions.</div> : (xdr.missions || []).map(mission => <button type="button" key={mission.id} onClick={() => mission.route?.includes("tab=xdr") ? setTab("xdr") : navigate(mission.route)} className="group w-full rounded-xl border border-border/70 bg-background/55 p-3 text-left transition-colors hover:border-violet-400/30 dark:bg-black/[0.14]">
-                  <div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-foreground">{mission.title}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{mission.detail}</p><p className="mt-2 text-[11px] font-medium text-violet-700 dark:text-violet-200">{mission.impact}</p></div><ArrowRight className="mt-1 h-4 w-4 shrink-0 text-violet-700 transition-transform group-hover:translate-x-0.5 dark:text-violet-200" /></div>
-                </button>)}
+                {(xdr.missions || []).length === 0 ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4 text-sm text-emerald-700 dark:text-emerald-100">No current evidence-backed missions.</div> : (xdr.missions || []).map(mission => <div key={mission.id} className="rounded-xl border border-border/70 bg-background/55 p-3 dark:bg-black/[0.14]">
+                  <div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-foreground">{mission.title}</p><Badge variant="outline" className={SEVERITY_STYLE[mission.severity] || SEVERITY_STYLE.medium}>{mission.severity}</Badge></div><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{mission.detail}</p><p className="mt-2 text-[11px] font-medium text-violet-700 dark:text-violet-200">{mission.impact}</p></div></div>
+                  <div className="mt-3 flex flex-wrap gap-2"><Button size="sm" className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={() => { setSelectedMission(mission); setMissionReason(""); }}><Target className="mr-1.5 h-3.5 w-3.5" />Activate mission</Button><Button size="sm" variant="outline" onClick={() => mission.route?.includes("tab=xdr") ? setTab("xdr") : navigate(mission.route)}>Inspect evidence<ArrowRight className="ml-1.5 h-3.5 w-3.5" /></Button></div>
+                </div>)}
+                {activatedMissions.length > 0 && <div className="space-y-2 rounded-xl border border-violet-400/20 bg-violet-500/[0.05] p-3 text-xs text-violet-800 dark:text-violet-100"><div><span className="font-semibold">{activatedMissions.filter(item => !["completed", "cancelled"].includes(item.status)).length} active mission{activatedMissions.filter(item => !["completed", "cancelled"].includes(item.status)).length === 1 ? "" : "s"}</span><span className="text-muted-foreground"> · owned work with an auditable purpose and response pack.</span></div>{activatedMissions.filter(item => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map(mission => <button key={mission.id} type="button" onClick={() => openMissionEditor(mission)} className="flex w-full items-center justify-between gap-2 rounded-lg border border-violet-400/15 bg-background/45 px-2.5 py-2 text-left hover:border-violet-400/35"><span className="truncate font-medium text-foreground">{mission.title}</span><Badge variant="outline" className="shrink-0 border-violet-400/25 text-violet-700 dark:text-violet-100">{String(mission.status).replaceAll("_", " ")}</Badge></button>)}</div>}
                 <Button variant="outline" className="w-full border-cyan-400/25 text-cyan-700 dark:text-cyan-100" onClick={() => navigate(xdr.graph?.route || "/security-graph")}><GitBranch className="mr-1.5 h-4 w-4" />Open evidence graph</Button>
               </CardContent>
             </Card>
@@ -614,6 +714,35 @@ export default function NexusShieldPage() {
               <Button variant="outline" onClick={() => setPolicyEditor(null)}>Cancel</Button>
               <Button className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={applyPolicyEditor}><CheckCircle2 className="mr-1.5 h-4 w-4" />Stage policy changes</Button>
             </DialogFooter>
+          </>}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedMission)} onOpenChange={(open) => { if (!open) { setSelectedMission(null); setMissionReason(""); } }}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto border-violet-400/20 bg-[linear-gradient(160deg,#121020,#090b11)] sm:max-w-2xl">
+          {selectedMission && <>
+            <DialogHeader><div className="flex items-start gap-3"><div className="rounded-xl border border-violet-400/25 bg-violet-500/10 p-2.5"><Target className="h-5 w-5 text-violet-200" /></div><div><div className="flex flex-wrap items-center gap-2"><DialogTitle>{selectedMission.title}</DialogTitle><Badge variant="outline" className={SEVERITY_STYLE[selectedMission.severity] || SEVERITY_STYLE.medium}>{selectedMission.severity}</Badge></div><p className="mt-1 text-sm text-muted-foreground">Nexus Security Mission · {xdrClientId ? (xdr.filters?.selected_client_name || "selected client") : "all managed clients"}</p></div></div></DialogHeader>
+            <div className="space-y-5 py-2">
+              <div className="rounded-xl border border-violet-400/20 bg-violet-500/[0.05] p-4"><p className="text-sm font-semibold text-foreground">Outcome</p><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{selectedMission.detail}</p><p className="mt-3 text-xs font-medium text-violet-700 dark:text-violet-200">Expected impact: {selectedMission.impact}</p></div>
+              <div><p className="mb-3 text-sm font-semibold text-foreground">Controlled response pack</p><div className="grid gap-2 sm:grid-cols-2">{(selectedMission.response_pack || []).map(step => <div key={step} className="flex gap-2 rounded-lg border border-white/[0.08] bg-black/[0.13] p-3 text-xs leading-relaxed text-muted-foreground"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300" />{step}</div>)}</div></div>
+              <div className="space-y-2"><Label htmlFor="shield-mission-reason">Operational reason</Label><Textarea id="shield-mission-reason" value={missionReason} onChange={(event) => setMissionReason(event.target.value)} placeholder="Why is this mission being opened now, and what client outcome is expected?" className="min-h-28" /><p className="text-xs text-muted-foreground">Activation creates owned, auditable work only. It does not silently change customer systems.</p></div>
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => { setSelectedMission(null); setMissionReason(""); }}>Cancel</Button><Button className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={activateMission} disabled={savingMission || !missionReason.trim()}>{savingMission ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Target className="mr-1.5 h-4 w-4" />}Activate & audit</Button></DialogFooter>
+          </>}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedActivatedMission)} onOpenChange={(open) => { if (!open) setSelectedActivatedMission(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto border-violet-400/20 bg-[linear-gradient(160deg,#121020,#090b11)] sm:max-w-3xl">
+          {selectedActivatedMission && <>
+            <DialogHeader><div className="flex items-start gap-3"><div className="rounded-xl border border-violet-400/25 bg-violet-500/10 p-2.5"><Target className="h-5 w-5 text-violet-200" /></div><div><div className="flex flex-wrap items-center gap-2"><DialogTitle>{selectedActivatedMission.title}</DialogTitle><Badge variant="outline" className={SEVERITY_STYLE[selectedActivatedMission.severity] || SEVERITY_STYLE.medium}>{selectedActivatedMission.severity}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{selectedActivatedMission.client_name} · owned by {selectedActivatedMission.owner_name}</p></div></div></DialogHeader>
+            <div className="space-y-5 py-2">
+              <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl border border-white/[0.08] bg-black/[0.14] p-3"><p className="text-[10px] uppercase tracking-[0.14em] text-violet-200/65">Status</p><p className="mt-2 text-sm font-semibold capitalize text-foreground">{String(selectedActivatedMission.status).replaceAll("_", " ")}</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.14] p-3"><p className="text-[10px] uppercase tracking-[0.14em] text-violet-200/65">Response pack</p><p className="mt-2 text-sm font-semibold text-foreground">{selectedActivatedMission.response_pack?.length || 0} controlled steps</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.14] p-3"><p className="text-[10px] uppercase tracking-[0.14em] text-violet-200/65">Opened</p><p className="mt-2 text-sm font-semibold text-foreground">{evidenceTime(selectedActivatedMission.opened_at)}</p></div></div>
+              <div><p className="mb-3 text-sm font-semibold text-foreground">Outcome workflow</p><div className="grid gap-2 sm:grid-cols-2">{(selectedActivatedMission.response_pack || []).map(step => <div key={step} className="flex gap-2 rounded-lg border border-white/[0.08] bg-black/[0.13] p-3 text-xs leading-relaxed text-muted-foreground"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-300" />{step}</div>)}</div></div>
+              <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="shield-mission-status">Mission status</Label><select id="shield-mission-status" value={missionStatus} onChange={(event) => setMissionStatus(event.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground"><option value="planned">Planned</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></div><div className="space-y-2"><Label htmlFor="shield-mission-note">Outcome note</Label><Textarea id="shield-mission-note" value={missionUpdateNote} onChange={(event) => setMissionUpdateNote(event.target.value)} placeholder="Record the decision, customer impact and the next accountable step…" className="min-h-24" /></div></div>
+              <div><p className="mb-3 text-sm font-semibold text-foreground">Mission history</p><div className="space-y-2">{[...(selectedActivatedMission.events || [])].reverse().map((event, index) => <div key={`${event.at}:${index}`} className="rounded-xl border border-white/[0.08] bg-black/[0.13] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold capitalize text-violet-100">{String(event.type || "mission event").replaceAll("_", " ")}</p><span className="text-[11px] text-muted-foreground">{evidenceTime(event.at)}</span></div><p className="mt-1 text-sm text-muted-foreground">{event.note}</p><p className="mt-2 text-[11px] text-violet-200/70">{event.technician_name} · {String(event.status || "").replaceAll("_", " ")}</p></div>)}</div></div>
+            </div>
+            <DialogFooter><Button variant="outline" onClick={() => setSelectedActivatedMission(null)}>Close</Button>{selectedActivatedMission.ticket_id ? <Button variant="outline" onClick={() => navigate(`/tickets?ticket=${selectedActivatedMission.ticket_id}`)}><ClipboardList className="mr-1.5 h-4 w-4" />Open {selectedActivatedMission.ticket_number || "ticket"}</Button> : <Button variant="outline" onClick={createMissionTicket} disabled={creatingMissionTicket || !selectedActivatedMission.client_id} title={!selectedActivatedMission.client_id ? "Select one client in Shield XDR before creating remediation work" : undefined}>{creatingMissionTicket ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <ClipboardList className="mr-1.5 h-4 w-4" />}Create remediation ticket</Button>}<Button className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={saveMissionUpdate} disabled={savingMission || !missionUpdateNote.trim()}>{savingMission ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}Record update</Button></DialogFooter>
           </>}
         </DialogContent>
       </Dialog>

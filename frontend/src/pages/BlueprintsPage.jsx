@@ -28,6 +28,7 @@ const FIELD_TYPES = [
 
 const PRIORITY_OPTS = ["low", "medium", "high", "critical"];
 const STATUS_OPTS = ["open", "in_progress", "on_hold"];
+const BLUEPRINT_TABS = ["library", "patterns"];
 
 const EMPTY_BP = {
   name: "", description: "", icon: "Clipboard", color: "sky",
@@ -41,7 +42,9 @@ export default function BlueprintsPage() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = searchParams.get("pattern") ? "patterns" : "library";
+  const requestedTab = searchParams.get("tab");
+  const resolvedTab = BLUEPRINT_TABS.includes(requestedTab) ? requestedTab : (searchParams.get("pattern") ? "patterns" : "library");
+  const [activeTab, setActiveTab] = useState(resolvedTab);
   const [bps, setBps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -60,6 +63,14 @@ export default function BlueprintsPage() {
   }, [headers]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setActiveTab(resolvedTab); }, [resolvedTab]);
+
+  const selectTab = (nextTab) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextTab === "library") nextParams.delete("tab");
+    else nextParams.set("tab", nextTab);
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const openCreate = () => { setEditing(null); setForm(EMPTY_BP); setOpen(true); };
   const openEdit = (bp) => {
@@ -163,7 +174,7 @@ export default function BlueprintsPage() {
         <HeroTile label="Starter library" value={bps.filter(bp => bp.starter_template && bp.active !== false).length} icon={Sparkles} glow="emerald" subtitle="MSP-ready templates" testId="blueprints-stat-starters" />
       </div>
 
-      <Tabs defaultValue={initialTab}>
+      <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList>
           <TabsTrigger value="library" data-testid="blueprints-tab-library"><Clipboard className="w-3 h-3 mr-1" />Library</TabsTrigger>
           <TabsTrigger value="patterns" data-testid="blueprints-tab-patterns"><Sparkles className="w-3 h-3 mr-1" />Pattern Discovery</TabsTrigger>
@@ -230,7 +241,13 @@ export default function BlueprintsPage() {
           <PatternsPanel
             onCreated={() => load()}
             initialTokens={searchParams.get("t") ? searchParams.get("t").split(",") : null}
-            onConsumed={() => setSearchParams({})}
+            onConsumed={() => {
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.delete("pattern");
+              nextParams.delete("t");
+              nextParams.set("tab", "patterns");
+              setSearchParams(nextParams, { replace: true });
+            }}
           />
         </TabsContent>
       </Tabs>

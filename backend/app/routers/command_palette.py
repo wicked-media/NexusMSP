@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.database import db
 from app.routers.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 
 router = APIRouter()
@@ -39,6 +40,31 @@ def _intent_suggestions(query: str, entity_term: str) -> list[dict]:
             "/control-plane?module=microsoft365&view=actions&action=reset-mfa", "Identity change",
         ),
         (
+            ("create", "user"), "Create a Microsoft user",
+            "Open a governed user-provisioning plan with tenant, client, licence and audit context.",
+            "/control-plane?module=microsoft365&view=actions&action=create-user", "Identity workflow",
+        ),
+        (
+            ("block", "sign"), "Block Microsoft sign-in",
+            "Open the containment workflow and review the target, business reason and approval requirements first.",
+            "/control-plane?module=microsoft365&view=actions&action=block-sign-in", "High-impact workflow",
+        ),
+        (
+            ("licence",), "Review Microsoft licensing",
+            "Open Nexus 365 licensing posture and the approval-aware licence-change workflow.",
+            "/control-plane?module=microsoft365&view=actions&action=change-licences", "Commercial workflow",
+        ),
+        (
+            ("group",), "Manage Microsoft group access",
+            "Open a tenant-scoped group membership plan with access-owner evidence and approval gates.",
+            "/control-plane?module=microsoft365&view=actions&action=manage-group-access", "Access governance",
+        ),
+        (
+            ("role",), "Manage privileged Microsoft role",
+            "Open a time-bounded, approval-required directory-role plan with a named access owner.",
+            "/control-plane?module=microsoft365&view=actions&action=manage-privileged-role", "Privileged access",
+        ),
+        (
             ("remote",), "Start a remote support session",
             "Open matching managed assets and confirm the endpoint and remote provider.",
             f"/devices?search={quote_plus(entity_term)}", "Technician action",
@@ -55,8 +81,23 @@ def _intent_suggestions(query: str, entity_term: str) -> list[dict]:
         ),
         (
             ("mailbox",), "Create or manage a mailbox",
-            "Open Microsoft operations and review tenant, user, licence and mailbox settings.",
-            "/control-plane?module=microsoft365&view=actions&action=create-user", "Identity workflow",
+            "Open a governed mailbox-delegation plan with tenant, user, mailbox owner and approval context.",
+            "/control-plane?module=microsoft365&view=actions&action=manage-mailbox-access", "Mailbox governance",
+        ),
+        (
+            ("phishing",), "Investigate a phishing signal",
+            "Open Mail Shield with the incident context; containment stays evidence- and approval-led.",
+            "/mail-shield?intent=phishing-investigation", "Security investigation",
+        ),
+        (
+            ("conditional", "access"), "Review Conditional Access",
+            "Open a governed Conditional Access policy plan with emergency-access review and approval gates.",
+            "/control-plane?module=microsoft365&view=actions&action=manage-conditional-access", "Security governance",
+        ),
+        (
+            ("retire", "device"), "Retire an Intune device",
+            "Open the protected device-retirement plan; a device is not retired or wiped until its scope and approval are confirmed.",
+            "/control-plane?module=microsoft365&view=actions&action=retire-managed-device", "Critical device action",
         ),
         (
             ("move", "device"), "Move an asset to another client",
@@ -93,8 +134,10 @@ def _intent_suggestions(query: str, entity_term: str) -> list[dict]:
 
 
 @router.get("/command-palette/search")
-async def palette_search(q: str = "", current_user: dict = Depends(get_current_user)):
+async def palette_search(q: str = "", client_id: str = "", current_user: dict = Depends(get_current_user)):
+    """Search Nexus records within both the selected and permitted client boundary."""
     q = (q or "").strip()
+    client_id = str(client_id or "").strip()
     empty = {
         "intents": [], "tickets": [], "clients": [], "devices": [], "users": [],
         "invoices": [], "pbxs": [], "backups": [], "knowledge": [], "products": [],
@@ -102,21 +145,29 @@ async def palette_search(q: str = "", current_user: dict = Depends(get_current_u
     if not q:
         return empty
 
+    if client_id:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="command_palette.search.client_context",
+            mask_not_found=True,
+        )
+
     entity_term = _entity_search_term(q)
     regex = {"$regex": re.escape(entity_term), "$options": "i"}
     (
         tickets, clients, devices, users, invoices, pbxs, backups, knowledge, products,
     ) = await asyncio.gather(
         db.tickets.find(
-            {"$or": [{"title": regex}, {"ticket_number": regex}, {"client_name": regex}]},
+            scoped_query(current_user, {"$or": [{"title": regex}, {"ticket_number": regex}, {"client_name": regex}], **({"client_id": client_id} if client_id else {})}),
             {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1, "priority": 1, "client_name": 1},
         ).limit(6).to_list(6),
         db.clients.find(
-            {"$or": [{"name": regex}, {"email": regex}, {"phone": regex}]},
+            scoped_query(current_user, {"$or": [{"name": regex}, {"email": regex}, {"phone": regex}], **({"id": client_id} if client_id else {})}, field="id", site_field=None),
             {"_id": 0, "id": 1, "name": 1, "email": 1, "contract_status": 1},
         ).limit(6).to_list(6),
         db.devices.find(
-            {"$or": [{"hostname": regex}, {"name": regex}, {"client_name": regex}, {"serial_number": regex}]},
+            scoped_query(current_user, {"$or": [{"hostname": regex}, {"name": regex}, {"client_name": regex}, {"serial_number": regex}], **({"client_id": client_id} if client_id else {})}),
             {"_id": 0, "id": 1, "hostname": 1, "name": 1, "client_name": 1, "status": 1, "device_type": 1},
         ).limit(6).to_list(6),
         db.users.find(
@@ -124,15 +175,15 @@ async def palette_search(q: str = "", current_user: dict = Depends(get_current_u
             {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1},
         ).limit(5).to_list(5),
         db.invoices.find(
-            {"$or": [{"invoice_number": regex}, {"invoice_name": regex}, {"client_name": regex}]},
+            scoped_query(current_user, {"$or": [{"invoice_number": regex}, {"invoice_name": regex}, {"client_name": regex}], **({"client_id": client_id} if client_id else {})}),
             {"_id": 0, "id": 1, "invoice_number": 1, "invoice_name": 1, "client_name": 1, "status": 1, "total": 1},
         ).limit(5).to_list(5),
         db.yeastar_pbxs.find(
-            {"$or": [{"name": regex}, {"pbx_name": regex}, {"client_name": regex}, {"pbx_url": regex}]},
+            scoped_query(current_user, {"$or": [{"name": regex}, {"pbx_name": regex}, {"client_name": regex}, {"pbx_url": regex}], **({"client_id": client_id} if client_id else {})}),
             {"_id": 0, "id": 1, "name": 1, "pbx_name": 1, "client_name": 1, "status": 1},
         ).limit(5).to_list(5),
         db.backup_jobs.find(
-            {"$or": [{"name": regex}, {"client_name": regex}, {"type": regex}, {"provider": regex}]},
+            scoped_query(current_user, {"$or": [{"name": regex}, {"client_name": regex}, {"type": regex}, {"provider": regex}], **({"client_id": client_id} if client_id else {})}),
             {"_id": 0, "id": 1, "name": 1, "client_name": 1, "status": 1, "provider": 1},
         ).limit(5).to_list(5),
         db.knowledge_articles.find(

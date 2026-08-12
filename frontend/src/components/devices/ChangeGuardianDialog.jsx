@@ -38,6 +38,7 @@ export default function ChangeGuardianDialog({
   busy = false,
   confirmLabel = "Approve and continue",
   onApprove,
+  previewOnly = false,
 }) {
   const navigate = useNavigate();
   const [preview, setPreview] = useState(null);
@@ -242,8 +243,8 @@ export default function ChangeGuardianDialog({
         </div>
 
         <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/20 px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{previewOnly ? "Close check" : "Cancel"}</Button>
+          {!previewOnly && <Button
             onClick={() => onApprove?.(preview?.preview_id)}
             disabled={!preview?.execution_allowed || busy || loading}
             className={risk.level === "critical" ? "bg-rose-600 text-white hover:bg-rose-500" : ""}
@@ -251,7 +252,7 @@ export default function ChangeGuardianDialog({
           >
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
             {confirmLabel}
-          </Button>
+          </Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

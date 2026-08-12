@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Eye, FileText, GitBranch, History, Loader2, MoreHorizontal, Play, Plus, RefreshCw, RotateCcw, Snowflake, BellOff, XCircle } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
@@ -28,12 +28,14 @@ const STATUS_STYLE = {
   rollback: "border-rose-500/30 bg-rose-500/10 text-rose-200",
 };
 const RISK_STYLE = { high: "border-rose-500/30 bg-rose-500/10 text-rose-200", medium: "border-amber-500/30 bg-amber-500/10 text-amber-200", low: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" };
+const CHANGE_VIEWS = new Set(["pending_review", "approved", "implementing", "history", "all"]);
 const label = (value) => String(value || "").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const displayDate = (value) => value ? new Date(value).toLocaleString() : "Not recorded";
 
 export default function ChangeManagementPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [changes, setChanges] = useState([]);
   const [stats, setStats] = useState(null);
@@ -42,7 +44,8 @@ export default function ChangeManagementPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [clientQuery, setClientQuery] = useState("");
-  const [tab, setTab] = useState("pending_review");
+  const requestedTab = searchParams.get("view");
+  const [tab, setTab] = useState(CHANGE_VIEWS.has(requestedTab) ? requestedTab : "pending_review");
   const [search, setSearch] = useState("");
   const [details, setDetails] = useState(null);
   const [actionDialog, setActionDialog] = useState(null);
@@ -66,6 +69,18 @@ export default function ChangeManagementPage() {
   }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    const nextTab = CHANGE_VIEWS.has(requestedTab) ? requestedTab : "pending_review";
+    if (nextTab !== tab) setTab(nextTab);
+  }, [requestedTab, tab]);
+
+  const selectTab = (nextTab) => {
+    setTab(nextTab);
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextTab === "pending_review") nextParams.delete("view");
+    else nextParams.set("view", nextTab);
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const loadDetails = useCallback(async (changeId) => {
     try {
@@ -142,15 +157,15 @@ export default function ChangeManagementPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
-        <HeroTile label="All changes" value={stats?.total ?? "—"} icon={GitBranch} glow="indigo" subtitle="Recorded lifecycle" active={tab === "all"} onClick={() => setTab("all")} />
-        <HeroTile label="Awaiting review" value={stats?.pending_review ?? "—"} icon={Clock3} glow={(stats?.pending_review || 0) > 0 ? "amber" : "zinc"} subtitle="CAB decision required" active={tab === "pending_review"} onClick={() => setTab("pending_review")} />
-        <HeroTile label="Approved" value={stats?.approved ?? "—"} icon={ClipboardCheck} glow="sky" subtitle="Ready to schedule" active={tab === "approved"} onClick={() => setTab("approved")} />
-        <HeroTile label="Implementing" value={stats?.implementing ?? "—"} icon={Play} glow={(stats?.implementing || 0) > 0 ? "violet" : "zinc"} subtitle="Live controlled work" active={tab === "implementing"} onClick={() => setTab("implementing")} />
-        <HeroTile label="Completed" value={stats?.completed ?? "—"} icon={CheckCircle2} glow="emerald" subtitle="Validated outcomes" active={tab === "history"} onClick={() => setTab("history")} />
-        <HeroTile label="Rolled back" value={stats?.rollback ?? "—"} icon={RotateCcw} glow={(stats?.rollback || 0) > 0 ? "rose" : "zinc"} subtitle="Review implementation evidence" active={tab === "history"} onClick={() => setTab("history")} />
+        <HeroTile label="All changes" value={stats?.total ?? "—"} icon={GitBranch} glow="indigo" subtitle="Recorded lifecycle" active={tab === "all"} onClick={() => selectTab("all")} />
+        <HeroTile label="Awaiting review" value={stats?.pending_review ?? "—"} icon={Clock3} glow={(stats?.pending_review || 0) > 0 ? "amber" : "zinc"} subtitle="CAB decision required" active={tab === "pending_review"} onClick={() => selectTab("pending_review")} />
+        <HeroTile label="Approved" value={stats?.approved ?? "—"} icon={ClipboardCheck} glow="sky" subtitle="Ready to schedule" active={tab === "approved"} onClick={() => selectTab("approved")} />
+        <HeroTile label="Implementing" value={stats?.implementing ?? "—"} icon={Play} glow={(stats?.implementing || 0) > 0 ? "violet" : "zinc"} subtitle="Live controlled work" active={tab === "implementing"} onClick={() => selectTab("implementing")} />
+        <HeroTile label="Completed" value={stats?.completed ?? "—"} icon={CheckCircle2} glow="emerald" subtitle="Validated outcomes" active={tab === "history"} onClick={() => selectTab("history")} />
+        <HeroTile label="Rolled back" value={stats?.rollback ?? "—"} icon={RotateCcw} glow={(stats?.rollback || 0) > 0 ? "rose" : "zinc"} subtitle="Review implementation evidence" active={tab === "history"} onClick={() => selectTab("history")} />
       </div>
 
-      <Card><CardContent className="p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><Tabs value={tab} onValueChange={setTab}><TabsList><TabsTrigger value="pending_review">Review</TabsTrigger><TabsTrigger value="approved">Approved</TabsTrigger><TabsTrigger value="implementing">Implementing</TabsTrigger><TabsTrigger value="history">History</TabsTrigger><TabsTrigger value="all">All</TabsTrigger></TabsList></Tabs><div className="relative w-full lg:w-80"><Eye className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search change, client, requester…" /></div></div></CardContent></Card>
+      <Card><CardContent className="p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><Tabs value={tab} onValueChange={selectTab}><TabsList><TabsTrigger value="pending_review">Review</TabsTrigger><TabsTrigger value="approved">Approved</TabsTrigger><TabsTrigger value="implementing">Implementing</TabsTrigger><TabsTrigger value="history">History</TabsTrigger><TabsTrigger value="all">All</TabsTrigger></TabsList></Tabs><div className="relative w-full lg:w-80"><Eye className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search change, client, requester…" /></div></div></CardContent></Card>
 
       <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Change</TableHead><TableHead>Client</TableHead><TableHead>Type & risk</TableHead><TableHead>Schedule</TableHead><TableHead>Requester</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Controls</TableHead></TableRow></TableHeader><TableBody>{loading ? <TableRow><TableCell colSpan={7} className="py-12 text-center"><Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" /></TableCell></TableRow> : filtered.length === 0 ? <TableRow><TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">No change records match this view.</TableCell></TableRow> : filtered.map((change) => <TableRow key={change.id} data-testid={`change-${change.id}`}><TableCell><button className="max-w-64 text-left" onClick={() => setDetails(change)}><p className="font-mono text-[10px] text-muted-foreground">{change.id}</p><p className="mt-0.5 truncate font-medium hover:text-primary">{change.title}</p></button></TableCell><TableCell className="text-sm">{change.client_name || <span className="text-muted-foreground">Internal</span>}</TableCell><TableCell><div className="flex flex-wrap gap-1"><Badge variant="outline" className="text-[10px]">{label(change.category)}</Badge><Badge variant="outline" className={`text-[10px] ${RISK_STYLE[change.risk_level] || ""}`}>{label(change.risk_level)}</Badge></div></TableCell><TableCell className="text-xs text-muted-foreground">{change.scheduled_date || "Not scheduled"}{change.maintenance_window && <p className="mt-1">{change.maintenance_window}</p>}</TableCell><TableCell className="text-sm">{change.requested_by || "Unknown"}</TableCell><TableCell><Badge variant="outline" className={`text-[10px] ${STATUS_STYLE[change.status] || ""}`}>{label(change.status)}</Badge></TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => setDetails(change)}><Eye className="mr-1 h-3.5 w-3.5" />View</Button>{change.status === "pending_review" && <><Button size="sm" className="h-8 px-2" onClick={() => openAction(change, "approve")} title="Approve"><CheckCircle2 className="h-3.5 w-3.5" /></Button><Button variant="destructive" size="sm" className="h-8 px-2" onClick={() => openAction(change, "reject")} title="Reject"><XCircle className="h-3.5 w-3.5" /></Button></>}{change.status === "approved" && <Button size="sm" className="h-8 px-2" onClick={() => openAction(change, "implement")}><Play className="mr-1 h-3.5 w-3.5" />Start</Button>}{change.status === "implementing" && <><Button size="sm" className="h-8 px-2" onClick={() => openAction(change, "complete")}><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Complete</Button><Button variant="outline" size="sm" className="h-8 px-2" onClick={() => openAction(change, "rollback")}><RotateCcw className="h-3.5 w-3.5" /></Button></>}</div></TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card>
 
@@ -158,7 +173,7 @@ export default function ChangeManagementPage() {
 
       <Dialog open={!!details} onOpenChange={(open) => !open && setDetails(null)}><DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto"><DialogHeader><DialogTitle className="flex items-center gap-2"><FileText className="h-5 w-5 text-indigo-400" />{details?.title}</DialogTitle></DialogHeader>{details && <div className="space-y-5"><div className="flex flex-wrap gap-2"><Badge variant="outline" className={STATUS_STYLE[details.status]}>{label(details.status)}</Badge><Badge variant="outline" className={RISK_STYLE[details.risk_level]}>{label(details.risk_level)} risk</Badge><Badge variant="outline">{label(details.category)}</Badge></div><div className="grid gap-4 sm:grid-cols-2"><Card><CardContent className="p-3"><p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Client & schedule</p><p className="mt-2 text-sm">{details.client_name || "Internal change"}</p><p className="mt-1 text-xs text-muted-foreground">{details.scheduled_date || "No planned date"}{details.maintenance_window ? ` · ${details.maintenance_window}` : ""}</p></CardContent></Card><Card><CardContent className="p-3"><p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Request record</p><p className="mt-2 text-sm">Requested by {details.requested_by || "Unknown"}</p><p className="mt-1 text-xs text-muted-foreground">{displayDate(details.created_at)}</p></CardContent></Card></div><section><p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Implementation brief</p><p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{details.description}</p></section><section><p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Impact assessment</p><p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{details.impact || "Not recorded"}</p></section><section><p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Rollback plan</p><p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{details.rollback_plan || "Not recorded"}</p></section><section><p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"><History className="h-3 w-3" />Lifecycle evidence</p><div className="mt-2 space-y-2">{(details.activity || []).length === 0 ? <p className="text-sm text-muted-foreground">No lifecycle events were recorded on this legacy change.</p> : details.activity.map((event, index) => <div key={`${event.at}-${index}`} className="rounded-lg border border-border bg-muted/20 p-3"><div className="flex items-center justify-between gap-3"><p className="text-sm font-medium">{label(event.action)}</p><p className="text-[10px] text-muted-foreground">{displayDate(event.at)}</p></div><p className="mt-1 text-xs text-muted-foreground">{event.by || "System"}{event.note ? ` · ${event.note}` : ""}</p></div>)}</div></section></div>}</DialogContent></Dialog>
 
-      <Dialog open={!!actionDialog} onOpenChange={(open) => !open && setActionDialog(null)}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle className="flex items-center gap-2"><ActionIcon className="h-5 w-5 text-indigo-400" />{actionConfig?.title}</DialogTitle></DialogHeader><div className="space-y-3"><p className="text-sm text-muted-foreground">{actionConfig?.help}</p><div className="rounded-lg border border-border bg-muted/20 p-3 text-sm"><p className="font-medium">{actionDialog?.change.title}</p><p className="mt-1 font-mono text-[10px] text-muted-foreground">{actionDialog?.change.id}</p></div><div><Label htmlFor="change-action-note">{["reject", "complete", "rollback"].includes(actionDialog?.action) ? "Required evidence note" : "CAB or implementation note (optional)"}</Label><Textarea id="change-action-note" className="mt-1" rows={4} value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={actionDialog?.action === "complete" ? "Record validation tests, observed outcome and client communication." : actionDialog?.action === "rollback" ? "Record the rollback trigger, actions taken and recovered state." : actionDialog?.action === "reject" ? "Explain why this change cannot proceed and what is needed next." : "Add relevant decision or handover context."} /></div></div><DialogFooter><Button variant="outline" onClick={() => setActionDialog(null)} disabled={busy}>Cancel</Button><Button variant={actionDialog?.action === "reject" || actionDialog?.action === "rollback" ? "destructive" : "default"} onClick={runAction} disabled={busy}>{busy && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{actionConfig?.confirm}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={!!actionDialog} onOpenChange={(open) => !open && setActionDialog(null)}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle className="flex items-center gap-2"><ActionIcon className="h-5 w-5 text-indigo-400" />{actionConfig?.title}</DialogTitle></DialogHeader><div className="space-y-3"><p className="text-sm text-muted-foreground">{actionConfig?.help}</p><div className="rounded-lg border border-border bg-muted/20 p-3 text-sm"><p className="font-medium">{actionDialog?.change.title}</p><p className="mt-1 font-mono text-[10px] text-muted-foreground">{actionDialog?.change.id}</p></div><div><Label htmlFor="change-action-note">{["reject", "complete", "rollback"].includes(actionDialog?.action) ? "Required evidence note" : "Required CAB or implementation note"}</Label><Textarea id="change-action-note" className="mt-1" rows={4} value={actionNote} onChange={(event) => setActionNote(event.target.value)} placeholder={actionDialog?.action === "complete" ? "Record validation tests, observed outcome and client communication." : actionDialog?.action === "rollback" ? "Record the rollback trigger, actions taken and recovered state." : actionDialog?.action === "reject" ? "Explain why this change cannot proceed and what is needed next." : "Add relevant decision or handover context."} /></div></div><DialogFooter><Button variant="outline" onClick={() => setActionDialog(null)} disabled={busy}>Cancel</Button><Button variant={actionDialog?.action === "reject" || actionDialog?.action === "rollback" ? "destructive" : "default"} onClick={runAction} disabled={busy}>{busy && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{actionConfig?.confirm}</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }

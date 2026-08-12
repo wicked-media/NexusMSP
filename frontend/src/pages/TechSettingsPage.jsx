@@ -11,7 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import SignatureManager from "@/components/email/SignatureManager";
 import {
@@ -304,6 +305,10 @@ export default function TechSettingsPage() {
   const nextLevelXp = level * 500;
   const xpProgress = Math.min(100, Math.round((xp % 500) / 5));
   const earnedBadges = gamProfile?.badges_earned || [];
+  const badgeCompletion = Math.round((earnedBadges.length / BADGES.length) * 100);
+  const nextBadge = BADGES.find(badge => !earnedBadges.includes(badge.id));
+  const enabledNotificationCount = Object.values(notifPrefs).filter(Boolean).length;
+  const criticalNotificationCount = ["inapp_ticket_escalated", "inapp_sla_breach", "inapp_device_offline"].filter(key => notifPrefs[key]).length;
   const activeSection = SETTINGS_SECTIONS.find(section => section.key === activeTab) || SETTINGS_SECTIONS[0];
 
   return (
@@ -397,7 +402,7 @@ export default function TechSettingsPage() {
                     <AvatarFallback className="rounded-2xl bg-primary/10 text-lg font-bold text-primary">{profile?.name?.split(" ").map(n => n[0]).join("") || "U"}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">Profile photo</p>
+                    <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold">Your Nexus identity</p><Badge variant="outline" className="capitalize text-[10px]">{profile?.role || "Technician"}</Badge></div>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">Shown beside your ticket comments, assignments, active-viewer indicators, and technician activity. If no photo is selected, NexusMSP uses your initials.</p>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadProfilePhoto} data-testid="profile-avatar-file" />
@@ -409,12 +414,13 @@ export default function TechSettingsPage() {
                     </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Display Name</Label><Input value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} data-testid="profile-name" /></div>
-                  <div><Label>Phone</Label><Input value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} data-testid="profile-phone" /></div>
+                <div className="rounded-xl border border-border/70 bg-muted/[0.14] px-3 py-2.5 text-xs text-muted-foreground"><span className="font-medium text-foreground">Primary account:</span> {profile?.email || user?.email} <span className="mx-1.5 text-border">·</span> Your name and specialties make technician activity recognisable across Nexus.</div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div><Label>Display Name</Label><Input value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} autoComplete="name" data-testid="profile-name" /></div>
+                  <div><Label>Phone</Label><Input value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} autoComplete="tel" placeholder="e.g., +61 4XX XXX XXX" data-testid="profile-phone" /></div>
                 </div>
-                <div><Label>Job Title</Label><Input value={profileForm.job_title} onChange={e => setProfileForm({ ...profileForm, job_title: e.target.value })} data-testid="profile-job-title" /></div>
-                <div><Label>Specialties (comma separated)</Label><Input value={profileForm.specialties} onChange={e => setProfileForm({ ...profileForm, specialties: e.target.value })} placeholder="e.g., Networking, Cloud, Security" data-testid="profile-specialties" /></div>
+                <div><Label>Job Title</Label><Input value={profileForm.job_title} onChange={e => setProfileForm({ ...profileForm, job_title: e.target.value })} placeholder="e.g., Senior Systems Engineer" data-testid="profile-job-title" /></div>
+                <div><Label>Operational Specialties</Label><p className="mb-1.5 text-xs text-muted-foreground">Used to make routing and collaboration context more useful. Separate specialties with commas.</p><Input value={profileForm.specialties} onChange={e => setProfileForm({ ...profileForm, specialties: e.target.value })} placeholder="e.g., Networking, Cloud, Security" data-testid="profile-specialties" /></div>
                 <Button onClick={saveProfile} disabled={saving} data-testid="save-profile-btn">{saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : null}Save Profile</Button>
               </CardContent>
             </Card>
@@ -462,28 +468,16 @@ export default function TechSettingsPage() {
                   )}
                   {setupData && (
                     <div className="space-y-4">
-                      <div className="p-4 rounded-lg border bg-muted/30">
-                        <p className="text-sm font-medium mb-2">Scan this QR code with your authenticator app:</p>
-                        <div className="bg-white p-4 rounded-lg inline-block">
-                          <div className="w-48 h-48 bg-muted flex items-center justify-center text-xs text-center p-2 text-black">
-                            <div>
-                              <Shield className="w-12 h-12 mx-auto mb-2 text-black" />
-                              <p className="font-mono text-[10px] break-all">{setupData.secret}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-2">Or enter this key manually: <code className="bg-muted px-1 rounded font-mono">{setupData.secret}</code></p>
-                      </div>
-                      <div className="p-4 rounded-lg border bg-amber-500/5 border-amber-500/20">
-                        <p className="text-sm font-medium mb-2">Backup Codes (save these securely):</p>
-                        <div className="grid grid-cols-4 gap-2">
-                          {setupData.backup_codes?.map((code, i) => (
-                            <code key={`k-${i}`} className="text-xs bg-muted px-2 py-1 rounded text-center font-mono">{code}</code>
-                          ))}
+                      <div className="overflow-hidden rounded-xl border border-primary/20 bg-[radial-gradient(circle_at_90%_0%,hsl(var(--primary)/0.16),transparent_42%),hsl(var(--card)/0.7)] p-4">
+                        <div className="mb-4 flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary"><ShieldCheck className="h-4 w-4" /></span><div><p className="text-sm font-semibold">Add NexusMSP to your authenticator</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Scan this code with Microsoft Authenticator, 1Password, Authy, or another TOTP app. Your password is never shared with the app.</p></div></div>
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                          <div className="inline-flex w-fit rounded-xl bg-white p-3 shadow-sm"><img src={setupData.qr_code_data_uri} alt="Scan to enrol NexusMSP two-factor authentication" className="h-44 w-44" /></div>
+                          <div className="min-w-0 flex-1 rounded-lg border border-border/70 bg-background/55 p-3"><p className="text-xs font-medium">Can’t scan it?</p><p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">Enter this setup key manually, then choose a time-based one-time password.</p><code className="mt-3 block break-all rounded-md bg-muted px-2 py-2 text-[11px] font-mono text-foreground">{setupData.secret}</code></div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <Input value={verifyCode} onChange={e => setVerifyCode(e.target.value)} placeholder="Enter 6-digit code" className="max-w-[200px] font-mono" data-testid="2fa-verify-code" />
+                      <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-3 text-xs text-muted-foreground"><span className="font-semibold text-foreground">Almost there.</span> Enter the first six-digit code below to prove the authenticator was enrolled successfully. Two-factor authentication is not active until you verify it.</div>
+                      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-muted/15 p-3">
+                        <Input value={verifyCode} onChange={e => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" className="max-w-[200px] font-mono tracking-[0.24em]" data-testid="2fa-verify-code" />
                         <Button onClick={verify2FA} data-testid="verify-2fa-btn">Verify & Enable</Button>
                         <Button variant="ghost" onClick={() => setSetupData(null)}>Cancel</Button>
                       </div>
@@ -517,6 +511,10 @@ export default function TechSettingsPage() {
             <Card data-testid="settings-notifications-panel">
               <CardHeader><CardTitle className="flex items-center gap-2"><Bell className="w-5 h-5" />Notification Preferences</CardTitle></CardHeader>
               <CardContent className="space-y-6">
+                <section className="grid gap-3 overflow-hidden rounded-xl border border-primary/20 bg-[radial-gradient(circle_at_88%_0%,hsl(var(--primary)/0.2),transparent_42%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-4 sm:grid-cols-[1fr_auto] sm:items-center" aria-label="Notification coverage summary" data-testid="notification-coverage-summary">
+                  <div><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold">Your operational attention policy</p><Badge variant="outline" className="border-primary/25 bg-primary/[0.06] text-[10px] text-primary">Personal routing</Badge></div><p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Choose which signals interrupt your work. Urgent events remain visually distinct so that attention is reserved for action, not noise.</p></div>
+                  <div className="flex gap-2"><div className="min-w-20 rounded-lg border border-border/70 bg-background/55 px-3 py-2 text-center"><p className="text-lg font-bold text-primary">{enabledNotificationCount}</p><p className="text-[10px] text-muted-foreground">enabled</p></div><div className="min-w-20 rounded-lg border border-rose-500/20 bg-rose-500/[0.05] px-3 py-2 text-center"><p className="text-lg font-bold text-rose-400">{criticalNotificationCount}</p><p className="text-[10px] text-muted-foreground">urgent</p></div></div>
+                </section>
                 {[
                   { title: "NexusMSP Notifications", items: [
                     { key: "inapp_ticket_assigned", label: "Ticket assigned", description: "When work is assigned directly to you" },
@@ -533,12 +531,15 @@ export default function TechSettingsPage() {
                   <div key={group.title}>
                     <h4 className="text-sm font-semibold mb-2">{group.title}</h4>
                     <div className="space-y-2">
-                      {group.items.map(item => (
-                        <div key={item.key} className="flex items-center justify-between p-2.5 rounded-lg border hover:bg-muted/30" data-testid={`notif-${item.key}`}>
-                          <div><span className="text-sm font-medium">{item.label}</span>{item.description && <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>}</div>
+                      {group.items.map(item => {
+                        const isUrgent = ["inapp_ticket_escalated", "inapp_sla_breach", "inapp_device_offline"].includes(item.key);
+                        return (
+                        <div key={item.key} className={`flex items-center justify-between gap-3 rounded-lg border p-2.5 transition-colors hover:bg-muted/30 ${isUrgent ? "border-rose-500/20 bg-rose-500/[0.025]" : ""}`} data-testid={`notif-${item.key}`}>
+                          <div><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">{item.label}</span>{isUrgent && <Badge variant="outline" className="border-rose-500/30 bg-rose-500/[0.05] px-1.5 py-0 text-[9px] text-rose-400">Urgent</Badge>}</div>{item.description && <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>}</div>
                           <Switch checked={!!notifPrefs[item.key]} onCheckedChange={v => setNotifPrefs({ ...notifPrefs, [item.key]: v })} />
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -629,6 +630,37 @@ export default function TechSettingsPage() {
             <Card data-testid="settings-display-panel">
               <CardHeader><CardTitle className="flex items-center gap-2"><Palette className="w-5 h-5" />Appearance & Themes</CardTitle></CardHeader>
               <CardContent className="space-y-6">
+                <section className="overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_82%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(135deg,hsl(var(--card)),hsl(var(--background)))] shadow-[0_18px_38px_-30px_hsl(var(--primary)/0.8)]" aria-label="Live workspace appearance preview" data-testid="appearance-live-preview">
+                  <div className="flex flex-col gap-3 border-b border-border/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15 text-primary"><Eye className="h-3.5 w-3.5" /></span>
+                        <p className="text-sm font-semibold">Live workspace preview</p>
+                        <Badge variant="outline" className="border-primary/25 bg-primary/[0.06] text-[10px] text-primary">Applied live</Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">Every selection below is reflected immediately. Save it to carry this experience to your other browsers.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-[10px]">
+                      <Badge variant="outline" className="capitalize">{theme} mode</Badge>
+                      <Badge variant="outline">{THEME_PRESETS?.[preset]?.label || preset}</Badge>
+                      <Badge variant="outline" className="capitalize">{accent} accent</Badge>
+                      <Badge variant="outline">{motion === "full" ? "Professional motion" : MOTION_OPTIONS.find(option => option.value === motion)?.label || "Follow system"}</Badge>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 p-3 sm:grid-cols-[0.72fr_1.28fr]">
+                    <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                      <div className="mb-3 flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-primary shadow-[0_0_10px_hsl(var(--primary))]" /><span className="text-[11px] font-medium text-muted-foreground">NEXUS / OPERATIONS</span></div>
+                      <div className="space-y-1.5">
+                        {["Mission control", "Client operations", "Service intelligence"].map((label, index) => <div key={label} className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs ${index === 0 ? "bg-primary/12 text-primary" : "text-muted-foreground"}`}><span className={`h-1.5 w-1.5 rounded-full ${index === 0 ? "bg-primary" : "bg-muted-foreground/35"}`} />{label}</div>)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-border/70 bg-background/55 p-3">
+                      <div className="mb-3 flex items-center justify-between"><div><p className="text-sm font-semibold">Good afternoon, {profile?.name?.split(" ")[0] || "Technician"}</p><p className="text-[11px] text-muted-foreground">Your operations are ready to review.</p></div><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/15 text-primary"><CheckCircle className="h-4 w-4" /></span></div>
+                      <div className="grid grid-cols-3 gap-2"><div className="rounded-lg border border-primary/20 bg-primary/[0.06] p-2"><p className="text-[10px] text-muted-foreground">Focus</p><p className="mt-1 text-sm font-semibold text-primary">Clear</p></div><div className="rounded-lg border border-border/70 bg-card/70 p-2"><p className="text-[10px] text-muted-foreground">Motion</p><p className="mt-1 truncate text-sm font-semibold">{motion === "none" ? "Static" : "Ready"}</p></div><div className="rounded-lg border border-border/70 bg-card/70 p-2"><p className="text-[10px] text-muted-foreground">Typeface</p><p className="mt-1 truncate text-sm font-semibold" style={{ fontFamily: FONTS?.[font] }}>{font}</p></div></div>
+                    </div>
+                  </div>
+                </section>
+
                 {/* Light/Dark Mode */}
                 <div>
                   <Label className="text-sm font-medium">Mode</Label>
@@ -856,9 +888,24 @@ export default function TechSettingsPage() {
           {/* BADGES & AWARDS TAB */}
           {activeTab === "badges" && (
             <div className="space-y-4" data-testid="settings-badges-panel">
+              <Card className="overflow-hidden border-primary/20 bg-[radial-gradient(circle_at_82%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] shadow-[0_16px_38px_-30px_hsl(var(--primary)/0.8)]">
+                <CardContent className="grid gap-4 p-5 md:grid-cols-[1.25fr_0.75fr] md:items-center">
+                  <div>
+                    <div className="mb-2 flex flex-wrap items-center gap-2"><Badge className="border-primary/25 bg-primary/10 text-primary"><Trophy className="mr-1 h-3.5 w-3.5" />Technician progress</Badge><span className="text-xs text-muted-foreground">A record of meaningful operational contribution.</span></div>
+                    <div className="flex items-end gap-3"><p className="text-3xl font-bold tracking-tight">Level {level}</p><p className="mb-1 text-sm text-muted-foreground">{xp.toLocaleString()} total XP</p></div>
+                    <div className="mt-3 max-w-xl"><div className="mb-1.5 flex items-center justify-between text-xs"><span className="text-muted-foreground">Progress to the next level</span><span className="font-semibold text-primary">{xpProgress}%</span></div><div className="h-2 overflow-hidden rounded-full bg-muted/70"><div className="h-full rounded-full bg-gradient-to-r from-primary to-primary/60 transition-all duration-500" style={{ width: `${xpProgress}%` }} /></div></div>
+                  </div>
+                  <div className="rounded-xl border border-border/70 bg-background/55 p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Next milestone</p>
+                    {nextBadge ? <><p className="mt-2 text-sm font-semibold">{nextBadge.label}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{nextBadge.description}</p></> : <><p className="mt-2 text-sm font-semibold text-primary">Badge collection complete</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Every current recognition milestone has been earned.</p></>}
+                    <div className="mt-3 flex items-center justify-between border-t border-border/70 pt-3 text-xs"><span className="text-muted-foreground">Recognition unlocked</span><span className="font-semibold">{earnedBadges.length} / {BADGES.length} · {badgeCompletion}%</span></div>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Stats Overview */}
               {gamProfile && (
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                   <Card>
                     <CardContent className="p-4 text-center">
                       <Zap className="w-6 h-6 mx-auto text-yellow-500 mb-1" />
@@ -892,7 +939,7 @@ export default function TechSettingsPage() {
 
               {/* All Badges */}
               <Card>
-                <CardHeader><CardTitle className="flex items-center gap-2"><Trophy className="w-5 h-5" />All Badges</CardTitle></CardHeader>
+                <CardHeader><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="flex items-center gap-2"><Trophy className="w-5 h-5" />Recognition library</CardTitle><Badge variant="outline">{earnedBadges.length} of {BADGES.length} earned</Badge></div></CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {BADGES.map(badge => {
@@ -946,12 +993,13 @@ export default function TechSettingsPage() {
 
       {/* Dialogs */}
       <Dialog open={showDisable2FA} onOpenChange={setShowDisable2FA}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Disable Two-Factor Authentication</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Enter your password to confirm disabling 2FA. This will remove all registered security keys as well.</p>
-          <Input type="password" value={disablePw} onChange={e => setDisablePw(e.target.value)} placeholder="Enter password" data-testid="disable-2fa-password" />
-          <DialogFooter><Button variant="destructive" onClick={disable2FA} data-testid="confirm-disable-2fa">Disable 2FA</Button></DialogFooter>
-        </DialogContent>
+        <NexusWorkflowDialog eyebrow="Account security" title="Disable two-factor authentication" description="This is a high-impact change. Confirm your password before removing two-factor protection and registered security keys." icon={Shield} tone="amber" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setShowDisable2FA(false)}>Cancel</Button><Button variant="destructive" onClick={disable2FA} data-testid="confirm-disable-2fa">Disable 2FA</Button></>}>
+          <section className="space-y-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-4">
+            <p className="text-sm font-medium text-foreground">Confirm your identity</p>
+            <p className="text-sm leading-6 text-muted-foreground">Enter your password to continue. Nexus records this security change in the audit trail.</p>
+            <Input type="password" value={disablePw} onChange={e => setDisablePw(e.target.value)} placeholder="Enter password" data-testid="disable-2fa-password" autoComplete="current-password" />
+          </section>
+        </NexusWorkflowDialog>
       </Dialog>
 
     </div>

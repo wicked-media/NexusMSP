@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,6 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -35,7 +38,8 @@ export default function VendorScorecardPage() {
   const [ratingFilter, setRatingFilter] = useState("all");
   const [sortBy, setSortBy] = useState("score");
   const [selectedVendor, setSelectedVendor] = useState(null);
-  const [tab, setTab] = useState("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = ["overview", "analytics", "risk"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "overview";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
@@ -63,22 +67,21 @@ export default function VendorScorecardPage() {
   vendors.forEach(v => { categorySpend[v.category] = (categorySpend[v.category] || 0) + v.total_spend; });
   const spendByCategory = Object.entries(categorySpend).map(([name, value]) => ({ name, value: Math.round(value) })).sort((a, b) => b.value - a.value);
   const topSpenders = [...vendors].sort((a, b) => b.total_spend - a.total_spend).slice(0, 8);
+  const selectTab = (nextTab) => setSearchParams({ tab: nextTab });
 
   return (
     <div className="space-y-5" data-testid="vendor-scorecard-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center"><Building2 className="w-5 h-5 text-white" /></div>
-            Vendor Scorecard & Spend Analytics
-          </h1>
-          <p className="text-muted-foreground mt-1">Track vendor performance, fulfillment rates, and spend optimization</p>
-        </div>
-        <Button variant="outline" onClick={fetchData} data-testid="refresh-vendors"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Procurement intelligence · supplier resilience"
+        title="Vendor Scorecard"
+        description="Rank supplier delivery confidence, spend concentration, and procurement risk from the same audited purchase-order ledger."
+        icon={Building2}
+        tone="cyan"
+        actions={<Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-vendors"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>}
+      />
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {[
           { label: "Total Vendors", value: summary.total_vendors, icon: Building2, color: "text-blue-400" },
           { label: "Total Spend", value: `$${summary.total_spend.toLocaleString()}`, icon: DollarSign, color: "text-emerald-400" },
@@ -86,17 +89,12 @@ export default function VendorScorecardPage() {
           { label: "Top Vendor", value: summary.top_vendor, icon: Package, color: "text-purple-400", small: true },
           { label: "Avg Fulfillment", value: `${vendors.length > 0 ? Math.round(vendors.reduce((s, v) => s + v.fulfillment_rate, 0) / vendors.length) : 0}%`, icon: Truck, color: "text-cyan-400" },
         ].map(st => (
-          <Card key={st.label} className="border-border/40">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-1"><p className="text-xs text-muted-foreground uppercase tracking-wider">{st.label}</p><st.icon className={`w-4 h-4 ${st.color}`} /></div>
-              <p className={`${st.small ? "text-lg" : "text-2xl"} font-bold ${st.color}`}>{st.value}</p>
-            </CardContent>
-          </Card>
+          <HeroTile key={st.label} label={st.label} value={st.value} icon={st.icon} glow={st.label === "Avg Fulfillment" ? "cyan" : st.label === "Total Spend" ? "emerald" : st.label === "Avg Score" ? "amber" : "blue"} subtitle={st.label === "Top Vendor" ? "Largest spend relationship" : st.label === "Avg Fulfillment" ? "Completed purchase-order lines" : "Retained procurement evidence"} />
         ))}
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+      <Tabs value={tab} onValueChange={selectTab}>
+        <TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-xl border border-white/[0.08] bg-black/[0.14] p-1 sm:grid-cols-3">
           <TabsTrigger value="overview">Performance Table</TabsTrigger>
           <TabsTrigger value="analytics">Spend Analytics</TabsTrigger>
           <TabsTrigger value="risk">Risk & Compliance</TabsTrigger>

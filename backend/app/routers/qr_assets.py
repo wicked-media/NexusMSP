@@ -3,6 +3,7 @@ import io
 import base64
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_record_scope, scoped_query
 
 router = APIRouter()
 
@@ -37,15 +38,11 @@ def _asset_label(asset: dict, qr_image: str, *, print_format: bool = False) -> d
 async def generate_qr_code(asset_type: str, asset_id: str, current_user: dict = Depends(get_current_user)):
     """Generate a QR code for a managed device or a canonical inventory asset."""
     if asset_type == "device":
-        item = await db.devices.find_one({"id": asset_id}, {"_id": 0, "hostname": 1, "device_type": 1, "client_name": 1})
-        if not item:
-            raise HTTPException(status_code=404, detail="Managed asset not found")
+        item = await assert_record_scope(current_user, db.devices, asset_id, operation="asset.qr.generate", resource_name="Managed asset")
         qr_data = f"/devices/{asset_id}"
         label = item.get("hostname") or asset_id
     elif asset_type == "asset":
-        item = await db.assets.find_one({"id": asset_id}, {"_id": 0, "name": 1, "asset_tag": 1})
-        if not item:
-            raise HTTPException(status_code=404, detail="Inventory asset not found")
+        item = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.qr.generate", resource_name="Inventory asset")
         qr_data = f"/assets/{asset_id}"
         label = item.get("asset_tag") or item.get("name") or asset_id
     else:
@@ -57,7 +54,7 @@ async def generate_qr_code(asset_type: str, asset_id: str, current_user: dict = 
 @router.get("/qr-assets/generate-batch")
 async def generate_batch_qr(current_user: dict = Depends(get_current_user)):
     """Generate QR label previews for inventory assets, not the RMM device list."""
-    assets = await db.assets.find({}, {"_id": 0, "id": 1, "name": 1, "asset_tag": 1, "asset_type": 1, "client_name": 1}).sort("name", 1).to_list(200)
+    assets = await db.assets.find(scoped_query(current_user), {"_id": 0, "id": 1, "name": 1, "asset_tag": 1, "asset_type": 1, "client_name": 1}).sort("name", 1).to_list(200)
     results = []
     for asset in assets[:50]:
         results.append(_asset_label(asset, _make_qr_data_url(f"/assets/{asset['id']}", box_size=6, border=2)))
@@ -67,7 +64,7 @@ async def generate_batch_qr(current_user: dict = Depends(get_current_user)):
 @router.get("/qr-assets/print-sheet")
 async def generate_print_sheet(current_user: dict = Depends(get_current_user)):
     """Generate a printable sheet of canonical inventory asset QR labels."""
-    assets = await db.assets.find({}, {"_id": 0, "id": 1, "name": 1, "asset_tag": 1, "asset_type": 1, "client_name": 1}).sort("name", 1).to_list(100)
+    assets = await db.assets.find(scoped_query(current_user), {"_id": 0, "id": 1, "name": 1, "asset_tag": 1, "asset_type": 1, "client_name": 1}).sort("name", 1).to_list(100)
     labels = []
     for asset in assets[:30]:
         labels.append(_asset_label(asset, _make_qr_data_url(f"/assets/{asset['id']}", box_size=4, border=2), print_format=True))

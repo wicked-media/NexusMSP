@@ -55,6 +55,42 @@ def test_create_validation_requires_accountability_and_evidence():
             "test_result": "not_run",
         })
 
+
+def test_readiness_cannot_claim_passed_with_non_passing_evidence():
+    with pytest.raises(ValueError, match="passed readiness control"):
+        normalise_readiness_payload({
+            "section": "billing",
+            "title": "Billing replay test",
+            "owner": "Commercial Platform",
+            "severity": "critical",
+            "evidence_required": "Repeatable invoice output from duplicate events.",
+            "status": "passed",
+            "test_result": "fail",
+        })
+
+
+def test_partial_update_state_requires_merged_validation():
+    existing = {
+        **DEFAULT_READINESS_ITEMS[0],
+        "status": "in_progress",
+        "test_result": "fail",
+    }
+    update = normalise_readiness_payload({"status": "passed"}, partial=True)
+
+    with pytest.raises(ValueError, match="passed readiness control"):
+        normalise_readiness_payload({**existing, **update})
+
+    with pytest.raises(ValueError, match="not-applicable readiness control"):
+        normalise_readiness_payload({
+            "section": "billing",
+            "title": "Billing replay test",
+            "owner": "Commercial Platform",
+            "severity": "critical",
+            "evidence_required": "Repeatable invoice output from duplicate events.",
+            "status": "not_applicable",
+            "test_result": "pass",
+        })
+
     with pytest.raises(ValueError, match="evidence"):
         normalise_readiness_payload({
             "section": "billing",

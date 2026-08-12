@@ -1,0 +1,29 @@
+# Nexus OS Edge reference image. Build with the repository root as context:
+#   podman build -f nexus-os/edge/Containerfile -t nexus-os-edge:dev .
+#
+# This establishes an image-based appliance foundation. It is deliberately not
+# marketed as signed, Secure Boot-attested or production-ready until its release
+# pipeline and hardware acceptance evidence exist.
+FROM golang:1.22-alpine AS edge-build
+WORKDIR /src/agent
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+COPY agent/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/nexus-edge ./cmd/nexus-edge
+
+FROM quay.io/fedora/fedora-bootc:41
+LABEL org.opencontainers.image.title="Nexus OS Edge" \
+      org.opencontainers.image.description="Reference immutable Nexus Edge appliance image" \
+      org.opencontainers.image.vendor="NexusMSP"
+
+RUN useradd --system --home-dir /var/lib/nexus-edge --create-home --shell /usr/sbin/nologin nexus-edge \
+    && install -d -o root -g nexus-edge -m 0750 /etc/nexus-edge \
+    && install -d -o nexus-edge -g nexus-edge -m 0700 /var/lib/nexus-edge
+
+COPY --from=edge-build /out/nexus-edge /usr/local/libexec/nexus-edge
+COPY nexus-os/edge/nexus-edge.service /usr/lib/systemd/system/nexus-edge.service
+
+RUN chmod 0755 /usr/local/libexec/nexus-edge \
+    && systemctl enable nexus-edge.service
+
+VOLUME ["/var/lib/nexus-edge"]

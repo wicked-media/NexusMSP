@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Loader2, Users, HeartPulse, AlertTriangle, Smile, Activity, Radar } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { Loader2, Users, HeartPulse, AlertTriangle, Smile, Activity, Radar, GitCompareArrows } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const TABS = [
@@ -9,23 +10,25 @@ const TABS = [
   { id: "client-risk", label: "Risk", description: "Client churn and commercial risk indicators requiring attention.", icon: AlertTriangle, page: () => import("./ClientRiskPage") },
   { id: "sentiment", label: "Sentiment", description: "Customer sentiment trends, recommendations, and analysis controls.", icon: Smile, page: () => import("./SentimentDashboardPage") },
   { id: "client-timeline", label: "Timeline", description: "One audited history for customer correspondence and operational activity.", icon: Activity, page: () => import("./ClientTimelinePage") },
+  { id: "what-changed", label: "What Changed", description: "Compare retained client evidence with the prior window, without assuming causation.", icon: GitCompareArrows, page: () => import("./ClientWhatChangedPage") },
 ];
 
 const lazyMap = Object.fromEntries(TABS.map((tab) => [tab.id, lazy(tab.page)]));
 
 export default function ClientInsightsHubPage() {
-  const [activeTab, setActiveTab] = useState("portfolio-radar");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(() => TABS.some((tab) => tab.id === requestedTab) ? requestedTab : "portfolio-radar");
 
   useEffect(() => {
-    const requested = new URLSearchParams(window.location.search).get("tab");
-    if (requested && TABS.some((tab) => tab.id === requested)) setActiveTab(requested);
-  }, []);
+    setActiveTab(TABS.some((tab) => tab.id === requestedTab) ? requestedTab : "portfolio-radar");
+  }, [requestedTab]);
 
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", activeTab);
-    window.history.replaceState({}, "", url);
-  }, [activeTab]);
+  const selectTab = (tabId) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("tab", tabId);
+    setSearchParams(nextParams, { replace: true });
+  };
 
   const Active = lazyMap[activeTab];
   const active = TABS.find((tab) => tab.id === activeTab) || TABS[0];
@@ -43,18 +46,18 @@ export default function ClientInsightsHubPage() {
 
       <section className="overflow-hidden rounded-2xl border border-border/70 bg-card/55">
         <div className="border-b border-border/70 px-3 pt-3 md:px-4">
-          <div className="flex items-center gap-1 overflow-x-auto" role="tablist" aria-label="Client Insights views">
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 xl:grid-cols-7" role="tablist" aria-label="Client Insights views">
             {TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectTab(tab.id)}
                   data-testid={`client-insights-tab-${tab.id}`}
                   role="tab"
                   aria-selected={isActive}
-                  className={`flex items-center gap-2 rounded-t-lg border-b-2 px-4 py-2.5 text-sm font-medium transition-colors whitespace-nowrap ${
+                  className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
                     isActive ? "border-sky-400 bg-sky-500/[0.09] text-foreground" : "border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                   }`}
                 >

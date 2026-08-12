@@ -241,6 +241,10 @@ async def update_readiness_item(item_id: str, payload: dict, request: Request, c
         raise HTTPException(status_code=404, detail="Production-readiness item not found")
     try:
         updates = normalise_readiness_payload(payload, partial=True)
+        # Validate the merged state as well as the changed fields.  A partial
+        # request must not be able to set status=passed while preserving a
+        # previously failed or unrun test result.
+        normalise_readiness_payload({**existing, **updates})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not updates:

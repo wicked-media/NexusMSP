@@ -209,7 +209,7 @@ export default function SettingsPage() {
   const [emailLeads, setEmailLeads] = useState([]);
   const [calendarConnection, setCalendarConnection] = useState({ provider: "microsoft365", connected: false, calendar_name: "NexusMSP Dispatch", sync_direction: "two_way" });
   const [calendarSaving, setCalendarSaving] = useState(false);
-  const [nexusElevate, setNexusElevate] = useState({ native_enabled: true, max_duration_minutes: 15, require_justification: true, keeper_bridge_enabled: false, keeper_connector_reference: "", keeper_sync_interval_minutes: 15 });
+  const [nexusElevate, setNexusElevate] = useState({ native_enabled: true, auto_deploy_companion: true, max_duration_minutes: 15, require_justification: true, keeper_bridge_enabled: false, keeper_connector_reference: "", keeper_sync_interval_minutes: 15 });
   const [nexusElevateSaving, setNexusElevateSaving] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -499,9 +499,9 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-6xl space-y-5" data-testid="settings-page">
+    <div className="nx-page-stage max-w-6xl space-y-5" data-testid="settings-page">
       {/* Header */}
-      <div className="rounded-2xl border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.09] via-background to-background p-5 md:p-6">
+      <div className="nx-ambient-surface rounded-2xl border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.09] via-background to-background p-5 md:p-6" data-nx-signal="recommendation">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex items-start gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10"><Settings2 className="h-5 w-5 text-violet-300" /></span><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">NexusOps administration</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Settings</h1><p className="mt-1 text-sm text-muted-foreground">Configure your workspace, integrations, security, and service standards.</p></div></div>
           <Badge variant="outline" className="w-fit border-emerald-500/25 bg-emerald-500/10 text-emerald-300">Changes save per section</Badge>
@@ -2317,6 +2317,7 @@ export default function SettingsPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-xl border border-border/80 bg-muted/15 p-4">
             <div className="flex items-center justify-between gap-4"><div><Label htmlFor="nexus-elevate-native">Enable native service-launch approvals</Label><p className="text-[11px] text-muted-foreground mt-1">Available to every enrolled Windows agent client, not just Keeper customers. It does not provide interactive UAC elevation.</p></div><Switch id="nexus-elevate-native" checked={nexusElevate.native_enabled} onCheckedChange={(checked) => setNexusElevate({ ...nexusElevate, native_enabled: checked })} /></div>
+            <div className="flex items-center justify-between gap-4"><div><Label htmlFor="nexus-elevate-companion">Automatically activate on eligible agents</Label><p className="text-[11px] text-muted-foreground mt-1">When a Windows Nexus Agent enrols or checks in, Nexus automatically delivers the signed Client Chat + Elevate companion. The device shows active only after the agent verifies installation.</p></div><Switch id="nexus-elevate-companion" checked={nexusElevate.auto_deploy_companion !== false} onCheckedChange={(checked) => setNexusElevate({ ...nexusElevate, auto_deploy_companion: checked })} /></div>
             <div className="flex items-center justify-between gap-4"><div><Label htmlFor="nexus-elevate-justification">Require request justification</Label><p className="text-[11px] text-muted-foreground mt-1">Captures why elevation is needed before an approver sees it.</p></div><Switch id="nexus-elevate-justification" checked={nexusElevate.require_justification} onCheckedChange={(checked) => setNexusElevate({ ...nexusElevate, require_justification: checked })} /></div>
             <div><Label htmlFor="nexus-elevate-duration">Maximum approval duration (minutes)</Label><Input id="nexus-elevate-duration" className="mt-1" type="number" min="5" max="60" value={nexusElevate.max_duration_minutes} onChange={(event) => setNexusElevate({ ...nexusElevate, max_duration_minutes: event.target.value })} /></div>
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-2 text-xs text-muted-foreground"><span className="font-semibold text-emerald-200">Built-in safety:</span> a native request is bound to its endpoint, absolute executable path, argv, expiry and SHA-256. It cannot self-approve or open a command shell.</div>

@@ -16,6 +16,7 @@ import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import EventBackbonePanel from "@/components/control-plane/EventBackbonePanel";
 import MicrosoftActionCentre from "@/components/control-plane/MicrosoftActionCentre";
+import MicrosoftCapabilityMap from "@/components/control-plane/MicrosoftCapabilityMap";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -99,7 +100,7 @@ export default function NexusControlPlanePage() {
   const [query, setQuery] = useState(params.get("search") || "");
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState(null);
-  const microsoftView = ["actions", "security", "connections"].includes(params.get("view"))
+  const microsoftView = ["actions", "security", "connections", "capabilities"].includes(params.get("view"))
     ? params.get("view")
     : "tenant-operations";
 
@@ -113,7 +114,7 @@ export default function NexusControlPlanePage() {
   const selectMicrosoftView = (next) => {
     const updated = new URLSearchParams(params);
     updated.set("module", "microsoft365");
-    if (["actions", "security", "connections"].includes(next)) updated.set("view", next);
+    if (["actions", "security", "connections", "capabilities"].includes(next)) updated.set("view", next);
     else updated.delete("view");
     if (next !== "actions") updated.delete("action");
     setParams(updated, { replace: true });
@@ -195,14 +196,43 @@ export default function NexusControlPlanePage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stats = overview?.stats || {};
+  const nextAction = !stats.m365_tenants
+    ? {
+      label: "Connect the first Microsoft tenant",
+      description: "Microsoft 365 is not yet in the verified control scope, so tenant actions and identity evidence remain unavailable.",
+      route: "/settings?tab=integrations&anchor=cipp-settings-card",
+      action: "Open Microsoft connection",
+      tone: "amber",
+    }
+    : stats.open_tickets > 0
+      ? {
+        label: "Review open service work",
+        description: `${stats.open_tickets} service record${stats.open_tickets === 1 ? " is" : "s are"} currently open across the connected estate.`,
+        route: "/tickets",
+        action: "Open service desk",
+        tone: "cyan",
+      }
+      : {
+        label: "Control scope is ready",
+        description: "No immediate Control Plane action is evidenced. Use the command tabs to investigate providers, automation or the activity record.",
+        route: "/control-plane?module=operations",
+        action: "Explore providers",
+        tone: "emerald",
+      };
+  const controlPlaneSignal = !stats.m365_tenants
+    ? "attention"
+    : (stats.open_tickets || 0) > 0 || (stats.open_invoices || 0) > 0
+      ? "working"
+      : "healthy";
   return (
-    <div className="space-y-5 p-6" data-testid="nexus-control-plane">
+    <div className="nx-page-stage space-y-5 p-6" data-testid="nexus-control-plane">
       <OperationalPageHeader
         eyebrow="Multi-tenant operations fabric"
         title="Nexus Control Plane"
         description="One control surface for Microsoft 365, connected infrastructure, client context, automation, billing and auditable technician actions."
         icon={Boxes}
         tone="cyan"
+        signal={controlPlaneSignal}
         actions={<>
           <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/[0.08] text-cyan-100">
             <Sparkles className="mr-1.5 h-3.5 w-3.5" />Operations fabric
@@ -216,7 +246,7 @@ export default function NexusControlPlanePage() {
         </>}
       />
 
-      <Card className="overflow-hidden border-cyan-500/20 bg-gradient-to-r from-cyan-500/[0.06] via-card to-emerald-500/[0.04]">
+      <Card className="nx-ambient-surface overflow-hidden border-cyan-500/20 bg-gradient-to-r from-cyan-500/[0.06] via-card to-emerald-500/[0.04]" data-nx-signal={controlPlaneSignal}>
         <CardContent className="flex flex-col gap-4 p-4 xl:flex-row xl:items-center">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-sm font-semibold"><Search className="h-4 w-4 text-cyan-300" />Search the entire operation</div>
@@ -246,8 +276,20 @@ export default function NexusControlPlanePage() {
         <HeroTile label="Open invoices" value={loading ? "—" : stats.open_invoices ?? 0} icon={Receipt} glow="violet" subtitle="Commercial follow-up" />
       </div>
 
+      {!loading && <Card className={nextAction.tone === "emerald" ? "border-emerald-500/25 bg-emerald-500/[0.045]" : nextAction.tone === "amber" ? "border-amber-500/25 bg-amber-500/[0.045]" : "border-cyan-500/25 bg-cyan-500/[0.045]"} data-testid="control-plane-next-action">
+        <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border ${nextAction.tone === "emerald" ? "border-emerald-500/25 bg-emerald-500/[0.09] text-emerald-300" : nextAction.tone === "amber" ? "border-amber-500/25 bg-amber-500/[0.09] text-amber-300" : "border-cyan-500/25 bg-cyan-500/[0.09] text-cyan-300"}`}>
+              {nextAction.tone === "emerald" ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+            </div>
+            <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Recommended next action</p><p className="mt-1 text-sm font-semibold">{nextAction.label}</p><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{nextAction.description}</p></div>
+          </div>
+          <Button size="sm" className="shrink-0" variant={nextAction.tone === "emerald" ? "outline" : "default"} asChild><Link to={nextAction.route}>{nextAction.action}<ExternalLink className="ml-1.5 h-3.5 w-3.5" /></Link></Button>
+        </CardContent>
+      </Card>}
+
       <Tabs value={module} onValueChange={selectModule} className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/40 p-1 md:grid-cols-6" data-testid="control-plane-tabs">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-xl border border-border/70 bg-muted/30 p-1.5" data-testid="control-plane-tabs" aria-label="Control Plane workspaces">
           <TabsTrigger value="overview"><BarChart3 className="mr-1.5 h-3.5 w-3.5" />Command</TabsTrigger>
           <TabsTrigger value="microsoft365"><Cloud className="mr-1.5 h-3.5 w-3.5" />Microsoft 365</TabsTrigger>
           <TabsTrigger value="operations"><Boxes className="mr-1.5 h-3.5 w-3.5" />Providers</TabsTrigger>
@@ -308,6 +350,7 @@ export default function NexusControlPlanePage() {
             <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
               <div><p className="text-sm font-semibold">Microsoft 365 control module</p><p className="mt-1 text-xs text-muted-foreground">Tenant administration and provider-verified security evidence now share one Microsoft workspace.</p></div>
               <div className="flex flex-wrap rounded-lg border border-border/70 bg-black/15 p-1">
+                <Button size="sm" variant={microsoftView === "capabilities" ? "default" : "ghost"} onClick={() => selectMicrosoftView("capabilities")}>Nexus 365</Button>
                 <Button size="sm" variant={microsoftView === "tenant-operations" ? "default" : "ghost"} onClick={() => selectMicrosoftView("tenant-operations")}>Tenant operations</Button>
                 <Button size="sm" variant={microsoftView === "actions" ? "default" : "ghost"} onClick={() => selectMicrosoftView("actions")}>Action centre</Button>
                 <Button size="sm" variant={microsoftView === "security" ? "default" : "ghost"} onClick={() => selectMicrosoftView("security")}>Security & guardrails</Button>
@@ -315,9 +358,10 @@ export default function NexusControlPlanePage() {
               </div>
             </CardContent>
           </Card>
+          {microsoftView === "capabilities" && <MicrosoftCapabilityMap providerConnected={Boolean(overview?.compatibility?.cipp_adapter_configured || overview?.compatibility?.m365_graph_configured)} tenantCount={stats.m365_tenants ?? 0} />}
           {microsoftView === "tenant-operations" && <CippCommandCenterPage embedded />}
           {microsoftView === "actions" && <MicrosoftActionCentre />}
-          {microsoftView === "security" && <M365CommandCenter embedded />}
+          {microsoftView === "security" && <M365CommandCenter embedded initialTab="security" />}
           {microsoftView === "connections" && <M365CommandCenter embedded initialTab="connection" />}
         </TabsContent>
 
@@ -441,14 +485,14 @@ function IdeaVault({ registry, headers, onChanged }) {
     title: "", summary: "", category: "general", horizon: "explore",
     value_axes: { saves_time: true, reduces_stress: false, increases_confidence: true, creates_opportunity: false },
   });
-  const ideas = registry?.items || [];
   const filtered = useMemo(() => {
+    const ideas = registry?.items || [];
     const needle = search.trim().toLowerCase();
     return ideas.filter((idea) => {
       if (status !== "all" && idea.status !== status) return false;
       return !needle || `${idea.number || ""} ${idea.title} ${idea.summary} ${idea.category}`.toLowerCase().includes(needle);
     });
-  }, [ideas, search, status]);
+  }, [registry?.items, search, status]);
 
   const captureIdea = async () => {
     if (form.title.trim().length < 3 || form.summary.trim().length < 10) {

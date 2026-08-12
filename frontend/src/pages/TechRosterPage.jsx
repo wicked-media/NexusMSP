@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
@@ -185,9 +186,7 @@ export default function TechRosterPage() {
       </Card>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-rose-500/25 bg-background p-0" data-testid="tech-roster-dialog">
-          <DialogHeader className="border-b border-rose-500/20 bg-gradient-to-br from-rose-500/[0.13] via-background to-background p-5 sm:p-6"><DialogTitle className="flex items-center gap-2 text-xl"><Radio className="h-5 w-5 text-rose-700 dark:text-rose-300" />{editing ? "Edit roster contact" : "Add roster contact"}</DialogTitle><DialogDescription>Configure escalation position, active on-call status and the notification channels used for paging. This controls on-call coverage, not the technician’s NexusMSP account access.</DialogDescription></DialogHeader>
-          <div className="space-y-4 p-5 sm:p-6">
+        <NexusWorkflowDialog eyebrow="Team operations" title={editing ? "Edit roster contact" : "Add roster contact"} description="Configure escalation position, active on-call status and the notification channels used for paging. This controls on-call coverage, not the technician’s NexusMSP account access." icon={Radio} tone="amber" className="max-w-2xl" contentClassName="space-y-4" data-testid="tech-roster-dialog" footer={<><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={save} disabled={saving || !form.name.trim()} data-testid="tech-form-save">{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}{editing ? "Save contact" : "Add to roster"}</Button></>}>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="roster-name">Name *</Label>
@@ -260,15 +259,7 @@ export default function TechRosterPage() {
                 })}
               </div>
             </div>
-          </div>
-          <DialogFooter className="border-t border-border bg-muted/20 px-5 py-4 sm:px-6">
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={saving || !form.name.trim()} className="bg-rose-500 text-white hover:bg-rose-400" data-testid="tech-form-save">
-              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-              {editing ? "Save contact" : "Add to roster"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={!!deleteCandidate} onOpenChange={(isOpen) => !isOpen && setDeleteCandidate(null)}>
         <DialogContent className="max-w-md border-rose-500/25 bg-background" data-testid="delete-roster-contact-dialog">

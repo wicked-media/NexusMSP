@@ -358,6 +358,28 @@
     animation: nx-page-enter var(--nx-motion-standard) var(--nx-ease-out) both;
 }
 
+/* Safe sharing is deliberate and opt-in: sensitive values are marked at the
+   source with data-sensitive, so Nexus never claims to hide unknown content. */
+html[data-privacy-curtain="active"] [data-sensitive] {
+    filter: blur(7px);
+    opacity: 0.58;
+    user-select: none;
+    pointer-events: none;
+    transition: filter 160ms ease, opacity 160ms ease;
+}
+
+html[data-privacy-curtain="active"] [data-sensitive]::selection {
+    color: transparent;
+    background: transparent;
+}
+
+@media print {
+    html[data-privacy-curtain="active"] [data-sensitive] {
+        filter: blur(9px);
+        opacity: 0.45;
+    }
+}
+
 .nx-assistant-drawer {
     animation: nx-assistant-enter var(--nx-motion-standard) var(--nx-ease-out) both;
 }
@@ -419,6 +441,73 @@ html[data-focus-mode="true"] body {
     opacity: 0.82;
 }
 
+/* Native Nexus controls: one predictable focus and hover language across forms. */
+.nx-field-control {
+    transition:
+        border-color var(--nx-motion-fast) var(--nx-ease-out),
+        background-color var(--nx-motion-fast) var(--nx-ease-out),
+        box-shadow var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+.nx-field-control:hover:not(:disabled) {
+    border-color: hsl(var(--primary) / 0.4);
+    background-color: hsl(var(--muted) / 0.16);
+}
+
+.nx-field-control:focus-visible {
+    border-color: hsl(var(--primary) / 0.72);
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.14), 0 1px 2px hsl(var(--background) / 0.16);
+}
+
+.nx-switch,
+.nx-checkbox,
+.nx-radio-control {
+    transition: border-color var(--nx-motion-fast) var(--nx-ease-out), box-shadow var(--nx-motion-fast) var(--nx-ease-out), background-color var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+.nx-switch:hover:not(:disabled),
+.nx-checkbox:hover:not(:disabled),
+.nx-radio-control:hover:not(:disabled) {
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.12);
+}
+
+.nx-switch-thumb {
+    transition: transform var(--nx-motion-fast) var(--nx-ease-out), box-shadow var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+.nx-tabs-list {
+    border: 1px solid hsl(var(--border) / 0.7);
+    box-shadow: inset 0 1px 0 hsl(var(--background) / 0.28);
+}
+
+.nx-tabs-trigger {
+    transition: color var(--nx-motion-fast) var(--nx-ease-out), background-color var(--nx-motion-fast) var(--nx-ease-out), box-shadow var(--nx-motion-fast) var(--nx-ease-out), transform var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+.nx-tabs-trigger:not([data-state="active"]):hover {
+    color: hsl(var(--foreground));
+    background-color: hsl(var(--background) / 0.35);
+}
+
+.nx-flyout-surface {
+    border-color: hsl(var(--border) / 0.82);
+    background: hsl(var(--popover) / 0.96);
+    box-shadow: 0 20px 55px -28px hsl(var(--background) / 0.95), 0 1px 0 hsl(var(--foreground) / 0.06) inset;
+    backdrop-filter: blur(18px);
+}
+
+.nx-flyout-item {
+    transition: background-color var(--nx-motion-fast) var(--nx-ease-out), color var(--nx-motion-fast) var(--nx-ease-out), transform var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+.nx-flyout-item:hover:not([data-disabled]) {
+    transform: translateX(1px);
+}
+
+.nx-tooltip-surface {
+    box-shadow: 0 12px 28px -16px hsl(var(--primary) / 0.65);
+}
+
 html[data-motion="minimal"] .nx-page-stage {
     animation: nx-page-fade 120ms ease-out both;
 }
@@ -442,6 +531,52 @@ html[data-motion="none"] *::after {
     transition-duration: 1ms !important;
     transition-delay: 0ms !important;
 }
+
+/* Nexus' shared accountable-work signature. The motion is intentionally restrained:
+   the sequence explains an outcome and remains complete without animation. */
+.nexus-verified-sequence {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: .85rem 1rem;
+    border: 1px solid hsl(var(--primary) / .18);
+    border-radius: .9rem;
+    background: linear-gradient(110deg, hsl(var(--primary) / .09), hsl(var(--card) / .5) 48%, hsl(187 82% 42% / .055));
+}
+.nexus-verified-sequence__stages { display: flex; min-width: 0; flex: 1; align-items: center; overflow-x: auto; }
+.nexus-verified-sequence__stage { display: flex; min-width: max-content; align-items: center; gap: .36rem; color: hsl(var(--muted-foreground)); font-size: .7rem; font-weight: 700; letter-spacing: .03em; }
+.nexus-verified-sequence__stage:not(:last-child)::after { content: ""; width: clamp(.75rem, 2vw, 2rem); height: 1px; margin: 0 .42rem; background: hsl(var(--border)); }
+.nexus-verified-sequence__marker { display: grid; width: 1.15rem; height: 1.15rem; place-items: center; border: 1px solid hsl(var(--border)); border-radius: 999px; background: hsl(var(--background) / .62); }
+.nexus-verified-sequence__marker svg { width: .7rem; height: .7rem; }
+.nexus-verified-sequence__stage[data-state="complete"] { color: hsl(160 84% 68%); }
+.nexus-verified-sequence__stage[data-state="complete"] .nexus-verified-sequence__marker { border-color: hsl(160 72% 44% / .56); background: hsl(160 72% 38% / .17); }
+.nexus-verified-sequence__stage[data-state="active"] { color: hsl(190 90% 70%); }
+.nexus-verified-sequence__stage[data-state="active"] .nexus-verified-sequence__marker { border-color: hsl(190 90% 52% / .72); box-shadow: 0 0 0 4px hsl(190 90% 52% / .09); animation: nexus-verified-active 2.4s ease-in-out infinite; }
+.nexus-verified-sequence__seal { display: flex; flex: 0 0 auto; align-items: center; gap: .55rem; padding-left: 1rem; border-left: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+.nexus-verified-sequence__seal > svg { width: 1.5rem; height: 1.5rem; color: hsl(var(--primary)); }
+.nexus-verified-sequence__seal strong,.nexus-verified-sequence__seal small { display: block; white-space: nowrap; }
+.nexus-verified-sequence__seal strong { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+.nexus-verified-sequence__seal small { margin-top: .1rem; font-size: .62rem; }
+.nexus-verified-sequence__seal[data-complete="true"] { color: hsl(160 84% 74%); }
+.nexus-verified-sequence__seal[data-complete="true"] > svg { color: hsl(160 82% 54%); filter: drop-shadow(0 0 7px hsl(160 82% 54% / .3)); }
+@keyframes nexus-verified-active { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+html[data-motion="minimal"] .nexus-verified-sequence__marker,
+html[data-motion="none"] .nexus-verified-sequence__marker { animation: none !important; }
+@media (max-width: 720px) { .nexus-verified-sequence { align-items: flex-start; flex-direction: column; }.nexus-verified-sequence__seal { width: 100%; padding: .7rem 0 0; border-top: 1px solid hsl(var(--border)); border-left: 0; } }
+
+/* A calm estate heartbeat: current evidence is surfaced without becoming another alert feed. */
+.nexus-global-pulse { display:flex; width:100%; align-items:center; gap:.65rem; padding:.62rem .7rem; border:1px solid hsl(var(--border)); border-radius:.78rem; color:hsl(var(--foreground)); background:linear-gradient(120deg,hsl(var(--muted)/.34),hsl(var(--card)/.5)); text-align:left; transition: border-color var(--nx-motion-fast) var(--nx-ease-out), background-color var(--nx-motion-fast) var(--nx-ease-out), transform var(--nx-motion-fast) var(--nx-ease-out); }
+.nexus-global-pulse:hover { transform:translateY(-1px); border-color:hsl(var(--primary)/.38); background:hsl(var(--primary)/.07); }
+.nexus-global-pulse__orb { position:relative; display:grid; width:1.9rem; height:1.9rem; flex:0 0 auto; place-items:center; border:1px solid hsl(var(--border)); border-radius:.65rem; background:hsl(var(--background)/.55); }
+.nexus-global-pulse__orb svg { width:1rem; height:1rem; }.nexus-global-pulse.is-nominal .nexus-global-pulse__orb { color:hsl(160 78% 48%); border-color:hsl(160 78% 48%/.28); }.nexus-global-pulse.needs-attention .nexus-global-pulse__orb { color:hsl(38 92% 54%); border-color:hsl(38 92% 54%/.32); animation:nexus-global-pulse 3.4s ease-in-out infinite; }
+.nexus-global-pulse__eyebrow { display:flex; align-items:center; gap:.28rem; color:hsl(var(--muted-foreground)); font-size:.57rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }.nexus-global-pulse__eyebrow svg { width:.62rem; height:.62rem; color:hsl(var(--primary)); }.nexus-global-pulse strong,.nexus-global-pulse small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.nexus-global-pulse strong { margin-top:.12rem; font-size:.72rem; }.nexus-global-pulse small { margin-top:.1rem; color:hsl(var(--muted-foreground)); font-size:.61rem; }.nexus-global-pulse__arrow { width:.85rem; height:.85rem; margin-left:auto; color:hsl(var(--muted-foreground)); }.nexus-global-pulse.is-collapsed { justify-content:center; padding:.58rem; }.nexus-global-pulse.is-collapsed .nexus-global-pulse__orb { width:2rem; height:2rem; }
+@keyframes nexus-global-pulse { 0%,100% { box-shadow:0 0 0 0 hsl(38 92% 54% / 0); } 50% { box-shadow:0 0 0 4px hsl(38 92% 54% / .09); } }
+html[data-motion="minimal"] .nexus-global-pulse.needs-attention .nexus-global-pulse__orb,
+html[data-motion="none"] .nexus-global-pulse.needs-attention .nexus-global-pulse__orb { animation:none !important; }
+
+/* Persistent, browser-local work context. Pinned objects are always explicit. */
+.nexus-object-dock { position:fixed; bottom:1rem; left:50%; z-index:35; display:flex; max-width:calc(100vw - 7rem); align-items:center; gap:.45rem; padding:.38rem .45rem; border:1px solid hsl(var(--border)/.9); border-radius:1rem; background:hsl(var(--card)/.94); box-shadow:0 18px 48px hsl(var(--nx-surface-shadow)/.38); backdrop-filter:blur(18px); transform:translateX(-50%); }
+.nexus-object-dock__label { display:flex; align-items:center; gap:.28rem; padding:0 .3rem; color:hsl(var(--muted-foreground)); font-size:.58rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }.nexus-object-dock__label svg { width:.72rem; height:.72rem; color:hsl(var(--primary)); }.nexus-object-dock__items { display:flex; min-width:0; gap:.35rem; overflow-x:auto; }.nexus-object-dock__item { display:flex; align-items:stretch; overflow:hidden; border:1px solid hsl(var(--border)/.8); border-radius:.72rem; background:hsl(var(--background)/.45); }.nexus-object-dock__open { display:flex; min-width:0; align-items:center; gap:.4rem; padding:.4rem .38rem .4rem .5rem; text-align:left; transition:background-color var(--nx-motion-fast) var(--nx-ease-out); }.nexus-object-dock__open:hover { background:hsl(var(--primary)/.09); }.nexus-object-dock__open>svg { width:.8rem; height:.8rem; flex:0 0 auto; color:hsl(var(--primary)); }.nexus-object-dock__open strong,.nexus-object-dock__open small { display:block; max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.nexus-object-dock__open strong { font-size:.66rem; }.nexus-object-dock__open small { margin-top:.05rem; color:hsl(var(--muted-foreground)); font-size:.56rem; }.nexus-object-dock__remove { display:grid; width:1.5rem; place-items:center; border-left:1px solid hsl(var(--border)/.75); color:hsl(var(--muted-foreground)); transition:background-color var(--nx-motion-fast) var(--nx-ease-out),color var(--nx-motion-fast) var(--nx-ease-out); }.nexus-object-dock__remove:hover { color:hsl(var(--destructive)); background:hsl(var(--destructive)/.08); }.nexus-object-dock__remove svg { width:.7rem; height:.7rem; }@media (max-width:640px) { .nexus-object-dock { bottom:.6rem; max-width:calc(100vw - 1rem); }.nexus-object-dock__label { display:none; }.nexus-object-dock__open strong,.nexus-object-dock__open small { max-width:6.5rem; } }
 
 @media (prefers-reduced-motion: reduce) {
     *:not(.animate-spin),
@@ -524,6 +659,9 @@ html[data-motion="none"] *::after {
     }
 
     .nx-dialog-surface {
+        position: fixed;
+        isolation: isolate;
+        overflow: hidden;
         color: hsl(var(--foreground));
         border-color: hsl(var(--nx-surface-border));
         background:
@@ -534,10 +672,97 @@ html[data-motion="none"] *::after {
             inset 0 1px 0 hsl(var(--nx-grid-line) / 0.045);
     }
 
+    .nx-dialog-surface::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 0;
+        height: 2px;
+        pointer-events: none;
+        opacity: .9;
+        background: linear-gradient(90deg, transparent, hsl(var(--primary) / .9) 24%, hsl(190 95% 65% / .92) 50%, hsl(var(--primary) / .9) 76%, transparent);
+        box-shadow: 0 1px 18px hsl(var(--primary) / .46);
+    }
+
+    .nx-dialog-surface > *:not(.nx-dialog-close) {
+        position: relative;
+        z-index: 1;
+    }
+
+    /* Shared action hierarchy for every create, edit, review and confirmation flow. */
+    .nx-dialog-header {
+        padding-right: 2.25rem;
+    }
+
+    .nx-dialog-footer:not(.nx-workflow-dialog__footer) {
+        margin-top: 0.25rem;
+        padding-top: 1rem;
+        border-top: 1px solid hsl(var(--border) / 0.7);
+    }
+
+    .nx-dialog-footer > button {
+        min-height: 2.5rem;
+    }
+
+    .nx-dialog-close {
+        z-index: 2;
+    }
+
+    .nx-workflow-dialog__header {
+        position: relative;
+    }
+
+    .nx-workflow-dialog__header::after {
+        content: "";
+        position: absolute;
+        right: -4rem;
+        top: -5rem;
+        width: 14rem;
+        height: 14rem;
+        border: 1px solid currentColor;
+        border-radius: 999px;
+        opacity: .11;
+        box-shadow: 0 0 0 1.5rem currentColor, 0 0 0 3.5rem currentColor;
+        pointer-events: none;
+    }
+
+    .nx-workflow-dialog__footer {
+        box-shadow: 0 -14px 28px -30px hsl(var(--nx-surface-shadow) / .9);
+    }
+
     .light .nx-dialog-surface {
         box-shadow:
             0 28px 75px hsl(var(--nx-surface-shadow) / 0.24),
             inset 0 1px 0 rgb(255 255 255 / 0.85);
+    }
+
+    .nx-sheet-surface {
+        isolation: isolate;
+        overflow: hidden auto;
+        background:
+            radial-gradient(circle at 100% 0%, hsl(var(--primary) / .12), transparent 28%),
+            linear-gradient(145deg, hsl(var(--nx-surface-raised) / .99), hsl(var(--nx-surface) / .99));
+        box-shadow: -22px 0 76px hsl(var(--nx-surface-shadow) / .48), inset 1px 0 hsl(var(--nx-grid-line) / .05);
+    }
+
+    .nx-sheet-surface::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 0;
+        width: 2px;
+        pointer-events: none;
+        background: linear-gradient(hsl(var(--primary) / .9), hsl(190 95% 65% / .3), transparent 78%);
+    }
+
+    .nx-sheet-surface > *:not(button) {
+        position: relative;
+        z-index: 1;
+    }
+
+    html[data-motion="minimal"] .nx-workflow-dialog__header::after,
+    html[data-motion="none"] .nx-workflow-dialog__header::after {
+        box-shadow: none;
     }
 
     /* Glassy ticket detail card aesthetic — gradient bg + subtle border + accent glow.

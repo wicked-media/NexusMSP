@@ -23,6 +23,7 @@ import DeviceDossier from "../components/devices/DeviceDossier";
 import DeviceTimeMachine from "../components/devices/DeviceTimeMachine";
 import AssetStoryPanel from "../components/devices/AssetStoryPanel";
 import MaintenanceWindowDialog from "../components/devices/MaintenanceWindowDialog";
+import ChangeGuardianDialog from "../components/devices/ChangeGuardianDialog";
 import StatusOrb from "../components/devices/StatusOrb";
 import NexusPageSkeleton from "../components/feedback/NexusPageSkeleton";
 import HeroTile from "../components/HeroTile";
@@ -53,6 +54,7 @@ export default function DeviceDetailPage() {
   const [diskHealth, setDiskHealth] = useState([]);
   const [rdLiveStatus, setRdLiveStatus] = useState(null);
   const [patchWindowOpen, setPatchWindowOpen] = useState(false);
+  const [safetyCheckOpen, setSafetyCheckOpen] = useState(false);
   const [deviceEditorOpen, setDeviceEditorOpen] = useState(false);
   const [deviceEditorBusy, setDeviceEditorBusy] = useState(false);
   const [clientOptions, setClientOptions] = useState([]);
@@ -181,6 +183,13 @@ export default function DeviceDetailPage() {
   const cpuUsage = Math.round(dev.cpu_usage || 0);
   const memoryUsage = Math.round(dev.memory_usage || 0);
   const diskUsage = Math.round(dev.disk_usage || 0);
+  const deviceSignal = (rdLiveStatus || dev.status) === "offline"
+    ? "critical"
+    : (dev.alerts_count || 0) > 0 || cpuUsage >= 90 || memoryUsage >= 90 || diskUsage >= 90
+      ? "attention"
+      : (rdLiveStatus || dev.status) === "online"
+        ? "healthy"
+        : "recommendation";
   const usageGlow = (value) => value >= 90 ? "rose" : value >= 70 ? "amber" : "emerald";
   const adapters = data.network_adapters || [];
   const activeAdapter = adapters.find(adapter => adapter.status === "up") || adapters.find(adapter => adapter.ip_address) || null;
@@ -190,9 +199,9 @@ export default function DeviceDetailPage() {
   const softwareInventoryAt = software.reduce((latest, item) => item.last_inventory_at && (!latest || item.last_inventory_at > latest) ? item.last_inventory_at : latest, null);
 
   return (
-    <div className="space-y-5 sm:space-y-6" data-testid="device-detail-page">
+    <div className="nx-page-stage space-y-5 sm:space-y-6" data-testid="device-detail-page">
       {/* Device identity */}
-      <section className="nx-device-header relative overflow-hidden rounded-2xl p-4 sm:p-5">
+      <section className="nx-device-header nx-ambient-surface relative overflow-hidden rounded-2xl p-4 sm:p-5" data-nx-signal={deviceSignal}>
         <div className="mb-4 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
           Managed asset
           <span className="text-muted-foreground">· Live endpoint record</span>
@@ -218,7 +227,7 @@ export default function DeviceDetailPage() {
               )}
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1"><Globe className="h-3.5 w-3.5" />{dev.ip_address || "No IP reported"}</span>
+              <span className="flex items-center gap-1" data-sensitive="ip-address"><Globe className="h-3.5 w-3.5" />{dev.ip_address || "No IP reported"}</span>
               <span className="flex items-center gap-1"><Monitor className="h-3.5 w-3.5" />{dev.os} {dev.os_version || ""}</span>
               <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{dev.location || "No location"}</span>
               <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{dev.client_name || "Unassigned client"}</span>
@@ -231,6 +240,7 @@ export default function DeviceDetailPage() {
           <Button size="sm" variant="outline" className="border-sky-500/30 text-sky-700 hover:bg-sky-500/10 dark:text-sky-300" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)} data-testid="create-device-ticket"><Ticket className="mr-1 h-4 w-4" />New ticket</Button>
           {dev.client_id && <Button size="sm" variant="outline" onClick={() => navigate(`/clients?client=${encodeURIComponent(dev.client_id)}`)} data-testid="open-device-client"><Building2 className="mr-1 h-4 w-4" />Open client</Button>}
           <Button variant="outline" size="sm" onClick={openDeviceEditor} data-testid="edit-device-identity"><Pencil className="mr-1 h-4 w-4" />Edit</Button>
+          <Button variant="outline" size="sm" className="border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-200" onClick={() => setSafetyCheckOpen(true)} data-testid="device-safe-to-touch"><ShieldCheck className="mr-1 h-4 w-4" />Safe to touch?</Button>
           <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
           <RemoteAccessButton
             device={dev}
@@ -296,7 +306,7 @@ export default function DeviceDetailPage() {
                   <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
                     <div><span className="text-muted-foreground block text-xs">Manufacturer</span><span className="font-medium">{dev.manufacturer || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Model</span><span className="font-medium">{dev.model || "N/A"}</span></div>
-                    <div><span className="text-muted-foreground block text-xs">Serial Number</span><span className="font-mono text-xs">{dev.serial_number || "N/A"}</span></div>
+                    <div><span className="text-muted-foreground block text-xs">Serial Number</span><span className="font-mono text-xs" data-sensitive="serial-number">{dev.serial_number || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Processor</span><span className="font-medium">{dev.processor || "N/A"} {dev.processor_cores ? `(${dev.processor_cores} cores)` : ""}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Memory (RAM)</span><span className="font-medium">{dev.ram_gb ? `${dev.ram_gb} GB` : "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Storage</span><span className="font-medium">{dev.storage_total_gb ? `${dev.storage_used_gb || 0} / ${dev.storage_total_gb} GB` : "N/A"}</span></div>
@@ -1039,6 +1049,14 @@ export default function DeviceDetailPage() {
         selectedIds={[dev.id]}
         deviceNames={{ [dev.id]: dev.name }}
         onScheduled={() => { setPatchWindowOpen(false); fetchDetail(); }}
+      />
+      <ChangeGuardianDialog
+        open={safetyCheckOpen}
+        onOpenChange={setSafetyCheckOpen}
+        action="reboot"
+        deviceIds={[dev.id]}
+        headers={{ Authorization: `Bearer ${token}` }}
+        previewOnly
       />
     </div>
   );

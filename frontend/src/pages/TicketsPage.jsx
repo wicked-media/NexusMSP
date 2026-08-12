@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
@@ -14,6 +14,8 @@ import {
 } from "@/components/tickets/TicketSecondaryTabs";
 import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
+import TicketConnectivityVerification from "@/components/tickets/TicketConnectivityVerification";
+import TicketJumpAccessRequest from "@/components/tickets/TicketJumpAccessRequest";
 import TicketServiceTierWidget from "@/components/tickets/TicketServiceTierWidget";
 import { TicketModuleHeader, TicketToolAction, TicketToolsCenter, TicketWorkspaceTabs } from "@/components/tickets/TicketWorkspaceShell";
 import {
@@ -21,6 +23,7 @@ import {
   GroupBySelector, useGroupedTickets,
 } from "@/components/tickets/TicketRow";
 import AICopilotStrip from "@/components/tickets/AICopilotStrip";
+import NexusVerifiedSequence from "@/components/NexusVerifiedSequence";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import HeroTile from "@/components/HeroTile";
 import {
@@ -55,6 +58,7 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { PageShell } from "@/components/design-system";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag,
@@ -107,6 +111,7 @@ function formatDuration(minutes) {
 
 export default function TicketsPage() {
   const { token, user } = useAuth();
+  const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
   const [clients, setClients] = useState([]);
   const [services, setServices] = useState([]);
@@ -184,7 +189,6 @@ export default function TicketsPage() {
   const [scripts, setScripts] = useState([]);
   const [deviceStatus, setDeviceStatus] = useState(null);
   const [newNote, setNewNote] = useState("");
-  const [isInternalNote, setIsInternalNote] = useState(false);
   const [conversationType, setConversationType] = useState("public");
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [emailSignature, setEmailSignature] = useState("");
@@ -209,7 +213,6 @@ export default function TicketsPage() {
   const [isPushInvoiceOpen, setIsPushInvoiceOpen] = useState(false);
   const [invoicesList, setInvoicesList] = useState([]);
   const [pushToExisting, setPushToExisting] = useState("");
-  const [topTab, setTopTab] = useState("tickets");
   const [typeFilter, setTypeFilter] = useState("all");
   // Bulk action state
   const [selectedTickets, setSelectedTickets] = useState(new Set());
@@ -217,9 +220,7 @@ export default function TicketsPage() {
   const [bulkValue, setBulkValue] = useState("");
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [workshopJobs, setWorkshopJobs] = useState([]);
-  const [workshopStats, setWorkshopStats] = useState({});
   const [fieldJobs, setFieldJobs] = useState([]);
-  const [fieldStats, setFieldStats] = useState({});
   const [wsDialog, setWsDialog] = useState(false);
   const [wsForm, setWsForm] = useState({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
   const [fjDialog, setFjDialog] = useState(false);
@@ -232,7 +233,6 @@ export default function TicketsPage() {
   const [isChildOpen, setIsChildOpen] = useState(false);
   const [isMergeOpen, setIsMergeOpen] = useState(false);
   const [isTimeOpen, setIsTimeOpen] = useState(false);
-  const [isCannedOpen, setIsCannedOpen] = useState(false);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [timerStart, setTimerStart] = useState(null);
   const [timerElapsed, setTimerElapsed] = useState(0);
@@ -247,7 +247,6 @@ export default function TicketsPage() {
   const [childForm, setChildForm] = useState({ title: "", description: "", priority: "medium" });
   const [mergeIds, setMergeIds] = useState([]);
   const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true });
-  const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [noteCounts, setNoteCounts] = useState({});
   const [ticketViewers, setTicketViewers] = useState({}); // kept for internal tracking only
   const [worksheetItems, setWorksheetItems] = useState([]);
@@ -369,7 +368,6 @@ export default function TicketsPage() {
       ...steps,
     ].filter(Boolean).join("\n");
     setConversationType("note");
-    setIsInternalNote(true);
     setNewNote((current) => current ? `${current}\n\n${runbookNote}` : runbookNote);
     setDetailTab("conversation");
     axios.post(`${API}/knowledge-runbooks/${selectedRunbookSuggestion.id}/used`, {}, { headers }).catch(() => {});
@@ -404,7 +402,7 @@ export default function TicketsPage() {
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes, wsRes, wsSRes, fjRes, fjSRes, svcRes] = await Promise.all([
+      const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes, wsRes, fjRes, svcRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/users`, { headers }),
@@ -413,9 +411,7 @@ export default function TicketsPage() {
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/products`, { headers }),
         axios.get(`${API}/workshop/jobs`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/workshop/stats`, { headers }).catch(() => ({ data: {} })),
         axios.get(`${API}/field-jobs`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/field-jobs/stats/summary`, { headers }).catch(() => ({ data: {} })),
         axios.get(`${API}/pro-pack/service-catalog`, { headers }).catch(() => ({ data: [] })),
       ]);
       setTickets(localPreviewCollection(collectionFromResponse(tRes.data, ["tickets"]), LOCAL_PREVIEW_TICKETS));
@@ -426,9 +422,7 @@ export default function TicketsPage() {
       setDevices(localPreviewCollection(collectionFromResponse(dRes.data, ["devices"]), LOCAL_PREVIEW_DEVICES));
       setAllProducts(localPreviewCollection(collectionFromResponse(pRes.data, ["products"]), LOCAL_PREVIEW_PRODUCTS));
       setWorkshopJobs(collectionFromResponse(wsRes.data, ["jobs"]));
-      setWorkshopStats(wsSRes.data || {});
       setFieldJobs(collectionFromResponse(fjRes.data, ["jobs", "field_jobs"]));
-      setFieldStats(fjSRes.data || {});
       setServices(localPreviewCollection(collectionFromResponse(svcRes.data, ["services"]), LOCAL_PREVIEW_SERVICES));
       // Fetch active viewers for tickets
       try {
@@ -486,9 +480,9 @@ export default function TicketsPage() {
     const status = searchParams.get("status");
     const priority = searchParams.get("priority");
     const attention = searchParams.get("attention");
-    if (status && ["open", "pending", "in_progress", "on_hold", "resolved", "closed", "completed"].includes(status)) setStatusFilter(status);
-    if (priority && ["critical", "high", "medium", "low"].includes(priority)) setPriorityFilter(priority);
-    if (["no_response", "sla_breach", "unassigned", "critical_high"].includes(attention)) setAttentionFilter(attention);
+    setStatusFilter(status && ["open", "pending", "in_progress", "on_hold", "resolved", "closed", "completed"].includes(status) ? status : "all");
+    setPriorityFilter(priority && ["critical", "high", "medium", "low"].includes(priority) ? priority : "all");
+    setAttentionFilter(["no_response", "sla_breach", "unassigned", "critical_high"].includes(attention) ? attention : "all");
   }, [searchParams]);
 
   // Device detail deep-link: prefill a new ticket with the selected endpoint and
@@ -685,6 +679,31 @@ export default function TicketsPage() {
       await fetchTickets();
       if (resolvedToClosed) toast.success("Ticket resolved, closed and retained in client history");
     } catch { toast.error("Failed to update ticket"); }
+  };
+
+  const handleQueueQuickAction = async (ticket, action) => {
+    if (!ticket?.id) return;
+    if (action === "remote") {
+      const deviceId = ticket.device_id || ticket.asset_id || ticket.device_ids?.[0];
+      if (!deviceId) { toast.error("Link a managed asset before starting a remote session"); return; }
+      navigate(`/remote-access?device=${encodeURIComponent(deviceId)}&ticket=${encodeURIComponent(ticket.id)}`);
+      return;
+    }
+    const patches = {
+      claim: { assigned_to: user?.id },
+      start: { status: "in_progress" },
+      resolve: { status: "resolved" },
+    };
+    const patch = patches[action];
+    if (!patch || (action === "claim" && !user?.id)) return;
+    try {
+      await axios.put(`${API}/tickets/${ticket.id}`, patch, { headers });
+      await fetchTickets();
+      const label = action === "claim" ? "Ticket claimed" : action === "start" ? "Work started" : "Ticket resolved, closed and retained in client history";
+      toast.success(label);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update ticket");
+    }
   };
 
   const handleAddNote = async (options = {}) => {
@@ -939,23 +958,6 @@ export default function TicketsPage() {
     }
   };
 
-  const handleSaveCanned = async () => {
-    try {
-      await axios.post(`${API}/canned-responses`, cannedForm, { headers });
-      setCannedForm({ title: "", content: "", category: "general" });
-      const res = await axios.get(`${API}/canned-responses`, { headers });
-      setCannedResponses(collectionFromResponse(res.data, ["responses", "canned_responses"]));
-      toast.success("Canned response saved");
-    } catch { toast.error("Failed to save"); }
-  };
-
-  const handleSaveSignature = async () => {
-    try {
-      await axios.put(`${API}/users/${user.id}`, { email_signature: emailSignature }, { headers });
-      toast.success("Signature saved");
-    } catch { toast.error("Failed to save signature"); }
-  };
-
   // Workshop + Field data is now loaded in fetchTickets
 
   // ============ BULK ACTIONS ============
@@ -1055,10 +1057,6 @@ export default function TicketsPage() {
       await fetchTickets();
       if (viewFjJob?.id === jobId) setViewFjJob(response.data?.job || viewFjJob);
     } catch { toast.error("Failed"); }
-  };
-
-  const handleFjChecklist = async (jobId, checklist) => {
-    try { await axios.put(`${API}/field-jobs/${jobId}`, { checklist }, { headers }); } catch {}
   };
 
   const refreshJobConversation = async (kind, jobId) => {
@@ -1219,7 +1217,7 @@ export default function TicketsPage() {
   const handleLoadWsTemplate = async (template) => {
     if (!viewWsJob) return;
     try {
-      const r = await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { template }, { headers });
+      await axios.post(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { template }, { headers });
       const clRes = await axios.get(`${API}/workshop/jobs/${viewWsJob.id}/checklist`, { headers });
       setWsChecklist(clRes.data || []);
       setWsTemplateDialog(false);
@@ -1595,13 +1593,11 @@ export default function TicketsPage() {
     cancelled: { label: "Cancelled", class: "bg-red-500/20 text-red-400" },
   };
 
-  const fmtTime = (s) => { const m = Math.floor(s / 60); const sec = s % 60; return `${m}:${sec.toString().padStart(2, '0')}`; };
-
   const filteredTickets = tickets.filter(t => {
     if (statusFilter === "completed" && !["resolved", "closed"].includes(t.status)) return false;
     if (statusFilter !== "all" && statusFilter !== "completed" && t.status !== statusFilter) return false;
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
-    if (attentionFilter === "no_response" && (noteCounts[t.id] > 0 || ["closed", "resolved"].includes(t.status))) return false;
+    if (attentionFilter === "no_response" && (t.last_response_at || Date.now() - new Date(t.created_at).getTime() <= 4 * 60 * 60 * 1000 || ["closed", "resolved"].includes(t.status))) return false;
     if (attentionFilter === "sla_breach") {
       const dueAt = t.sla_due || t.sla_due_at;
       if (!dueAt || new Date(dueAt) >= new Date() || ["closed", "resolved"].includes(t.status)) return false;
@@ -1699,7 +1695,6 @@ export default function TicketsPage() {
     const source = jobType === "workshop" ? workshopJobs : jobType === "field" ? fieldJobs : [];
     const job = source.find(item => item.id === jobId);
     if (!job) return;
-    setTopTab("tickets");
     setTypeFilter(jobType === "workshop" ? "workshop" : "cabling_wisp");
     if (jobType === "workshop") fetchWsJobDetail(job);
     else fetchFjJobDetail(job);
@@ -1716,6 +1711,13 @@ export default function TicketsPage() {
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
     const ticketCompleted = ["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase());
+    const ticketStage = (() => {
+      const status = String(viewingTicket.status || "").toLowerCase();
+      if (status === "closed") return 6;
+      if (status === "resolved") return 5;
+      if (status === "in_progress" || status === "on_hold") return 2;
+      return 1;
+    })();
     const slaHours = viewingTicket.sla_due && !ticketCompleted ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
     const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
     const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
@@ -1760,7 +1762,20 @@ export default function TicketsPage() {
           isTimerRunning={isTimerRunning}
           timerElapsed={timerElapsed}
           onToggleTimer={toggleTimer}
+          onStartWork={() => navigate(`/work-session?ticket=${encodeURIComponent(viewingTicket.id)}`)}
+          onPinObject={() => {
+            window.dispatchEvent(new CustomEvent("nexus:pin-object", { detail: {
+              id: viewingTicket.id,
+              type: "ticket",
+              label: viewingTicket.ticket_number || viewingTicket.title || "Ticket",
+              detail: viewingTicket.client_name || "Service record",
+              path: `/tickets?ticket=${encodeURIComponent(viewingTicket.id)}`,
+            }}));
+            toast.success("Ticket pinned to your Object Dock");
+          }}
         />
+
+        <NexusVerifiedSequence complete={ticketStage} label="Nexus service record" className="shadow-sm" />
 
         {runbookSuggestions.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5" data-testid="ticket-runbook-suggestions">
@@ -1919,6 +1934,10 @@ export default function TicketsPage() {
 
         {/* Finance Intel: Quote Nudge banner */}
         <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
+
+        <TicketConnectivityVerification ticket={viewingTicket} headers={headers} />
+
+        <TicketJumpAccessRequest ticket={viewingTicket} headers={headers} />
 
         {/* Title + Compact Progress side-by-side (saves vertical space) */}
         <div className="grid grid-cols-1 gap-4">
@@ -2889,8 +2908,7 @@ export default function TicketsPage() {
 
         {/* Add Part Dialog */}
         <Dialog open={wsPartDialog} onOpenChange={setWsPartDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Add Part to Workshop Job</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Workshop service" title="Add workshop part" description="Record the stock item used and keep inventory accurate." icon={ShoppingCart} tone="amber" footer={<><Button variant="outline" onClick={() => setWsPartDialog(false)}>Cancel</Button><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></>}>
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground">Stock will be deducted automatically.</p>
               <Select value={wsPartProduct || "__none"} onValueChange={v => setWsPartProduct(v === "__none" ? "" : v)}>
@@ -2899,15 +2917,13 @@ export default function TicketsPage() {
               </Select>
               <Input type="number" min="1" value={wsPartQty} onChange={e => setWsPartQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" />
             </div>
-            <DialogFooter><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Quote Builder Dialog */}
         <Dialog open={wsQuoteDialog} onOpenChange={setWsQuoteDialog}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader><DialogTitle>Repair Quote Builder</DialogTitle></DialogHeader>
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          <NexusWorkflowDialog eyebrow="Workshop service" title="Repair quote builder" description="Build an approval-ready repair estimate with a clear cost breakdown." icon={DollarSign} tone="amber" footer={<><Button variant="outline" onClick={() => setWsQuoteDialog(false)}>Cancel</Button><Button onClick={handleSaveWsQuote} data-testid="ws-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></>}>
+            <div className="space-y-4">
               {wsQuoteItems.map((item, i) => (
                 <div key={`k-${i}`} className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-6"><Label className="text-xs">Description</Label><Input value={item.description} onChange={e => { const n = [...wsQuoteItems]; n[i].description = e.target.value; setWsQuoteItems(n); }} placeholder="Labour / Part / Service" /></div>
@@ -2923,14 +2939,12 @@ export default function TicketsPage() {
               </div>
               <div><Label className="text-xs">Notes</Label><Textarea value={wsQuoteNotes} onChange={e => setWsQuoteNotes(e.target.value)} rows={2} placeholder="Additional notes for the customer..." /></div>
             </div>
-            <DialogFooter><Button onClick={handleSaveWsQuote} data-testid="ws-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Customer Notification Dialog */}
         <Dialog open={wsNotifyDialog} onOpenChange={setWsNotifyDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Notify Customer</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Workshop communication" title="Send customer update" description="Use a prepared update or write a clear status message for the customer." icon={Send} tone="cyan" footer={<><Button variant="outline" onClick={() => setWsNotifyDialog(false)}>Cancel</Button><Button onClick={handleWsNotifyCustomer} data-testid="ws-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></>}>
             <div className="space-y-4">
               <div><Label>Email</Label><Input value={wsNotifyForm.email} onChange={e => setWsNotifyForm({ ...wsNotifyForm, email: e.target.value })} placeholder="customer@example.com" data-testid="ws-notify-email" /></div>
               <div><Label>Subject</Label><Input value={wsNotifyForm.subject} onChange={e => setWsNotifyForm({ ...wsNotifyForm, subject: e.target.value })} /></div>
@@ -2941,14 +2955,12 @@ export default function TicketsPage() {
                 <Button variant="outline" size="sm" onClick={() => setWsNotifyForm(prev => ({ ...prev, message: `Hi ${viewWsJob.customer_name},\n\nGreat news! Your ${viewWsJob.device_brand || ""} ${viewWsJob.device_model || ""} is ready for collection.\n\nJob Number: ${viewWsJob.job_number}\nTotal: $${(viewWsJob.total_cost || 0).toFixed(2)}\n\nPlease collect at your earliest convenience.\n\nRegards,\nThe Workshop Team`, subject: `Ready for Pickup - ${viewWsJob.job_number}` }))}>Ready for Pickup</Button>
               </div>
             </div>
-            <DialogFooter><Button onClick={handleWsNotifyCustomer} data-testid="ws-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Push to Invoice Dialog */}
         <Dialog open={wsInvoiceDialog} onOpenChange={setWsInvoiceDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Push Workshop Job to Invoice</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Workshop billing" title="Send workshop job to billing" description="Create a new invoice or add the recorded work to an existing customer invoice." icon={Receipt} tone="emerald">
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Parts (${(viewWsJob.total_parts_cost || 0).toFixed(2)}) + Labour (${(viewWsJob.total_labour_cost || 0).toFixed(2)}) = <strong className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</strong></p>
               <Button className="w-full" onClick={() => handleWsPushToInvoice(null)} data-testid="ws-new-invoice"><Plus className="w-4 h-4 mr-1" />Create New Invoice</Button>
@@ -2964,7 +2976,7 @@ export default function TicketsPage() {
                 </ScrollArea>
               </>}
             </div>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Device Intake Dialog */}
@@ -3049,8 +3061,7 @@ export default function TicketsPage() {
 
         {/* Diagnostic Template Picker Dialog */}
         <Dialog open={wsTemplateDialog} onOpenChange={setWsTemplateDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Load Diagnostic Template</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Workshop diagnostics" title="Load diagnostic checklist" description="Start from a tested device checklist to keep diagnosis consistent." icon={ClipboardList} tone="violet">
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Select a device-type template to load pre-built diagnostic checklist items.</p>
               {Object.entries(wsTemplates).map(([key, items]) => (
@@ -3060,7 +3071,7 @@ export default function TicketsPage() {
                 </Button>
               ))}
             </div>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
       </div>
     );
@@ -3459,9 +3470,8 @@ export default function TicketsPage() {
 
         {/* Quote Builder */}
         <Dialog open={fjQuoteDialog} onOpenChange={setFjQuoteDialog}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader><DialogTitle>Service Quote Builder</DialogTitle></DialogHeader>
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          <NexusWorkflowDialog eyebrow="Field service" title="Service quote builder" description="Create a clear field-service estimate before work is approved." icon={DollarSign} tone="cyan" footer={<><Button variant="outline" onClick={() => setFjQuoteDialog(false)}>Cancel</Button><Button onClick={handleSaveFjQuote} data-testid="fj-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></>}>
+            <div className="space-y-4">
               {fjQuoteItems.map((item, i) => (
                 <div key={`k-${i}`} className="grid grid-cols-12 gap-2 items-end">
                   <div className="col-span-6"><Label className="text-xs">Description</Label><Input value={item.description} onChange={e => { const n = [...fjQuoteItems]; n[i].description = e.target.value; setFjQuoteItems(n); }} placeholder="Installation / Cable / Labour" /></div>
@@ -3477,14 +3487,12 @@ export default function TicketsPage() {
               </div>
               <div><Label className="text-xs">Notes</Label><Textarea value={fjQuoteNotes} onChange={e => setFjQuoteNotes(e.target.value)} rows={2} placeholder="Additional notes..." /></div>
             </div>
-            <DialogFooter><Button onClick={handleSaveFjQuote} data-testid="fj-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Add Equipment */}
         <Dialog open={fjEquipDialog} onOpenChange={setFjEquipDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Add Equipment</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Field service" title="Add site equipment" description="Capture installed, replaced or inspected equipment against this field job." icon={Radio} tone="cyan" footer={<><Button variant="outline" onClick={() => setFjEquipDialog(false)}>Cancel</Button><Button onClick={handleAddFjEquipment} disabled={!fjEquipForm.equipment_type} data-testid="fj-save-equip"><Plus className="w-4 h-4 mr-1" />Add Equipment</Button></>}>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Type</Label>
@@ -3524,14 +3532,12 @@ export default function TicketsPage() {
               </div>
               <div><Label>Config Notes</Label><Textarea value={fjEquipForm.config_notes} onChange={e => setFjEquipForm({ ...fjEquipForm, config_notes: e.target.value })} rows={2} placeholder="SSID, channel, frequency, etc." /></div>
             </div>
-            <DialogFooter><Button onClick={handleAddFjEquipment} disabled={!fjEquipForm.equipment_type} data-testid="fj-save-equip"><Plus className="w-4 h-4 mr-1" />Add Equipment</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Add Material */}
         <Dialog open={fjMatDialog} onOpenChange={setFjMatDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Add Material Used</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Field service" title="Record material used" description="Keep cabling and consumable costs connected to the completed site work." icon={Package} tone="amber" footer={<><Button variant="outline" onClick={() => setFjMatDialog(false)}>Cancel</Button><Button onClick={handleAddFjMaterial} disabled={!fjMatForm.material} data-testid="fj-save-mat"><Plus className="w-4 h-4 mr-1" />Add Material</Button></>}>
             <div className="space-y-3">
               <div><Label>Material</Label><Input value={fjMatForm.material} onChange={e => setFjMatForm({ ...fjMatForm, material: e.target.value })} placeholder="Cat6 cable, RJ45 connectors, Cable ties..." data-testid="fj-mat-name" /></div>
               <div className="grid grid-cols-3 gap-3">
@@ -3553,15 +3559,13 @@ export default function TicketsPage() {
               </div>
               <div className="text-right font-bold text-green-400">Total: ${((fjMatForm.quantity || 1) * (fjMatForm.unit_cost || 0)).toFixed(2)}</div>
             </div>
-            <DialogFooter><Button onClick={handleAddFjMaterial} disabled={!fjMatForm.material} data-testid="fj-save-mat"><Plus className="w-4 h-4 mr-1" />Add Material</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Site Info Dialog */}
         <Dialog open={fjSiteDialog} onOpenChange={setFjSiteDialog}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader><DialogTitle>Site Survey & Access Info</DialogTitle></DialogHeader>
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+          <NexusWorkflowDialog eyebrow="Field service" title="Site survey & access" description="Document access, installation conditions and safety details before site work begins." icon={MapPin} tone="cyan" footer={<><Button variant="outline" onClick={() => setFjSiteDialog(false)}>Cancel</Button><Button onClick={handleSaveFjSiteInfo} data-testid="fj-save-site"><CheckCircle className="w-4 h-4 mr-1" />Save Site Info</Button></>}>
+            <div className="space-y-3">
               <div><Label>Customer Email</Label><Input value={fjSiteInfo.customer_email || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, customer_email: e.target.value })} placeholder="customer@example.com" /></div>
               <div className="grid grid-cols-3 gap-3">
                 <div><Label>GPS Latitude</Label><Input value={fjSiteInfo.gps_lat || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, gps_lat: e.target.value })} placeholder="-36.8485" className="font-mono text-xs" /></div>
@@ -3607,14 +3611,12 @@ export default function TicketsPage() {
                 <label className="flex items-center gap-1.5 text-sm"><Checkbox checked={fjSiteInfo.roof_access || false} onCheckedChange={c => setFjSiteInfo({ ...fjSiteInfo, roof_access: c })} />Roof Access</label>
               </div>
             </div>
-            <DialogFooter><Button onClick={handleSaveFjSiteInfo} data-testid="fj-save-site"><CheckCircle className="w-4 h-4 mr-1" />Save Site Info</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Customer Notification */}
         <Dialog open={fjNotifyDialog} onOpenChange={setFjNotifyDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Notify Customer</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Field communication" title="Send customer update" description="Keep the customer informed from travel through completion." icon={Send} tone="cyan" footer={<><Button variant="outline" onClick={() => setFjNotifyDialog(false)}>Cancel</Button><Button onClick={handleFjNotifyCustomer} data-testid="fj-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></>}>
             <div className="space-y-4">
               <div><Label>Email</Label><Input value={fjNotifyForm.email} onChange={e => setFjNotifyForm({ ...fjNotifyForm, email: e.target.value })} placeholder="customer@example.com" data-testid="fj-notify-email" /></div>
               <div><Label>Subject</Label><Input value={fjNotifyForm.subject} onChange={e => setFjNotifyForm({ ...fjNotifyForm, subject: e.target.value })} /></div>
@@ -3625,14 +3627,12 @@ export default function TicketsPage() {
                 <Button variant="outline" size="sm" onClick={() => setFjNotifyForm(prev => ({ ...prev, message: `Hi ${viewFjJob.customer_name},\n\nGreat news! Your ${viewFjJob.job_category} job has been completed at ${viewFjJob.service_address}.\n\nJob: ${viewFjJob.job_number}\nSignal: ${viewFjJob.signal_strength || "N/A"} dBm\nSpeed: ${viewFjJob.speed_test_down || "N/A"} / ${viewFjJob.speed_test_up || "N/A"} Mbps\n\nPlease don't hesitate to contact us if you have any issues.\n\nRegards,\nNexusOps Field Services`, subject: `Job Completed - ${viewFjJob.job_number}` }))}>Completed</Button>
               </div>
             </div>
-            <DialogFooter><Button onClick={handleFjNotifyCustomer} data-testid="fj-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Push to Invoice */}
         <Dialog open={fjInvoiceDialog} onOpenChange={setFjInvoiceDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Push Field Job to Invoice</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Field billing" title="Send field job to billing" description="Create a new invoice or add the site work to an existing customer invoice." icon={Receipt} tone="emerald">
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Materials (${fjMatTotal.toFixed(2)}) + Labour will be added to the invoice.</p>
               <Button className="w-full" onClick={() => handleFjPushToInvoice(null)} data-testid="fj-new-invoice"><Plus className="w-4 h-4 mr-1" />Create New Invoice</Button>
@@ -3648,13 +3648,12 @@ export default function TicketsPage() {
                 </ScrollArea>
               </>}
             </div>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Checklist Template Picker */}
         <Dialog open={fjTemplateDialog} onOpenChange={setFjTemplateDialog}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Load Field Checklist Template</DialogTitle></DialogHeader>
+          <NexusWorkflowDialog eyebrow="Field service" title="Load field checklist" description="Apply a proven job checklist for consistent site delivery." icon={ClipboardList} tone="violet">
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">Select a job category template to load pre-built checklist items.</p>
               {Object.entries(fjTemplates).map(([key, items]) => (
@@ -3664,7 +3663,7 @@ export default function TicketsPage() {
                 </Button>
               ))}
             </div>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
       </div>
     );
@@ -3677,7 +3676,9 @@ export default function TicketsPage() {
   const completedTickets = tickets.filter(t => ["resolved", "closed"].includes(t.status));
   const completedCount = completedTickets.length;
   const criticalCount = tickets.filter(t => t.priority === "critical" && t.status !== "closed" && t.status !== "resolved").length;
-  const noNotesCount = tickets.filter(t => noteCounts[t.id] === 0 && t.status !== "closed" && t.status !== "resolved").length;
+  const unassignedCount = tickets.filter(t => !t.assigned_to && !["closed", "resolved"].includes(t.status)).length;
+  const staleCount = tickets.filter(t => !t.last_response_at && Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000 && !["closed", "resolved"].includes(t.status)).length;
+  const breachedCount = tickets.filter(t => (t.sla_due || t.sla_due_at) && new Date(t.sla_due || t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status)).length;
   const completedDurations = completedTickets.map(resolutionMinutes).filter(value => value != null);
   const avgResTime = completedDurations.length
     ? Math.round(completedDurations.reduce((total, value) => total + value, 0) / completedDurations.length)
@@ -3722,7 +3723,7 @@ export default function TicketsPage() {
           <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
           <HeroTile label="Completed" value={completedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && attentionFilter === "all"} testId="stat-resolved" />
           <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
-          <HeroTile label="No Response" value={noNotesCount} icon={MessageSquare} glow={noNotesCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
+          <HeroTile label="Awaiting Reply" value={staleCount} icon={MessageSquare} glow={staleCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
           <HeroTile label="Avg Resolve" value={formatDuration(avgResTime)} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
         </div>
       </div>
@@ -3778,9 +3779,33 @@ export default function TicketsPage() {
             </div>
           );
         })()}
-      </div>
+       </div>
 
-      {/* Type Filter Tabs */}
+       <Card className="overflow-hidden border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.055] via-card to-violet-500/[0.035]" data-testid="ticket-queue-cockpit">
+         <CardContent className="flex flex-col gap-3 p-3.5 lg:flex-row lg:items-center lg:justify-between">
+           <div className="min-w-0">
+             <div className="flex flex-wrap items-center gap-2">
+               <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-700 dark:text-cyan-300">Queue cockpit</span>
+               <Badge variant="outline" className="border-white/10 bg-background/40 text-[9px] text-muted-foreground">Live triage</Badge>
+             </div>
+             <p className="mt-1 text-sm font-medium text-foreground">Focus the queue, then act without leaving it.</p>
+             <p className="mt-0.5 text-xs text-muted-foreground">Hover a ticket to claim it, start work, resolve it, or open a linked device in Nexus Remote.</p>
+           </div>
+           <div className="flex flex-wrap gap-2">
+             <Button size="sm" variant="outline" className="h-8 border-rose-500/20 bg-rose-500/[0.04] text-xs text-rose-700 hover:bg-rose-500/[0.1] dark:text-rose-200" onClick={() => applyQueueFilter({ attention: "sla_breach" })}>
+               <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />{breachedCount} breached
+             </Button>
+             <Button size="sm" variant="outline" className="h-8 border-amber-500/20 bg-amber-500/[0.04] text-xs text-amber-700 hover:bg-amber-500/[0.1] dark:text-amber-200" onClick={() => applyQueueFilter({ attention: "unassigned" })}>
+               <User className="mr-1.5 h-3.5 w-3.5" />{unassignedCount} unassigned
+             </Button>
+             <Button size="sm" variant="outline" className="h-8 border-cyan-500/20 bg-cyan-500/[0.04] text-xs text-cyan-700 hover:bg-cyan-500/[0.1] dark:text-cyan-200" onClick={() => applyQueueFilter({ priority: "critical" })}>
+               <Shield className="mr-1.5 h-3.5 w-3.5" />{criticalCount} critical
+             </Button>
+           </div>
+         </CardContent>
+       </Card>
+
+       {/* Type Filter Tabs */}
       <div key="type-tabs" className="min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap rounded-xl border border-white/[0.08] bg-black/[0.14] p-1.5 h-full">
           {[
@@ -3809,11 +3834,11 @@ export default function TicketsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input className="h-9 border-white/[0.08] bg-white/[0.03] pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
           </div>
-          {(typeFilter === "all" || typeFilter === "sla") && <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
+          {(typeFilter === "all" || typeFilter === "sla") && <Select value={statusFilter} onValueChange={v => applyQueueFilter({ status: v, priority: priorityFilter, attention: "all" })}>
             <SelectTrigger className="h-9 w-[150px] border-white/[0.08] bg-white/[0.03]" data-testid="status-filter"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="completed">Completed</SelectItem>{Object.entries(statusConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
           </Select>}
-          {(typeFilter === "all" || typeFilter === "sla") && <Select value={priorityFilter} onValueChange={v => { setPriorityFilter(v); setAttentionFilter("all"); setActiveViewId(null); }}>
+          {(typeFilter === "all" || typeFilter === "sla") && <Select value={priorityFilter} onValueChange={v => applyQueueFilter({ status: statusFilter, priority: v, attention: "all" })}>
             <SelectTrigger className="h-9 w-[140px] border-white/[0.08] bg-white/[0.03]" data-testid="priority-filter"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">All Priority</SelectItem>{Object.entries(priorityConfig).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
           </Select>}
@@ -3920,6 +3945,7 @@ export default function TicketsPage() {
             <span className="hidden lg:inline-block w-[44px] shrink-0">Activity</span>
             <span className="w-[20px] shrink-0" />
             <span className="w-[68px] shrink-0">Status</span>
+            <span className="hidden xl:inline-block w-[104px] shrink-0">Quick actions</span>
             <span className="w-6 shrink-0">Owner</span>
             <span className="hidden sm:inline-block w-[60px] shrink-0 text-right">SLA / Age</span>
             <span className="w-6 shrink-0" />
@@ -3940,6 +3966,7 @@ export default function TicketsPage() {
                   isSelected={selectedTickets.has(t.id)}
                   onToggleSelect={toggleTicketSelect}
                   onOpen={fetchTicketDetail}
+                  onQuickAction={handleQueueQuickAction}
                   viewers={ticketViewers[t.id] || []}
                   noteCount={noteCounts[t.id]}
                   attachmentCount={t.attachment_count}
@@ -3955,6 +3982,7 @@ export default function TicketsPage() {
                 isSelected={selectedTickets.has(t.id)}
                 onToggleSelect={toggleTicketSelect}
                 onOpen={fetchTicketDetail}
+                onQuickAction={handleQueueQuickAction}
                 viewers={ticketViewers[t.id] || []}
                 noteCount={noteCounts[t.id]}
                 attachmentCount={t.attachment_count}

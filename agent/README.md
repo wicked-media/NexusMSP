@@ -93,6 +93,28 @@ The installer and the managed rollout both add **Nexus Client Chat** to the
 Windows Start Menu under **NexusMSP**. It is deliberately user launched: the
 background service does not inject a GUI into an endpoint user's session.
 
+## Nexus Edge
+
+`nexus-edge` is the optional, customer-scoped Linux connector prepared from
+**Deployment Hub**. It is not a remote-control replacement and it does not
+open an inbound management port. Its purpose is to establish an auditable
+customer deployment identity, report health to Nexus, and provide the safe
+foundation for future local discovery and customer-side service connectors.
+
+```bash
+cd /app/agent
+docker build -f Dockerfile.edge -t nexus-edge:local .
+# or: make edge-linux
+```
+
+The Deployment Hub bundle supplies the control-plane URL, deployment ID and a
+single-use activation code. On first start the Edge exchanges that code for a
+non-recoverable token stored only in its persistent `/var/lib/nexus-edge`
+volume. After the first accepted heartbeat, remove `NEXUS_ACTIVATION_CODE`
+from the host `.env` file and restart the container. Nexus derives client Edge
+agent metering from its own agent registry; a customer-side heartbeat cannot
+inflate the billable count.
+
 ## Phase status
 
 - [x] Phase 1 — Enrollment + heartbeat

@@ -490,13 +490,14 @@ export default function RemediationPlaybooksPage() {
   );
 
   return (
-    <div className="space-y-6" data-testid="remediation-playbooks-page">
+    <div className="nx-page-stage space-y-6" data-testid="remediation-playbooks-page">
       <OperationalPageHeader
         eyebrow="Nexus Shield | security operations"
         title="Guided response runbooks"
         description="Technician-confirmed containment checklists with durable audit evidence. Runbooks guide work; they never perform disruptive containment automatically."
         icon={ShieldCheck}
         tone="rose"
+        signal={activeSessions.length ? "working" : "healthy"}
         actions={
           <>
             <Button

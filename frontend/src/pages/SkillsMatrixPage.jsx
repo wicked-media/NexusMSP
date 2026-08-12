@@ -6,11 +6,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Users, Edit } from "lucide-react";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { Users, Edit, Target, Award, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
-const skillLevels = { 0: "None", 1: "Basic", 2: "Intermediate", 3: "Advanced", 4: "Expert" };
 const skillColors = { 0: "text-slate-400", 1: "text-blue-400", 2: "text-blue-500", 3: "text-green-500", 4: "text-amber-500" };
 
 export default function SkillsMatrixPage() {
@@ -51,13 +51,19 @@ export default function SkillsMatrixPage() {
 
   if (loading) return <div className="flex justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" /></div>;
   if (!data) return null;
+  const technicians = data.technicians || [];
+  const allSkills = data.all_skills || [];
+  const assessedSkills = technicians.reduce((total, technician) => total + allSkills.filter(skill => (technician.skills?.[skill] || 0) > 0).length, 0);
+  const possibleSkills = technicians.length * allSkills.length;
+  const coverage = possibleSkills ? Math.round((assessedSkills / possibleSkills) * 100) : 0;
+  const expertCapabilities = technicians.reduce((total, technician) => total + allSkills.filter(skill => (technician.skills?.[skill] || 0) === 4).length, 0);
 
   return (
     <div className="space-y-6" data-testid="skills-matrix-page">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Technician Skills Matrix</h1>
-        <p className="text-muted-foreground text-sm mt-1">Skills inventory with auto-matching for ticket assignment</p>
-      </div>
+      <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)] lg:flex-row lg:items-center lg:justify-between">
+        <div><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Target className="h-5 w-5" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Team capability</p><h1 className="text-2xl font-bold tracking-tight">Skills coverage matrix</h1></div></div><p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">Nexus uses these declared capabilities to provide better technician matching, escalation context, and coverage visibility.</p></div>
+        <div className="grid grid-cols-3 gap-2"><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold text-primary">{technicians.length}</p><p className="text-[10px] text-muted-foreground">technicians</p></div><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold">{coverage}%</p><p className="text-[10px] text-muted-foreground">coverage</p></div><div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className="text-lg font-bold text-amber-500">{expertCapabilities}</p><p className="text-[10px] text-muted-foreground">expert skills</p></div></div>
+      </section>
 
       <Card>
         <CardHeader><CardTitle className="text-base flex items-center gap-2"><Users className="w-4 h-4" />Skills Matrix</CardTitle></CardHeader>
@@ -67,23 +73,21 @@ export default function SkillsMatrixPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="sticky left-0 bg-card z-10">Technician</TableHead>
-                  {data.all_skills.map(s => <TableHead key={s} className="text-center capitalize text-xs">{s}</TableHead>)}
+                  {allSkills.map(s => <TableHead key={s} className="text-center capitalize text-xs">{s}</TableHead>)}
                   <TableHead>Certs</TableHead>
                   <TableHead className="text-right">Resolved</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.technicians.map(tech => (
+                {technicians.map(tech => (
                   <TableRow key={tech.user_id} data-testid={`skills-row-${tech.user_id}`}>
                     <TableCell className="font-medium sticky left-0 bg-card">{tech.name}</TableCell>
-                    {data.all_skills.map(s => {
+                    {allSkills.map(s => {
                       const level = tech.skills[s] || 0;
                       return (
                         <TableCell key={s} className="text-center">
-                          <span className={`text-xs font-medium ${skillColors[level]}`}>
-                            {level > 0 ? `${"*".repeat(level)}` : "-"}
-                          </span>
+                          <span className={`inline-flex min-w-8 items-center justify-center rounded-md border border-current/20 px-1.5 py-1 text-[10px] font-bold ${skillColors[level]}`}>{level > 0 ? `${level}/4` : "—"}</span>
                         </TableCell>
                       );
                     })}
@@ -106,19 +110,19 @@ export default function SkillsMatrixPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <div className="flex items-center gap-2 text-xs"><span className="text-slate-400">-</span> None</div>
         <div className="flex items-center gap-2 text-xs"><span className="text-blue-400">*</span> Basic</div>
         <div className="flex items-center gap-2 text-xs"><span className="text-blue-500">**</span> Intermediate</div>
         <div className="flex items-center gap-2 text-xs"><span className="text-green-500">***</span> Advanced</div>
+        <div className="flex items-center gap-2 text-xs"><span className="text-amber-500">4/4</span> Expert</div>
       </div>
 
       {editing && (
         <Dialog open={!!editing} onOpenChange={() => setEditing(null)}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Edit Skills: {editing.name}</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              {data.all_skills.map(s => (
+          <NexusWorkflowDialog eyebrow="Team capability" title={`Edit skills: ${editing.name}`} description="Keep proficiency current so Nexus can make reliable assignment and escalation suggestions." icon={Award} tone="violet" className="max-w-2xl" contentClassName="space-y-3" footer={<><Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button><Button onClick={saveSkills} data-testid="save-skills"><ShieldCheck className="mr-1.5 h-4 w-4" />Save capabilities</Button></>}>
+              <div className="rounded-xl border border-primary/15 bg-primary/[0.035] p-3 text-xs text-muted-foreground">Rate demonstrated delivery capability, not intended learning goals. Level 4 represents a trusted escalation resource for that discipline.</div>
+              {allSkills.map(s => (
                 <div key={s} className="flex items-center justify-between">
                   <span className="capitalize text-sm">{s}</span>
                   <div className="flex gap-1">
@@ -135,9 +139,7 @@ export default function SkillsMatrixPage() {
                 <label className="text-sm font-medium">Certifications (comma-separated)</label>
                 <Input value={editCerts} onChange={e => setEditCerts(e.target.value)} placeholder="CCNA, Azure, CompTIA..." data-testid="certs-input" />
               </div>
-              <Button onClick={saveSkills} className="w-full" data-testid="save-skills">Save Skills</Button>
-            </div>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
       )}
     </div>

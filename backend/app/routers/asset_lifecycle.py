@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 
 
 router = APIRouter()
@@ -62,8 +63,9 @@ async def get_all_lifecycle_assets(
 ):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="asset.lifecycle.list")
         query["client_id"] = client_id
-    assets = await db.assets.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    assets = await db.assets.find(scoped_query(current_user, query), {"_id": 0}).sort("created_at", -1).to_list(1000)
     rows = [_lifecycle_view(asset) for asset in assets]
     if stage:
         rows = [asset for asset in rows if asset["lifecycle_stage"] == stage]
@@ -72,7 +74,7 @@ async def get_all_lifecycle_assets(
 
 @router.get("/asset-lifecycle/dashboard")
 async def get_lifecycle_dashboard(current_user: dict = Depends(get_current_user)):
-    assets = [_lifecycle_view(asset) for asset in await db.assets.find({}, {"_id": 0}).to_list(10000)]
+    assets = [_lifecycle_view(asset) for asset in await db.assets.find(scoped_query(current_user), {"_id": 0}).to_list(10000)]
     by_stage = {stage: 0 for stage in VALID_STAGES}
     by_type: dict[str, int] = {}
     now = datetime.now(timezone.utc).date()
@@ -103,9 +105,7 @@ async def get_lifecycle_dashboard(current_user: dict = Depends(get_current_user)
 
 @router.get("/asset-lifecycle/{asset_id}")
 async def get_lifecycle_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Inventory asset not found")
+    asset = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.read", resource_name="Inventory asset")
     return _lifecycle_view(asset)
 
 
@@ -119,6 +119,7 @@ async def create_lifecycle_asset(data: dict, current_user: dict = Depends(get_cu
         raise HTTPException(status_code=400, detail="Invalid lifecycle stage")
 
     client_id = data.get("client_id") or None
+    await assert_client_scope(current_user, client_id, operation="asset.lifecycle.create")
     client_name = ""
     if client_id:
         client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
@@ -177,9 +178,9 @@ async def create_lifecycle_asset(data: dict, current_user: dict = Depends(get_cu
 
 @router.put("/asset-lifecycle/{asset_id}")
 async def update_lifecycle_asset(asset_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Inventory asset not found")
+    existing = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.update", resource_name="Inventory asset")
+    if "client_id" in data and data.get("client_id") != existing.get("client_id"):
+        await assert_client_scope(current_user, data.get("client_id"), operation="asset.lifecycle.reassign")
 
     allowed = {
         "name", "asset_type", "category", "manufacturer", "model", "serial_number", "client_id", "client_name",
@@ -214,6 +215,7 @@ async def update_lifecycle_asset(asset_id: str, data: dict, current_user: dict =
 
 @router.delete("/asset-lifecycle/{asset_id}")
 async def delete_lifecycle_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.delete", resource_name="Inventory asset")
     result = await db.assets.delete_one({"id": asset_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Inventory asset not found")
@@ -222,9 +224,7 @@ async def delete_lifecycle_asset(asset_id: str, current_user: dict = Depends(get
 
 @router.post("/asset-lifecycle/{asset_id}/transition")
 async def transition_lifecycle_stage(asset_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
-    if not asset:
-        raise HTTPException(status_code=404, detail="Inventory asset not found")
+    asset = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.transition", resource_name="Inventory asset")
     new_stage = data.get("new_stage") or ""
     if new_stage not in VALID_STAGES:
         raise HTTPException(status_code=400, detail=f"Invalid stage. Must be one of: {sorted(VALID_STAGES)}")

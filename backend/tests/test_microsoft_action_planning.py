@@ -5,6 +5,7 @@ from app.routers.control_plane import (
     MICROSOFT_ACTION_TEMPLATES,
     _normalise_action_options,
 )
+from app.services.action_permissions import ACTION_PERMISSION_IDS
 
 
 def _template(action_id: str) -> dict:
@@ -66,3 +67,70 @@ def test_action_plan_rejects_malformed_email_fields():
 
 def test_every_microsoft_action_has_a_rollback_contract():
     assert all(template.get("rollback") for template in MICROSOFT_ACTION_TEMPLATES)
+
+
+def test_group_access_plan_requires_group_and_access_review_evidence():
+    options, missing = _normalise_action_options(
+        _template("manage-group-access"),
+        {"membership_operation": "add"},
+    )
+
+    assert options["membership_operation"] == "add"
+    assert missing == ["Group name or object ID"]
+
+
+def test_privileged_role_plan_is_critical_and_requires_independent_approval():
+    template = _template("manage-privileged-role")
+    options, missing = _normalise_action_options(
+        template,
+        {
+            "role_name": "Exchange Administrator",
+            "role_operation": "activate_time_bound",
+            "access_duration": "8_hours",
+            "role_owner": "Security owner",
+        },
+    )
+
+    assert missing == []
+    assert template["impact"] == "critical"
+    assert template["approval_required"] is True
+    assert options["access_duration"] == "8_hours"
+    assert template["permission"] in ACTION_PERMISSION_IDS
+
+
+def test_mailbox_delegation_plan_requires_owner_and_approval_contract():
+    template = _template("manage-mailbox-access")
+    _, missing = _normalise_action_options(
+        template,
+        {"mailbox_address": "accounts@example.com"},
+    )
+
+    assert missing == ["Mailbox owner or approval authority"]
+    assert template["approval_required"] is True
+    assert template["permission"] in ACTION_PERMISSION_IDS
+
+
+def test_intune_device_retirement_is_critical_and_requires_recovery_evidence():
+    template = _template("retire-managed-device")
+    options, missing = _normalise_action_options(template, {})
+
+    assert missing == []
+    assert template["target"] == "device"
+    assert template["impact"] == "critical"
+    assert template["approval_required"] is True
+    assert options["device_operation"] == "retire"
+    assert template["permission"] in ACTION_PERMISSION_IDS
+
+
+def test_conditional_access_change_defaults_to_report_only_and_is_approval_gated():
+    template = _template("manage-conditional-access")
+    options, missing = _normalise_action_options(
+        template,
+        {"policy_identifier": "Require compliant device"},
+    )
+
+    assert missing == []
+    assert options["policy_operation"] == "report_only"
+    assert template["impact"] == "critical"
+    assert template["approval_required"] is True
+    assert template["permission"] in ACTION_PERMISSION_IDS

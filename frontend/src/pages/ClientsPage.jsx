@@ -16,7 +16,7 @@ import {
   Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles,
   Activity, ChevronRight, RefreshCw, Filter, X,
   Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink, MoreHorizontal,
-  ChevronDown, BarChart3, Scale, Globe, FileText, ArrowRight, CheckCircle2
+  ChevronDown, BarChart3, Scale, Globe, FileText, ArrowRight, CheckCircle2, Rocket
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
@@ -24,6 +24,7 @@ import { Client360Subscriptions, Client360Security, Client360Billing, Client360A
 import ClientWarRoom from "@/components/clients/ClientWarRoom";
 import HeroTile from "@/components/HeroTile";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { ClientProfilePictureUploader, ClientCoverImage } from "@/components/clients/ClientProfileAssets";
 import ClientDocumentsTab from "@/components/clients/ClientDocumentsTab";
 import ClientNotesTab from "@/components/clients/ClientNotesTab";
@@ -147,6 +148,7 @@ function IntegrationChip({ type, active }) {
     rmm: { label: "Nexus Agent", color: "text-emerald-300 border-emerald-500/30 bg-emerald-500/[0.06]", tip: "Nexus Agent installed" },
     yeastar: { label: "Voice", color: "text-cyan-300 border-cyan-500/30 bg-cyan-500/[0.06]", tip: "Yeastar PBX linked" },
     suped: { label: "DMARC", color: "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/[0.06]", tip: "Suped DMARC" },
+    nexus_dmarc: { label: "Nexus DMARC", color: "text-violet-300 border-violet-500/30 bg-violet-500/[0.06]", tip: "Nexus-owned DMARC evidence and sender intelligence" },
     cipp: { label: "Control Plane", color: "text-cyan-300 border-cyan-500/30 bg-cyan-500/[0.06]", tip: "Nexus Control Plane — Microsoft 365" },
   };
   const cfg = map[type];
@@ -227,12 +229,13 @@ function ClientQuickSearch({ clients = [], activeClientId, onSelect, onBrowsePor
   };
 
   return (
-    <section className="border-b border-border/70 bg-background/30 px-6 py-4" aria-label="Client finder">
+    <section className="mx-6 mb-5 overflow-visible rounded-2xl border border-primary/15 bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.14),transparent_32%),linear-gradient(135deg,hsl(var(--nx-surface-raised)/0.92),hsl(var(--nx-surface)/0.94))] px-5 py-4 shadow-[0_18px_46px_rgba(0,0,0,0.16)]" aria-label="Client finder">
       <div className="mx-auto flex max-w-6xl flex-col gap-3 lg:flex-row lg:items-center">
         <div className="flex shrink-0 items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><Search className="h-4 w-4 text-primary" /></span>
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 shadow-sm"><Search className="h-4 w-4 text-primary" /></span>
           <div>
-            <p className="text-sm font-semibold text-foreground">{activeClient ? "Client switcher" : "Open a client"}</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Client command</p>
+            <p className="mt-0.5 text-sm font-semibold text-foreground">{activeClient ? "Client switcher" : "Open a client"}</p>
             <p className="text-xs text-muted-foreground">{activeClient ? `Viewing ${activeClient.name}` : "Find any account without leaving this workspace."}</p>
           </div>
         </div>
@@ -244,12 +247,12 @@ function ClientQuickSearch({ clients = [], activeClientId, onSelect, onBrowsePor
             onBlur={() => window.setTimeout(() => setExpanded(false), 120)}
             onChange={(event) => { setQuery(event.target.value); setExpanded(true); }}
             placeholder="Search clients by name, industry, or primary email..."
-            className="h-11 border-border/80 bg-background pl-10 pr-24 shadow-sm"
+            className="h-12 rounded-xl border-primary/20 bg-background/85 pl-10 pr-24 shadow-sm focus-visible:ring-primary/30"
             data-testid="client-quick-search-input"
           />
           <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:block">{clients.length} clients</span>
           {expanded && (
-            <div className="absolute z-50 mt-2 max-h-[360px] w-full overflow-y-auto rounded-xl border border-border/80 bg-popover p-1.5 shadow-xl" data-testid="client-quick-search-results">
+            <div className="absolute z-50 mt-2 max-h-[360px] w-full overflow-y-auto rounded-2xl border border-primary/20 bg-popover p-1.5 shadow-2xl" data-testid="client-quick-search-results">
               {matches.length ? matches.map((client) => {
                 const active = client.id === activeClientId;
                 return (
@@ -285,6 +288,7 @@ export default function ClientsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const clientIdFromUrl = searchParams.get("client");
   const tabFromUrl = searchParams.get("view");
+  const onboardingPrompt = searchParams.get("onboarding") === "prompt";
   const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
@@ -297,6 +301,7 @@ export default function ClientsPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [onboardingSession, setOnboardingSession] = useState(null);
   const [healthDetail, setHealthDetail] = useState(null);
   const [detailTab, setDetailTab] = useState(CLIENT_TAB_VALUES.has(tabFromUrl) ? tabFromUrl : "overview");
   const [detailLoading, setDetailLoading] = useState(false);
@@ -359,14 +364,16 @@ export default function ClientsPage() {
     if (!id) return;
     setDetailLoading(true);
     try {
-      const [cRes, aRes, hRes] = await Promise.all([
+      const [cRes, aRes, hRes, oRes] = await Promise.all([
         axios.get(`${API}/clients/${id}`, { headers }),
         axios.get(`${API}/clients/${id}/timeline?limit=300`, { headers }).catch(() => ({ data: { events: [] } })),
         axios.get(`${API}/clients/${id}/health`, { headers }).catch(() => ({ data: null })),
+        axios.get(`${API}/onboarding-enhanced/sessions?client_id=${encodeURIComponent(id)}`, { headers }).catch(() => ({ data: { sessions: [] } })),
       ]);
       setDetail(cRes.data);
       setActivity(aRes.data?.events || []);
       setHealthDetail(hRes.data);
+      setOnboardingSession((oRes.data?.sessions || []).find((session) => session.status === "in_progress" || session.status === "paused") || null);
     } catch {
       toast.error("Failed to load client");
     } finally {
@@ -409,16 +416,51 @@ export default function ClientsPage() {
   }, [data, search, lifecycleFilter, riskFilter, integrationFilter, tierFilter]);
 
   const selectedClient = useMemo(() => data.clients?.find(c => c.id === selectedId), [data, selectedId]);
+  const onboardingProgress = onboardingSession
+    ? Math.round((Object.values(onboardingSession.steps || {}).filter((step) => step.status === "completed").length / Math.max(Object.keys(onboardingSession.steps || {}).length, 1)) * 100)
+    : 0;
 
   const createClient = async () => {
     if (!createForm.name) { toast.error("Name required"); return; }
     try {
-      await axios.post(`${API}/clients`, createForm, { headers });
-      toast.success("Client created");
+      const response = await axios.post(`${API}/clients`, createForm, { headers });
+      const createdClient = response.data;
       setCreateDialog(false);
       setCreateForm({ name: "", industry: "", email: "", phone: "", tier: "standard", lifecycle: "active" });
-      fetchData();
+      setSelectedId(createdClient.id);
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.set("client", createdClient.id);
+        next.set("onboarding", "prompt");
+        return next;
+      });
+      await fetchData();
+      toast.success(`${createdClient.name} created — ready for onboarding`);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const dismissOnboardingPrompt = () => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("onboarding");
+      return next;
+    });
+  };
+
+  const startClientOnboarding = async () => {
+    if (!selectedClient) return;
+    try {
+      const response = await axios.post(`${API}/onboarding-enhanced/sessions`, {
+        client_id: selectedClient.id,
+        client_name: selectedClient.name,
+        template: selectedClient.lifecycle === "prospect" ? "small_office" : "mid_market",
+      }, { headers });
+      dismissOnboardingPrompt();
+      toast.success("Client Onboarding is ready");
+      navigate(`/onboarding?session=${encodeURIComponent(response.data.id)}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not start client onboarding");
+    }
   };
 
   if (loading) return <div className="p-8 flex items-center gap-2 text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" />Loading portfolio...</div>;
@@ -427,6 +469,13 @@ export default function ClientsPage() {
   const attentionClients = (data.clients || [])
     .filter(client => client.patch_pending > 0 || client.risk_level === "critical" || client.risk_level === "at_risk")
     .sort((a, b) => (b.patch_pending || 0) - (a.patch_pending || 0) || (a.health_score || 0) - (b.health_score || 0));
+  const clientWorkspaceSignal = attentionClients.some(client => client.risk_level === "critical" || (client.health_score || 100) < 60)
+    ? "critical"
+    : attentionClients.length > 0 || (s.patch_pending || 0) > 0
+      ? "attention"
+      : (s.client_count || 0) > 0
+        ? "healthy"
+        : "recommendation";
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -438,6 +487,7 @@ export default function ClientsPage() {
             description="Manage account health, service tiers, subscriptions, risks, documents, and client communications from one operational workspace."
             icon={Building2}
             tone="violet"
+            signal={clientWorkspaceSignal}
             actions={<>
               <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-clients-btn"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
               <DropdownMenu>
@@ -584,32 +634,59 @@ export default function ClientsPage() {
                 </div>
               </div>
             ) : (
-              <ClientDetailPane
-                client={selectedClient}
-                detail={detail}
-                activity={activity}
-                healthDetail={healthDetail}
-                tab={detailTab}
-                setTab={changeDetailTab}
-                loading={detailLoading}
-                onClose={() => openClient(null)}
-              />
+              <>
+                {onboardingPrompt && (
+                  <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-cyan-400/25 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_42%),linear-gradient(135deg,rgba(8,28,36,0.96),rgba(12,14,20,0.98))] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.18)]" data-testid="client-onboarding-prompt">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><Rocket className="h-5 w-5 text-emerald-300" /></span>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300">Recommended next mission</p>
+                          <h2 className="mt-1 text-base font-semibold text-foreground">Set up {selectedClient.name} with Client Onboarding</h2>
+                          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Create one linked, auditable delivery plan for contacts, assets, security, services, billing, documentation and go-live checks.</p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button variant="outline" size="sm" onClick={dismissOnboardingPrompt}>I’ll do this later</Button>
+                        <Button size="sm" onClick={startClientOnboarding} data-testid="start-client-onboarding"><Rocket className="mr-1.5 h-4 w-4" />Start Client Onboarding</Button>
+                      </div>
+                    </div>
+                  </section>
+                )}
+                {onboardingSession && !onboardingPrompt && (
+                  <section className="mx-4 mt-4 overflow-hidden rounded-2xl border border-sky-400/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.13),transparent_42%),linear-gradient(135deg,rgba(10,25,34,0.96),rgba(12,14,20,0.98))] p-4 shadow-sm" data-testid="client-active-onboarding">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Rocket className="h-5 w-5 text-cyan-200" /></span>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300">Active client onboarding</p>
+                          <h2 className="mt-1 text-base font-semibold text-foreground">{onboardingProgress}% ready · Step {onboardingSession.current_step || 1} of {onboardingSession.total_steps || 8}</h2>
+                          <p className="mt-1 text-xs leading-5 text-muted-foreground">Owner: <span className="font-medium text-foreground">{onboardingSession.owner_name || onboardingSession.created_by || "Unassigned"}</span> · Last activity by {onboardingSession.last_activity_by || onboardingSession.created_by || "Nexus"} {onboardingSession.last_activity_at ? formatDistanceToNow(new Date(onboardingSession.last_activity_at), { addSuffix: true }) : "recently"}.</p>
+                        </div>
+                      </div>
+                      <Button size="sm" onClick={() => navigate(`/onboarding?session=${encodeURIComponent(onboardingSession.id)}`)} data-testid="continue-client-onboarding"><Rocket className="mr-1.5 h-4 w-4" />Continue onboarding</Button>
+                    </div>
+                  </section>
+                )}
+                <ClientDetailPane
+                  client={selectedClient}
+                  detail={detail}
+                  activity={activity}
+                  healthDetail={healthDetail}
+                  tab={detailTab}
+                  setTab={changeDetailTab}
+                  loading={detailLoading}
+                  onClose={() => openClient(null)}
+                />
+              </>
             )}
           </main>
         </div>
 
         {/* Create dialog */}
         <Dialog open={createDialog} onOpenChange={setCreateDialog}>
-          <DialogContent className="max-w-2xl overflow-hidden border-border/80 bg-background p-0" data-testid="new-client-dialog">
-            <DialogHeader className="border-b border-border/70 bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_42%),linear-gradient(135deg,rgba(24,24,27,0.96),rgba(9,9,11,0.98))] px-6 py-5 text-left">
-              <div className="mb-3 flex items-center gap-2">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Building2 className="h-4 w-4" /></span>
-                <Badge variant="outline" className="border-primary/25 bg-primary/[0.06] text-[9px] uppercase tracking-[0.16em] text-primary">Client operating record</Badge>
-              </div>
-              <DialogTitle className="text-xl">Create a new client</DialogTitle>
-              <DialogDescription className="max-w-xl leading-5">Start the canonical Nexus relationship that tickets, assets, services, contracts, billing, integrations, and audit records will use.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-5 px-6 py-5">
+          <NexusWorkflowDialog eyebrow="Client operations" title="Create a new client" description="Start the canonical Nexus relationship that tickets, assets, services, contracts, billing, integrations, and audit records will use." icon={Building2} tone="violet" className="max-w-2xl" data-testid="new-client-dialog" footer={<><Button variant="outline" onClick={() => setCreateDialog(false)}>Cancel</Button><Button onClick={createClient} data-testid="create-client-btn"><Plus className="mr-1.5 h-4 w-4" />Create client record</Button></>}>
+            <div className="space-y-5">
               <section>
                 <div className="mb-3">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Organisation</p>
@@ -671,11 +748,7 @@ export default function ClientsPage() {
                 </Select>
               </section>
             </div>
-            <DialogFooter className="border-t border-border/70 bg-muted/15 px-6 py-4">
-              <Button variant="ghost" onClick={() => setCreateDialog(false)}>Cancel</Button>
-              <Button onClick={createClient} data-testid="create-client-btn"><Plus className="mr-1.5 h-4 w-4" />Create client record</Button>
-            </DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
       </div>
     </TooltipProvider>
@@ -953,7 +1026,7 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
   return (
     <div className="flex min-h-full flex-col gap-4 p-4 sm:p-5" data-testid="client-detail-pane">
       {/* Cover banner */}
-      <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]">
+      <section className="nx-ambient-surface overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-nx-signal={client.health_score < 60 ? "critical" : client.health_score < 85 ? "attention" : "healthy"}>
         <ClientCoverImage client={client} onUpdated={applyClientPatch}>
           <ClientAccountAlerts client={client} />
         </ClientCoverImage>
@@ -988,9 +1061,9 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
             {client.industry && <span>{client.industry}</span>}
-            {client.email && <span className="flex items-center gap-1"><Mail className="w-2.5 h-2.5" />{client.email}</span>}
-            {client.phone && <span className="flex items-center gap-1"><Phone className="w-2.5 h-2.5" />{client.phone}</span>}
-            {client.address && <span className="flex items-center gap-1 truncate max-w-[280px]"><MapPin className="w-2.5 h-2.5" />{client.address}</span>}
+            {client.email && <span className="flex items-center gap-1" data-sensitive="email"><Mail className="w-2.5 h-2.5" />{client.email}</span>}
+            {client.phone && <span className="flex items-center gap-1" data-sensitive="phone"><Phone className="w-2.5 h-2.5" />{client.phone}</span>}
+            {client.address && <span className="flex items-center gap-1 truncate max-w-[280px]" data-sensitive="address"><MapPin className="w-2.5 h-2.5" />{client.address}</span>}
             {client.website && (
               <a href={client.website.startsWith("http") ? client.website : `https://${client.website}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-cyan-400">
                 <ExternalLink className="w-2.5 h-2.5" />{client.website.replace(/^https?:\/\//, "")}

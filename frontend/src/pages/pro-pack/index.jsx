@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
@@ -105,6 +106,7 @@ export function ServiceCatalogPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [archiveCandidate, setArchiveCandidate] = useState(null);
   const [form, setForm] = useState({ name: "", code: "", category: "managed_services", default_priority: "medium", sla_response_hours: 4, sla_resolve_hours: 24, billing_unit_price: 0, billing_unit: "each", is_active: true });
   const fetch = () => { setLoading(true); return Promise.all([axios.get(`${API}/pro-pack/service-catalog`, { headers }), axios.get(`${API}/pro-pack/service-catalog/usage/summary`, { headers }).catch(() => ({ data: { usage: [] } }))]).then(([services, usageResult]) => { setItems(services.data || []); setUsage(Object.fromEntries((usageResult.data?.usage || []).map(row => [row.service_id, row]))); }).catch(() => toast.error("Could not load the service catalog")).finally(() => setLoading(false)); };
   useEffect(() => { fetch(); }, []); // eslint-disable-line
@@ -117,9 +119,12 @@ export function ServiceCatalogPage() {
     } catch (error) { toast.error(error.response?.data?.detail || "Save failed"); }
   };
   const del = async (id) => {
-    if (!window.confirm("Archive this service? It remains on historic tickets but cannot be selected for new tickets.")) return;
-    await axios.delete(`${API}/pro-pack/service-catalog/${id}`, { headers });
-    toast.success("Service archived"); fetch();
+    try {
+      await axios.delete(`${API}/pro-pack/service-catalog/${id}`, { headers });
+      toast.success("Service archived");
+      setArchiveCandidate(null);
+      fetch();
+    } catch (error) { toast.error(error.response?.data?.detail || "Service could not be archived"); }
   };
   const activeItems = items.filter(s => s.is_active !== false);
   const visibleItems = items.filter(s => (showArchived || s.is_active !== false) && `${s.name} ${s.code} ${s.category}`.toLowerCase().includes(query.toLowerCase()));
@@ -145,7 +150,7 @@ export function ServiceCatalogPage() {
             <TableCell className="text-right font-mono">${Number(s.billing_unit_price || 0).toFixed(2)}/{s.billing_unit}</TableCell>
             <TableCell className="text-right">
               <Button size="sm" variant="ghost" onClick={() => { setEditing(s); setForm(s); setShow(true); }}><Save className="w-3 h-3" /></Button>
-              {s.is_active !== false && <Button size="sm" variant="ghost" onClick={() => del(s.id)}><Trash2 className="w-3 h-3 text-rose-400" /></Button>}
+              {s.is_active !== false && <Button size="sm" variant="ghost" onClick={() => setArchiveCandidate(s)} aria-label={`Archive ${s.name}`}><Trash2 className="w-3 h-3 text-rose-400" /></Button>}
             </TableCell>
           </TableRow>
         ))}</TableBody>
@@ -173,6 +178,23 @@ export function ServiceCatalogPage() {
         </div>
         <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={save} data-testid="save-service-btn"><Save className="mr-2 h-4 w-4" />{editing ? "Save policy" : "Create policy"}</Button></DialogFooter>
       </DialogContent></Dialog>
+      <AlertDialog open={Boolean(archiveCandidate)} onOpenChange={(open) => !open && setArchiveCandidate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive service policy?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {archiveCandidate?.name || "This service"} will stay on historic tickets and reports, but will no longer be available during new ticket intake.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-sm text-muted-foreground">
+            This does not cancel active work or alter existing billing records.
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep active</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => del(archiveCandidate.id)}>Archive policy</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -333,10 +355,11 @@ export function ApiTokensPage() {
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ name: "", scopes: ["read"] });
   const [created, setCreated] = useState(null);
+  const [revokeCandidate, setRevokeCandidate] = useState(null);
   const fetch = () => axios.get(`${API}/pro-pack/api-tokens`, { headers }).then(r => setItems(r.data));
   useEffect(() => { fetch(); }, []); // eslint-disable-line
   const save = async () => { try { const r = await axios.post(`${API}/pro-pack/api-tokens`, form, { headers }); setCreated(r.data); fetch(); setShow(false); } catch { toast.error("Create failed"); } };
-  const revoke = async (id) => { if (!window.confirm("Revoke this token?")) return; await axios.delete(`${API}/pro-pack/api-tokens/${id}`, { headers }); fetch(); };
+  const revoke = async (id) => { try { await axios.delete(`${API}/pro-pack/api-tokens/${id}`, { headers }); toast.success("API token revoked"); setRevokeCandidate(null); fetch(); } catch (error) { toast.error(error.response?.data?.detail || "Token could not be revoked"); } };
   return (
     <div className="p-6 space-y-4" data-testid="api-tokens-page">
       <PageHeader title="API Tokens" subtitle="Programmatic access — sha256-hashed at rest" icon={KeySquare}>
@@ -357,7 +380,7 @@ export function ApiTokensPage() {
             <TableCell className="font-mono text-xs">{t.secret_preview}</TableCell>
             <TableCell><div className="flex gap-1 flex-wrap">{(t.scopes || []).map(s => <Badge key={s} variant="outline" className="text-[10px]">{s}</Badge>)}</div></TableCell>
             <TableCell className="text-xs">{t.created_at?.slice(0, 10)}</TableCell>
-            <TableCell className="text-right">{t.is_active !== false && <Button size="sm" variant="ghost" onClick={() => revoke(t.id)}><Trash2 className="w-3 h-3 text-rose-400" /></Button>}</TableCell>
+            <TableCell className="text-right">{t.is_active !== false && <Button size="sm" variant="ghost" onClick={() => setRevokeCandidate(t)} aria-label={`Revoke ${t.name}`}><Trash2 className="w-3 h-3 text-rose-400" /></Button>}</TableCell>
           </TableRow>
         ))}</TableBody>
       </Table></CardContent></Card>
@@ -373,6 +396,18 @@ export function ApiTokensPage() {
         </div>
         <DialogFooter><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button onClick={save} data-testid="confirm-create-token">Create</Button></DialogFooter>
       </DialogContent></Dialog>
+      <AlertDialog open={Boolean(revokeCandidate)} onOpenChange={(open) => !open && setRevokeCandidate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke API token?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {revokeCandidate?.name || "This token"} will stop authenticating immediately. Any integration using it must be updated with a replacement token.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.06] p-3 text-sm text-muted-foreground">This action is logged and cannot be undone.</div>
+          <AlertDialogFooter><AlertDialogCancel>Keep token</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => revoke(revokeCandidate.id)}>Revoke token</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-from app.services.nexus_brain import build_value_proof, correlate_client_signals
+from app.services.nexus_brain import build_continuous_improvements, build_diagnostic_queue, build_value_proof, correlate_client_signals
 
 
 CLIENTS = [
@@ -128,3 +128,49 @@ def test_value_proof_does_not_invent_prevented_tickets():
     prevented = next(metric for metric in proof["metrics"] if metric["id"] == "tickets_prevented")
     assert prevented["value"] is None
     assert prevented["state"] == "not_measured"
+
+
+def test_continuous_improvement_queue_stays_evidence_led():
+    improvements = build_continuous_improvements(
+        revenue_found=482.0,
+        insights=[],
+        recent_resolved_tickets=[
+            {"client_id": "client-001", "title": "Printer offline"},
+            {"client_id": "client-001", "title": "Printer offline"},
+            {"client_id": "client-001", "title": "Printer offline"},
+        ],
+        recent_script_runs=[
+            {"script_name": "Repair print spooler"},
+            {"script_name": "Repair print spooler"},
+            {"script_name": "Repair print spooler"},
+        ],
+        healed_month=3,
+        detected_month=7,
+    )
+
+    assert [item["id"] for item in improvements[:3]] == [
+        "improvement-billing-review",
+        next(item["id"] for item in improvements if item["id"].startswith("improvement-recurring-")),
+        "improvement-repeat-script",
+    ]
+    assert all(item["state"] == "review_required" for item in improvements)
+    assert "causality" not in improvements[1]["evidence"].lower()
+
+
+def test_diagnostic_queue_is_a_read_only_plan_not_a_remediation_claim():
+    queue = build_diagnostic_queue([{
+        "id": "brain-client-001",
+        "client_id": "client-001",
+        "client_name": "Acme Plumbing",
+        "evidence": [
+            {"label": "Storage pressure", "value": "96% peak"},
+            {"label": "Failed backups", "value": 2},
+        ],
+        "route": "/backup-center",
+    }])
+
+    assert len(queue) == 1
+    assert queue[0]["state"] == "read_only_plan"
+    assert queue[0]["route"] == "/backup-center"
+    assert len(queue[0]["steps"]) == 3
+    assert "proves" in queue[0]["detail"]

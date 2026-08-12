@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageShell } from "@/components/design-system";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -303,8 +304,9 @@ export default function InvoicesPage() {
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
   });
+  const processedStripeSession = useRef(null);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -335,36 +337,9 @@ export default function InvoicesPage() {
       toast.error("Failed to load invoices");
     }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
-
-  // Chat and other workspaces can deep-link directly to a specific invoice.
-  useEffect(() => {
-    const invoiceId = searchParams.get("invoice");
-    if (!invoiceId || viewInvoice?.id === invoiceId || invoices.length === 0) return;
-    const target = invoices.find(invoice => invoice.id === invoiceId || invoice.invoice_number === invoiceId);
-    if (target) viewInvoiceDetail(target);
-  }, [invoices, searchParams, viewInvoice?.id]); // intentionally opens only the requested invoice
-
-  // Stripe payment callback
-  useEffect(() => {
-    const success = searchParams.get("payment_success");
-    const sessionId = searchParams.get("session_id");
-    if (success === "true" && sessionId) {
-      const checkPayment = async () => {
-        try {
-          const inv = invoices.find(i => i.stripe_session_id === sessionId);
-          if (inv) {
-            await axios.get(`${API}/invoices/${inv.id}/payment-status?session_id=${sessionId}`, { headers });
-            toast.success("Payment processed successfully!");
-            fetchAll();
-          }
-        } catch (e) { console.error(e); }
-      };
-      if (invoices.length > 0) checkPayment();
-    }
-  }, [searchParams, invoices.length]);
 
   const resetForm = () => setForm({
     client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
@@ -373,7 +348,7 @@ export default function InvoicesPage() {
     recurring_start_date: "", recurring_end_date: ""
   });
 
-  const viewInvoiceDetail = async (inv) => {
+  const viewInvoiceDetail = useCallback(async (inv) => {
     setViewInvoice(inv);
     setDetailTab("items");
     setInvoiceActivityError("");
@@ -388,7 +363,7 @@ export default function InvoicesPage() {
       setInvoiceActivity(actRes.data);
       setEmailHistory(emailRes.data);
     } catch { setInvoiceActivity([]); setEmailHistory([]); setInvoiceActivityError("Invoice history could not be loaded."); }
-  };
+  }, [headers]);
 
   const openCreate = () => {
     setEditing(null);
@@ -398,6 +373,33 @@ export default function InvoicesPage() {
     setForm((current) => ({ ...current, due_date: dueDate.toISOString().slice(0, 10) }));
     setIsFormOpen(true);
   };
+
+  // Chat and other workspaces can deep-link directly to a specific invoice.
+  useEffect(() => {
+    const invoiceId = searchParams.get("invoice");
+    if (!invoiceId || viewInvoice?.id === invoiceId || invoices.length === 0) return;
+    const target = invoices.find(invoice => invoice.id === invoiceId || invoice.invoice_number === invoiceId);
+    if (target) viewInvoiceDetail(target);
+  }, [invoices, searchParams, viewInvoice?.id, viewInvoiceDetail]);
+
+  // Stripe payment callback
+  useEffect(() => {
+    const success = searchParams.get("payment_success");
+    const sessionId = searchParams.get("session_id");
+    if (success !== "true" || !sessionId || invoices.length === 0 || processedStripeSession.current === sessionId) return;
+    const inv = invoices.find(invoice => invoice.stripe_session_id === sessionId);
+    if (!inv) return;
+    processedStripeSession.current = sessionId;
+    axios.get(`${API}/invoices/${inv.id}/payment-status?session_id=${sessionId}`, { headers })
+      .then(() => {
+        toast.success("Payment processed successfully!");
+        return fetchAll();
+      })
+      .catch(error => {
+        processedStripeSession.current = null;
+        console.error(error);
+      });
+  }, [fetchAll, headers, invoices, searchParams]);
   const openEdit = (inv) => {
     setEditing(inv);
     setForm({
@@ -1064,24 +1066,20 @@ export default function InvoicesPage() {
       </Dialog>
 
       <Dialog open={billingProfileOpen} onOpenChange={setBillingProfileOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Client billing profile</DialogTitle><DialogDescription>Set the defaults that keep billing, approval and Xero matching consistent for this client.</DialogDescription></DialogHeader>
+        <NexusWorkflowDialog eyebrow="Billing controls" title="Client billing profile" description="Set the defaults that keep billing, approval and Xero matching consistent for this client." icon={Building2} tone="cyan" className="max-w-lg" footer={<><Button variant="outline" onClick={() => setBillingProfileOpen(false)}>Cancel</Button><Button onClick={saveBillingProfile}>Save billing profile</Button></>}>
           <div className="space-y-4">
             <div><Label>Client</Label><ClientAutocomplete clients={clients} value={billingProfileClient} onValueChange={openBillingProfile} placeholder="Search for a client…" testId="billing-profile-client" /></div>
             <div className="grid grid-cols-2 gap-3"><div><Label>Billing email</Label><Input type="email" value={billingProfile.billing_email || ""} onChange={e => setBillingProfile({ ...billingProfile, billing_email: e.target.value })} placeholder="accounts@client.com" /></div><div><Label>Payment terms (days)</Label><Input type="number" min="0" max="365" value={billingProfile.payment_terms_days ?? 30} onChange={e => setBillingProfile({ ...billingProfile, payment_terms_days: e.target.value })} /></div></div>
             <div className="grid grid-cols-2 gap-3"><div><Label>Default payment method</Label><Select value={billingProfile.default_payment_method || "bank_transfer"} onValueChange={v => setBillingProfile({ ...billingProfile, default_payment_method: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="bank_transfer">Bank transfer / EFT</SelectItem><SelectItem value="eftpos">EFTPOS terminal</SelectItem><SelectItem value="cash">Cash</SelectItem></SelectContent></Select></div><div><Label>Xero contact ID</Label><Input value={billingProfile.xero_contact_id || ""} onChange={e => setBillingProfile({ ...billingProfile, xero_contact_id: e.target.value })} placeholder="Optional, after Xero sync" /></div></div>
             <label className="flex items-start gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 text-sm"><Switch checked={Boolean(billingProfile.purchase_order_required)} onCheckedChange={v => setBillingProfile({ ...billingProfile, purchase_order_required: v })} /><span><span className="block font-medium">Purchase order required</span><span className="text-xs text-muted-foreground">Keep a PO requirement visible before billing this client.</span></span></label>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setBillingProfileOpen(false)}>Cancel</Button><Button onClick={saveBillingProfile}>Save billing profile</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={settlementOpen} onOpenChange={setSettlementOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Close payment settlement</DialogTitle><DialogDescription>Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero.</DialogDescription></DialogHeader>
+        <NexusWorkflowDialog eyebrow="Reconciliation workflow" title="Close payment settlement" description="Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero." icon={Check} tone="emerald" className="max-w-md" footer={<><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button onClick={closeSettlement}><Check className="mr-1 h-4 w-4" />Close settlement</Button></>}>
           <div className="space-y-3"><div><Label>Method</Label><Select value={settlementForm.method} onValueChange={v => setSettlementForm({ ...settlementForm, method: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="eftpos">EFTPOS terminal</SelectItem><SelectItem value="cash">Cash</SelectItem></SelectContent></Select></div><div><Label>Settlement date</Label><Input type="date" value={settlementForm.date} onChange={e => setSettlementForm({ ...settlementForm, date: e.target.value })} /></div><div><Label>Settlement / deposit reference</Label><Input value={settlementForm.reference} onChange={e => setSettlementForm({ ...settlementForm, reference: e.target.value })} placeholder="Terminal batch or bank deposit ID" /></div></div>
-          <DialogFooter><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button onClick={closeSettlement}><Check className="w-4 h-4 mr-1" />Close settlement</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* MOVE CLIENT */}
@@ -1704,9 +1702,9 @@ export default function InvoicesPage() {
 
   // ========== LIST VIEW ==========
   return (
-    <PageShell data-testid="invoices-page">
+    <PageShell className="nx-page-stage" data-testid="invoices-page">
       <div className="flex-1 space-y-6 overflow-y-auto">
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_16px_42px_rgba(0,0,0,0.18)]">
+      <div className="nx-ambient-surface flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_16px_42px_rgba(0,0,0,0.18)]" data-nx-signal={(stats.unpaid || 0) > 0 || (stats.total_outstanding || 0) > 0 ? "attention" : "healthy"}>
         <div>
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Finance operations</p>
           <div className="flex items-center gap-3">

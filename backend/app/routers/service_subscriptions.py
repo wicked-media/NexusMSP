@@ -379,6 +379,62 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
             "attention_reasons": reasons,
         })
 
+    # Native Nexus Elevate is metered from agent-attested companion readiness.
+    # A device is billable only after the existing Nexus Agent has reported a
+    # successful, hash-verified companion installation; a queued deployment is
+    # deliberately not counted as usage.
+    elevate_agents = await db.nexus_agents.find({
+        "is_active": True,
+        "nexus_elevate.state": "active",
+    }, {"_id": 0, "id": 1, "client_id": 1, "last_seen": 1, "nexus_elevate": 1}).to_list(10000)
+    elevate_by_client = defaultdict(list)
+    for agent in elevate_agents:
+        if agent.get("client_id"):
+            elevate_by_client[str(agent["client_id"])].append(agent)
+    for client_id, agents in elevate_by_client.items():
+        client = _client_details({"client_id": client_id}, by_client_id, by_client_name)
+        streams = recurring_by_client.get(client_id, [])
+        billing_linked = any(
+            stream.get("include_nexus_elevate_usage") or any(
+                "nexus elevate" in str(line.get("description") or line.get("name") or "").lower()
+                for line in (stream.get("line_items") or [])
+            )
+            for stream in streams
+        )
+        last_attested = max((str((agent.get("nexus_elevate") or {}).get("active_at") or agent.get("last_seen") or "") for agent in agents), default="")
+        reasons = _attention(
+            "Not linked to recurring billing" if not billing_linked else "",
+        )
+        items.append({
+            "id": f"nexus-elevate:{client_id}",
+            **client,
+            "name": "Nexus Elevate protected endpoints",
+            "category": "security",
+            "record_kind": "provider_usage",
+            "source": "nexus_elevate",
+            "source_label": "Nexus Elevate",
+            "provider": "NexusMSP",
+            "quantity": len(agents),
+            "used_quantity": len(agents),
+            "unit_cost": None,
+            "monthly_cost": None,
+            "unit_price": None,
+            "monthly_revenue": None,
+            "billing_cycle": "monthly",
+            "renewal_date": "",
+            "status": "active",
+            "billing_linked": billing_linked,
+            "billing_state": "linked" if billing_linked else "unmapped",
+            "contract_id": "",
+            "recurring_invoice_id": next((stream.get("id") for stream in streams if stream.get("include_nexus_elevate_usage")), ""),
+            "quantity_source": "agent_attested",
+            "evidence_state": "agent_attested",
+            "last_synced": last_attested,
+            "source_route": "/nexus-elevate",
+            "editable": False,
+            "attention_reasons": reasons,
+        })
+
     items.sort(key=lambda item: (
         0 if item.get("attention_reasons") else 1,
         item.get("client_name", ""),

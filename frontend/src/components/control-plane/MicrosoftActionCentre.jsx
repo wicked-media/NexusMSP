@@ -14,6 +14,7 @@ import {
   KeyRound,
   Loader2,
   LockKeyhole,
+  Mail,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -37,6 +38,11 @@ const ACTION_ICONS = {
   "reset-mfa": ShieldCheck,
   "block-sign-in": ShieldAlert,
   "change-licences": UserRoundCog,
+  "manage-group-access": UserRoundCog,
+  "manage-privileged-role": ShieldAlert,
+  "manage-mailbox-access": Mail,
+  "retire-managed-device": ShieldAlert,
+  "manage-conditional-access": ShieldCheck,
   "create-user": UserPlus,
   "offboard-user": LockKeyhole,
 };
@@ -46,6 +52,20 @@ const IMPACT_STYLES = {
   medium: "border-cyan-500/25 bg-cyan-500/10 text-cyan-200",
   high: "border-amber-500/25 bg-amber-500/10 text-amber-200",
   critical: "border-rose-500/25 bg-rose-500/10 text-rose-200",
+};
+
+const ACTION_CATEGORIES = {
+  "reset-password": "Identity",
+  "reset-mfa": "Identity",
+  "block-sign-in": "Identity",
+  "change-licences": "Commercial",
+  "create-user": "Identity",
+  "offboard-user": "Identity",
+  "manage-group-access": "Access",
+  "manage-privileged-role": "Access",
+  "manage-mailbox-access": "Collaboration",
+  "retire-managed-device": "Endpoints",
+  "manage-conditional-access": "Security",
 };
 
 const EMPTY_FORM = {
@@ -95,6 +115,11 @@ export default function MicrosoftActionCentre() {
   const [tenantUsers, setTenantUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [tenantGroups, setTenantGroups] = useState([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
+  const [actionCategory, setActionCategory] = useState("All");
+  const [planDetail, setPlanDetail] = useState(null);
   const handledAction = useRef("");
 
   const load = useCallback(async () => {
@@ -210,6 +235,19 @@ export default function MicrosoftActionCentre() {
       || String(user.userPrincipalName || "").toLowerCase().includes(query)
     )).slice(0, 8);
   }, [form.target_id, tenantUsers]);
+  const filteredTenantGroups = useMemo(() => {
+    const query = String(form.options?.group_identifier || "").trim().toLowerCase();
+    if (!query) return tenantGroups.slice(0, 8);
+    return tenantGroups.filter((group) => (
+      String(group.display_name || group.displayName || "").toLowerCase().includes(query)
+      || String(group.mail || "").toLowerCase().includes(query)
+      || String(group.id || "").toLowerCase().includes(query)
+    )).slice(0, 8);
+  }, [form.options?.group_identifier, tenantGroups]);
+  const visibleActions = useMemo(() => (readiness?.actions || []).filter((action) => (
+    actionCategory === "All" || (ACTION_CATEGORIES[action.id] || "Other") === actionCategory
+  )), [actionCategory, readiness?.actions]);
+  const actionCategories = useMemo(() => ["All", ...Array.from(new Set((readiness?.actions || []).map((action) => ACTION_CATEGORIES[action.id] || "Other")))], [readiness?.actions]);
 
   useEffect(() => {
     if (!selected || selected.target !== "user" || !selectedTenant?.action_ready || provider.execution_provider !== "cipp") {
@@ -230,6 +268,26 @@ export default function MicrosoftActionCentre() {
       });
     return () => { cancelled = true; };
   }, [headers, provider.execution_provider, selected, selectedTenant?.action_ready, selectedTenant?.id]);
+
+  useEffect(() => {
+    if (!selected || selected.id !== "manage-group-access" || !selectedTenant?.action_ready) {
+      setTenantGroups([]);
+      return;
+    }
+    let cancelled = false;
+    setGroupsLoading(true);
+    axios.get(`${API}/m365/groups`, { headers, params: { tenant_id: selectedTenant.id } })
+      .then((response) => {
+        if (!cancelled) setTenantGroups(response.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setTenantGroups([]);
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [headers, selected, selectedTenant?.action_ready, selectedTenant?.id]);
 
   if (loading && !readiness) {
     return (
@@ -270,6 +328,29 @@ export default function MicrosoftActionCentre() {
         </CardContent>
       </Card>
 
+      <Card className="border-border/70 bg-muted/[0.12]" data-testid="microsoft-action-workflow">
+        <CardContent className="grid gap-3 p-4 md:grid-cols-3">
+          <ActionWorkflowStep
+            number="01"
+            icon={FileCheck2}
+            title="Prepare a safe preview"
+            description="Choose the verified tenant, target and business reason. Nexus checks role, client ownership, provider access and required evidence."
+          />
+          <ActionWorkflowStep
+            number="02"
+            icon={ClipboardCheck}
+            title="Review the change plan"
+            description="See the intended outcome, readiness gates and rollback notes before a request is retained or routed for approval."
+          />
+          <ActionWorkflowStep
+            number="03"
+            icon={ShieldCheck}
+            title="Execute with an audit trail"
+            description="Only a connected, authorised provider can perform approved work. The plan stays linked to its tenant, client and service evidence."
+          />
+        </CardContent>
+      </Card>
+
       {(!provider.configured || !provider.execution_provider) && (
         <Card className="border-amber-500/25 bg-amber-500/[0.045]">
           <CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
@@ -296,8 +377,17 @@ export default function MicrosoftActionCentre() {
         </Card>
       )}
 
+      <Card className="border-border/70 bg-muted/[0.12]">
+        <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="text-sm font-semibold">Choose a governed workflow</p><p className="mt-0.5 text-xs text-muted-foreground">Every workflow starts with a non-mutating preview and shows its impact before it can be submitted.</p></div>
+          <div className="flex flex-wrap gap-1.5" data-testid="microsoft-action-categories">
+            {actionCategories.map((category) => <Button key={category} type="button" size="sm" variant={actionCategory === category ? "default" : "outline"} className="h-8" onClick={() => setActionCategory(category)}>{category}</Button>)}
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {(readiness?.actions || []).map((action) => {
+        {visibleActions.map((action) => {
           const Icon = ACTION_ICONS[action.id] || Cloud;
           return (
             <Card key={action.id} className="group overflow-hidden border-border/70 bg-card/80 transition hover:border-cyan-500/30 hover:bg-cyan-500/[0.025]">
@@ -311,6 +401,9 @@ export default function MicrosoftActionCentre() {
                       <p className="font-semibold">{action.label}</p>
                       <Badge variant="outline" className={IMPACT_STYLES[action.impact] || IMPACT_STYLES.medium}>
                         {action.impact}
+                      </Badge>
+                      <Badge variant="outline" className="border-border/70 text-[9px] text-muted-foreground">
+                        {ACTION_CATEGORIES[action.id] || "Other"}
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs leading-5 text-muted-foreground">{action.description}</p>
@@ -353,7 +446,7 @@ export default function MicrosoftActionCentre() {
         </CardHeader>
         <CardContent className="space-y-2">
           {(readiness?.recent_plans || []).map((plan) => (
-            <div key={plan.id} className="flex flex-col gap-3 rounded-xl border border-border/70 bg-muted/15 p-3 md:flex-row md:items-center">
+            <button key={plan.id} type="button" onClick={() => setPlanDetail(plan)} className="flex w-full flex-col gap-3 rounded-xl border border-border/70 bg-muted/15 p-3 text-left transition hover:border-cyan-500/30 hover:bg-cyan-500/[0.035] md:flex-row md:items-center">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/[0.06]">
                 <FileCheck2 className="h-4 w-4 text-cyan-200" />
               </div>
@@ -369,7 +462,7 @@ export default function MicrosoftActionCentre() {
                 </Badge>
                 <p className="mt-1 text-[11px] text-muted-foreground">{formatWhen(plan.created_at)}</p>
               </div>
-            </div>
+            </button>
           ))}
           {!readiness?.recent_plans?.length && (
             <div className="py-10 text-center">
@@ -380,6 +473,24 @@ export default function MicrosoftActionCentre() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!planDetail} onOpenChange={(open) => !open && setPlanDetail(null)}>
+        <DialogContent className="max-h-[86vh] max-w-2xl overflow-y-auto" data-testid="microsoft-action-plan-detail">
+          <DialogHeader>
+            <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className={IMPACT_STYLES[planDetail?.impact] || IMPACT_STYLES.medium}>{planDetail?.impact || "planned"} impact</Badge><Badge variant="outline" className={planDetail?.status === "blocked" ? "border-rose-500/25 text-rose-200" : planDetail?.status === "pending_approval" ? "border-amber-500/25 text-amber-200" : "border-emerald-500/25 text-emerald-200"}>{String(planDetail?.status || "previewed").replaceAll("_", " ")}</Badge></div>
+            <DialogTitle className="mt-3">{planDetail?.action_label || "Microsoft action plan"}</DialogTitle>
+            <DialogDescription>Retained Nexus action evidence. Viewing this record does not run or approve a Microsoft change.</DialogDescription>
+          </DialogHeader>
+          {planDetail && <div className="space-y-4 text-sm">
+            <div className="grid gap-2 sm:grid-cols-2"><AuditField label="Tenant" value={planDetail.tenant_name || planDetail.tenant_id} /><AuditField label="Client" value={planDetail.client_name || "No client recorded"} /><AuditField label="Target" value={planDetail.target_id || "Tenant scoped"} /><AuditField label="Requested by" value={planDetail.created_by_name || "Not recorded"} /><AuditField label="Service ticket" value={planDetail.ticket_id || "Not linked"} /><AuditField label="Change reference" value={planDetail.change_reference || "Not linked"} /></div>
+            <div className="rounded-xl border border-border/70 bg-muted/15 p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Technician reason</p><p className="mt-1.5 text-xs leading-5">{planDetail.reason || "No reason was retained."}</p></div>
+            {!!planDetail.option_summary?.length && <div className="rounded-xl border border-border/70 bg-muted/15 p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">Reviewed options</p><div className="mt-2 space-y-1.5">{planDetail.option_summary.map((option) => <div key={option.key} className="flex gap-3 text-xs"><span className="min-w-36 text-muted-foreground">{option.label}</span><span className="font-medium">{option.display_value || option.value}</span></div>)}</div></div>}
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-amber-200">Rollback boundary</p><p className="mt-1.5 text-xs leading-5 text-muted-foreground">{planDetail.rollback_plan || "No rollback guidance retained."}</p></div>
+            <p className="text-[11px] text-muted-foreground">Created {formatWhen(planDetail.created_at)}{planDetail.preview_expires_at ? ` · Preview expiry ${formatWhen(planDetail.preview_expires_at)}` : ""}</p>
+          </div>}
+          <DialogFooter><Button variant="outline" onClick={() => setPlanDetail(null)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!selected} onOpenChange={(open) => !open && closeAction()}>
         <DialogContent className="max-h-[92vh] max-w-4xl overflow-y-auto border-cyan-500/20 p-0" data-testid="microsoft-action-dialog">
@@ -438,19 +549,19 @@ export default function MicrosoftActionCentre() {
                     )}
                   </div>
 
-                  {selected?.target === "user" && (
+                  {(selected?.target === "user" || selected?.target === "device") && (
                     <div className="relative">
-                      <Label>User principal name or provider user ID *</Label>
+                      <Label>{selected?.target === "device" ? "Intune managed-device ID, serial or provider ID *" : "User principal name or provider user ID *"}</Label>
                       <Input
                         className="mt-1.5"
                         value={form.target_id}
-                        onChange={(event) => { setForm({ ...form, target_id: event.target.value }); setPreview(null); setUserMenuOpen(true); }}
-                        onFocus={() => setUserMenuOpen(true)}
-                        onBlur={() => window.setTimeout(() => setUserMenuOpen(false), 120)}
-                        placeholder={usersLoading ? "Loading tenant users…" : "Search name, UPN, or enter provider user ID"}
+                        onChange={(event) => { setForm({ ...form, target_id: event.target.value }); setPreview(null); if (selected?.target === "user") setUserMenuOpen(true); }}
+                        onFocus={() => selected?.target === "user" && setUserMenuOpen(true)}
+                        onBlur={() => selected?.target === "user" && window.setTimeout(() => setUserMenuOpen(false), 120)}
+                        placeholder={selected?.target === "device" ? "Enter the exact verified Intune device ID or serial" : usersLoading ? "Loading tenant users…" : "Search name, UPN, or enter provider user ID"}
                         data-testid="microsoft-action-target"
                       />
-                      {userMenuOpen && !!filteredTenantUsers.length && (
+                      {selected?.target === "user" && userMenuOpen && !!filteredTenantUsers.length && (
                         <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-2xl">
                           {filteredTenantUsers.map((user) => (
                             <button
@@ -475,18 +586,42 @@ export default function MicrosoftActionCentre() {
                           ))}
                         </div>
                       )}
-                      {!usersLoading && selectedTenant?.action_ready && !tenantUsers.length && (
+                      {selected?.target === "user" && !usersLoading && selectedTenant?.action_ready && !tenantUsers.length && (
                         <p className="mt-1.5 text-xs text-muted-foreground">No provider-backed users were returned. A verified provider ID can still be entered manually.</p>
                       )}
+                      {selected?.target === "device" && <p className="mt-1.5 text-xs text-muted-foreground">Use the exact provider-recorded Intune device identifier. Nexus will re-check provider evidence immediately before execution.</p>}
                     </div>
                   )}
 
                   {!!selected?.fields?.length && (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {selected.fields.map((field) => (
-                        <div key={field.key} className={field.key === "display_name" || field.key === "user_principal_name" ? "sm:col-span-2" : ""}>
+                        <div key={field.key} className={field.key === "display_name" || field.key === "user_principal_name" || field.key === "group_identifier" ? "sm:col-span-2" : ""}>
                           <Label>{field.label}{field.required ? " *" : ""}</Label>
-                          {field.type === "select" ? (
+                          {field.key === "group_identifier" ? (
+                            <div className="relative">
+                              <Input
+                                className="mt-1.5"
+                                value={form.options?.group_identifier || ""}
+                                onChange={(event) => { updateOption("group_identifier", event.target.value); setGroupMenuOpen(true); }}
+                                onFocus={() => setGroupMenuOpen(true)}
+                                onBlur={() => window.setTimeout(() => setGroupMenuOpen(false), 120)}
+                                placeholder={groupsLoading ? "Loading verified Microsoft groups…" : field.placeholder}
+                                data-testid="microsoft-action-option-group_identifier"
+                              />
+                              {groupMenuOpen && !!filteredTenantGroups.length && (
+                                <div className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-2xl">
+                                  {filteredTenantGroups.map((group) => (
+                                    <button key={group.id} type="button" className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-cyan-500/10" onMouseDown={(event) => event.preventDefault()} onClick={() => { updateOption("group_identifier", group.id); setGroupMenuOpen(false); }}>
+                                      <span className="min-w-0"><span className="block truncate text-sm font-medium">{group.display_name || group.displayName || group.id}</span><span className="block truncate text-xs text-muted-foreground">{group.mail || group.id}</span></span>
+                                      <Badge variant="outline" className="border-cyan-500/25 text-cyan-100">Verified</Badge>
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              {!groupsLoading && selectedTenant?.action_ready && !tenantGroups.length && <p className="mt-1.5 text-xs text-muted-foreground">No provider-recorded groups are available yet. Enter an existing group ID only after verifying it in Microsoft.</p>}
+                            </div>
+                          ) : field.type === "select" ? (
                             <Select value={form.options?.[field.key] || field.default || ""} onValueChange={(value) => updateOption(field.key, value)}>
                               <SelectTrigger className="mt-1.5" data-testid={`microsoft-action-option-${field.key}`}>
                                 <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
@@ -607,6 +742,22 @@ export default function MicrosoftActionCentre() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function AuditField({ label, value }) {
+  return <div className="rounded-lg border border-border/70 bg-background/40 p-2.5"><p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p><p className="mt-1 truncate text-xs font-medium">{value}</p></div>;
+}
+
+function ActionWorkflowStep({ number, icon: Icon, title, description }) {
+  return (
+    <div className="flex gap-3 rounded-xl border border-border/70 bg-background/40 p-3">
+      <div className="flex h-9 w-9 shrink-0 flex-col items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/[0.07] text-cyan-200">
+        <Icon className="h-3.5 w-3.5" />
+        <span className="mt-0.5 text-[8px] font-bold tracking-wider">{number}</span>
+      </div>
+      <div className="min-w-0"><p className="text-xs font-semibold">{title}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{description}</p></div>
     </div>
   );
 }

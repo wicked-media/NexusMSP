@@ -1,0 +1,14 @@
+FROM golang:1.22-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/nexus-edge ./cmd/nexus-edge
+
+FROM alpine:3.20
+RUN addgroup -S nexus && adduser -S nexus -G nexus && mkdir -p /var/lib/nexus-edge && chown nexus:nexus /var/lib/nexus-edge
+COPY --from=build /out/nexus-edge /usr/local/bin/nexus-edge
+USER nexus
+ENV NEXUS_EDGE_STATE_PATH=/var/lib/nexus-edge/state.json
+VOLUME ["/var/lib/nexus-edge"]
+ENTRYPOINT ["/usr/local/bin/nexus-edge"]

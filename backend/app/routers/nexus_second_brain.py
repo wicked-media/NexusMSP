@@ -361,6 +361,7 @@ async def _overview_records() -> tuple[list[dict], list[dict], list[dict]]:
 @router.get("/second-brain/overview")
 async def second_brain_overview(current_user: dict = Depends(get_current_user)):
     tickets, runbooks, articles = await _overview_records()
+    operational_decisions = await db.context_relationships.find({}, {"_id": 0}).to_list(500)
     knowledge = [*runbooks, *articles]
     signals = _build_topic_signals(tickets, knowledge)
     expertise = _build_expertise(tickets)
@@ -380,11 +381,12 @@ async def second_brain_overview(current_user: dict = Depends(get_current_user)):
             "statement": "Built only from this NexusMSP tenant. No client data is contributed to a shared intelligence network.",
         },
         "metrics": {
-            "evidence_records": len(tickets) + len(runbooks) + len(articles),
+            "evidence_records": len(tickets) + len(runbooks) + len(articles) + len(operational_decisions),
             "patterns": len(signals),
             "knowledge_gaps": sum(1 for item in signals if item["knowledge_gap"]),
             "expertise_profiles": len(expertise),
             "recommendations": len(recommendations),
+            "operational_decisions": len(operational_decisions),
         },
         "coverage": _coverage(tickets, len(articles), len(runbooks)),
         "signals": signals,
@@ -394,6 +396,7 @@ async def second_brain_overview(current_user: dict = Depends(get_current_user)):
             "tickets": len(tickets),
             "runbooks": len(runbooks),
             "knowledge_articles": len(articles),
+            "operational_decisions": len(operational_decisions),
         },
     }
 
@@ -406,12 +409,13 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
     if len(query) > 240:
         raise HTTPException(status_code=400, detail="Keep memory searches under 240 characters")
 
-    tickets, runbooks, articles, clients, audit = await asyncio.gather(
+    tickets, runbooks, articles, clients, audit, decisions = await asyncio.gather(
         db.tickets.find({}, {"_id": 0}).sort("updated_at", -1).to_list(600),
         db.runbooks.find({}, {"_id": 0}).sort("updated_at", -1).to_list(300),
         db.kb_articles.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500),
         db.clients.find({}, {"_id": 0}).sort("updated_at", -1).to_list(300),
         db.audit_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500),
+        db.context_relationships.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500),
     )
     source_records = [
         (
@@ -449,6 +453,13 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
             lambda item: item.get("action") or "Audit event",
             lambda item: "/audit-trail",
         ),
+        (
+            "decision",
+            decisions,
+            ("purpose", "decision_record", "business_process", "approval_evidence", "from_name", "to_name", "requested_by", "approved_by"),
+            lambda item: item.get("purpose") or "Operational decision",
+            lambda item: f"/clients?client={item.get('client_id')}",
+        ),
     ]
     results = []
     for source, records, fields, title_fn, route_fn in source_records:
@@ -458,10 +469,10 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
                 continue
             evidence_text = " ".join(_plain(item.get(field)) for field in fields)
             results.append({
-                "id": item.get("id") or item.get("slug") or _stable_id(source, title_fn(item), excerpt[:80]),
+                "id": item.get("id") or item.get("slug") or _stable_id(source, title_fn(item), evidence_text[:80]),
                 "source": source,
                 "title": title_fn(item),
-                "subtitle": item.get("client_name") or item.get("category") or item.get("target_name") or "",
+                "subtitle": item.get("client_name") or item.get("business_process") or item.get("category") or item.get("target_name") or "",
                 "excerpt": _excerpt(evidence_text),
                 "matched_terms": matched,
                 "score": score,

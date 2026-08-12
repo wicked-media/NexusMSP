@@ -15,10 +15,12 @@ import {
   Focus,
   Sparkles,
   TimerReset,
+  Wand2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { calculateQuickExpression, formatQuickTimer } from "@/lib/nexusQuickTools";
@@ -90,6 +92,7 @@ export default function NexusQuickDock() {
   const [elapsed, setElapsed] = useState(() => timerState.accumulated + (timerState.startedAt ? Math.floor((Date.now() - timerState.startedAt) / 1000) : 0));
   const [calculation, setCalculation] = useState("");
   const [calculationResult, setCalculationResult] = useState("");
+  const [magicPrompt, setMagicPrompt] = useState("");
   const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
@@ -134,6 +137,34 @@ export default function NexusQuickDock() {
   }, [location.pathname]);
 
   const timerDisplay = useMemo(() => formatQuickTimer(elapsed), [elapsed]);
+  const magicPlans = useMemo(() => {
+    const path = location.pathname;
+    if (path.startsWith("/tickets")) return [
+      { label: "Do the boring stuff", detail: "Prepare time, notes, customer update and next actions", route: "/work-session", tone: "cyan" },
+      { label: "Why is this weird?", detail: "Compare evidence and investigate the unusual condition", route: "/diagnostics", tone: "violet" },
+      { label: "Never let this happen again", detail: "Turn a repeated issue into a prevention plan", route: "/blueprints?tab=patterns", tone: "emerald" },
+    ];
+    if (path.startsWith("/devices")) return [
+      { label: "Give it a check-up", detail: "Open governed device diagnostics", route: "/diagnostics", tone: "cyan" },
+      { label: "Find its twin", detail: "Compare with healthy device evidence", route: "/devices?tab=insights", tone: "violet" },
+      { label: "What changed?", detail: "Review the retained change timeline", route: "/client-insights?tab=what-changed", tone: "amber" },
+    ];
+    if (path.startsWith("/clients")) return [
+      { label: "Make it standard", detail: "Review expected state and managed-service gaps", route: "/expected-state", tone: "emerald" },
+      { label: "Show me its DNA", detail: "Open relationships, health and operational history", route: "/client-insights", tone: "violet" },
+      { label: "What could blow up?", detail: "Review evidence-backed assurance gaps", route: "/expected-state", tone: "amber" },
+    ];
+    if (path.includes("billing") || path.includes("invoice") || path.includes("purchase-order")) return [
+      { label: "Find vampire costs", detail: "Open leakage and reconciliation evidence", route: "/billing-recon", tone: "rose" },
+      { label: "Where are we bleeding money?", detail: "Review commercial exposure and missed billing", route: "/billing-dashboard", tone: "amber" },
+      { label: "Make this beautiful", detail: "Create a polished, evidence-backed report", route: "/reports", tone: "cyan" },
+    ];
+    return [
+      { label: "Fix this", detail: "Start from the evidence gaps needing attention", route: "/expected-state", tone: "cyan" },
+      { label: "Yesterday / now / tomorrow", detail: "Review changes, present evidence and upcoming risk", route: "/client-insights?tab=what-changed", tone: "violet" },
+      { label: "Make this faster", detail: "Find repeatable work worth standardising", route: "/blueprints?tab=patterns", tone: "emerald" },
+    ];
+  }, [location.pathname]);
 
   const startTimer = () => {
     const start = Date.now();
@@ -264,6 +295,7 @@ export default function NexusQuickDock() {
                   <QuickAction icon={Code2} label="Scripts" detail="Open technician library" onClick={() => go("/scripting")} testId="quick-dock-scripts" />
                   <QuickAction icon={TimerReset} label="Time tracking" detail="Create audited entry" onClick={() => go("/time-tracking")} testId="quick-dock-time-tracking" />
                   <QuickAction icon={Focus} label="Focus mode" detail="Hide navigation noise" onClick={enterFocusMode} testId="quick-dock-focus-mode" />
+                  <QuickAction icon={Wand2} label="Magic Wand" detail="Improve this workspace" onClick={() => setTool("magic")} testId="quick-dock-magic-wand" />
                 </div>
                 <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
                   Quick tools never silently alter a client record. Actions that require scope, approval or audit open their full Nexus workflow.
@@ -336,6 +368,24 @@ export default function NexusQuickDock() {
                     </div>
                   </div>
                 </form>
+              </section>
+            )}
+
+            {tool === "magic" && (
+              <section aria-label="Nexus Magic Wand" className="overflow-hidden rounded-2xl border border-violet-400/25 bg-[radial-gradient(circle_at_82%_0%,rgba(168,85,247,0.16),transparent_42%),radial-gradient(circle_at_0%_100%,rgba(34,211,238,0.1),transparent_38%),rgba(10,15,26,0.56)] p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-300/30 bg-violet-500/15 text-violet-200 shadow-[0_0_28px_rgba(139,92,246,0.22)]"><Wand2 className="h-5 w-5" /></span>
+                  <div><p className="text-sm font-semibold">Nexus Magic Wand</p><p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">Choose an evidence-backed improvement path for this workspace. Nexus opens a preview or review flow; it never silently changes a customer.</p></div>
+                </div>
+                <div className="mt-4 rounded-xl border border-white/[0.08] bg-black/15 p-3">
+                  <Label htmlFor="nexus-magic-intent" className="text-[10px] uppercase tracking-[0.16em] text-violet-200">What would you like improved here?</Label>
+                  <Input id="nexus-magic-intent" value={magicPrompt} onChange={(event) => setMagicPrompt(event.target.value)} className="mt-2 h-10 border-violet-400/20 bg-background/60" placeholder="e.g. Stop this from happening again" />
+                  {magicPrompt.trim() && <p className="mt-2 text-[11px] text-muted-foreground">Your note stays in this browser until you choose a governed workflow below.</p>}
+                </div>
+                <div className="mt-3 space-y-2">
+                  {magicPlans.map((plan) => <button key={plan.label} type="button" onClick={() => go(plan.route)} className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-background/45 p-3 text-left transition hover:-translate-y-0.5 hover:border-violet-400/35 hover:bg-violet-500/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-300"><span className={`h-2.5 w-2.5 rounded-full ${plan.tone === "cyan" ? "bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.8)]" : plan.tone === "emerald" ? "bg-emerald-300 shadow-[0_0_16px_rgba(110,231,183,0.8)]" : plan.tone === "amber" ? "bg-amber-300 shadow-[0_0_16px_rgba(252,211,77,0.8)]" : plan.tone === "rose" ? "bg-rose-300 shadow-[0_0_16px_rgba(253,164,175,0.8)]" : "bg-violet-300 shadow-[0_0_16px_rgba(196,181,253,0.8)]"}`} /><span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-foreground">{plan.label}</span><span className="mt-0.5 block text-[10px] text-muted-foreground">{plan.detail}</span></span><Sparkles className="h-4 w-4 text-violet-300 transition group-hover:scale-110" /></button>)}
+                </div>
+                <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">Magic Wand routes into existing Nexus controls. Preview, simulation, approval and audit remain mandatory where the workflow requires them.</p>
               </section>
             )}
           </div>

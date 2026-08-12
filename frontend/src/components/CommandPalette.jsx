@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { API, useAuth } from "@/App";
+import { useClientContext } from "@/contexts/ClientContext";
 import { navGroups } from "@/config/navigation";
 import { toast } from "sonner";
 import {
@@ -110,6 +111,7 @@ function paletteIcon(item) {
 
 export default function CommandPalette() {
   const { token } = useAuth();
+  const { activeClient, activeClientId } = useClientContext() || {};
   const navigate = useNavigate();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [open, setOpen] = useState(false);
@@ -173,7 +175,7 @@ export default function CommandPalette() {
       try {
         const response = await axios.get(`${API}/command-palette/search`, {
           headers,
-          params: { q: q.trim() },
+          params: { q: q.trim(), ...(activeClientId ? { client_id: activeClientId } : {}) },
         });
         setSearch({ ...EMPTY_SEARCH, ...(response.data || {}) });
       } catch {
@@ -183,7 +185,7 @@ export default function CommandPalette() {
       }
     }, 180);
     return () => clearTimeout(debounceRef.current);
-  }, [q, token, open, headers]);
+  }, [q, token, open, headers, activeClientId]);
 
   const sections = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -372,7 +374,7 @@ export default function CommandPalette() {
       return;
     }
     if (item.kind === "ticket") navigate(`/tickets?ticket=${encodeURIComponent(item.ticket_number || item.id)}`);
-    if (item.kind === "client") navigate(`/clients?id=${item.id}`);
+    if (item.kind === "client") navigate(`/clients?client=${encodeURIComponent(item.id)}`);
     if (item.kind === "device") navigate(`/devices/${item.id}`);
     if (item.kind === "user") navigate("/team-hub?view=directory");
     if (item.kind === "invoice") navigate(`/invoices?invoice=${encodeURIComponent(item.id)}`);
@@ -435,7 +437,7 @@ export default function CommandPalette() {
               </span>
               <div>
                 <p className="text-xs font-semibold text-foreground">Nexus Command</p>
-                <p className="text-[10px] text-muted-foreground">Search every connected Nexus record or describe an operational outcome</p>
+                <p className="text-[10px] text-muted-foreground">{activeClient ? `Prioritising ${activeClient.name}` : "Search every connected Nexus record or describe an operational outcome"}</p>
               </div>
             </div>
             <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/[0.07] text-[9px] text-emerald-700 dark:text-emerald-200">

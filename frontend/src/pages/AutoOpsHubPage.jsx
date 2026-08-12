@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { BrainCircuit, Loader2, Inbox, RefreshCw, Route, Sparkles, Wrench, Workflow, Activity, Bot, CircleHelp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PageShell } from "@/components/design-system";
 
 const TABS = [
   { id: "autopilot", label: "Autopilot", description: "Permission-based autonomy with explicit guardrails", icon: Bot, page: () => import("./AutopilotPage") },
@@ -16,24 +17,28 @@ const TABS = [
 const lazyMap = Object.fromEntries(TABS.map(t => [t.id, lazy(t.page)]));
 
 export default function AutoOpsHubPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(() => {
-    const requestedTab = new URLSearchParams(window.location.search).get("tab");
     return TABS.some(tab => tab.id === requestedTab) ? requestedTab : "autopilot";
   });
   const [workspaceVersion, setWorkspaceVersion] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", activeTab);
-    window.history.replaceState({}, "", url);
-  }, [activeTab]);
+    if (TABS.some(tab => tab.id === requestedTab) && requestedTab !== activeTab) setActiveTab(requestedTab);
+  }, [requestedTab, activeTab]);
+
+  const selectTab = (nextTab) => {
+    setActiveTab(nextTab);
+    setSearchParams(nextTab === "autopilot" ? {} : { tab: nextTab }, { replace: true });
+  };
 
   const Active = lazyMap[activeTab];
 
   return (
-    <div className="space-y-5 p-6" data-testid="auto-ops-hub">
-      <section className="overflow-hidden rounded-2xl border border-border/70 bg-card/80 shadow-[0_18px_55px_rgba(0,0,0,0.12)]" data-testid="auto-ops-header">
+    <PageShell className="nx-page-stage space-y-5 p-6" data-testid="auto-ops-hub">
+      <section className="nx-ambient-surface overflow-hidden rounded-2xl border border-border/70 bg-card/80 shadow-[0_18px_55px_rgba(0,0,0,0.12)]" data-nx-signal={["ai-resolution", "self-healing"].includes(activeTab) ? "working" : "recommendation"} data-testid="auto-ops-header">
         <div className="flex flex-col gap-4 border-b border-border/60 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400">AI intelligence</p>
@@ -50,14 +55,14 @@ export default function AutoOpsHubPage() {
             <Button size="sm" variant="outline" onClick={() => navigate("/automation-hub")} data-testid="auto-ops-workflows"><Workflow className="mr-1.5 h-3.5 w-3.5" />Automation</Button>
           </div>
         </div>
-        <nav className="flex items-center gap-1 overflow-x-auto px-3 py-2" aria-label="AI Operations modules">
+        <nav className="grid grid-cols-2 gap-1 border-t border-border/60 p-2 sm:grid-cols-3 2xl:grid-cols-6" aria-label="AI Operations modules">
           {TABS.map(tab => {
             const Icon = tab.icon;
             const selected = activeTab === tab.id;
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} data-testid={`auto-ops-tab-${tab.id}`} aria-current={selected ? "page" : undefined}
-                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium transition ${selected ? "bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/25 dark:text-violet-200" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}>
-                <Icon className="h-3.5 w-3.5" />{tab.label}
+              <button key={tab.id} onClick={() => selectTab(tab.id)} data-testid={`auto-ops-tab-${tab.id}`} aria-current={selected ? "page" : undefined}
+                className={`inline-flex h-10 min-w-0 items-center justify-center gap-2 rounded-lg px-2.5 text-xs font-medium transition ${selected ? "bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/25 dark:text-violet-200" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}>
+                <Icon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{tab.label}</span>
               </button>
             );
           })}
@@ -66,6 +71,6 @@ export default function AutoOpsHubPage() {
       <Suspense fallback={<div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading workspace...</div>}>
         <Active key={`${activeTab}-${workspaceVersion}`} embedded />
       </Suspense>
-    </div>
+    </PageShell>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, createContext, useContext, Suspense } from "react";
+import { useCallback, useEffect, useState, createContext, useContext, Suspense } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import axios from "axios";
@@ -15,8 +15,12 @@ import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
 import CommandPalette from "@/components/CommandPalette";
 import NexusQuickDock from "@/components/NexusQuickDock";
+import NexusObjectDock from "@/components/NexusObjectDock";
+import NexusPrivacyCurtain from "@/components/NexusPrivacyCurtain";
 import UniversalInspector from "@/components/UniversalInspector";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
+import { ClientContextProvider } from "@/contexts/ClientContext";
+import ClientContextBar from "@/components/ClientContextBar";
 import { Menu } from "lucide-react";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
@@ -138,6 +142,14 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(secureStorage.getItem("nexusops_token"));
   const [loading, setLoading] = useState(true);
+  const [authServiceUnavailable, setAuthServiceUnavailable] = useState(false);
+
+  const clearSession = useCallback(() => {
+    secureStorage.removeItem("nexusops_token");
+    setToken(null);
+    setUser(null);
+    setAuthServiceUnavailable(false);
+  }, []);
 
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
@@ -147,33 +159,47 @@ export const AuthProvider = ({ children }) => {
         // so every protected page returns to sign-in instead of showing a
         // misleading module-specific loading error.
         if (error.response?.status === 401) {
-          secureStorage.removeItem("nexusops_token");
-          setToken(null);
-          setUser(null);
+          clearSession();
         }
         return Promise.reject(error);
       }
     );
     return () => axios.interceptors.response.eject(interceptor);
-  }, []);
+  }, [clearSession]);
+
+  const hydrateSession = useCallback(async () => {
+    if (!token) {
+      setUser(null);
+      setAuthServiceUnavailable(false);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setUser(response.data);
+      setAuthServiceUnavailable(false);
+    } catch (error) {
+      const status = error.response?.status;
+      // A server restart, network interruption, or a 5xx response must not
+      // silently sign a technician out. Only an explicitly invalid session
+      // should remove the saved token.
+      if (status === 401 || status === 403) {
+        clearSession();
+      } else {
+        setAuthServiceUnavailable(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [clearSession, token]);
 
   useEffect(() => {
-    const initAuth = async () => {
-      if (token) {
-        try {
-          const response = await axios.get(`${API}/auth/me`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          setUser(response.data);
-        } catch (error) {
-          secureStorage.removeItem("nexusops_token");
-          setToken(null);
-        }
-      }
-      setLoading(false);
-    };
-    initAuth();
-  }, [token]);
+    hydrateSession();
+  }, [hydrateSession]);
 
   const login = async (email, password, twoFactorCode = "") => {
     try {
@@ -183,6 +209,7 @@ export const AuthProvider = ({ children }) => {
       secureStorage.setItem("nexusops_token", newToken);
       setToken(newToken);
       setUser(userData);
+      setAuthServiceUnavailable(false);
       toast.success("Welcome back!");
       return { success: true };
     } catch (error) {
@@ -199,6 +226,7 @@ export const AuthProvider = ({ children }) => {
       secureStorage.setItem("nexusops_token", newToken);
       setToken(newToken);
       setUser(userData);
+      setAuthServiceUnavailable(false);
       toast.success("Account created successfully!");
       return true;
     } catch (error) {
@@ -215,11 +243,15 @@ export const AuthProvider = ({ children }) => {
         headers: { Authorization: `Bearer ${newToken}` }
       });
       setUser(response.data);
+      setAuthServiceUnavailable(false);
       return true;
-    } catch {
-      secureStorage.removeItem("nexusops_token");
-      setToken(null);
-      throw new Error("Invalid token");
+    } catch (error) {
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        clearSession();
+        throw new Error("Invalid token");
+      }
+      setAuthServiceUnavailable(true);
+      throw new Error("Nexus authentication service is temporarily unavailable");
     }
   };
 
@@ -233,14 +265,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    secureStorage.removeItem("nexusops_token");
-    setToken(null);
-    setUser(null);
+    clearSession();
     toast.success("Logged out successfully");
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, loginWithToken, register, logout, refreshUser, loading }}>
+    <AuthContext.Provider value={{ user, token, login, loginWithToken, register, logout, refreshUser, loading, authServiceUnavailable, retrySession: hydrateSession }}>
       {children}
     </AuthContext.Provider>
   );
@@ -248,13 +278,34 @@ export const AuthProvider = ({ children }) => {
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, token, loading, authServiceUnavailable, retrySession } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (token && !user && authServiceUnavailable) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <section className="w-full max-w-md rounded-2xl border border-border bg-card p-7 text-center shadow-2xl">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Session preserved</p>
+          <h1 className="mt-3 text-xl font-semibold text-foreground">Nexus is reconnecting</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Your sign-in is still saved. The authentication service is temporarily unavailable, so we have not signed you out.
+          </p>
+          <button
+            type="button"
+            onClick={retrySession}
+            className="mt-6 inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          >
+            Retry connection
+          </button>
+        </section>
       </div>
     );
   }
@@ -341,6 +392,7 @@ const MainLayout = ({ children }) => {
       )}
       <main className={`min-w-0 flex-1 transition-all duration-300 ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
         <div className={`${focusMode ? 'p-4 md:p-8' : 'px-4 pb-24 pt-20 md:p-8'}`}>
+          {!focusMode && <ClientContextBar />}
           <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""}`}>
             {children}
           </div>
@@ -395,6 +447,7 @@ function App() {
   return (
     <ThemeProvider>
     <AuthProvider>
+      <ClientContextGate>
       <NavCountsProvider>
       <BrowserRouter>
         <GlobalAddons />
@@ -411,6 +464,7 @@ function App() {
         </Routes>
       </BrowserRouter>
       </NavCountsProvider>
+      </ClientContextGate>
       <Toaster />
     </AuthProvider>
     </ThemeProvider>
@@ -423,6 +477,11 @@ function GlobalAddons() {
   return <AuthedAddons token={token} />;
 }
 
+function ClientContextGate({ children }) {
+  const { token } = useAuth();
+  return <ClientContextProvider api={API} token={token}>{children}</ClientContextProvider>;
+}
+
 function AuthedAddons({ token }) {
   usePresenceHeartbeat();
   return (
@@ -432,6 +491,8 @@ function AuthedAddons({ token }) {
       <ShortcutPalette />
       <CommandPalette />
       <NexusQuickDock />
+      <NexusObjectDock />
+      <NexusPrivacyCurtain />
       <UniversalInspector token={token} />
     </>
   );

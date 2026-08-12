@@ -284,6 +284,19 @@ def normalise_readiness_payload(payload: dict[str, Any], *, partial: bool = Fals
         if result not in TEST_RESULTS:
             raise ValueError("Select a valid test result")
         data["test_result"] = result
+
+    # A launch control must never show a green status against failed or missing
+    # test evidence.  The UI deliberately shows status and test outcome side by
+    # side, so reject contradictory combinations at the service boundary too.
+    # Partial updates are validated against the existing record by the router.
+    # Validate here only when both sides of the relationship are present.
+    if not partial or {"status", "test_result"}.issubset(data):
+        effective_status = data.get("status")
+        effective_result = data.get("test_result")
+        if effective_status == "passed" and effective_result not in {"pass", "not_applicable"}:
+            raise ValueError("A passed readiness control requires a passing or not-applicable test result")
+        if effective_status == "not_applicable" and effective_result not in {"not_applicable", None}:
+            raise ValueError("A not-applicable readiness control requires a not-applicable test result")
     for field in ("evidence_required", "target_release", "review_note", "evidence_reference"):
         if field in data:
             data[field] = str(data.get(field) or "").strip()[:2000]

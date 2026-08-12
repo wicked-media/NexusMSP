@@ -15,6 +15,7 @@ from app.auth import get_current_user
 from app.database import db
 from app.services.activity import log_activity
 from app.services.nexus_xdr import build_xdr_overview
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 router = APIRouter()
 
@@ -178,6 +179,39 @@ def _xdr_response_item(incident: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _mail_shield_alerts(signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalise persisted Mail Shield evidence into the XDR event contract.
+
+    The authoritative Mail Shield record remains intact; XDR receives a read
+    model only, so a case cannot overwrite mail triage history.
+    """
+    return [{
+        "id": signal.get("id"),
+        "client_id": signal.get("client_id"),
+        "client_name": signal.get("client_name"),
+        "category": "email",
+        "source": "Nexus Mail Shield",
+        "title": signal.get("title"),
+        "summary": signal.get("summary"),
+        "severity": signal.get("severity"),
+        "status": signal.get("status"),
+        "user_email": signal.get("recipient") or signal.get("mailbox"),
+        "created_at": signal.get("observed_at") or signal.get("created_at"),
+        "evidence_route": "/mail-shield",
+    } for signal in signals]
+
+
+def _dmarc_alerts(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expose meaningful unauthorised-sender evidence to XDR without mutating DMARC history."""
+    return [{
+        "id": f"xdr-dmarc-{report.get('id')}", "client_id": report.get("client_id"),
+        "category": "email", "source": "Nexus DMARC", "title": f"Unauthorised sending observed for {report.get('domain')}",
+        "summary": f"{int(report.get('unauthorized_count') or 0)} unauthorised message(s) in a DMARC aggregate report.",
+        "severity": "high" if int(report.get("unauthorized_count") or 0) >= 25 else "medium",
+        "status": "new", "created_at": report.get("received_at"), "evidence_route": "/dmarc-compliance",
+    } for report in reports if int(report.get("unauthorized_count") or 0) > 0]
+
+
 @router.get("/nexus-shield/overview")
 async def get_nexus_shield_overview(current_user: dict = Depends(get_current_user)):
     devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
@@ -204,11 +238,14 @@ async def get_nexus_shield_overview(current_user: dict = Depends(get_current_use
                 risk["severity"] = policy.get("severity") or risk.get("severity")
                 risk_queue.append(risk)
     verified_sources = ["m365_graph", "m365_partner_center"]
+    security_alerts = await db.security_alerts.find({}, {"_id": 0}).to_list(5000)
+    mail_signals = await db.nexus_mail_shield_signals.find({}, {"_id": 0}).to_list(5000)
+    dmarc_reports = await db.nexus_dmarc_reports.find({}, {"_id": 0}).to_list(5000)
     xdr = build_xdr_overview(
         devices=devices,
         m365_users=await db.m365_users.find({"source": {"$in": verified_sources}}, {"_id": 0}).to_list(10000),
         m365_tenants=await db.m365_tenants.find({"source": {"$in": verified_sources}}, {"_id": 0}).to_list(2000),
-        security_alerts=await db.security_alerts.find({}, {"_id": 0}).to_list(5000),
+        security_alerts=[*security_alerts, *_mail_shield_alerts(mail_signals), *_dmarc_alerts(dmarc_reports)],
         identity_threats=await db.identity_threats.find({}, {"_id": 0}).to_list(5000),
         dns_domains=await db.dns_domains.find({}, {"_id": 0}).to_list(5000),
         dns_alerts=await db.dns_alerts.find({}, {"_id": 0}).to_list(5000),
@@ -285,11 +322,14 @@ async def _build_xdr_assessment(client_id: str = "") -> dict[str, Any]:
 
     verified_sources = ["m365_graph", "m365_partner_center"]
     trusted_vulnerability_sources = ["agent", "huntress", "defender", "vulnerability-provider"]
+    security_alerts = await db.security_alerts.find(scoped(), {"_id": 0}).to_list(5000)
+    mail_signals = await db.nexus_mail_shield_signals.find(scoped(), {"_id": 0}).to_list(5000)
+    dmarc_reports = await db.nexus_dmarc_reports.find(scoped(), {"_id": 0}).to_list(5000)
     xdr = build_xdr_overview(
         devices=await db.devices.find(scoped(), {"_id": 0}).to_list(10000),
         m365_users=await db.m365_users.find(scoped({"source": {"$in": verified_sources}}), {"_id": 0}).to_list(10000),
         m365_tenants=await db.m365_tenants.find(scoped({"source": {"$in": verified_sources}}), {"_id": 0}).to_list(2000),
-        security_alerts=await db.security_alerts.find(scoped(), {"_id": 0}).to_list(5000),
+        security_alerts=[*security_alerts, *_mail_shield_alerts(mail_signals), *_dmarc_alerts(dmarc_reports)],
         identity_threats=await db.identity_threats.find(scoped(), {"_id": 0}).to_list(5000),
         dns_domains=await db.dns_domains.find(scoped(), {"_id": 0}).to_list(5000),
         dns_alerts=await db.dns_alerts.find(scoped(), {"_id": 0}).to_list(5000),
@@ -318,9 +358,187 @@ async def list_nexus_shield_xdr_cases(
     client_id: str = Query(default=""),
     current_user: dict = Depends(get_current_user),
 ):
-    query = {"client_id": client_id} if client_id else {}
+    if client_id:
+        await assert_client_scope(current_user, client_id, operation="list_nexus_shield_xdr_cases")
+    query = scoped_query(current_user, {"client_id": client_id} if client_id else {})
     cases = await db.nexus_shield_xdr_cases.find(query, {"_id": 0}).sort("updated_at", -1).to_list(1000)
     return {"cases": cases}
+
+
+@router.get("/nexus-shield/xdr/missions")
+async def list_nexus_shield_xdr_missions(
+    client_id: str = Query(default=""),
+    current_user: dict = Depends(get_current_user),
+):
+    if client_id:
+        await assert_client_scope(current_user, client_id, operation="list_nexus_shield_xdr_missions")
+    query = scoped_query(current_user, {"client_id": client_id} if client_id else {})
+    missions = await db.nexus_shield_security_missions.find(query, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    return {"missions": missions}
+
+
+@router.post("/nexus-shield/xdr/missions")
+async def activate_nexus_shield_xdr_mission(
+    data: dict[str, Any],
+    current_user: dict = Depends(get_current_user),
+):
+    mission_id = str(data.get("mission_id") or "").strip()
+    client_id = str(data.get("client_id") or "").strip()
+    reason = str(data.get("reason") or "").strip()
+    if not mission_id or not reason:
+        raise HTTPException(status_code=422, detail="Choose a current security mission and record the operational reason")
+    await assert_client_scope(current_user, client_id or None, operation="activate_nexus_shield_xdr_mission")
+
+    assessment = await _build_xdr_assessment(client_id)
+    observed = next((item for item in assessment.get("missions", []) if item.get("id") == mission_id), None)
+    if not observed:
+        raise HTTPException(status_code=409, detail="This security mission is no longer supported by the current evidence. Refresh the assessment before activating it.")
+
+    existing = await db.nexus_shield_security_missions.find_one({
+        "mission_id": mission_id,
+        "client_id": client_id,
+        "status": {"$nin": ["completed", "cancelled"]},
+    }, {"_id": 0})
+    if existing:
+        return {"message": "An active Security Mission already exists", "mission": existing, "existing": True}
+
+    now = _now()
+    owner_id = str(current_user.get("id") or "")
+    owner_name = str(current_user.get("name") or current_user.get("email") or "Authenticated technician")
+    record = {
+        "id": f"shield-mission-{uuid.uuid4().hex[:12]}",
+        "mission_id": mission_id,
+        "title": observed.get("title"),
+        "detail": observed.get("detail"),
+        "impact": observed.get("impact"),
+        "severity": observed.get("severity"),
+        "route": observed.get("route"),
+        "response_pack": observed.get("response_pack") or [],
+        "client_id": client_id,
+        "client_name": assessment.get("filters", {}).get("selected_client_name") or "All managed clients",
+        "status": "planned",
+        "owner_id": owner_id,
+        "owner_name": owner_name,
+        "opened_at": now,
+        "updated_at": now,
+        "events": [{
+            "type": "mission_activated",
+            "status": "planned",
+            "note": reason,
+            "technician_id": owner_id,
+            "technician_name": owner_name,
+            "at": now,
+        }],
+    }
+    await db.nexus_shield_security_missions.insert_one(record.copy())
+    await log_activity(current_user, "shield_security_mission_activated", "nexus_shield_security_mission", record["id"], record["title"] or "Security Mission", f"Activated Security Mission for {record['client_name']}", metadata={"mission_id": mission_id, "client_id": client_id, "external_changes": False})
+    record.pop("_id", None)
+    return {"message": "Security Mission activated and recorded", "mission": record, "existing": False}
+
+
+@router.patch("/nexus-shield/xdr/missions/{mission_record_id}")
+async def update_nexus_shield_xdr_mission(
+    mission_record_id: str,
+    data: dict[str, Any],
+    current_user: dict = Depends(get_current_user),
+):
+    existing = await db.nexus_shield_security_missions.find_one({"id": mission_record_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Security Mission not found")
+    await assert_client_scope(current_user, existing.get("client_id") or None, operation="update_nexus_shield_xdr_mission")
+
+    status = str(data.get("status") or existing.get("status") or "planned").strip().lower()
+    allowed = {"planned", "in_progress", "blocked", "completed", "cancelled"}
+    if status not in allowed:
+        raise HTTPException(status_code=422, detail="Choose a valid Security Mission status")
+    note = str(data.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=422, detail="Record an outcome note before updating the mission")
+
+    now = _now()
+    technician_id = str(current_user.get("id") or "")
+    technician_name = str(current_user.get("name") or current_user.get("email") or "Authenticated technician")
+    event = {
+        "type": "status_updated" if status != existing.get("status") else "mission_note",
+        "from_status": existing.get("status"),
+        "status": status,
+        "note": note,
+        "technician_id": technician_id,
+        "technician_name": technician_name,
+        "at": now,
+    }
+    update = {"status": status, "updated_at": now}
+    if status in {"completed", "cancelled"}:
+        update.update({"closed_at": now, "closed_by": technician_name})
+    await db.nexus_shield_security_missions.update_one({"id": mission_record_id}, {"$set": update, "$push": {"events": event}})
+    await log_activity(current_user, "shield_security_mission_updated", "nexus_shield_security_mission", mission_record_id, existing.get("title") or "Security Mission", f"Updated Security Mission from {existing.get('status')} to {status}", metadata={"status": status, "previous_status": existing.get("status"), "client_id": existing.get("client_id"), "external_changes": False})
+    updated = await db.nexus_shield_security_missions.find_one({"id": mission_record_id}, {"_id": 0})
+    return {"message": "Security Mission updated", "mission": updated}
+
+
+@router.post("/nexus-shield/xdr/missions/{mission_record_id}/ticket")
+async def create_nexus_shield_mission_ticket(
+    mission_record_id: str,
+    data: dict[str, Any],
+    current_user: dict = Depends(get_current_user),
+):
+    mission = await db.nexus_shield_security_missions.find_one({"id": mission_record_id}, {"_id": 0})
+    if not mission:
+        raise HTTPException(status_code=404, detail="Security Mission not found")
+    await assert_client_scope(current_user, mission.get("client_id") or None, operation="create_nexus_shield_mission_ticket")
+    if not mission.get("client_id"):
+        raise HTTPException(status_code=422, detail="Choose a client before creating a remediation ticket from an MSP-wide mission")
+    if mission.get("ticket_id"):
+        ticket = await db.tickets.find_one({"id": mission["ticket_id"]}, {"_id": 0, "id": 1, "ticket_number": 1})
+        if ticket:
+            return {"message": "A remediation ticket is already linked", "ticket": ticket, "existing": True}
+
+    from app.routers.ticket_suggestions import generate_ticket_number
+
+    now = _now()
+    ticket_id = f"shield-ticket-{uuid.uuid4().hex[:12]}"
+    ticket_number = await generate_ticket_number("incident")
+    pack = mission.get("response_pack") or []
+    description = "\n".join([
+        f"Nexus Security Mission: {mission.get('title') or 'Security resilience work'}",
+        mission.get("detail") or "",
+        "",
+        "Controlled response pack:",
+        *[f"- {step}" for step in pack],
+        "",
+        f"Mission record: {mission.get('id')}",
+    ]).strip()
+    ticket = {
+        "id": ticket_id,
+        "ticket_number": ticket_number,
+        "title": f"[Shield Mission] {mission.get('title') or 'Security resilience work'}",
+        "description": description,
+        "client_id": mission["client_id"],
+        "client_name": mission.get("client_name"),
+        "status": "open",
+        "priority": mission.get("severity") if mission.get("severity") in {"critical", "high", "medium", "low"} else "high",
+        "category": "security",
+        "ticket_type": "incident",
+        "source": "nexus_shield_mission",
+        "nexus_shield_mission_id": mission["id"],
+        "created_at": now,
+        "updated_at": now,
+        "created_by": current_user.get("name") or current_user.get("email") or "Nexus Shield",
+    }
+    await db.tickets.insert_one(ticket.copy())
+    event = {
+        "type": "remediation_ticket_created",
+        "status": mission.get("status") or "planned",
+        "note": str(data.get("note") or f"Created linked remediation ticket {ticket_number}."),
+        "technician_id": str(current_user.get("id") or ""),
+        "technician_name": str(current_user.get("name") or current_user.get("email") or "Authenticated technician"),
+        "at": now,
+        "ticket_id": ticket_id,
+        "ticket_number": ticket_number,
+    }
+    await db.nexus_shield_security_missions.update_one({"id": mission_record_id}, {"$set": {"ticket_id": ticket_id, "ticket_number": ticket_number, "updated_at": now}, "$push": {"events": event}})
+    await log_activity(current_user, "shield_security_mission_ticket_created", "nexus_shield_security_mission", mission_record_id, mission.get("title") or "Security Mission", f"Created linked remediation ticket {ticket_number}", metadata={"ticket_id": ticket_id, "ticket_number": ticket_number, "client_id": mission.get("client_id"), "external_changes": False})
+    return {"message": "Linked remediation ticket created", "ticket": {"id": ticket_id, "ticket_number": ticket_number}, "existing": False}
 
 
 @router.post("/nexus-shield/xdr/cases")

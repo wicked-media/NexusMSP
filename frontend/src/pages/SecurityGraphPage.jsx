@@ -267,6 +267,7 @@ export default function SecurityGraphPage() {
   }, [data, search, severity]);
 
   const summary = data?.summary || {};
+  const graphSignal = (summary.critical || 0) > 0 ? "critical" : (summary.high || 0) > 0 ? "attention" : (summary.paths || 0) > 0 ? "healthy" : "recommendation";
   const hasActiveFilters = Boolean(
     search.trim() || clientId !== "all" || severity !== "all",
   );
@@ -277,13 +278,14 @@ export default function SecurityGraphPage() {
   };
 
   return (
-    <div className="space-y-6" data-testid="security-graph-page">
+    <div className="nx-page-stage space-y-6" data-testid="security-graph-page">
       <OperationalPageHeader
         eyebrow="Security workspace · relationship-aware exposure"
         title="Security Graph"
         description="Follow observed identity, endpoint, control, detection, and client relationships. Nexus shows only attributable paths and leaves missing connector evidence unknown."
         icon={GitBranch}
         tone="amber"
+        signal={graphSignal}
         actions={
           <>
             <Button variant="outline" size="sm" asChild>

@@ -3,8 +3,8 @@ import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,7 +18,7 @@ import { toast } from "sonner";
 import {
   Activity, AlertTriangle, Building2, CheckCircle2, Cloud, ExternalLink,
   FileCheck2, KeyRound, Link2, ListChecks, Loader2, Lock, Plus,
-  RefreshCw, Search, ShieldCheck, Sparkles, UserPlus, Users,
+  Mail, MonitorSmartphone, RefreshCw, Search, Share2, ShieldCheck, Sparkles, UserPlus, Users,
 } from "lucide-react";
 
 const severityClasses = {
@@ -118,8 +118,12 @@ export default function M365CommandCenter({ embedded = false, initialTab = "over
       {!hasEvidence && <EmptyEvidence action={<Button size="sm" onClick={() => setTab("connection")}><Lock className="mr-1.5 h-3.5 w-3.5" />Set up connection</Button>} />}
 
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/40 p-1 md:grid-cols-6">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 bg-muted/40 p-1">
           <TabsTrigger value="overview"><Cloud className="mr-1.5 h-3.5 w-3.5" />Tenants</TabsTrigger>
+          <TabsTrigger value="exchange"><Mail className="mr-1.5 h-3.5 w-3.5" />Exchange</TabsTrigger>
+          <TabsTrigger value="intune"><MonitorSmartphone className="mr-1.5 h-3.5 w-3.5" />Intune</TabsTrigger>
+          <TabsTrigger value="collaboration"><Share2 className="mr-1.5 h-3.5 w-3.5" />Collaboration</TabsTrigger>
+          <TabsTrigger value="licensing"><FileCheck2 className="mr-1.5 h-3.5 w-3.5" />Licensing</TabsTrigger>
           <TabsTrigger value="standards"><ListChecks className="mr-1.5 h-3.5 w-3.5" />Guardrails</TabsTrigger>
           <TabsTrigger value="gdap"><KeyRound className="mr-1.5 h-3.5 w-3.5" />GDAP</TabsTrigger>
           <TabsTrigger value="security"><ShieldCheck className="mr-1.5 h-3.5 w-3.5" />Security</TabsTrigger>
@@ -128,6 +132,10 @@ export default function M365CommandCenter({ embedded = false, initialTab = "over
         </TabsList>
 
         <TabsContent value="overview"><TenantsTab headers={headers} hasEvidence={hasEvidence} onSetup={() => setTab("connection")} /></TabsContent>
+        <TabsContent value="exchange"><ExchangePostureTab headers={headers} onSetup={() => setTab("connection")} /></TabsContent>
+        <TabsContent value="intune"><IntunePostureTab headers={headers} onSetup={() => setTab("connection")} /></TabsContent>
+        <TabsContent value="collaboration"><CollaborationPostureTab headers={headers} onSetup={() => setTab("connection")} /></TabsContent>
+        <TabsContent value="licensing"><LicensingPostureTab headers={headers} onSetup={() => setTab("connection")} /></TabsContent>
         <TabsContent value="standards"><StandardsTab headers={headers} /></TabsContent>
         <TabsContent value="gdap"><GdapTab headers={headers} /></TabsContent>
         <TabsContent value="security"><SecurityTab headers={headers} /></TabsContent>
@@ -186,12 +194,115 @@ function TenantsTab({ headers, hasEvidence, onSetup }) {
   );
 }
 
-function StandardsTab({ headers }) {
-  const [standards, setStandards] = useState([]);
+function ExchangePostureTab({ headers, onSetup }) {
+  const [posture, setPosture] = useState(null);
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true);
-    try { const response = await axios.get(`${API}/m365/standards`, { headers }); setStandards(response.data); }
+    try {
+      const response = await axios.get(`${API}/m365/exchange/posture`, { headers });
+      setPosture(response.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Exchange posture evidence could not be loaded");
+    } finally { setLoading(false); }
+  }, [headers]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !posture) return <div className="py-10 text-center text-sm text-muted-foreground">Loading Exchange evidence…</div>;
+  if (!posture?.telemetry_available) return <EmptyEvidence title="Exchange posture is waiting for verified evidence" description="Nexus needs a read-only Graph synchronisation for mailbox inventory, forwarding or inbox-rule evidence, and transport rules. A saved credential never becomes a pretend mail-security result." action={<Button size="sm" onClick={onSetup}><KeyRound className="mr-1.5 h-3.5 w-3.5" />Open Microsoft connection</Button>} />;
+  const summary = posture.summary || {};
+  return <div className="space-y-4" data-testid="m365-exchange-posture">
+    <Card className="border-sky-500/20 bg-sky-500/[0.035]"><CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between"><div className="flex gap-3"><Mail className="mt-0.5 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-200" /><div><p className="text-sm font-semibold">Exchange & mailbox governance</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Read-only Microsoft evidence is joined to the tenant and client record. Containment, deletion and forwarding changes remain governed actions—not one-click mailbox mutations.</p></div></div><Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh evidence</Button></CardContent></Card>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><HeroTile label="Mailboxes" value={summary.mailboxes ?? 0} icon={Mail} glow="sky" subtitle="Provider-recorded" /><HeroTile label="External forwarding" value={summary.external_forwards ?? 0} icon={AlertTriangle} glow={(summary.external_forwards || 0) ? "rose" : "emerald"} subtitle="Requires technician review" /><HeroTile label="Inbox rules" value={summary.mailbox_rules ?? 0} icon={ListChecks} glow="violet" subtitle="Observed rule evidence" /><HeroTile label="Transport rules" value={summary.transport_rules ?? 0} icon={Activity} glow="cyan" subtitle="Exchange mail flow" /><HeroTile label="Audit unknown" value={summary.audit_unknown ?? 0} icon={ShieldCheck} glow={(summary.audit_unknown || 0) ? "amber" : "emerald"} subtitle="Check provider evidence" /></div>
+    <Card className="overflow-hidden border-rose-500/20"><CardHeader className="border-b border-rose-500/15"><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-200" />Forwarding and mailbox-rule review</CardTitle><p className="mt-1 text-xs text-muted-foreground">Nexus flags evidence that needs validation. It does not assert malicious intent, disable a rule or alter delivery.</p></CardHeader><CardContent className="p-0">{(posture.attention || []).length === 0 ? <div className="p-6 text-center text-sm text-emerald-700 dark:text-emerald-100"><CheckCircle2 className="mx-auto mb-2 h-5 w-5" />No external-forwarding evidence is currently recorded in this scope.</div> : <Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Mailbox / subject</TableHead><TableHead>Destination or detail</TableHead><TableHead>Severity</TableHead><TableHead>Observed</TableHead></TableRow></TableHeader><TableBody>{posture.attention.map((item, index) => <TableRow key={`${item.id || item.subject}-${index}`}><TableCell><Badge variant="outline" className="capitalize">{String(item.kind || "evidence").replace("_", " ")}</Badge></TableCell><TableCell className="font-medium">{item.subject}</TableCell><TableCell className="max-w-[320px] truncate text-sm text-muted-foreground" title={item.detail}>{item.detail}</TableCell><TableCell><Badge variant="outline" className={severityClasses[item.severity] || severityClasses.medium}>{item.severity}</Badge></TableCell><TableCell className="text-xs text-muted-foreground">{item.observed_at ? new Date(item.observed_at).toLocaleString() : "Not supplied"}</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
+    <Card className="border-violet-500/15 bg-violet-500/[0.025]"><CardContent className="p-4"><p className="text-sm font-semibold">Safety boundary</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{posture.boundary}</p></CardContent></Card>
+  </div>;
+}
+
+function IntunePostureTab({ headers, onSetup }) {
+  const [posture, setPosture] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/m365/intune/posture`, { headers });
+      setPosture(response.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Intune posture evidence could not be loaded");
+    } finally { setLoading(false); }
+  }, [headers]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !posture) return <div className="py-10 text-center text-sm text-muted-foreground">Loading Intune evidence…</div>;
+  if (!posture?.telemetry_available) return <EmptyEvidence title="Intune compliance is waiting for verified evidence" description="Nexus needs a read-only Graph synchronisation for managed devices, compliance state and BitLocker or encryption posture. Nexus Agent and Intune remain separate source records until they are explicitly correlated." action={<Button size="sm" onClick={onSetup}><KeyRound className="mr-1.5 h-3.5 w-3.5" />Open Microsoft connection</Button>} />;
+  const summary = posture.summary || {};
+  return <div className="space-y-4" data-testid="m365-intune-posture">
+    <Card className="border-cyan-500/20 bg-cyan-500/[0.035]"><CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between"><div className="flex gap-3"><MonitorSmartphone className="mt-0.5 h-5 w-5 shrink-0 text-cyan-600 dark:text-cyan-200" /><div><p className="text-sm font-semibold">Intune & device compliance</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Microsoft compliance evidence remains distinct from Nexus Agent telemetry until identity correlation is verified. That avoids treating two similarly named devices as the same asset.</p></div></div><Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh evidence</Button></CardContent></Card>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><HeroTile label="Managed devices" value={summary.devices ?? 0} icon={MonitorSmartphone} glow="cyan" subtitle="Provider-recorded" /><HeroTile label="Compliant" value={summary.compliant ?? 0} icon={CheckCircle2} glow="emerald" subtitle="Current evidence only" /><HeroTile label="Needs attention" value={summary.needs_attention ?? 0} icon={AlertTriangle} glow={(summary.needs_attention || 0) ? "rose" : "emerald"} subtitle="Compliance evidence" /><HeroTile label="Encryption review" value={summary.encryption_review ?? 0} icon={ShieldCheck} glow={(summary.encryption_review || 0) ? "amber" : "emerald"} subtitle="Validate BitLocker posture" /><HeroTile label="Stale sync" value={summary.stale ?? 0} icon={Activity} glow={(summary.stale || 0) ? "amber" : "emerald"} subtitle="24+ hours or provider flag" /></div>
+    <Card className="overflow-hidden border-amber-500/20"><CardHeader className="border-b border-amber-500/15"><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-200" />Compliance review queue</CardTitle><p className="mt-1 text-xs text-muted-foreground">Review non-compliance before using an approved Intune or Nexus Agent remediation workflow.</p></CardHeader><CardContent className="p-0">{(posture.attention || []).length === 0 ? <div className="p-6 text-center text-sm text-emerald-700 dark:text-emerald-100"><CheckCircle2 className="mx-auto mb-2 h-5 w-5" />No non-compliant Intune device evidence is currently recorded.</div> : <Table><TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Primary user</TableHead><TableHead>Compliance</TableHead><TableHead>Encryption</TableHead><TableHead>Last evidence</TableHead></TableRow></TableHeader><TableBody>{posture.attention.map((item, index) => <TableRow key={`${item.id || item.device_name}-${index}`}><TableCell className="font-medium">{item.device_name}</TableCell><TableCell className="text-sm text-muted-foreground">{item.primary_user || "Not supplied"}</TableCell><TableCell><Badge variant="outline" className={String(item.compliance_state).toLowerCase() === "compliant" ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-200" : "border-amber-500/30 text-amber-700 dark:text-amber-200"}>{item.compliance_state}</Badge></TableCell><TableCell className="capitalize text-sm text-muted-foreground">{item.encryption_state}</TableCell><TableCell className="text-xs text-muted-foreground">{item.last_sync ? new Date(item.last_sync).toLocaleString() : "Not supplied"}</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
+    <Card className="border-violet-500/15 bg-violet-500/[0.025]"><CardContent className="p-4"><p className="text-sm font-semibold">Safety boundary</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{posture.boundary}</p></CardContent></Card>
+  </div>;
+}
+
+function CollaborationPostureTab({ headers, onSetup }) {
+  const [posture, setPosture] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/m365/collaboration/posture`, { headers });
+      setPosture(response.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Collaboration posture evidence could not be loaded");
+    } finally { setLoading(false); }
+  }, [headers]);
+  useEffect(() => { load(); }, [load]);
+
+  if (loading && !posture) return <div className="py-10 text-center text-sm text-muted-foreground">Loading collaboration evidence…</div>;
+  if (!posture?.telemetry_available) return <EmptyEvidence title="Collaboration governance is waiting for verified evidence" description="Nexus needs Graph synchronisation for SharePoint sites, Teams, guest access and Entra guest sign-in evidence. This view does not estimate sharing posture from a tenant connection." action={<Button size="sm" onClick={onSetup}><KeyRound className="mr-1.5 h-3.5 w-3.5" />Open Microsoft connection</Button>} />;
+  const summary = posture.summary || {};
+  return <div className="space-y-4" data-testid="m365-collaboration-posture">
+    <Card className="border-violet-500/20 bg-violet-500/[0.035]"><CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between"><div className="flex gap-3"><Share2 className="mt-0.5 h-5 w-5 shrink-0 text-violet-600 dark:text-violet-200" /><div><p className="text-sm font-semibold">Teams, SharePoint & guest governance</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Review collaboration exposure alongside the owning tenant, client, support history and future approval-gated changes.</p></div></div><Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh evidence</Button></CardContent></Card>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><HeroTile label="SharePoint sites" value={summary.sharepoint_sites ?? 0} icon={Cloud} glow="sky" subtitle="Provider-recorded" /><HeroTile label="Teams" value={summary.teams ?? 0} icon={Users} glow="violet" subtitle="Governed collaboration" /><HeroTile label="Guest users" value={summary.guest_users ?? 0} icon={Users} glow="cyan" subtitle="Entra evidence" /><HeroTile label="External sites" value={summary.external_sites ?? 0} icon={Share2} glow={(summary.external_sites || 0) ? "amber" : "emerald"} subtitle="Validate sharing need" /><HeroTile label="External teams" value={summary.external_teams ?? 0} icon={AlertTriangle} glow={(summary.external_teams || 0) ? "amber" : "emerald"} subtitle="Guest/external access" /><HeroTile label="Dormant guests" value={summary.dormant_guests ?? 0} icon={Activity} glow={(summary.dormant_guests || 0) ? "rose" : "emerald"} subtitle="90+ days or stale" /></div>
+    <Card className="overflow-hidden border-amber-500/20"><CardHeader className="border-b border-amber-500/15"><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-200" />Collaboration access review</CardTitle><p className="mt-1 text-xs text-muted-foreground">External sharing and dormant guests are review signals, not proof of a problem. Record a reason and approval before changing access.</p></CardHeader><CardContent className="p-0">{(posture.attention || []).length === 0 ? <div className="p-6 text-center text-sm text-emerald-700 dark:text-emerald-100"><CheckCircle2 className="mx-auto mb-2 h-5 w-5" />No external-sharing or dormant-guest evidence is currently recorded.</div> : <Table><TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Resource or identity</TableHead><TableHead>Evidence</TableHead><TableHead>Severity</TableHead><TableHead>Observed</TableHead></TableRow></TableHeader><TableBody>{posture.attention.map((item, index) => <TableRow key={`${item.id || item.subject}-${index}`}><TableCell><Badge variant="outline" className="capitalize">{String(item.kind || "evidence").replace("_", " ")}</Badge></TableCell><TableCell className="font-medium">{item.subject}</TableCell><TableCell className="max-w-[300px] truncate text-sm text-muted-foreground" title={item.detail}>{item.detail}</TableCell><TableCell><Badge variant="outline" className={severityClasses[item.severity] || severityClasses.medium}>{item.severity}</Badge></TableCell><TableCell className="text-xs text-muted-foreground">{item.observed_at ? new Date(item.observed_at).toLocaleString() : "Not supplied"}</TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
+    <Card className="border-violet-500/15 bg-violet-500/[0.025]"><CardContent className="p-4"><p className="text-sm font-semibold">Safety boundary</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{posture.boundary}</p></CardContent></Card>
+  </div>;
+}
+
+function LicensingPostureTab({ headers, onSetup }) {
+  const [posture, setPosture] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/m365/licensing/posture`, { headers });
+      setPosture(response.data);
+    } catch (error) { toast.error(error.response?.data?.detail || "Microsoft licence evidence could not be loaded"); }
+    finally { setLoading(false); }
+  }, [headers]);
+  useEffect(() => { load(); }, [load]);
+  if (loading && !posture) return <div className="py-10 text-center text-sm text-muted-foreground">Loading Microsoft licence evidence…</div>;
+  if (!posture?.telemetry_available) return <EmptyEvidence title="Microsoft licence posture is waiting for verified evidence" description="Nexus needs provider-recorded SKU inventory and user licence assignments before it can identify waste, stock pressure or a reconciliation opportunity. It will not estimate commercial exposure from a tenant connection." action={<Button size="sm" onClick={onSetup}><KeyRound className="mr-1.5 h-3.5 w-3.5" />Open Microsoft connection</Button>} />;
+  const summary = posture.summary || {};
+  return <div className="space-y-4" data-testid="m365-licensing-posture">
+    <Card className="border-emerald-500/20 bg-emerald-500/[0.035]"><CardContent className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between"><div className="flex gap-3"><FileCheck2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-200" /><div><p className="text-sm font-semibold">Microsoft licensing & revenue protection</p><p className="mt-1 text-xs leading-5 text-muted-foreground">See provider-recorded assignments first, then turn approved changes into a Nexus service and billing reconciliation. This avoids treating every unassigned seat as a billing error.</p></div></div><div className="flex gap-2"><Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</Button><Button size="sm" variant="outline" onClick={() => window.location.assign("/control-plane?module=microsoft365&view=actions&action=change-licences")}>Preview licence change</Button></div></CardContent></Card>
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><HeroTile label="Microsoft SKUs" value={summary.skus ?? 0} icon={FileCheck2} glow="cyan" subtitle="Provider-recorded" /><HeroTile label="Active users" value={summary.active_users ?? 0} icon={Users} glow="sky" subtitle="Identity evidence" /><HeroTile label="Unlicensed active" value={summary.unlicensed_active ?? 0} icon={AlertTriangle} glow={(summary.unlicensed_active || 0) ? "amber" : "emerald"} subtitle="Review entitlement" /><HeroTile label="Disabled + licensed" value={summary.disabled_licensed ?? 0} icon={KeyRound} glow={(summary.disabled_licensed || 0) ? "amber" : "emerald"} subtitle="Potential reclaim" /><HeroTile label="Low-stock SKUs" value={summary.low_stock_skus ?? 0} icon={Activity} glow={(summary.low_stock_skus || 0) ? "rose" : "emerald"} subtitle="Two or fewer seats" /></div>
+    <Card className="overflow-hidden border-amber-500/20"><CardHeader className="border-b border-amber-500/15"><CardTitle className="flex items-center gap-2 text-base"><AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-200" />Licensing review queue</CardTitle><p className="mt-1 text-xs text-muted-foreground">These are evidence-led review signals. A technician still validates customer intent, contract coverage and billing treatment before changing a licence.</p></CardHeader><CardContent className="p-0">{(posture.attention || []).length === 0 ? <div className="p-6 text-center text-sm text-emerald-700 dark:text-emerald-100"><CheckCircle2 className="mx-auto mb-2 h-5 w-5" />No licence-review evidence is currently recorded.</div> : <Table><TableHeader><TableRow><TableHead>Signal</TableHead><TableHead>Subject</TableHead><TableHead>Evidence</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader><TableBody>{posture.attention.map((item, index) => <TableRow key={`${item.id || item.subject}-${index}`}><TableCell><Badge variant="outline" className="capitalize">{String(item.kind || "evidence").replaceAll("_", " ")}</Badge></TableCell><TableCell className="font-medium">{item.subject}</TableCell><TableCell className="text-sm text-muted-foreground">{item.detail}</TableCell><TableCell><Badge variant="outline" className={severityClasses[item.severity] || severityClasses.medium}>{item.severity}</Badge></TableCell></TableRow>)}</TableBody></Table>}</CardContent></Card>
+    <Card className="border-violet-500/15 bg-violet-500/[0.025]"><CardContent className="p-4"><p className="text-sm font-semibold">Safety boundary</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{posture.boundary}</p></CardContent></Card>
+  </div>;
+}
+
+function StandardsTab({ headers }) {
+  const [standards, setStandards] = useState([]);
+  const [tenants, setTenants] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [planning, setPlanning] = useState(null);
+  const [planTenants, setPlanTenants] = useState([]);
+  const [planSchedule, setPlanSchedule] = useState("168");
+  const [savingPlan, setSavingPlan] = useState(false);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const [response, tenantsResponse] = await Promise.all([axios.get(`${API}/m365/standards`, { headers }), axios.get(`${API}/m365/tenants`, { headers })]); setStandards(response.data); setTenants(tenantsResponse.data || []); }
     catch (error) { toast.error("Microsoft 365 guardrail library could not be loaded"); }
     finally { setLoading(false); }
   }, [headers]);
@@ -209,10 +320,24 @@ function StandardsTab({ headers }) {
     (result[standard.category] ||= []).push(standard);
     return result;
   }, {});
+  const openPlan = (standard) => { setPlanning(standard); setPlanTenants(standard.assigned_tenants || []); setPlanSchedule(String(standard.schedule_hours || 168)); };
+  const savePlan = async () => {
+    if (!planning) return;
+    const schedule = Number(planSchedule);
+    if (!Number.isInteger(schedule) || schedule < 1 || schedule > 8760) { toast.error("Choose a review cadence between 1 and 8,760 hours"); return; }
+    setSavingPlan(true);
+    try {
+      const response = await axios.put(`${API}/m365/standards/${planning.id}`, { enabled: true, assigned_tenants: planTenants, schedule_hours: schedule, actions: ["manual_review"] }, { headers });
+      setStandards((current) => current.map((item) => item.id === planning.id ? response.data : item));
+      setPlanning(null); toast.success("Guardrail review plan saved — no Microsoft policy changed");
+    } catch (error) { toast.error(error.response?.data?.detail || "Unable to save guardrail plan"); }
+    finally { setSavingPlan(false); }
+  };
   return (
     <div className="space-y-3">
       <Card className="border-cyan-500/25 bg-cyan-500/[0.04]"><CardContent className="flex gap-3 p-4"><FileCheck2 className="mt-0.5 h-5 w-5 text-cyan-300" /><div><p className="text-sm font-semibold">Reference guardrails, not fabricated compliance</p><p className="mt-1 text-xs leading-5 text-muted-foreground">These are MSP-reviewed planning controls. Enabling one stores an internal plan only; it does not evaluate a tenant, apply a Microsoft policy, or claim remediation until a verified provider can prove the result.</p></div></CardContent></Card>
-      {loading ? <div className="py-10 text-center text-sm text-muted-foreground">Loading reference guardrails...</div> : Object.entries(groups).map(([category, items]) => <Card key={category}><CardContent className="space-y-2 p-4"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{category}</p>{items.map((standard) => <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-muted/15 p-3" key={standard.id}><Switch checked={standard.enabled} onCheckedChange={() => togglePlan(standard)} /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium">{standard.name}</p><Badge variant="outline" className={severityClasses[standard.severity]}>{standard.severity}</Badge>{standard.enabled && <Badge variant="outline" className="border-cyan-500/30 text-cyan-100">planned</Badge>}</div><p className="mt-1 text-xs text-muted-foreground">{standard.description}</p></div><Badge variant="outline" className="hidden border-zinc-700 text-[10px] text-muted-foreground sm:inline-flex">Reference only</Badge></div>)}</CardContent></Card>)}
+      {loading ? <div className="py-10 text-center text-sm text-muted-foreground">Loading reference guardrails...</div> : Object.entries(groups).map(([category, items]) => <Card key={category}><CardContent className="space-y-2 p-4"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{category}</p>{items.map((standard) => <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-muted/15 p-3" key={standard.id}><Switch checked={standard.enabled} onCheckedChange={() => togglePlan(standard)} /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium">{standard.name}</p><Badge variant="outline" className={severityClasses[standard.severity]}>{standard.severity}</Badge>{standard.enabled && <Badge variant="outline" className="border-cyan-500/30 text-cyan-100">planned</Badge>}</div><p className="mt-1 text-xs text-muted-foreground">{standard.description}</p>{standard.enabled && <p className="mt-1 text-[11px] text-cyan-700 dark:text-cyan-200">{standard.assigned_tenants?.length ? `${standard.assigned_tenants.length} tenant${standard.assigned_tenants.length === 1 ? "" : "s"} in scope` : "All eligible tenants when evidence is connected"} · review every {standard.schedule_hours || 168}h</p>}</div><div className="flex shrink-0 flex-col items-end gap-2"><Badge variant="outline" className="hidden border-zinc-700 text-[10px] text-muted-foreground sm:inline-flex">Reference only</Badge><Button size="sm" variant="outline" onClick={() => openPlan(standard)}>Plan scope</Button></div></div>)}</CardContent></Card>)}
+      <Dialog open={Boolean(planning)} onOpenChange={(open) => !open && setPlanning(null)}><DialogContent className="max-w-xl"><DialogHeader><DialogTitle>Plan guardrail review</DialogTitle><DialogDescription>{planning?.name} becomes a Nexus review plan only. It will not evaluate or deploy a Microsoft policy until verified provider evidence and an approved executor are available.</DialogDescription></DialogHeader>{planning && <div className="space-y-4"><div className="grid gap-2"><Label htmlFor="guardrail-cadence">Review cadence (hours)</Label><Input id="guardrail-cadence" type="number" min="1" max="8760" value={planSchedule} onChange={(event) => setPlanSchedule(event.target.value)} /><p className="text-xs text-muted-foreground">168 hours is weekly. This controls review planning, not an automatic Microsoft change.</p></div><div><Label className="mb-2 block">Tenant scope</Label>{tenants.length === 0 ? <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-3 text-xs text-muted-foreground">No verified Microsoft tenants are available yet. Save this as an all-eligible-tenant plan and scope it after synchronisation.</div> : <div className="max-h-52 space-y-2 overflow-y-auto rounded-lg border border-border/70 p-3">{tenants.map((tenant) => <label key={tenant.id} className="flex cursor-pointer items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-cyan-500" checked={planTenants.includes(tenant.id)} onChange={(event) => setPlanTenants((current) => event.target.checked ? [...current, tenant.id] : current.filter((id) => id !== tenant.id))} />{tenant.name || tenant.tenant_name || tenant.id}<span className="ml-auto text-xs text-muted-foreground">{tenant.default_domain || ""}</span></label>)}</div>}<p className="mt-2 text-xs text-muted-foreground">No selected tenants means all eligible tenants once verified evidence is available.</p></div></div>}<DialogFooter><Button variant="outline" onClick={() => setPlanning(null)}>Cancel</Button><Button onClick={savePlan} disabled={savingPlan}>{savingPlan ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <ListChecks className="mr-1.5 h-4 w-4" />}Save review plan</Button></DialogFooter></DialogContent></Dialog>
     </div>
   );
 }
@@ -235,18 +360,20 @@ function SecurityTab({ headers }) {
   const [trend, setTrend] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [aitm, setAitm] = useState(null);
+  const [securityPosture, setSecurityPosture] = useState(null);
   const [saving, setSaving] = useState(false);
   const load = useCallback(async () => {
     try {
-      const [mfaResponse, trendResponse, templateResponse, aitmResponse] = await Promise.all([
-        axios.get(`${API}/m365/mfa-analytics`, { headers }), axios.get(`${API}/m365/secure-score/trend`, { headers }), axios.get(`${API}/m365/ca-templates`, { headers }), axios.get(`${API}/m365/aitm-page`, { headers }),
+      const [mfaResponse, trendResponse, templateResponse, aitmResponse, postureResponse] = await Promise.all([
+        axios.get(`${API}/m365/mfa-analytics`, { headers }), axios.get(`${API}/m365/secure-score/trend`, { headers }), axios.get(`${API}/m365/ca-templates`, { headers }), axios.get(`${API}/m365/aitm-page`, { headers }), axios.get(`${API}/m365/security/posture`, { headers }),
       ]);
-      setMfa(mfaResponse.data); setTrend(trendResponse.data); setTemplates(templateResponse.data); setAitm(aitmResponse.data);
+      setMfa(mfaResponse.data); setTrend(trendResponse.data); setTemplates(templateResponse.data); setAitm(aitmResponse.data); setSecurityPosture(postureResponse.data);
     } catch (error) { toast.error("Microsoft 365 security references could not be loaded"); }
   }, [headers]);
   useEffect(() => { load(); }, [load]);
   const saveAitm = async () => { setSaving(true); try { const response = await axios.put(`${API}/m365/aitm-page`, aitm, { headers }); setAitm(response.data); toast.success("Manual reference snippet saved"); } catch { toast.error("Could not save the reference snippet"); } finally { setSaving(false); } };
   return <div className="grid gap-3 xl:grid-cols-2">
+    <Card className="overflow-hidden border-rose-500/20 bg-rose-500/[0.025] xl:col-span-2"><CardHeader className="border-b border-rose-500/15"><CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4 text-rose-600 dark:text-rose-200" />Defender, Entra risk & Conditional Access</CardTitle><p className="mt-1 text-xs text-muted-foreground">Microsoft evidence is correlated in Nexus Shield; this tenant view shows the control-plane posture without duplicating investigation or containment.</p></CardHeader><CardContent className="p-4">{securityPosture?.telemetry_available ? <><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><HeroTile label="Open alerts" value={securityPosture.summary?.open_alerts ?? 0} icon={AlertTriangle} glow={(securityPosture.summary?.open_alerts || 0) ? "amber" : "emerald"} subtitle="Defender evidence" /><HeroTile label="High severity" value={securityPosture.summary?.high_alerts ?? 0} icon={AlertTriangle} glow={(securityPosture.summary?.high_alerts || 0) ? "rose" : "emerald"} subtitle="Needs review" /><HeroTile label="Identity risks" value={securityPosture.summary?.identity_risks ?? 0} icon={KeyRound} glow={(securityPosture.summary?.identity_risks || 0) ? "rose" : "emerald"} subtitle="Entra evidence" /><HeroTile label="CA policies" value={securityPosture.summary?.conditional_access_policies ?? 0} icon={ShieldCheck} glow="cyan" subtitle="Provider-recorded" /><HeroTile label="Report-only" value={securityPosture.summary?.report_only_policies ?? 0} icon={FileCheck2} glow={(securityPosture.summary?.report_only_policies || 0) ? "amber" : "emerald"} subtitle="Review before enforce" /><HeroTile label="Risky devices" value={securityPosture.summary?.defender_devices_at_risk ?? 0} icon={MonitorSmartphone} glow={(securityPosture.summary?.defender_devices_at_risk || 0) ? "rose" : "emerald"} subtitle="Defender evidence" /></div><div className="mt-4 flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => window.location.assign("/nexus-shield?tab=xdr")}><ShieldCheck className="mr-1.5 h-3.5 w-3.5" />Investigate in Shield XDR</Button><p className="self-center text-xs text-muted-foreground">{securityPosture.boundary}</p></div></> : <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-muted-foreground">No verified Defender, Entra risk or Conditional Access evidence has arrived. Nexus will not calculate a security posture from an untested tenant connection.</p><Button size="sm" variant="outline" onClick={() => window.location.assign("/control-plane?module=microsoft365&view=connections")}>Open Microsoft connection</Button></div>}</CardContent></Card>
     <Card><CardContent className="p-4"><div className="flex items-center gap-2"><KeyRound className="h-4 w-4 text-emerald-300" /><p className="text-sm font-semibold">MFA coverage</p></div>{mfa?.telemetry_available ? <><p className="mt-4 text-3xl font-light text-emerald-200">{mfa.mfa_pct}%</p><p className="mt-1 text-xs text-muted-foreground">{mfa.no_mfa_admin_count} administrator accounts and {mfa.no_mfa_users.length} users need MFA review.</p></> : <p className="mt-3 text-xs leading-5 text-muted-foreground">No verified identity evidence has been received. MFA coverage will remain blank instead of being estimated.</p>}</CardContent></Card>
     <Card><CardContent className="p-4"><div className="flex items-center gap-2"><Activity className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Secure Score history</p></div>{trend?.series?.length ? <p className="mt-3 text-xs text-muted-foreground">{trend.series.length} provider-recorded score snapshots are available for reporting.</p> : <p className="mt-3 text-xs leading-5 text-muted-foreground">No recorded score history has been received. NexusMSP will not interpolate a chart from current values.</p>}</CardContent></Card>
     <Card className="xl:col-span-2"><CardContent className="p-4"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-semibold">Conditional Access reference library</p><p className="mt-1 text-xs text-muted-foreground">Review templates before creating the matching policies in Microsoft Entra. Deployment remains disabled until a provider can deploy and read back policy state.</p></div><Badge variant="outline" className="border-zinc-700 text-muted-foreground">Reference only</Badge></div><div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">{templates.map((template) => <div className="rounded-lg border border-border/70 bg-muted/15 p-3" key={template.id}><div className="flex items-center justify-between gap-2"><p className="text-sm font-medium">{template.name}</p><Badge variant="outline" className={severityClasses[template.severity]}>{template.severity}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{template.category} - {template.source}</p></div>)}</div></CardContent></Card>
@@ -434,6 +561,8 @@ function ConnectionTab({ headers, connection, onSaved }) {
           </div>
         </CardContent>
       </Card>
+
+      <MicrosoftSyncReadiness headers={headers} />
 
       <div className="grid gap-4 2xl:grid-cols-[1.25fr_.75fr]">
         <Card>
@@ -689,6 +818,21 @@ function ConnectionTab({ headers, connection, onSaved }) {
       </Card>
     </div>
   );
+}
+
+function MicrosoftSyncReadiness({ headers }) {
+  const [readiness, setReadiness] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const response = await axios.get(`${API}/m365/sync/readiness`, { headers }); setReadiness(response.data); }
+    catch (error) { toast.error(error.response?.data?.detail || "Microsoft collector readiness could not be loaded"); }
+    finally { setLoading(false); }
+  }, [headers]);
+  useEffect(() => { load(); }, [load]);
+  const stateClass = (status) => status === "evidence_active" ? "border-emerald-500/25 text-emerald-700 dark:text-emerald-200" : status === "ready_to_connect" ? "border-cyan-500/25 text-cyan-700 dark:text-cyan-200" : "border-amber-500/25 text-amber-700 dark:text-amber-200";
+  const stateLabel = (status) => status === "evidence_active" ? "Evidence active" : status === "ready_to_connect" ? "Ready to connect" : "Connection required";
+  return <Card className="border-violet-500/20 bg-violet-500/[0.025]" data-testid="m365-sync-readiness"><CardHeader className="border-b border-violet-500/15 pb-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle className="flex items-center gap-2 text-sm"><Activity className="h-4 w-4 text-violet-600 dark:text-violet-200" />Nexus Microsoft Collector</CardTitle><CardDescription className="mt-1">A least-privilege evidence plan for the Nexus 365 capabilities above. Each stream remains read-only until a separately approved action workflow is used.</CardDescription></div><Button size="sm" variant="outline" onClick={load} disabled={loading}>{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}<span className="sr-only">Refresh collector readiness</span></Button></div></CardHeader><CardContent className="p-4">{loading && !readiness ? <p className="py-5 text-center text-sm text-muted-foreground">Inspecting collector readiness…</p> : <><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">{(readiness?.streams || []).map((stream) => <div key={stream.id} className="rounded-xl border border-border/70 bg-background/55 p-3"><div className="flex items-start justify-between gap-2"><p className="text-sm font-medium">{stream.label}</p><Badge variant="outline" className={`shrink-0 text-[10px] ${stateClass(stream.status)}`}>{stateLabel(stream.status)}</Badge></div><p className="mt-2 text-2xl font-semibold text-violet-700 dark:text-violet-100">{stream.records || 0}</p><p className="mt-0.5 text-[10px] text-muted-foreground">verified records</p><div className="mt-3 flex flex-wrap gap-1">{(stream.permissions || []).map((permission) => <span key={permission} className="rounded-md border border-border/70 bg-muted/25 px-1.5 py-1 text-[9px] text-muted-foreground">{permission}</span>)}</div><p className="mt-3 text-[10px] leading-4 text-muted-foreground">Feeds: {(stream.feeds || []).join(" · ")}</p></div>)}</div><p className="mt-4 rounded-lg border border-violet-500/15 bg-violet-500/[0.035] p-3 text-xs leading-5 text-muted-foreground">{readiness?.boundary}</p></>}</CardContent></Card>;
 }
 
 function OnboardingMetric({ label, value }) {

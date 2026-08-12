@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Store,
+  Server,
 } from "lucide-react";
 
 import { API, useAuth } from "@/App";
@@ -161,6 +162,7 @@ export default function NexusSuitePage() {
         actions={<>
           <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/[0.08] text-cyan-700 dark:text-cyan-100"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Unified operations fabric</Badge>
           <Button variant="outline" size="sm" asChild><Link to="/help/nexus-suite-product-map">Product guide</Link></Button>
+          <Button variant="outline" size="sm" asChild><Link to="/deployment-hub"><Server className="mr-1.5 h-3.5 w-3.5" />Deployment Hub</Link></Button>
           <Button variant="outline" size="sm" onClick={loadEvidence} disabled={loading}><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
         </>}
       />

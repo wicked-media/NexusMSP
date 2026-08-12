@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   MessageSquare, Send, X, Ticket, Search, Zap, ArrowRightLeft, Users, Inbox,
-  UserCheck, Clock, AlertTriangle, Plus, Trash2, Building2, HardDrive, ChevronRight
+  UserCheck, Clock, AlertTriangle, Plus, Trash2, Building2, HardDrive, ChevronRight, ShieldCheck, ExternalLink
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
@@ -428,6 +428,22 @@ export default function LiveChatPage() {
                     <p className="text-[9px] text-muted-foreground">Devices</p>
                   </div>
                 </div>
+                {context.endpoint && (
+                  <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase text-muted-foreground">Endpoint elevation</p>
+                        <p className="truncate text-sm font-medium" title={context.endpoint.name}>{context.endpoint.name}</p>
+                      </div>
+                      <Badge variant="outline" className={context.endpoint.elevate_state === "active" ? "border-emerald-500/30 bg-emerald-500/10 text-[9px] text-emerald-300" : context.endpoint.elevate_state === "deploying" ? "border-sky-500/30 bg-sky-500/10 text-[9px] text-sky-300" : "text-[9px]"}>{String(context.endpoint.elevate_state || "not activated").replace(/_/g, " ")}</Badge>
+                    </div>
+                    {context.endpoint.elevate_last_error && <p className="line-clamp-2 text-[10px] text-rose-300">{context.endpoint.elevate_last_error}</p>}
+                    <div className="flex gap-2">
+                      <Button size="sm" className="h-7 flex-1 text-xs" onClick={() => navigate(`/nexus-elevate?status=pending&device=${encodeURIComponent(context.endpoint.agent_id || "")}`)} disabled={!context.endpoint.agent_id}><ShieldCheck className="mr-1 h-3 w-3" />Review queue</Button>
+                      <Button size="icon" variant="outline" className="h-7 w-7" onClick={() => navigate(`/devices/${context.endpoint.id}`)} title="Open endpoint"><ExternalLink className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  </div>
+                )}
                 {context.last_ticket && (
                   <div>
                     <p className="text-[10px] uppercase text-muted-foreground font-semibold mb-1">Last Ticket</p>

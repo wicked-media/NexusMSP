@@ -19,7 +19,7 @@ import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
   ArrowLeft, ChevronRight, MoreVertical, MessageSquareReply, CheckCircle2, AlertTriangle,
   Building2, UserCircle2, Mail, Loader2, History, Search,
-  ArrowLeftRight, X, RotateCcw, Wrench, Receipt, Play, Square,
+  ArrowLeftRight, Bookmark, X, RotateCcw, Wrench, Receipt, Play, Square,
 } from "lucide-react";
 
 const STATUS_FLOW = ["open", "in_progress", "on_hold", "resolved", "closed"];
@@ -41,6 +41,8 @@ export default function TicketConsoleHeader({
   isTimerRunning = false,
   timerElapsed = 0,
   onToggleTimer,
+  onStartWork,
+  onPinObject,
 }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -76,6 +78,7 @@ export default function TicketConsoleHeader({
   const sla = ticket?.sla_status || ticket?.sla;
   const overdue = (ticket?.sla_overdue_hours || 0) > 0 || sla === "breached" || sla === "overdue";
   const hasHistory = (ticket?.customer_history || []).length > 0;
+  const signal = ["resolved", "closed"].includes(ticket?.status) ? "healthy" : ticket?.status === "on_hold" ? "attention" : ticket?.status === "in_progress" ? "working" : overdue ? "critical" : "recommendation";
   const formatElapsed = (seconds) => {
     const total = Math.max(0, Number(seconds) || 0);
     const hours = Math.floor(total / 3600);
@@ -88,7 +91,7 @@ export default function TicketConsoleHeader({
 
   return (
     <>
-      <Card className="sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-testid="ticket-console-header">
+      <Card className="nx-ambient-surface sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-nx-signal={signal} data-testid="ticket-console-header">
         <CardContent className="p-4 space-y-3">
           {/* Row 1 — Back · ID · Priority · Title · Primary actions · More */}
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live service record <span className="text-zinc-600">/</span><span className="text-zinc-400">{ticket.ticket_type?.replace("_", " ") || "incident"}</span></div>
@@ -155,6 +158,7 @@ export default function TicketConsoleHeader({
               title={isTimerRunning ? `Stop timer at ${formatElapsed(timerElapsed)}` : "Start time tracking"}
               data-testid="console-timer-btn"
             >{isTimerRunning ? formatElapsed(timerElapsed) : "Start timer"}</TicketHeaderAction>
+            <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>
             <TicketHeaderAction icon={Receipt} tone="success" onClick={onInvoice} data-testid="console-invoice-btn">Invoice</TicketHeaderAction>
             <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={onResolve} data-testid="console-resolve-btn">Resolve & close</TicketHeaderAction>
             <TicketHeaderAction icon={Wrench} tone="accent" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
@@ -166,6 +170,7 @@ export default function TicketConsoleHeader({
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Quick actions</DropdownMenuLabel>
                 <DropdownMenuItem onClick={() => onMoreAction?.("transfer")}><ArrowLeftRight className="w-3.5 h-3.5 mr-2" />Reassign technician</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onPinObject?.()} data-testid="pin-ticket-object"><Bookmark className="w-3.5 h-3.5 mr-2" />Pin to Object Dock</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setChangeOpen(true)} data-testid="more-change-customer"><Building2 className="w-3.5 h-3.5 mr-2" />Change customer…</DropdownMenuItem>
                 {hasHistory && <DropdownMenuItem onClick={loadHistory}><History className="w-3.5 h-3.5 mr-2" />Customer history</DropdownMenuItem>}
               </DropdownMenuContent>
@@ -180,7 +185,9 @@ export default function TicketConsoleHeader({
               data-testid="customer-pill"
               title="Click to change customer"
             >
-              <Building2 className="w-3 h-3" />
+              {ticket.client_logo_url ? (
+                <img src={ticket.client_logo_url} alt="" className="h-4 w-4 rounded bg-white object-contain p-0.5" />
+              ) : <Building2 className="w-3 h-3" />}
               <span>{ticket.client_name || "No customer"}</span>
               <ArrowLeftRight className="w-3 h-3 opacity-60" />
             </button>

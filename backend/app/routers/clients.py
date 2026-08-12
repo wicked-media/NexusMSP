@@ -11,6 +11,122 @@ from app.models import *
 
 router = APIRouter()
 
+
+def _timeline_datetime(value: Any) -> Optional[datetime]:
+    """Parse retained timeline timestamps without treating missing evidence as a change."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif value:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _what_changed_impact(category: str, severity: Optional[str]) -> str:
+    """Describe the affected operating surface, never an unproven downstream cause."""
+    category_impacts = {
+        "service": "Service delivery and ticket ownership may need review.",
+        "communication": "Customer communication or delivery evidence was updated.",
+        "asset": "The managed asset estate has new recorded evidence.",
+        "remote": "Remote-access activity was recorded for this client.",
+        "automation": "An automation or runbook execution was recorded.",
+        "backup": "Backup protection or recovery evidence was updated.",
+        "finance": "Billing, invoice, or time-record evidence was updated.",
+        "documentation": "Technical documentation evidence was updated.",
+        "governance": "A governed change, approval, or audit record was updated.",
+        "platform": "A connected Nexus platform event was recorded.",
+    }
+    if str(severity or "").lower() in {"critical", "high"}:
+        return "High-priority evidence was recorded; review the originating record before acting."
+    return category_impacts.get(category, "New operational evidence was recorded for this client.")
+
+
+async def _build_what_changed_brief(client_id: str, days: int) -> dict:
+    """Build an explainable comparison from the canonical client timeline.
+
+    This is intentionally an event-evidence comparison, not a causal engine. A
+    source record must exist before Nexus can describe it as a recorded change.
+    """
+    timeline = await build_client_timeline(client_id, limit=500)
+    now = datetime.now(timezone.utc)
+    current_start = now - timedelta(days=days)
+    baseline_start = current_start - timedelta(days=days)
+    current_events: list[dict] = []
+    baseline_events: list[dict] = []
+
+    for event in timeline.get("events") or []:
+        occurred_at = _timeline_datetime(event.get("timestamp"))
+        if not occurred_at:
+            continue
+        if current_start <= occurred_at <= now:
+            current_events.append(event)
+        elif baseline_start <= occurred_at < current_start:
+            baseline_events.append(event)
+
+    current_events.sort(key=lambda event: _timeline_datetime(event.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    notable_events = sorted(
+        current_events,
+        key=lambda event: (
+            severity_rank.get(str(event.get("severity") or "").lower(), 4),
+            -((_timeline_datetime(event.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc)).timestamp()),
+        ),
+    )[:24]
+
+    current_by_category: Dict[str, int] = {}
+    baseline_by_category: Dict[str, int] = {}
+    for event in current_events:
+        category = event.get("category") or "platform"
+        current_by_category[category] = current_by_category.get(category, 0) + 1
+    for event in baseline_events:
+        category = event.get("category") or "platform"
+        baseline_by_category[category] = baseline_by_category.get(category, 0) + 1
+
+    categories = sorted(set(current_by_category) | set(baseline_by_category))
+    category_changes = [
+        {
+            "category": category,
+            "current_count": current_by_category.get(category, 0),
+            "previous_count": baseline_by_category.get(category, 0),
+            "difference": current_by_category.get(category, 0) - baseline_by_category.get(category, 0),
+        }
+        for category in categories
+    ]
+    category_changes.sort(key=lambda item: (abs(item["difference"]), item["current_count"]), reverse=True)
+
+    return {
+        "client": timeline.get("client") or {"id": client_id, "name": "Client"},
+        "window": {
+            "days": days,
+            "from": current_start.isoformat(),
+            "to": now.isoformat(),
+            "comparison_from": baseline_start.isoformat(),
+            "comparison_to": current_start.isoformat(),
+        },
+        "summary": {
+            "recorded_changes": len(current_events),
+            "previous_window_changes": len(baseline_events),
+            "difference": len(current_events) - len(baseline_events),
+            "high_priority_changes": sum(1 for event in current_events if str(event.get("severity") or "").lower() in {"critical", "high"}),
+            "affected_categories": len([item for item in category_changes if item["current_count"]]),
+        },
+        "category_changes": category_changes,
+        "changes": [
+            {
+                **event,
+                "impact": _what_changed_impact(event.get("category") or "platform", event.get("severity")),
+            }
+            for event in notable_events
+        ],
+        "evidence_note": "This comparison uses retained, authorised Nexus events. It identifies recorded changes and activity differences; event proximity does not establish causation, and unrecorded provider changes cannot be inferred.",
+    }
+
 # ============== CLIENTS ENDPOINTS ==============
 
 @router.get("/clients", response_model=List[Client])
@@ -161,6 +277,12 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
 
     acronis_links = {l["client_id"] async for l in db.acronis_customer_links.find({}, {"_id": 0, "client_id": 1})}
     pax8_links = {l["client_id"] async for l in db.pax8_company_links.find({}, {"_id": 0, "client_id": 1})}
+    nexus_dmarc_domains = await db.nexus_dmarc_domains.find(
+        {"client_id": {"$in": client_ids}}, {"_id": 0, "client_id": 1, "dmarc_status": 1, "last_report_at": 1}
+    ).to_list(1000)
+    nexus_dmarc_by_client = {}
+    for record in nexus_dmarc_domains:
+        nexus_dmarc_by_client.setdefault(record.get("client_id"), []).append(record)
     yeastar_records = await db.yeastar_pbxs.find(
         {"client_id": {"$in": client_ids}, "enabled": {"$ne": False}},
         {"_id": 0, "id": 1, "client_id": 1, "name": 1, "status": 1, "extension_count": 1, "billable_extension_count": 1, "last_sync": 1},
@@ -188,6 +310,8 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
 
         voice_pbxs = yeastar_by_client.get(cid, [])
         voice_online = len([pbx for pbx in voice_pbxs if pbx.get("status") == "online"])
+        dmarc_domains = nexus_dmarc_by_client.get(cid, [])
+        dmarc_evidence_active = any(item.get("last_report_at") for item in dmarc_domains)
         results.append({
             "id": cid,
             "name": c.get("name"),
@@ -220,8 +344,10 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
                 "m365": bool(c.get("m365_tenant_id") or c.get("office365_tenant_id")),
                 "rmm": amap["total"] > 0,
                 "suped": bool(c.get("suped_tenant_id")),
+                "nexus_dmarc": bool(dmarc_domains),
                 "cipp": bool(c.get("cipp_tenant_id")),
             },
+            "nexus_dmarc": {"linked": bool(dmarc_domains), "domain_count": len(dmarc_domains), "evidence_active": dmarc_evidence_active, "status": "evidence_active" if dmarc_evidence_active else "configured" if dmarc_domains else "not_linked"},
             "voice": {
                 "linked": bool(voice_pbxs),
                 "pbx_count": len(voice_pbxs),
@@ -283,6 +409,24 @@ async def get_client_nexus_timeline(
         search=q,
         limit=limit,
     )
+
+
+@router.get("/clients/{client_id}/what-changed")
+async def get_client_what_changed(
+    client_id: str,
+    days: int = Query(30, ge=1, le=90, description="Length of each comparison window in days"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Explain recorded client changes against the preceding equal time window."""
+    await assert_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        client_field="id",
+        operation="client.timeline.read",
+        resource_name="Client",
+    )
+    return await _build_what_changed_brief(client_id, days)
 
 
 @router.get("/clients/{client_id}/activity-timeline")
@@ -538,7 +682,10 @@ async def _visible_notifications(current_user: dict, unread_only: bool = False) 
         is_shared = notification.get("user_id") == "all"
         if is_shared and user_id in notification.get("dismissed_by", []):
             continue
-        is_read = user_id in notification.get("read_by", []) if is_shared else notification.get("read", False)
+        # A resolved shared action is no longer an outstanding item for any
+        # operator, even if they did not personally open the original alert.
+        # Keep it in the full inbox as read so the decision remains discoverable.
+        is_read = bool(notification.get("resolved_at")) or (user_id in notification.get("read_by", []) if is_shared else notification.get("read", False))
         if unread_only and is_read:
             continue
         if not prefs.get(NOTIFICATION_PREFERENCE_KEYS.get(notification.get("type"), ""), True):

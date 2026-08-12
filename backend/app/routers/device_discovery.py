@@ -1,10 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from datetime import datetime, timezone
+import ipaddress
+import os
 import uuid
 import random; random = random.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 router = APIRouter()
 
@@ -12,23 +15,52 @@ router = APIRouter()
 
 @router.post("/devices/discover")
 async def discover_devices(data: dict, current_user: dict = Depends(get_current_user)):
-    """Discover devices on a client's network (simulated scan)"""
+    """Run a clearly labelled demo scan only when demo mode is explicitly enabled.
+
+    Real discovery must be performed through a scoped Nexus Edge discovery
+    probe. Returning invented devices in a production deployment is unsafe, so
+    this legacy demo path is intentionally disabled by default.
+    """
     client_id = data.get("client_id")
     subnet = data.get("subnet", "192.168.1.0/24")
 
     if not client_id:
         raise HTTPException(status_code=400, detail="client_id is required")
 
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    await assert_client_scope(current_user, client_id, operation="device.discovery.create")
+    try:
+        network = ipaddress.ip_network(subnet, strict=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Subnet must be a valid CIDR") from exc
+    if not network.is_private or network.num_addresses > 1024:
+        raise HTTPException(status_code=422, detail="Discovery is limited to approved private CIDRs of 1,024 addresses or fewer")
+
+    client = await db.clients.find_one(scoped_query(current_user, {"id": client_id}), {"_id": 0, "name": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    if os.getenv("NEXUS_DEMO_MODE", "").lower() not in {"1", "true", "yes"}:
+        edge = await db.nexus_deployments.find_one(
+            scoped_query(current_user, {"kind": "edge", "client_id": client_id, "edge_roles": "discovery_probe", "activation_used_at": {"$ne": None}}),
+            {"_id": 0, "id": 1, "name": 1, "last_seen_at": 1},
+        )
+        if not edge:
+            raise HTTPException(
+                status_code=409,
+                detail="Prepare and activate a client-scoped Nexus Edge with the Discovery probe role before running a real discovery scan. Nexus will not invent device results.",
+            )
+        raise HTTPException(
+            status_code=409,
+            detail=f"Nexus Edge {edge.get('name') or edge.get('id')} is enrolled, but live discovery dispatch is not enabled in this release. No scan was run and no device data was created.",
+        )
 
     # Get existing devices for this client to avoid duplicates
     existing = await db.devices.find({"client_id": client_id}, {"_id": 0, "ip_address": 1, "mac_address": 1}).to_list(500)
     existing_ips = {d.get("ip_address") for d in existing if d.get("ip_address")}
     existing_macs = {d.get("mac_address") for d in existing if d.get("mac_address")}
 
-    # Simulate network scan - generate discovered devices
+    # Explicit demo-only sample data. It can never be confused with an Edge
+    # observation because the response and persisted scan record carry mode.
     base_ip = subnet.split("/")[0].rsplit(".", 1)[0]
     manufacturers = ["Dell", "HP", "Lenovo", "Cisco", "Apple", "Microsoft", "ASUS", "Acer", "Ubiquiti", "Synology"]
     os_types = ["Windows 11", "Windows 10", "macOS Ventura", "Ubuntu 22.04", "CentOS 8", "pfSense", "UniFi OS"]
@@ -84,6 +116,7 @@ async def discover_devices(data: dict, current_user: dict = Depends(get_current_
         "scanned_by": current_user["id"],
         "scanned_by_name": current_user["name"],
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "mode": "demo_simulation",
     }
     await db.network_scans.insert_one(scan_record)
     scan_record.pop("_id", None)
@@ -94,6 +127,7 @@ async def discover_devices(data: dict, current_user: dict = Depends(get_current_
         "client_name": client.get("name", ""),
         "discovered_count": len(discovered),
         "devices": discovered,
+        "mode": "demo_simulation",
     }
 
 @router.post("/devices/import-discovered")

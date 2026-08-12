@@ -26,6 +26,20 @@ async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -
     )
 
 
+async def _attach_client_branding(tickets: list[dict]) -> None:
+    """Resolve current client branding so ticket views never carry a stale logo."""
+    client_ids = {ticket.get("client_id") for ticket in tickets if ticket.get("client_id")}
+    if not client_ids:
+        return
+    clients = await db.clients.find(
+        {"id": {"$in": list(client_ids)}},
+        {"_id": 0, "id": 1, "logo_url": 1},
+    ).to_list(len(client_ids))
+    logos = {client["id"]: client.get("logo_url") for client in clients}
+    for ticket in tickets:
+        ticket["client_logo_url"] = logos.get(ticket.get("client_id"))
+
+
 # ============== TICKETS ENDPOINTS ==============
 
 @router.get("/tickets", response_model=List[Ticket])
@@ -54,6 +68,7 @@ async def get_tickets(
     
     tickets = await db.tickets.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     await attach_user_avatars(tickets, id_fields=("assigned_to",), output_field="assignee_avatar")
+    await _attach_client_branding(tickets)
     for t in tickets:
         for field in ['created_at', 'updated_at', 'sla_due']:
             if isinstance(t.get(field), str):
@@ -95,6 +110,7 @@ async def get_active_viewers_proxy(current_user: dict = Depends(get_current_user
 async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.read")
     await attach_user_avatars([ticket], id_fields=("assigned_to",), output_field="assignee_avatar")
+    await _attach_client_branding([ticket])
     return ticket
 
 @router.post("/tickets", response_model=Ticket)
@@ -182,6 +198,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
         device_name=device_name,
         sla_due=sla_due
     )
+    ticket.client_logo_url = client.get("logo_url") if client else None
     # Override with normalized multi-device arrays
     ticket.device_ids = device_ids
     ticket.device_names = device_names
@@ -265,10 +282,11 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     target_client_id = ticket_data.get("client_id", old_ticket.get("client_id"))
     await assert_client_scope(current_user, target_client_id, operation="ticket.move")
     if target_client_id != old_ticket.get("client_id"):
-        target_client = await db.clients.find_one({"id": target_client_id}, {"_id": 0, "name": 1})
+        target_client = await db.clients.find_one({"id": target_client_id}, {"_id": 0, "name": 1, "logo_url": 1})
         if not target_client:
             raise HTTPException(status_code=404, detail="Client not found")
         ticket_data["client_name"] = target_client.get("name")
+        ticket_data["client_logo_url"] = target_client.get("logo_url")
     now_iso = datetime.now(timezone.utc).isoformat()
     ticket_data['updated_at'] = now_iso
     # Auto-close: when marked as resolved, automatically set to closed

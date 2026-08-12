@@ -78,6 +78,7 @@ async def _native_settings() -> dict:
     stored = await db.nexus_elevate_settings.find_one({"_id": ELEVATE_SETTINGS_ID}, {"_id": 0}) or {}
     return {
         "native_enabled": bool(stored.get("native_enabled", True)),
+        "auto_deploy_companion": bool(stored.get("auto_deploy_companion", True)),
         "max_duration_minutes": max(5, min(NATIVE_ELEVATE_MAX_DURATION, int(stored.get("max_duration_minutes") or 15))),
         "require_justification": bool(stored.get("require_justification", True)),
         "require_sha256": True,
@@ -117,6 +118,49 @@ async def _write_native_audit(kind: str, request: dict, actor: dict | None = Non
             pass
 
 
+async def _notify_native_elevation_review(request: dict) -> None:
+    """Create one shared, actionable operator notification for a pending request."""
+    request_id = request.get("id")
+    if not request_id:
+        return
+    existing = await db.notifications.find_one({
+        "ref_id": request_id,
+        "type": "nexus_elevate_review",
+    }, {"_id": 0, "id": 1})
+    if existing:
+        return
+    executable = request.get("program_name") or PureWindowsPath(request.get("program_path") or "application.exe").name
+    endpoint = request.get("hostname") or "a managed endpoint"
+    requester = request.get("requested_by_name") or "An endpoint user"
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": "all",
+        "type": "nexus_elevate_review",
+        "title": "Nexus Elevate approval required",
+        "message": f"{requester} requested {executable} on {endpoint}.",
+        "ref_id": request_id,
+        "ref_type": "nexus_elevate_request",
+        "action_url": f"/nexus-elevate?status=pending&request={request_id}",
+        "action_label": "Review request",
+        "severity": "warning",
+        "read": False,
+        "read_by": [],
+        "dismissed_by": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def _resolve_native_elevation_review_notification(request_id: str, resolution: str) -> None:
+    """Close shared review notices once the queue has a final decision."""
+    if not request_id:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    await db.notifications.update_many(
+        {"ref_id": request_id, "type": "nexus_elevate_review"},
+        {"$set": {"resolved_at": now, "resolution": resolution}},
+    )
+
+
 async def _expire_stale_native_approvals() -> int:
     """Close approvals that cannot safely be honoured any longer.
 
@@ -147,6 +191,10 @@ async def _expire_stale_native_approvals() -> int:
         )
         if getattr(result, "matched_count", 0):
             request.update({"status": "expired", "expired_at": cutoff})
+            try:
+                await _resolve_native_elevation_review_notification(request.get("id"), "expired")
+            except Exception:
+                pass
             await _write_native_audit("nexus_elevate_expired", request, None, {
                 "approved_until": request.get("approved_until"),
             })
@@ -734,6 +782,7 @@ async def put_nexus_elevate_settings(data: dict, current_user: dict = Depends(ge
         raise HTTPException(status_code=400, detail="Keeper connector reference is too long")
     settings = {
         "native_enabled": bool(data.get("native_enabled", True)),
+        "auto_deploy_companion": bool(data.get("auto_deploy_companion", True)),
         "max_duration_minutes": max_duration,
         "require_justification": bool(data.get("require_justification", True)),
         "keeper_bridge_enabled": bool(data.get("keeper_bridge_enabled", False)),
@@ -772,6 +821,8 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
         "last_seen": {"$gte": online_cutoff},
         "client_companion_installed_at": {"$exists": True, "$ne": None},
     })
+    elevate_active = await db.nexus_agents.count_documents({"is_active": True, "nexus_elevate.state": "active"})
+    elevate_deploying = await db.nexus_agents.count_documents({"is_active": True, "nexus_elevate.state": "deploying"})
     pending = [row for row in requests if row.get("status") == "pending"]
     expiring = [row for row in requests if row.get("status") == "approved" and row.get("approved_until") and row["approved_until"] <= (now + timedelta(minutes=10)).isoformat()]
     failed = [row for row in requests if row.get("status") in {"failed", "expired"}]
@@ -789,6 +840,8 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
             "native_agents_online": online_agents,
             "companion_agents_ready": companion_agents,
             "companion_agents_online": companion_agents_online,
+            "elevate_active": elevate_active,
+            "elevate_deploying": elevate_deploying,
             "keeper_bridge_requests": sum(1 for row in requests if row.get("provider") == "keeper" and row.get("status") == "pending"),
             "active_policies": active_policies,
             "enforced_policies": enforced_policies,
@@ -801,6 +854,7 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
 async def list_nexus_elevate_requests(
     status: str | None = Query(None),
     client_id: str | None = Query(None),
+    device_id: str | None = Query(None),
     limit: int = Query(150, ge=1, le=500),
     current_user: dict = Depends(get_current_user),
 ):
@@ -812,6 +866,8 @@ async def list_nexus_elevate_requests(
         query["status"] = status
     if client_id:
         query["client_id"] = client_id
+    if device_id:
+        query["device_id"] = device_id
     rows = await db.nexus_elevate_requests.find(query, {"_id": 0}).sort("requested_at", -1).to_list(limit)
     return {"requests": [await _request_view(row) for row in rows]}
 
@@ -903,6 +959,10 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
         raise HTTPException(status_code=503, detail="Could not queue the approved launch; the request remains pending") from exc
     request = claimed
     request.update(update)
+    try:
+        await _resolve_native_elevation_review_notification(request_id, "approved")
+    except Exception:
+        pass
     await _write_native_audit("nexus_elevate_approved", request, caller, {
         "duration_minutes": duration,
         "reason": decision_reason,
@@ -938,6 +998,10 @@ async def deny_nexus_elevate_request(request_id: str, data: dict, current_user: 
     if not getattr(result, "matched_count", 0):
         raise HTTPException(status_code=409, detail="This elevation request was already decided by another technician")
     request.update(update)
+    try:
+        await _resolve_native_elevation_review_notification(request_id, "denied")
+    except Exception:
+        pass
     await _write_native_audit("nexus_elevate_denied", request, caller, {"reason": reason})
     return {"request": await _request_view(request)}
 
@@ -1025,7 +1089,28 @@ async def create_native_elevation_request(data: dict, x_agent_token: str | None 
         await _write_native_audit("nexus_elevate_policy_review_required", request, None, {
             "policy_id": matched_policy.get("id"), "policy_name": matched_policy.get("name"), "sha256": sha256,
         })
+    if request.get("status") == "pending":
+        try:
+            await _notify_native_elevation_review(request)
+        except Exception:
+            # A notification outage must never prevent the agent from safely
+            # receiving its request ID and polling the decision state.
+            pass
     return {"id": request_id, "status": request.get("status", "pending"), "poll_after_seconds": 5}
+
+
+@router.get("/nexus-elevate/agent/requests")
+async def list_native_elevation_agent_requests(x_agent_token: str | None = Header(None)):
+    """Expose only this endpoint's recent Elevate history to its local companion."""
+    agent = await db.nexus_agents.find_one({"agent_token": x_agent_token, "is_active": True}, {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=401, detail="Invalid agent token")
+    await _expire_stale_native_approvals()
+    rows = await db.nexus_elevate_requests.find(
+        {"device_id": agent["id"]},
+        {"_id": 0, "id": 1, "status": 1, "program_name": 1, "requested_at": 1, "approved_until": 1, "denial_reason": 1, "executed_at": 1},
+    ).sort("requested_at", -1).to_list(25)
+    return {"requests": rows}
 
 
 @router.get("/nexus-elevate/agent/requests/{request_id}")

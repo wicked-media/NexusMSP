@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from app.routers import mission_control, workflow_automation
+from app.routers import mega_features, mission_control, workflow_automation
 from app.services import scope_permissions
 
 
@@ -83,6 +83,37 @@ def test_scoped_query_enforces_selected_sites_when_present():
             {"site_id": {"$in": ["site-1"]}},
         ]
     }
+
+
+def test_similar_ticket_search_is_scoped_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Cursor:
+        def limit(self, _limit):
+            return self
+
+        async def to_list(self, _limit):
+            return []
+
+    class Tickets:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return Cursor()
+
+    async def owned_ticket(*_args, **_kwargs):
+        return {"id": "ticket-1", "client_id": "client-a", "title": "Printer offline investigation"}
+
+    monkeypatch.setattr(mega_features.db, "tickets", Tickets())
+    monkeypatch.setattr(mega_features, "assert_record_scope", owned_ticket)
+    result = asyncio.run(mega_features.ticket_doppelganger("ticket-1", {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }))
+
+    assert result["matches"] == []
+    assert captured["query"]["$and"][1] == {"client_id": {"$in": ["client-a"]}}
 
 
 def test_mission_control_queries_are_client_and_site_scoped():

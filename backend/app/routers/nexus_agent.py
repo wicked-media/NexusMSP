@@ -67,11 +67,16 @@ _LOCAL_AGENT_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-agent.exe"
 _CONTAINER_AGENT_BINARY = Path("/app/agent/dist/nexus-agent.exe")
 _LOCAL_CHAT_COMPANION_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-client-chat.exe"
 _CONTAINER_CHAT_COMPANION_BINARY = Path("/app/agent/dist/nexus-client-chat.exe")
+_LOCAL_TRAY_COMPANION_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-agent-tray.exe"
+_CONTAINER_TRAY_COMPANION_BINARY = Path("/app/agent/dist/nexus-agent-tray.exe")
 AGENT_BINARY_PATH = Path(os.environ["NEXUS_AGENT_BINARY"]) if os.environ.get("NEXUS_AGENT_BINARY") else (
     _CONTAINER_AGENT_BINARY if _CONTAINER_AGENT_BINARY.exists() else _LOCAL_AGENT_BINARY
 )
 CHAT_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_CHAT_COMPANION_BINARY"]) if os.environ.get("NEXUS_CHAT_COMPANION_BINARY") else (
     _CONTAINER_CHAT_COMPANION_BINARY if _CONTAINER_CHAT_COMPANION_BINARY.exists() else _LOCAL_CHAT_COMPANION_BINARY
+)
+TRAY_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_TRAY_COMPANION_BINARY"]) if os.environ.get("NEXUS_TRAY_COMPANION_BINARY") else (
+    _CONTAINER_TRAY_COMPANION_BINARY if _CONTAINER_TRAY_COMPANION_BINARY.exists() else _LOCAL_TRAY_COMPANION_BINARY
 )
 AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.10-signed-commands"
 MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
@@ -136,6 +141,126 @@ def _companion_binary_info() -> dict[str, Any]:
                 digest.update(chunk)
         _companion_binary_cache.update({"mtime": stat.st_mtime, "sha256": digest.hexdigest(), "size": stat.st_size})
     return {"sha256": _companion_binary_cache["sha256"], "size": _companion_binary_cache["size"], "exists": True}
+
+
+def _is_windows_agent(agent: dict) -> bool:
+    platform = " ".join(str(agent.get(key) or "") for key in ("os", "os_platform", "platform")).lower()
+    return "windows" in platform
+
+
+async def _ensure_elevate_companion_for_agent(agent: dict) -> str:
+    """Reconcile the bundled Elevate companion after agent enrolment/check-in.
+
+    Nexus Elevate is an entitlement of the existing Nexus Agent, not another
+    endpoint installation.  An enabled Windows agent receives the signed
+    companion automatically; the agent reports ``active`` only after its own
+    hash-verified command result is received.
+    """
+    if not agent.get("id") or not agent.get("is_active", True):
+        return "not_enrolled"
+    settings = await db.nexus_elevate_settings.find_one({"_id": "nexus_elevate"}, {"_id": 0}) or {}
+    if not settings.get("native_enabled", True):
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "paused"}})
+        return "paused"
+    if not settings.get("auto_deploy_companion", True):
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "manual_deployment"}})
+        return "manual_deployment"
+    if not _is_windows_agent(agent):
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "unsupported_platform"}})
+        return "unsupported_platform"
+    companion = _companion_binary_info()
+    if not companion["exists"]:
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "awaiting_companion_build"}})
+        return "awaiting_companion_build"
+    if agent.get("client_companion_sha256") == companion["sha256"] and agent.get("client_companion_installed_at"):
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+            "nexus_elevate.state": "active",
+            "nexus_elevate.active_at": agent.get("nexus_elevate", {}).get("active_at") or _now(),
+            "nexus_elevate.companion_sha256": companion["sha256"],
+        }})
+        return "active"
+    if agent.get("agent_version") != AGENT_VERSION:
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "requires_agent_update"}})
+        return "requires_agent_update"
+    elevation = agent.get("nexus_elevate") if isinstance(agent.get("nexus_elevate"), dict) else {}
+    retry_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+    if elevation.get("state") == "deployment_failed" and str(elevation.get("last_attempt_at") or "") >= retry_cutoff:
+        return "deployment_failed"
+    existing = await db.nexus_agent_commands.find_one({
+        "device_id": agent["id"], "kind": "install_companion", "status": {"$in": ["pending", "dispatched"]},
+        "payload.sha256": companion["sha256"],
+    }, {"_id": 0, "id": 1})
+    if existing:
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "deploying", "nexus_elevate.command_id": existing["id"]}})
+        return "deploying"
+    command_id = str(uuid.uuid4())
+    await db.nexus_agent_commands.insert_one({
+        "id": command_id,
+        "device_id": agent["id"],
+        "client_id": agent.get("client_id"),
+        "kind": "install_companion",
+        "payload": {"sha256": companion["sha256"], "reason": "nexus_elevate_entitlement"},
+        "status": "pending",
+        "queued_by": "Nexus Elevate entitlement",
+        "created_at": _now(),
+    })
+    await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+        "nexus_elevate.state": "deploying",
+        "nexus_elevate.entitled_at": _now(),
+        "nexus_elevate.last_attempt_at": _now(),
+        "nexus_elevate.command_id": command_id,
+        "nexus_elevate.companion_sha256": companion["sha256"],
+    }, "$inc": {"nexus_elevate.deployment_attempts": 1}})
+    await _audit(db, "nexus_elevate_companion_queued", {"device_id": agent["id"], "command_id": command_id})
+    return "deploying"
+
+
+async def _mirror_elevate_state_to_device(agent_id: str, state: str, details: dict | None = None) -> None:
+    """Keep the main device inventory honest about agent-attested Elevate state."""
+    update = {"nexus_elevate_state": state, "nexus_elevate_updated_at": _now()}
+    if details:
+        update.update(details)
+    await db.devices.update_one({"nexus_agent_id": agent_id}, {"$set": update})
+
+
+async def _notify_elevate_companion_failure(agent: dict, error: str) -> None:
+    """Raise one shared repair alert for an unresolved deployment failure."""
+    device = await db.devices.find_one({"nexus_agent_id": agent.get("id")}, {"_id": 0, "id": 1, "name": 1}) or {}
+    ref_id = device.get("id") or agent.get("id")
+    if not ref_id:
+        return
+    existing = await db.notifications.find_one({
+        "ref_id": ref_id,
+        "type": "nexus_elevate_companion_failure",
+        "resolved_at": {"$exists": False},
+    }, {"_id": 0, "id": 1})
+    if existing:
+        return
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": "all",
+        "type": "nexus_elevate_companion_failure",
+        "title": "Nexus Elevate companion needs repair",
+        "message": f"{device.get('name') or agent.get('hostname') or 'A managed endpoint'} could not verify its Elevate companion: {error[:180]}",
+        "ref_id": ref_id,
+        "ref_type": "device" if device.get("id") else "nexus_agent",
+        "action_url": f"/devices/{device['id']}" if device.get("id") else "/nexus-elevate",
+        "action_label": "Open device",
+        "severity": "warning",
+        "read": False,
+        "read_by": [],
+        "dismissed_by": [],
+        "created_at": _now(),
+    })
+
+
+async def _resolve_elevate_companion_failure(agent_id: str) -> None:
+    device = await db.devices.find_one({"nexus_agent_id": agent_id}, {"_id": 0, "id": 1}) or {}
+    ref_id = device.get("id") or agent_id
+    await db.notifications.update_many(
+        {"ref_id": ref_id, "type": "nexus_elevate_companion_failure", "resolved_at": {"$exists": False}},
+        {"$set": {"resolved_at": _now(), "resolution": "recovered"}},
+    )
 
 # Installer archives are stored locally by default. Set NEXUS_AGENT_INSTALLER_DIR
 # to a mounted volume in production; no third-party object storage is required.
@@ -277,6 +402,48 @@ async def _verify_agent_token(
         )
         agent.setdefault("device_identity", {})["last_transport"] = transport
     return agent
+
+
+@router.get("/nexus-agent/local/status")
+async def get_local_agent_status(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None),
+):
+    """Return a deliberately small, credential-free status view for the local tray console."""
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    policy = agent.get("platform_policy") if isinstance(agent.get("platform_policy"), dict) else {}
+    modules = policy.get("modules") if isinstance(policy.get("modules"), dict) else {}
+    elevate = agent.get("nexus_elevate") if isinstance(agent.get("nexus_elevate"), dict) else {}
+    update = agent.get("update_evidence") if isinstance(agent.get("update_evidence"), dict) else {}
+    client_name = str(agent.get("client_name") or "")
+    if not client_name and agent.get("client_id"):
+        client = await db.clients.find_one({"id": agent["client_id"]}, {"_id": 0, "name": 1}) or {}
+        client_name = str(client.get("name") or "")
+    services = [{"id": "nexus_agent", "name": "Nexus Agent", "state": "active", "included": True}]
+    for module_id, name in (("nexus_shield", "Nexus Shield"), ("nexus_dns", "Nexus DNS"), ("nexus_elevate", "Nexus Elevate")):
+        enabled = bool(modules.get(module_id))
+        state = str(elevate.get("state") or "not_activated") if module_id == "nexus_elevate" else ("active" if enabled else "not_included")
+        services.append({"id": module_id, "name": name, "state": state, "included": enabled})
+    current_version = str(agent.get("agent_version") or "unknown")
+    return {
+        "agent": {
+            "id": agent.get("id"),
+            "hostname": agent.get("hostname") or "Managed endpoint",
+            "client_name": client_name or "Assigned client",
+            "online": _is_online(agent.get("last_seen")),
+            "last_seen": agent.get("last_seen"),
+            "version": current_version,
+            "identity": agent_trust_state(agent).get("status"),
+        },
+        "update": {
+            "current_version": current_version,
+            "target_version": AGENT_VERSION,
+            "state": str(update.get("status") or "not_reported"),
+            "signature_verified": bool(update.get("signature_verified")),
+            "update_available": current_version != AGENT_VERSION,
+        },
+        "services": services,
+    }
 
 
 def _command_payload_sha256(payload: dict[str, Any] | None) -> str:
@@ -683,6 +850,11 @@ async def enroll(req: EnrollRequest):
         await _audit(db, "re-enroll", {"device_id": existing["id"], "client_id": client_id})
         await _sync_to_devices(db, existing["id"], client_id, req)
         await _queue_default_nexus_canary({**existing, "os": req.os or existing.get("os"), "nexus_shield": shield_profile}, shield_profile)
+        try:
+            elevate_state = await _ensure_elevate_companion_for_agent({**existing, "is_active": True, "os": req.os or existing.get("os"), "agent_version": req.agent_version})
+            await _mirror_elevate_state_to_device(existing["id"], elevate_state)
+        except Exception:
+            logger.exception("[nexus-agent] failed to reconcile Nexus Elevate after re-enrolment")
         await emit_platform_event(
             subject="device.identity.issued",
             source="nexus.agent.enrollment",
@@ -742,6 +914,11 @@ async def enroll(req: EnrollRequest):
     await _audit(db, "enroll", {"device_id": device_id, "client_id": client_id, "hostname": req.hostname})
     await _sync_to_devices(db, device_id, client_id, req)
     await _queue_default_nexus_canary(doc, shield_profile)
+    try:
+        elevate_state = await _ensure_elevate_companion_for_agent(doc)
+        await _mirror_elevate_state_to_device(device_id, elevate_state)
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile Nexus Elevate after enrolment")
     await emit_platform_event(
         subject="device.identity.issued",
         source="nexus.agent.enrollment",
@@ -1021,6 +1198,12 @@ async def heartbeat(
     update["disks"] = snap.get("disks", [])
     update["nics"] = snap.get("nics", [])
     await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": update})
+
+    try:
+        elevate_state = await _ensure_elevate_companion_for_agent({**agent, **update})
+        await _mirror_elevate_state_to_device(agent["id"], elevate_state)
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile Nexus Elevate after heartbeat")
 
     # Mirror into devices collection so the existing /devices page sees live data.
     try:
@@ -1346,6 +1529,10 @@ async def command_result(
                     "command_id": res.id,
                 },
             }})
+            await _mirror_elevate_state_to_device(agent["id"], "active", {
+                "nexus_elevate_active_at": _now(),
+                "nexus_elevate_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+            })
             await emit_platform_event(
                 subject="device.trust.changed",
                 source="nexus.agent.repair",
@@ -1449,8 +1636,26 @@ async def command_result(
             await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
                 "client_companion_installed_at": _now(),
                 "client_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+                "nexus_elevate.state": "active",
+                "nexus_elevate.active_at": _now(),
+                "nexus_elevate.companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
             }})
+            await _mirror_elevate_state_to_device(agent["id"], "active", {
+                "nexus_elevate_active_at": _now(),
+                "nexus_elevate_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+            })
+            await _resolve_elevate_companion_failure(agent["id"])
             await _audit(db, "companion_installed", {"device_id": agent["id"], "command_id": res.id})
+        elif companion_command:
+            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+                "nexus_elevate.state": "deployment_failed",
+                "nexus_elevate.last_error": (res.stderr or res.stdout or "Companion deployment failed")[:500],
+                "nexus_elevate.last_attempt_at": _now(),
+            }})
+            await _mirror_elevate_state_to_device(agent["id"], "deployment_failed", {
+                "nexus_elevate_last_error": (res.stderr or res.stdout or "Companion deployment failed")[:500],
+            })
+            await _notify_elevate_companion_failure(agent, res.stderr or res.stdout or "Companion deployment failed")
     except Exception:
         logger.exception("[nexus-agent] failed to record companion deployment")
     try:
@@ -1742,6 +1947,14 @@ async def deploy_client_companion(req: CompanionDeployRequest, user=Depends(requ
             "created_at": now,
         })
     await db.nexus_agent_commands.insert_many(commands)
+    for command in commands:
+        await db.nexus_agents.update_one({"id": command["device_id"]}, {"$set": {
+            "nexus_elevate.state": "deploying",
+            "nexus_elevate.entitled_at": now,
+            "nexus_elevate.command_id": command["id"],
+            "nexus_elevate.companion_sha256": companion["sha256"],
+        }})
+        await _mirror_elevate_state_to_device(command["device_id"], "deploying")
     await _audit(db, "companion_deploy", {
         "count": len(commands),
         "device_ids": [command["device_id"] for command in commands],
@@ -1777,6 +1990,7 @@ def _build_installer_zip(
     server_url: str,
     binary_bytes: bytes,
     chat_companion_bytes: bytes | None = None,
+    tray_companion_bytes: bytes | None = None,
     heartbeat_secs: int = 60,
     poll_secs: int = 10,
 ) -> bytes:
@@ -1792,6 +2006,7 @@ def _build_installer_zip(
         "nexus_dns": NEXUS_DNS_AGENT_PROFILE,
     }
     companion_copy_line = 'copy /Y "%~dp0nexus-client-chat.exe" "%INSTDIR%\\nexus-client-chat.exe" >nul\r\n' if chat_companion_bytes else ""
+    tray_copy_line = 'copy /Y "%~dp0nexus-agent-tray.exe" "%INSTDIR%\\nexus-agent-tray.exe" >nul\r\n' if tray_companion_bytes else ""
     companion_start_menu_lines = (
         'if not exist "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP" mkdir "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP"\r\n'
         'copy /Y "%~dp0Open Nexus Client Chat.bat" "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP\\Nexus Client Chat.bat" >nul\r\n'
@@ -1807,6 +2022,7 @@ def _build_installer_zip(
         "copy /Y \"%~dp0nexus-agent.exe\" \"%INSTDIR%\\nexus-agent.exe\" >nul\r\n"
         "copy /Y \"%~dp0config.json\"     \"%INSTDIR%\\config.json\"     >nul\r\n"
         + companion_copy_line
+        + tray_copy_line
         + companion_start_menu_lines
         + "cd /d \"%INSTDIR%\"\r\n"
         "\"%INSTDIR%\\nexus-agent.exe\" -run install\r\n"
@@ -1830,6 +2046,8 @@ def _build_installer_zip(
         if chat_companion_bytes:
             z.writestr("nexus-client-chat.exe", chat_companion_bytes)
             z.writestr("Open Nexus Client Chat.bat", "@echo off\r\n\"%ProgramFiles%\\NexusOps Agent\\nexus-client-chat.exe\"\r\n")
+        if tray_companion_bytes:
+            z.writestr("nexus-agent-tray.exe", tray_companion_bytes)
         z.writestr("config.json", json.dumps(config, indent=2))
         z.writestr("install.bat", install_bat)
         z.writestr("uninstall.bat", uninstall_bat)
@@ -1868,7 +2086,9 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         raise HTTPException(500, f"agent binary missing at {AGENT_BINARY_PATH}; run `make windows` in /app/agent")
     binary_bytes = AGENT_BINARY_PATH.read_bytes()
     chat_companion_bytes = CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None
+    tray_companion_bytes = TRAY_COMPANION_BINARY_PATH.read_bytes() if TRAY_COMPANION_BINARY_PATH.exists() else None
     includes_client_chat = bool(chat_companion_bytes)
+    includes_agent_tray = bool(tray_companion_bytes)
     # Nexus Elevate is delivered through the protected agent service together
     # with the user-session Client Chat companion; it is not a separate agent.
     includes_nexus_elevate = includes_client_chat
@@ -1903,6 +2123,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         server_url=server_url,
         binary_bytes=binary_bytes,
         chat_companion_bytes=chat_companion_bytes,
+        tray_companion_bytes=tray_companion_bytes,
         heartbeat_secs=heartbeat_secs,
         poll_secs=poll_secs,
     )
@@ -1926,6 +2147,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "agent_version": AGENT_VERSION,
         "package_format": "zip",
         "includes_client_chat": includes_client_chat,
+        "includes_agent_tray": includes_agent_tray,
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
@@ -1944,6 +2166,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "client_id": req.client_id,
         "agent_version": AGENT_VERSION,
         "includes_client_chat": includes_client_chat,
+        "includes_agent_tray": includes_agent_tray,
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
@@ -2006,6 +2229,7 @@ async def installer_download(token: str):
             server_url=str(manifest.get("server_url") or "").strip(),
             binary_bytes=AGENT_BINARY_PATH.read_bytes(),
             chat_companion_bytes=CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None,
+            tray_companion_bytes=TRAY_COMPANION_BINARY_PATH.read_bytes() if TRAY_COMPANION_BINARY_PATH.exists() else None,
             heartbeat_secs=int(manifest.get("heartbeat_secs") or 60),
             poll_secs=int(manifest.get("poll_secs") or 10),
         )

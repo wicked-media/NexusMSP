@@ -7,7 +7,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Shield, Wrench, Truck, MessageSquare, Paperclip, Lock, AlertTriangle,
-  ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark,
+  ChevronRight, ChevronDown, Layers, Activity, Timer, Bookmark, Play, UserPlus, CheckCircle2, Monitor,
 } from "lucide-react";
 import { differenceInHours, formatDistanceToNow } from "date-fns";
 import { TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES } from "@/lib/ticketWorkspaceHelpers";
@@ -73,7 +73,7 @@ function ActiveViewers({ viewers, density = "comfortable" }) {
    ───────────────────────────────────────────────────────────────── */
 export function TicketRow({
   ticket, density = "comfortable", isSelected, onToggleSelect, onOpen, viewers,
-  noteCount, attachmentCount, statusConfig,
+  noteCount, attachmentCount, statusConfig, onQuickAction,
 }) {
   const d = DENSITY[density];
   const sc = statusConfig[ticket.status] || { label: ticket.status };
@@ -81,6 +81,13 @@ export function TicketRow({
   const slaHrs = ticket.sla_due ? differenceInHours(new Date(ticket.sla_due), new Date()) : null;
   const isClosed = ["closed", "resolved"].includes(ticket.status);
   const isBlocked = !!ticket.blocked_by_ticket_number;
+  const hasLinkedDevice = Boolean(ticket.device_id || ticket.asset_id || ticket.device_ids?.length);
+  const quickActions = [
+    !isClosed && !ticket.assigned_to && { id: "claim", label: "Claim", icon: UserPlus, tone: "text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-100" },
+    !isClosed && ticket.status !== "in_progress" && { id: "start", label: "Start", icon: Play, tone: "text-amber-300 hover:bg-amber-500/10 hover:text-amber-100" },
+    hasLinkedDevice && { id: "remote", label: "Remote", icon: Monitor, tone: "text-violet-300 hover:bg-violet-500/10 hover:text-violet-100" },
+    !isClosed && { id: "resolve", label: "Resolve", icon: CheckCircle2, tone: "text-emerald-300 hover:bg-emerald-500/10 hover:text-emerald-100" },
+  ].filter(Boolean);
 
   // Type icon by category
   const Icon = ticket.category === "workshop" ? Wrench : ticket.category === "field" ? Truck : ticket.category === "change" ? Layers : Shield;
@@ -108,7 +115,7 @@ export function TicketRow({
   return (
     <div
       onClick={() => onOpen?.(ticket)}
-      className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer transition-colors
+      className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer transition-colors [&>span:has(+.ticket-client-brand)]:md:hidden
         ${TICKET_PRIORITY_STYLES[ticket.priority]?.border || "border-l-zinc-700"}
         ${isSelected ? "bg-violet-500/[0.08]" : isOverdue ? "bg-rose-500/[0.025] hover:bg-rose-500/[0.055]" : ticket.priority === "critical" ? "bg-amber-500/[0.02] hover:bg-amber-500/[0.05]" : "hover:bg-white/[0.025]"}
         ${isClosed ? "opacity-55" : ""}`}
@@ -144,6 +151,15 @@ export function TicketRow({
       {/* Client — muted */}
       <span className="hidden md:inline-block text-zinc-500 truncate w-[160px] shrink-0 text-[11px]">{ticket.client_name || "—"}</span>
 
+      <span className="ticket-client-brand hidden md:flex w-[160px] shrink-0 items-center gap-2 truncate text-[11px] text-zinc-500 [&+span]:md:hidden">
+        {ticket.client_logo_url ? (
+          <img src={ticket.client_logo_url} alt="" className="h-5 w-5 shrink-0 rounded-md border border-white/10 bg-white object-contain p-0.5" />
+        ) : (
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.045] text-[8px] font-semibold text-zinc-400">{(ticket.client_name || "?").slice(0, 1).toUpperCase()}</span>
+        )}
+        <span className="truncate">{ticket.client_name || "Client"}</span>
+      </span>
+
       {/* Counts */}
       <div className="hidden lg:flex items-center gap-2.5 text-zinc-500 text-[10px] font-mono shrink-0">
         {noteCount != null && (
@@ -163,6 +179,30 @@ export function TicketRow({
 
       {/* Status pill */}
       <StatusPill status={ticket.status} label={sc.label} />
+
+      {/* Technician cockpit actions appear only once a row is targeted. */}
+      {quickActions.length > 0 && (
+        <div className="hidden xl:flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-black/20 p-0.5 opacity-0 shadow-sm transition-all group-hover/row:opacity-100 group-focus-within/row:opacity-100" onClick={event => event.stopPropagation()}>
+          {quickActions.map(({ id, label, icon: QuickIcon, tone }) => (
+            <TooltipProvider key={id} delayDuration={250}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${tone}`}
+                    onClick={() => onQuickAction?.(ticket, id)}
+                    aria-label={`${label} ${ticket.ticket_number || "ticket"}`}
+                    data-testid={`ticket-quick-${id}-${ticket.id}`}
+                  >
+                    <QuickIcon className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent><p className="text-xs">{label}</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ))}
+        </div>
+      )}
 
       {/* Assignee avatar */}
       <Avatar className={`${d.avatar} shrink-0 ring-1 ring-white/10`}>
