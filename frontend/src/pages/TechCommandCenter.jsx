@@ -431,17 +431,7 @@ function AddUserDialog({ open, onClose, onCreated, onManageRoles, headers, prese
           </section>
       </NexusWorkflowDialog>
       <Dialog open={adminConfirmOpen} onOpenChange={setAdminConfirmOpen}>
-        <DialogContent className="max-w-md" data-testid="confirm-new-admin-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><ShieldAlert className="h-5 w-5 text-rose-400" />Grant administrator access?</DialogTitle>
-            <DialogDescription>This new user will be able to manage platform and team access. The account will be recorded as an administrator when created.</DialogDescription>
-          </DialogHeader>
-          <label className="flex items-start gap-2 rounded-md border border-zinc-800 p-3 text-xs text-zinc-300"><input className="mt-0.5" type="checkbox" checked={adminAcknowledged} onChange={e => setAdminAcknowledged(e.target.checked)} /><span>I understand this account will receive permanent administrator access.</span></label>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setAdminConfirmOpen(false)}>Cancel</Button>
-            <Button disabled={!adminAcknowledged} onClick={grantAdministratorAccess} variant="outline" className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10">Grant access</Button>
-          </DialogFooter>
-        </DialogContent>
+        <NexusWorkflowDialog eyebrow="Protected access change" title="Grant administrator access?" description="This new user will be able to manage platform and team access. The account will be recorded as an administrator when created." icon={ShieldAlert} tone="amber" className="max-w-md" data-testid="confirm-new-admin-dialog" footer={<><Button variant="ghost" onClick={() => setAdminConfirmOpen(false)}>Cancel</Button><Button disabled={!adminAcknowledged} onClick={grantAdministratorAccess} variant="outline" className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10">Grant access</Button></>}><label className="flex items-start gap-2 rounded-md border border-zinc-800 p-3 text-xs text-zinc-300"><input className="mt-0.5" type="checkbox" checked={adminAcknowledged} onChange={e => setAdminAcknowledged(e.target.checked)} /><span>I understand this account will receive permanent administrator access.</span></label></NexusWorkflowDialog>
       </Dialog>
     </Dialog>
   );
@@ -825,7 +815,7 @@ function InvitesTab({ headers }) {
         </Card>
       ))}
       <Dialog open={!!cancelling} onOpenChange={open => !open && setCancelling(null)}>
-        <DialogContent className="max-w-md border-rose-500/25 bg-zinc-950" data-testid="cancel-invite-dialog"><DialogHeader><DialogTitle className="flex items-center gap-2"><XCircle className="h-5 w-5 text-rose-300" />Cancel this invitation?</DialogTitle><DialogDescription>The sign-in link for <span className="font-medium text-zinc-200">{cancelling?.email}</span> will immediately stop working. This action is retained in the team audit history.</DialogDescription></DialogHeader><div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/85">You can send a new invitation later if the technician still needs access.</div><DialogFooter><Button variant="ghost" onClick={() => setCancelling(null)}>Keep invitation</Button><Button variant="destructive" disabled={actionId === cancelling?.id} onClick={() => cancel(cancelling.id)} data-testid="cancel-invite-submit">{actionId === cancelling?.id && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Cancel invitation</Button></DialogFooter></DialogContent>
+        <NexusWorkflowDialog eyebrow="Invitation lifecycle" title="Cancel this invitation?" description={`The sign-in link for ${cancelling?.email || "this recipient"} will immediately stop working. This action is retained in the team audit history.`} icon={XCircle} tone="amber" className="max-w-md" data-testid="cancel-invite-dialog" footer={<><Button variant="ghost" onClick={() => setCancelling(null)}>Keep invitation</Button><Button variant="destructive" disabled={actionId === cancelling?.id} onClick={() => cancel(cancelling.id)} data-testid="cancel-invite-submit">{actionId === cancelling?.id && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Cancel invitation</Button></>}><div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.06] p-3 text-xs leading-relaxed text-rose-100/85">You can send a new invitation later if the technician still needs access.</div></NexusWorkflowDialog>
       </Dialog>
     </div>
   );
@@ -1401,11 +1391,7 @@ function JITTab({ headers, capacity, presets, onChanged }) {
        </div>}
 
       <Dialog open={grantOpen} onOpenChange={setGrantOpen}>
-        <DialogContent className="max-w-2xl overflow-hidden border-border bg-background p-0">
-          <DialogHeader className="border-b border-border bg-gradient-to-r from-violet-500/10 via-background to-background px-6 py-5">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-700 dark:text-violet-300"><Zap className="h-5 w-5" /></div><div><DialogTitle>Grant just-in-time access</DialogTitle><DialogDescription className="mt-1">Give one technician a defined permission preset for a limited, fully audited window.</DialogDescription></div></div>
-          </DialogHeader>
-          <div className="space-y-5 px-6 py-5">
+        <NexusWorkflowDialog eyebrow="Time-bound access" title="Grant just-in-time access" description="Give one technician a defined permission preset for a limited, fully audited window." icon={Zap} tone="violet" className="max-w-2xl" contentClassName="space-y-5" data-testid="jit-access-workflow" footer={<><Button variant="ghost" onClick={() => setGrantOpen(false)}>Cancel</Button><Button onClick={doGrant} disabled={!grant.tech_id || !grant.reason.trim()}><Zap className="mr-1.5 h-4 w-4" />Grant temporary access</Button></>}>
             <div className="grid grid-cols-3 gap-2" aria-label="Elevation workflow">
               {["1  Technician", "2  Permission", "3  Expiry & evidence"].map((step, index) => <div key={step} className={`rounded-lg border px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider ${index === 0 ? "border-violet-500/40 bg-violet-500/10 text-violet-700 dark:text-violet-300" : "border-border bg-muted/30 text-muted-foreground"}`}>{step}</div>)}
             </div>
@@ -1422,20 +1408,11 @@ function JITTab({ headers, capacity, presets, onChanged }) {
             <div className="space-y-2"><Label htmlFor="jit-duration">Access window (minutes)</Label><Input id="jit-duration" aria-label="Access window in minutes" type="number" min={5} max={1440} value={grant.duration_minutes} onChange={e => setGrant({ ...grant, duration_minutes: Number(e.target.value) })} /><p className="text-[11px] text-muted-foreground">Between 5 minutes and 24 hours. Nexus automatically removes the grant at expiry.</p></div>
             <div className="space-y-2"><Label htmlFor="jit-reason">Business reason <span className="text-rose-500">*</span></Label><Textarea id="jit-reason" aria-label="Business reason" rows={4} value={grant.reason} onChange={e => setGrant({ ...grant, reason: e.target.value })} placeholder="Example: Temporary tenant administration required for approved Microsoft 365 remediation on INC-1042." /><p className="text-[11px] text-muted-foreground">Recorded permanently with the technician, preset, grantor and expiry.</p></div>
             <div className="grid gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4 sm:grid-cols-3">{[[Lock,"Least privilege"],[Clock,`${grant.duration_minutes || 0} min expiry`],[History,"Audit retained"]].map(([Icon,label]) => <div key={label} className="flex items-center gap-2 text-xs font-medium text-emerald-800 dark:text-emerald-200"><Icon className="h-3.5 w-3.5" />{label}</div>)}</div>
-          </div>
-          <DialogFooter className="border-t border-border bg-muted/20 px-6 py-4">
-            <Button variant="ghost" onClick={() => setGrantOpen(false)}>Cancel</Button>
-            <Button onClick={doGrant} disabled={!grant.tech_id || !grant.reason.trim()}><Zap className="mr-1.5 h-4 w-4" />Grant temporary access</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={bgOpen} onOpenChange={closeBreakGlass}>
-        <DialogContent className="max-w-xl overflow-hidden border-rose-500/40 bg-background p-0">
-          <DialogHeader className="border-b border-rose-500/25 bg-gradient-to-r from-rose-500/15 via-background to-background px-6 py-5">
-            <div className="flex items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-700 dark:text-rose-300"><ShieldAlert className="h-5 w-5" /></div><div><DialogTitle className="text-rose-800 dark:text-rose-200">Emergency break-glass access</DialogTitle><DialogDescription className="mt-1">Self-grant full administrator privileges only when normal approval cannot protect service continuity.</DialogDescription></div></div>
-          </DialogHeader>
-          <div className="space-y-5 px-6 py-5">
+        <NexusWorkflowDialog eyebrow="Emergency elevation" title="Emergency break-glass access" description="Self-grant full administrator privileges only when normal approval cannot protect service continuity." icon={ShieldAlert} tone="amber" className="max-w-xl" contentClassName="space-y-5" data-testid="break-glass-workflow" footer={<><Button variant="ghost" onClick={() => closeBreakGlass(false)}>Cancel</Button><Button variant="destructive" onClick={doBg} disabled={bg.reason.trim().length < 10 || !bgAcknowledged}><ShieldAlert className="mr-1.5 h-4 w-4" />Activate emergency access</Button></>}>
             <div className="grid gap-2 sm:grid-cols-3">{[[Crown,"Full admin","All protected actions"],[Clock,"Auto-expiring",`Maximum ${bg.duration_minutes || 0} minutes`],[History,"Permanently audited","Reason and activity retained"]].map(([Icon,title,body]) => <div key={title} className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3"><Icon className="mb-2 h-4 w-4 text-rose-700 dark:text-rose-300" /><p className="text-xs font-semibold text-foreground">{title}</p><p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{body}</p></div>)}</div>
             <div className="space-y-2"><Label htmlFor="break-glass-duration">Emergency access window (minutes)</Label><Input id="break-glass-duration" aria-label="Emergency access window in minutes" type="number" min={5} max={60} value={bg.duration_minutes} onChange={e => setBg({ ...bg, duration_minutes: Number(e.target.value) })} /><p className="text-[11px] text-muted-foreground">Keep this as short as possible. Access is revoked automatically.</p></div>
             <div className="space-y-2"><Label htmlFor="break-glass-reason">Detailed emergency reason <span className="text-rose-500">*</span></Label><Textarea id="break-glass-reason" aria-label="Detailed emergency reason" rows={4} value={bg.reason} onChange={e => setBg({ ...bg, reason: e.target.value })} placeholder="Describe the outage or security incident, why normal approval is unavailable, and the actions you expect to take." /><div className="flex justify-between text-[10px] text-muted-foreground"><span>Minimum 10 characters; include a ticket or incident reference where possible.</span><span>{bg.reason.length}/10</span></div></div>
@@ -1443,12 +1420,7 @@ function JITTab({ headers, capacity, presets, onChanged }) {
               <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-border accent-rose-600" checked={bgAcknowledged} onChange={e => setBgAcknowledged(e.target.checked)} />
               <span className="text-xs leading-relaxed text-foreground"><span className="font-semibold">I understand this grants full administrator access.</span><span className="mt-1 block text-muted-foreground">My identity, reason, activity and automatic expiry will be recorded in the immutable audit history.</span></span>
             </label>
-          </div>
-          <DialogFooter className="border-t border-rose-500/20 bg-rose-500/5 px-6 py-4">
-            <Button variant="ghost" onClick={() => closeBreakGlass(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={doBg} disabled={bg.reason.trim().length < 10 || !bgAcknowledged}><ShieldAlert className="mr-1.5 h-4 w-4" />Activate emergency access</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
