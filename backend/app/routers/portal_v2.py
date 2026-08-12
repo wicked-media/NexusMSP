@@ -1306,7 +1306,13 @@ async def portal_invoice_pdf(invoice_id: str, user: dict = Depends(get_portal_us
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            # Generated documents must never be served from a stale browser cache.
+            # This is especially important after a branding or template update.
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
     )
 
 
