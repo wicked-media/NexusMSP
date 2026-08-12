@@ -2386,7 +2386,7 @@ export default function TicketsPage() {
                       <span className="mt-1 block font-mono text-xs font-medium text-emerald-200">{unbilledTicketItems.length} · ${unbilledTicketTotal.toFixed(2)}</span>
                     </button>
                   </div>
-                  <Button type="button" variant="outline" size="sm" className="mt-3 h-8 w-full border-emerald-400/25 bg-emerald-500/[0.08] text-xs text-emerald-100 hover:bg-emerald-500/[0.16]" onClick={openTicketInvoiceWorkflow} data-testid="ticket-commercial-invoice">
+                  <Button type="button" variant="success" size="sm" className="mt-3 h-8 w-full text-xs" onClick={openTicketInvoiceWorkflow} data-testid="ticket-commercial-invoice">
                     <Receipt className="mr-1.5 h-3.5 w-3.5" />Review invoice workflow
                   </Button>
                 </div>
@@ -2785,7 +2785,7 @@ export default function TicketsPage() {
                       {wsQuote.notes && <p className="text-xs text-muted-foreground">{wsQuote.notes}</p>}
                       <div className="flex gap-2 pt-2">
                         {wsQuote.status === "draft" && <Button size="sm" onClick={handleSendWsQuote} data-testid="ws-send-quote"><Send className="w-3 h-3 mr-1" />Send to Customer</Button>}
-                        {wsQuote.status === "sent" && <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApproveWsQuote} data-testid="ws-approve-quote"><CheckCircle className="w-3 h-3 mr-1" />Mark Approved</Button>}
+                        {wsQuote.status === "sent" && <Button variant="success" size="sm" onClick={handleApproveWsQuote} data-testid="ws-approve-quote"><CheckCircle className="w-3 h-3 mr-1" />Mark Approved</Button>}
                         <Button size="sm" variant="outline" onClick={() => { setWsQuoteItems(wsQuote.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote.notes || ""); setWsQuoteDialog(true); }}>Edit Quote</Button>
                       </div>
                     </CardContent>
@@ -2876,7 +2876,7 @@ export default function TicketsPage() {
               <CardContent className="py-4">
                 <div className="flex items-center justify-between mb-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Labour timer</p><p className="font-mono text-2xl font-semibold mt-1">{viewWsJob.labour_minutes || 0}<span className="text-sm text-muted-foreground ml-1">min</span></p></div>{viewWsJob.timer_running && <Badge className="bg-amber-500/15 text-amber-300 border-amber-500/25 animate-pulse">Live</Badge>}</div>
                 <div className="flex items-center gap-2">
-                  <Button className={`flex-1 ${viewWsJob.timer_running ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"}`} onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
+                  <Button variant={viewWsJob.timer_running ? "destructive" : "success"} className="flex-1" onClick={() => handleWsTimer(viewWsJob.id, viewWsJob.timer_running ? "stop" : "start")} data-testid="ws-timer-btn">
                     {viewWsJob.timer_running ? <><Pause className="w-4 h-4 mr-1" />Stop timer</> : <><Play className="w-4 h-4 mr-1" />Start timer</>}
                   </Button>
                 </div>
@@ -3348,7 +3348,7 @@ export default function TicketsPage() {
                       {fjQuote.notes && <p className="text-xs text-muted-foreground">{fjQuote.notes}</p>}
                       <div className="flex gap-2 pt-2">
                         {fjQuote.status === "draft" && <Button size="sm" onClick={handleSendFjQuote}><Send className="w-3 h-3 mr-1" />Send to Customer</Button>}
-                        {fjQuote.status === "sent" && <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApproveFjQuote}><CheckCircle className="w-3 h-3 mr-1" />Mark Approved</Button>}
+                        {fjQuote.status === "sent" && <Button variant="success" size="sm" onClick={handleApproveFjQuote}><CheckCircle className="w-3 h-3 mr-1" />Mark Approved</Button>}
                         <Button size="sm" variant="outline" onClick={() => { setFjQuoteItems(fjQuote.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote.notes || ""); setFjQuoteDialog(true); }}>Edit Quote</Button>
                       </div>
                     </CardContent>
@@ -3699,13 +3699,13 @@ export default function TicketsPage() {
         title="Ticket queue"
         subtitle={`${tickets.length} support · ${workshopJobs.length} workshop · ${fieldJobs.length} field jobs · saved views and live service signals`}
         actions={<>
-          <Button variant="outline" size="sm" className="h-8 text-xs border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/[0.10]" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
+          <Button size="sm" className="h-8 text-xs" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
             <Plus className="w-3 h-3 mr-1" />New ticket
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/[0.10]" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
+          <Button variant="info" size="sm" className="h-8 text-xs" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
             <Wrench className="w-3 h-3 mr-1" />Workshop
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/[0.10]" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
+          <Button variant="info" size="sm" className="h-8 text-xs" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
             <Radio className="w-3 h-3 mr-1" />Cabling
           </Button>
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={fetchTickets} data-testid="refresh-tickets-btn">
@@ -3792,13 +3792,13 @@ export default function TicketsPage() {
              <p className="mt-0.5 text-xs text-muted-foreground">Hover a ticket to claim it, start work, resolve it, or open a linked device in Nexus Remote.</p>
            </div>
            <div className="flex flex-wrap gap-2">
-             <Button size="sm" variant="outline" className="h-8 border-rose-500/20 bg-rose-500/[0.04] text-xs text-rose-700 hover:bg-rose-500/[0.1] dark:text-rose-200" onClick={() => applyQueueFilter({ attention: "sla_breach" })}>
+             <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => applyQueueFilter({ attention: "sla_breach" })}>
                <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />{breachedCount} breached
              </Button>
-             <Button size="sm" variant="outline" className="h-8 border-amber-500/20 bg-amber-500/[0.04] text-xs text-amber-700 hover:bg-amber-500/[0.1] dark:text-amber-200" onClick={() => applyQueueFilter({ attention: "unassigned" })}>
+             <Button size="sm" variant="warning" className="h-8 text-xs" onClick={() => applyQueueFilter({ attention: "unassigned" })}>
                <User className="mr-1.5 h-3.5 w-3.5" />{unassignedCount} unassigned
              </Button>
-             <Button size="sm" variant="outline" className="h-8 border-cyan-500/20 bg-cyan-500/[0.04] text-xs text-cyan-700 hover:bg-cyan-500/[0.1] dark:text-cyan-200" onClick={() => applyQueueFilter({ priority: "critical" })}>
+             <Button size="sm" variant="info" className="h-8 text-xs" onClick={() => applyQueueFilter({ priority: "critical" })}>
                <Shield className="mr-1.5 h-3.5 w-3.5" />{criticalCount} critical
              </Button>
            </div>
