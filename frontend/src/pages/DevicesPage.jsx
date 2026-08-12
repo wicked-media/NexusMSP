@@ -9,7 +9,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
@@ -37,6 +37,7 @@ import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
 import { PageShell } from "@/components/design-system";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
 const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
@@ -94,6 +95,8 @@ export default function DevicesPage() {
   const [density, setDensity] = useState("comfortable"); // comfortable | compact | dense
   const [quickScriptOpen, setQuickScriptOpen] = useState(false);
   const [pulseCount, setPulseCount] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const filterSource = searchParams.get("source");
@@ -230,13 +233,16 @@ export default function DevicesPage() {
     } catch (e) { toast.error("Save failed"); }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this device?")) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
     try {
-      await axios.delete(`${API}/devices/${id}`, { headers });
+      await axios.delete(`${API}/devices/${deleteTarget.id}`, { headers });
       toast.success("Device deleted");
+      setDeleteTarget(null);
       fetchData();
     } catch (e) { toast.error("Delete failed"); }
+    finally { setDeleteBusy(false); }
   };
 
   const toggleSelectDevice = (id) => {
@@ -283,9 +289,7 @@ export default function DevicesPage() {
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
-      <DialogContent className="max-w-3xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
-        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Asset register</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Monitor className="h-4 w-4 text-cyan-200" /></span>{editing ? `Refine ${editing.name}` : "Add managed asset"}</DialogTitle><DialogDescription className="mt-2">Capture ownership, endpoint identity and operational context in one auditable asset record.</DialogDescription></DialogHeader>
-        <div className="max-h-[68vh] space-y-5 overflow-y-auto px-6 py-5">
+      <NexusWorkflowDialog eyebrow="Asset register" title={editing ? `Refine ${editing.name}` : "Add managed asset"} description="Capture ownership, endpoint identity and operational context in one auditable asset record." icon={Monitor} tone="cyan" className="max-w-3xl" contentClassName="max-h-[68vh] space-y-5 overflow-y-auto" data-testid="device-asset-workflow" footer={<><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button variant="success" onClick={handleSave} data-testid="save-device-btn">{editing ? "Save asset" : "Create asset"}</Button></>}>
           <section className="space-y-3"><div><p className="text-xs font-semibold text-zinc-200">Identity & ownership</p><p className="mt-0.5 text-[11px] text-zinc-500">Required fields establish the client relationship and asset identity.</p></div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Asset name *</Label><Input autoFocus value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="ACME-WS-001" data-testid="device-name-input" /></div>
@@ -334,9 +338,7 @@ export default function DevicesPage() {
           <div><Label>Tags (comma separated)</Label><Input value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} placeholder="production, vpn-user, critical" /></div>
           <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} placeholder="Additional notes..." /></div>
           </section>
-        </div>
-        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => setIsFormOpen(false)}>Cancel</Button><Button variant="success" onClick={handleSave} data-testid="save-device-btn">{editing ? "Save asset" : "Create asset"}</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 
@@ -738,7 +740,7 @@ export default function DevicesPage() {
                             <Sparkles className="w-3 h-3 text-fuchsia-400" />
                           </Button>
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(d)}><Edit className="w-3 h-3" /></Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => handleDelete(d.id)}><Trash2 className="w-3 h-3" /></Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" onClick={() => setDeleteTarget(d)} aria-label={`Delete ${d.name}`}><Trash2 className="w-3 h-3" /></Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -927,6 +929,21 @@ export default function DevicesPage() {
             </div>
           )}</div>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Managed asset lifecycle"
+          title="Delete managed asset?"
+          description={`Remove ${deleteTarget?.name || "this asset"} from the Nexus asset register. This cannot be undone.`}
+          icon={Trash2}
+          tone="amber"
+          className="max-w-lg"
+          data-testid="delete-device-workflow"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>Keep asset</Button><Button variant="destructive" onClick={handleDelete} disabled={deleteBusy}>{deleteBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}Delete asset</Button></>}
+        >
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">Delete only when this record is erroneous or no longer belongs in the managed estate. Archive or update the asset when historic operational context should remain visible.</div>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Quick Script bulk dialog */}
