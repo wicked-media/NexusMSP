@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ChevronLeft, ChevronRight, Loader2, Link2, RefreshCw, Search, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -203,8 +204,16 @@ export default function TenantsTab({ token, backupStatuses }) {
       </Card>
 
       <Dialog open={!!linkDialog} onOpenChange={v => !v && setLinkDialog(null)}>
-        <DialogContent className="max-w-xl overflow-hidden border-sky-400/20 bg-background p-0">
-          <DialogHeader className="border-b border-sky-400/15 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
+        <NexusWorkflowDialog
+          eyebrow="Backup tenant mapping"
+          title="Link Acronis tenant"
+          description={`Map ${linkDialog?.name || "this Acronis tenant"} to its NexusMSP client so billing, backup assurance and audit history remain connected.`}
+          icon={Link2}
+          tone="cyan"
+          className="max-w-xl"
+          footer={<><Button variant="outline" onClick={() => setLinkDialog(null)}>Cancel</Button><Button onClick={handleLink} disabled={!linkClientId} data-testid="confirm-link-tenant"><Link2 className="w-4 h-4 mr-1" />Link tenant</Button></>}
+        >
+          <DialogHeader className="sr-only" aria-hidden="true">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Tenant mapping</p>
             <DialogTitle className="mt-1 flex items-center gap-2 text-xl">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-400/25 bg-sky-400/10"><Link2 className="h-4 w-4 text-sky-300" /></span>
@@ -214,17 +223,11 @@ export default function TenantsTab({ token, backupStatuses }) {
               Map "{linkDialog?.name}" to a NexusMSP client for unified billing, backup assurance, and audit history.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 px-6 py-5">
+          <div className="space-y-3">
             <div className="rounded-xl border border-sky-400/15 bg-sky-400/[0.04] p-3 text-sm"><p className="font-medium">{linkDialog?.name}</p><p className="mt-1 text-xs text-muted-foreground">Select the customer responsible for this backup tenant. This mapping drives usage billing and customer-level reporting.</p></div>
             <div><label className="text-sm font-medium">NexusMSP customer</label><Select value={linkClientId} onValueChange={setLinkClientId}><SelectTrigger className="mt-1" data-testid="link-client-select"><SelectValue placeholder="Choose customer" /></SelectTrigger><SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></div>
           </div>
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
-            <Button variant="outline" onClick={() => setLinkDialog(null)}>Cancel</Button>
-            <Button onClick={handleLink} disabled={!linkClientId} data-testid="confirm-link-tenant">
-              <Link2 className="w-4 h-4 mr-1" />Link
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
