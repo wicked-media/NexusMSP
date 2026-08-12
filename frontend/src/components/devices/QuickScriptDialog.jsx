@@ -2,7 +2,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,8 +43,16 @@ export default function QuickScriptDialog({ open, onClose, deviceIds }) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose && onClose(); }}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Device automation"
+        title={`Run a quick script on ${deviceIds.length} device${deviceIds.length === 1 ? "" : "s"}`}
+        description="Choose an approved script. Nexus records the queued action against every selected endpoint."
+        icon={Search}
+        tone="violet"
+        className="max-w-2xl"
+        footer={<Button variant="outline" onClick={onClose}>Close</Button>}
+      >
+        <DialogHeader className="sr-only" aria-hidden="true">
           <DialogTitle>Quick Scripts · fan-out to {deviceIds.length} device{deviceIds.length === 1 ? "" : "s"}</DialogTitle>
         </DialogHeader>
         <div className="relative">
@@ -75,10 +84,7 @@ export default function QuickScriptDialog({ open, onClose, deviceIds }) {
             </Card>
           ))}
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
