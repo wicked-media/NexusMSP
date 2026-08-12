@@ -1453,6 +1453,11 @@ function CippTenantPanel({ client }) {
   const [createForm, setCreateForm] = useState({ displayName: "", userPrincipalName: "", password: "", firstName: "", lastName: "", usageLocation: "AU", licenses: [], mustChangePassword: true });
   const [licAdd, setLicAdd] = useState([]);
   const [licRemove, setLicRemove] = useState([]);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
+  const [resetDialog, setResetDialog] = useState(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [signInDialog, setSignInDialog] = useState(null);
+  const [offboardDialog, setOffboardDialog] = useState(null);
 
   const loadClient = async () => {
     try {
@@ -1526,10 +1531,10 @@ function CippTenantPanel({ client }) {
   };
 
   const doUnlink = async () => {
-    if (!window.confirm("Unlink this tenant from the client?")) return;
     try {
       await axios.delete(`${API}/clients/${client.id}/link-cipp-tenant`, { headers });
       toast.success("Unlinked");
+      setUnlinkConfirmOpen(false);
       loadClient();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
@@ -1561,35 +1566,46 @@ function CippTenantPanel({ client }) {
     finally { setBusy(false); }
   };
 
-  const doReset = async (u) => {
-    const pw = window.prompt(`Reset password for ${u.userPrincipalName}. Leave blank for auto-generated:`, "");
-    if (pw === null) return;
+  const doReset = async () => {
+    if (!resetDialog) return;
+    setBusy(true);
     try {
-      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/reset-password`, { password: pw, mustChange: true }, { headers });
+      await axios.post(`${API}/cipp/tenants/${tenantId}/users/${resetDialog.id}/reset-password`, { password: resetPassword, mustChange: true }, { headers });
       toast.success("Password reset");
+      setResetDialog(null);
+      setResetPassword("");
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
   };
 
-  const doToggleSignin = async (u) => {
-    if (!window.confirm(`${u.accountEnabled ? "Block" : "Unblock"} sign-in for ${u.userPrincipalName}?`)) return;
+  const doToggleSignin = async () => {
+    if (!signInDialog) return;
+    const u = signInDialog;
+    setBusy(true);
     try {
       await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/block-signin`, { enable: !u.accountEnabled }, { headers });
       toast.success(`Sign-in ${u.accountEnabled ? "blocked" : "unblocked"}`);
+      setSignInDialog(null);
       const res = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
       setUsers(res.data || []);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
   };
 
-  const doOffboard = async (u) => {
-    if (!window.confirm(`Offboard ${u.userPrincipalName}? Removes licenses, disables sign-in, converts mailbox to shared, resets password, hides from GAL.`)) return;
+  const doOffboard = async () => {
+    if (!offboardDialog) return;
+    const u = offboardDialog;
+    setBusy(true);
     try {
       await axios.post(`${API}/cipp/tenants/${tenantId}/users/${u.id}/offboard`, {
         convertToShared: true, removeLicenses: true, resetPassword: true, revokeSessions: true, disableUser: true, removeGroups: true, hideFromGAL: true,
       }, { headers });
       toast.success(`${u.userPrincipalName} offboarded`);
+      setOffboardDialog(null);
       const res = await axios.get(`${API}/cipp/tenants/${tenantId}/users`, { headers });
       setUsers(res.data || []);
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+    finally { setBusy(false); }
   };
 
   if (!tenantId) {
@@ -1646,7 +1662,7 @@ function CippTenantPanel({ client }) {
           <div className="flex gap-2">
             <Button size="sm" variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={() => setCreateOpen(true)} data-testid="client-cipp-create-user"><UserPlus className="w-3 h-3 mr-1" />Create user</Button>
             <Button size="sm" variant="outline" asChild><Link to="/control-plane?module=microsoft365"><ExternalLink className="w-3 h-3 mr-1" />Control Plane</Link></Button>
-            <Button size="sm" variant="ghost" className="text-rose-400" onClick={doUnlink} data-testid="client-cipp-unlink"><X className="w-3 h-3 mr-1" />Unlink</Button>
+            <Button size="sm" variant="ghost" className="text-rose-400" onClick={() => setUnlinkConfirmOpen(true)} data-testid="client-cipp-unlink"><X className="w-3 h-3 mr-1" />Unlink</Button>
           </div>
         </div>
 
@@ -1772,11 +1788,11 @@ function CippTenantPanel({ client }) {
                   <td className="px-3 py-2 text-right">
                     <div className="flex gap-1 justify-end flex-wrap">
                       <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setLicenseDialog(u); setLicAdd([]); setLicRemove([]); }} data-testid={`client-cipp-user-licenses-${u.id}`}><KeyRound className="w-3 h-3 mr-0.5" />Licenses</Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => doReset(u)} data-testid={`client-cipp-user-reset-${u.id}`}><RefreshCw className="w-3 h-3 mr-0.5" />Reset</Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => doToggleSignin(u)} data-testid={`client-cipp-user-block-${u.id}`}>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { setResetDialog(u); setResetPassword(""); }} data-testid={`client-cipp-user-reset-${u.id}`}><RefreshCw className="w-3 h-3 mr-0.5" />Reset</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setSignInDialog(u)} data-testid={`client-cipp-user-block-${u.id}`}>
                         {u.accountEnabled ? <><Lock className="w-3 h-3 mr-0.5" />Block</> : <><Unlock className="w-3 h-3 mr-0.5" />Unblock</>}
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px] text-rose-400" onClick={() => doOffboard(u)} data-testid={`client-cipp-user-offboard-${u.id}`}><UserX className="w-3 h-3 mr-0.5" />Offboard</Button>
+                      <Button size="sm" variant="ghost" className="h-6 text-[10px] text-rose-400" onClick={() => setOffboardDialog(u)} data-testid={`client-cipp-user-offboard-${u.id}`}><UserX className="w-3 h-3 mr-0.5" />Offboard</Button>
                     </div>
                   </td>
                 </tr>
@@ -1872,6 +1888,22 @@ function CippTenantPanel({ client }) {
             </div>
           </div>
         </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={unlinkConfirmOpen} onOpenChange={setUnlinkConfirmOpen}>
+        <NexusWorkflowDialog eyebrow="Client Microsoft setup" title="Unlink Microsoft tenant?" description={`Disconnect ${clientDoc?.cipp_tenant_display || "the linked tenant"} from ${client.name}. Nexus will retain existing client and audit records.`} icon={X} tone="amber" className="max-w-lg" data-testid="client-cipp-unlink-workflow" footer={<><Button variant="outline" onClick={() => setUnlinkConfirmOpen(false)}>Keep linked</Button><Button variant="destructive" onClick={doUnlink} disabled={busy}>Unlink tenant</Button></>}><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This stops Microsoft administration from the client record. It does not delete the Microsoft tenant.</p></NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(resetDialog)} onOpenChange={(open) => !open && setResetDialog(null)}>
+        <NexusWorkflowDialog eyebrow="Sensitive identity action" title="Reset user password" description={`Reset ${resetDialog?.userPrincipalName || "this user's"} password and require a new password at next sign-in.`} icon={KeyRound} tone="amber" className="max-w-lg" data-testid="client-cipp-reset-workflow" footer={<><Button variant="outline" onClick={() => setResetDialog(null)}>Cancel</Button><Button onClick={doReset} disabled={busy}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <KeyRound className="mr-1.5 h-4 w-4" />}Reset password</Button></>}><div className="space-y-2"><Label htmlFor="cipp-reset-password">Temporary password <span className="text-muted-foreground">(optional)</span></Label><Input id="cipp-reset-password" type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="Leave blank to generate securely" autoFocus /><p className="text-xs text-muted-foreground">Nexus will require the user to change this password after their next successful sign-in.</p></div></NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(signInDialog)} onOpenChange={(open) => !open && setSignInDialog(null)}>
+        <NexusWorkflowDialog eyebrow="Sensitive identity action" title={`${signInDialog?.accountEnabled ? "Block" : "Unblock"} user sign-in?`} description={`${signInDialog?.userPrincipalName || "This user"} will ${signInDialog?.accountEnabled ? "no longer be able to sign in" : "be able to sign in again"} to the linked Microsoft tenant.`} icon={signInDialog?.accountEnabled ? Lock : Unlock} tone="amber" className="max-w-lg" data-testid="client-cipp-signin-workflow" footer={<><Button variant="outline" onClick={() => setSignInDialog(null)}>Cancel</Button><Button variant={signInDialog?.accountEnabled ? "destructive" : "default"} onClick={doToggleSignin} disabled={busy}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : signInDialog?.accountEnabled ? <Lock className="mr-1.5 h-4 w-4" /> : <Unlock className="mr-1.5 h-4 w-4" />}{signInDialog?.accountEnabled ? "Block sign-in" : "Unblock sign-in"}</Button></>}><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This action is attributable to your Nexus session and recorded in the identity audit trail.</p></NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(offboardDialog)} onOpenChange={(open) => !open && setOffboardDialog(null)}>
+        <NexusWorkflowDialog eyebrow="High-impact identity workflow" title="Offboard Microsoft 365 user" description={`Prepare a safe departure workflow for ${offboardDialog?.userPrincipalName || "this user"}. Review the actions Nexus will apply before proceeding.`} icon={UserX} tone="amber" className="max-w-xl" data-testid="client-cipp-offboard-workflow" footer={<><Button variant="outline" onClick={() => setOffboardDialog(null)}>Cancel</Button><Button variant="destructive" onClick={doOffboard} disabled={busy}>{busy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <UserX className="mr-1.5 h-4 w-4" />}Offboard user</Button></>}><div className="grid gap-2 sm:grid-cols-2">{["Disable sign-in and revoke active sessions", "Reset password and remove group membership", "Convert mailbox to shared and hide it from the GAL", "Remove assigned Microsoft licences"].map((action) => <div key={action} className="flex items-start gap-2 rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-3 text-sm text-muted-foreground"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />{action}</div>)}</div></NexusWorkflowDialog>
       </Dialog>
     </div>
   );
