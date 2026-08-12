@@ -1,4 +1,5 @@
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,8 +16,14 @@ import { Plus, X, Send, DollarSign, CheckCircle } from "lucide-react";
 export function WsAddPartDialog({ open, onOpenChange, allProducts, wsPartProduct, setWsPartProduct, wsPartQty, setWsPartQty, handleAddWsPart }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Add Part to Workshop Job</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Workshop workflow"
+        title="Add a part"
+        description="Select the stock item and quantity. Nexus records the usage against this job and updates stock."
+        icon={Plus}
+        tone="amber"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></>}
+      >
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground">Stock will be deducted automatically.</p>
           <Select value={wsPartProduct || "__none"} onValueChange={v => setWsPartProduct(v === "__none" ? "" : v)}>
@@ -25,8 +32,7 @@ export function WsAddPartDialog({ open, onOpenChange, allProducts, wsPartProduct
           </Select>
           <Input type="number" min="1" value={wsPartQty} onChange={e => setWsPartQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" />
         </div>
-        <DialogFooter><Button onClick={handleAddWsPart} disabled={!wsPartProduct} data-testid="confirm-ws-part"><Plus className="w-4 h-4 mr-1" />Add Part</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -34,8 +40,15 @@ export function WsAddPartDialog({ open, onOpenChange, allProducts, wsPartProduct
 export function WsQuoteBuilderDialog({ open, onOpenChange, wsQuoteItems, setWsQuoteItems, wsQuoteNotes, setWsQuoteNotes, handleSaveWsQuote }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Repair Quote Builder</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Workshop workflow"
+        title="Build repair quote"
+        description="Prepare the repair scope and customer-facing price before requesting approval."
+        icon={DollarSign}
+        tone="amber"
+        className="max-w-2xl"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSaveWsQuote} data-testid="ws-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></>}
+      >
         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
           {wsQuoteItems.map((item, i) => (
             <div key={`k-${i}`} className="grid grid-cols-12 gap-2 items-end">
@@ -52,8 +65,7 @@ export function WsQuoteBuilderDialog({ open, onOpenChange, wsQuoteItems, setWsQu
           </div>
           <div><Label className="text-xs">Notes</Label><Textarea value={wsQuoteNotes} onChange={e => setWsQuoteNotes(e.target.value)} rows={2} placeholder="Additional notes for the customer..." /></div>
         </div>
-        <DialogFooter><Button onClick={handleSaveWsQuote} data-testid="ws-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -61,8 +73,13 @@ export function WsQuoteBuilderDialog({ open, onOpenChange, wsQuoteItems, setWsQu
 export function WsNotifyCustomerDialog({ open, onOpenChange, viewWsJob, wsNotifyForm, setWsNotifyForm, handleWsNotifyCustomer }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Notify Customer</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Workshop communication"
+        title="Notify customer"
+        description="Choose a ready-made update or compose a clear status message for this repair."
+        icon={Send}
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleWsNotifyCustomer} data-testid="ws-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></>}
+      >
         <div className="space-y-4">
           <div><Label>Email</Label><Input value={wsNotifyForm.email} onChange={e => setWsNotifyForm({ ...wsNotifyForm, email: e.target.value })} placeholder="customer@example.com" data-testid="ws-notify-email" /></div>
           <div><Label>Subject</Label><Input value={wsNotifyForm.subject} onChange={e => setWsNotifyForm({ ...wsNotifyForm, subject: e.target.value })} /></div>
@@ -73,8 +90,7 @@ export function WsNotifyCustomerDialog({ open, onOpenChange, viewWsJob, wsNotify
             <Button variant="outline" size="sm" onClick={() => setWsNotifyForm(prev => ({ ...prev, message: `Hi ${viewWsJob.customer_name},\n\nGreat news! Your ${viewWsJob.device_brand || ""} ${viewWsJob.device_model || ""} is ready for collection.\n\nJob Number: ${viewWsJob.job_number}\nTotal: $${(viewWsJob.total_cost || 0).toFixed(2)}\n\nPlease collect at your earliest convenience.\n\nRegards,\nThe Workshop Team`, subject: `Ready for Pickup - ${viewWsJob.job_number}` }))}>Ready for Pickup</Button>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleWsNotifyCustomer} data-testid="ws-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -82,8 +98,14 @@ export function WsNotifyCustomerDialog({ open, onOpenChange, viewWsJob, wsNotify
 export function WsPushInvoiceDialog({ open, onOpenChange, viewWsJob, wsInvoiceList, handleWsPushToInvoice }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Push Workshop Job to Invoice</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Workshop billing"
+        title="Send job to invoice"
+        description="Review the recorded parts and labour, then create a new invoice or add the work to an existing one."
+        icon={DollarSign}
+        tone="emerald"
+        footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>}
+      >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">Parts (${(viewWsJob.total_parts_cost || 0).toFixed(2)}) + Labour (${(viewWsJob.total_labour_cost || 0).toFixed(2)}) = <strong className="text-green-400">${(viewWsJob.total_cost || 0).toFixed(2)}</strong></p>
           <Button className="w-full" onClick={() => handleWsPushToInvoice(null)} data-testid="ws-new-invoice"><Plus className="w-4 h-4 mr-1" />Create New Invoice</Button>
@@ -99,7 +121,7 @@ export function WsPushInvoiceDialog({ open, onOpenChange, viewWsJob, wsInvoiceLi
             </ScrollArea>
           </>}
         </div>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -107,8 +129,14 @@ export function WsPushInvoiceDialog({ open, onOpenChange, viewWsJob, wsInvoiceLi
 export function WsDeviceIntakeDialog({ open, onOpenChange, wsIntakeForm, setWsIntakeForm, handleSaveWsIntake }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Device Intake Details</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Workshop intake"
+        title="Record device intake"
+        description="Capture the device condition, received accessories and warranty details before repair work begins."
+        icon={CheckCircle}
+        tone="amber"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save Intake</Button></>}
+      >
         <div className="space-y-4">
           <div><Label>Customer Email</Label><Input value={wsIntakeForm.customer_email} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_email: e.target.value })} placeholder="customer@example.com" data-testid="ws-intake-email" /></div>
           <div><Label>Condition on Arrival</Label>
@@ -151,8 +179,7 @@ export function WsDeviceIntakeDialog({ open, onOpenChange, wsIntakeForm, setWsIn
             <div><Label>Warranty Expiry</Label><Input type="date" value={wsIntakeForm.warranty_expiry} onChange={e => setWsIntakeForm({ ...wsIntakeForm, warranty_expiry: e.target.value })} /></div>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save Intake</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -160,8 +187,14 @@ export function WsDeviceIntakeDialog({ open, onOpenChange, wsIntakeForm, setWsIn
 export function WsTemplatePickerDialog({ open, onOpenChange, wsTemplates, handleLoadWsTemplate }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Load Diagnostic Template</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Workshop diagnostics"
+        title="Load a diagnostic template"
+        description="Start with the relevant checklist so every repair is assessed consistently."
+        icon={CheckCircle}
+        tone="amber"
+        footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>}
+      >
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Select a device-type template to load pre-built diagnostic checklist items.</p>
           {Object.entries(wsTemplates).map(([key, items]) => (
@@ -171,7 +204,7 @@ export function WsTemplatePickerDialog({ open, onOpenChange, wsTemplates, handle
             </Button>
           ))}
         </div>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -181,8 +214,15 @@ export function WsTemplatePickerDialog({ open, onOpenChange, wsTemplates, handle
 export function FjQuoteBuilderDialog({ open, onOpenChange, fjQuoteItems, setFjQuoteItems, fjQuoteNotes, setFjQuoteNotes, handleSaveFjQuote }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Service Quote Builder</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field service workflow"
+        title="Build service quote"
+        description="Prepare the installation, materials and labour scope before you ask the customer to approve it."
+        icon={DollarSign}
+        tone="amber"
+        className="max-w-2xl"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSaveFjQuote} data-testid="fj-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></>}
+      >
         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
           {fjQuoteItems.map((item, i) => (
             <div key={`k-${i}`} className="grid grid-cols-12 gap-2 items-end">
@@ -199,8 +239,7 @@ export function FjQuoteBuilderDialog({ open, onOpenChange, fjQuoteItems, setFjQu
           </div>
           <div><Label className="text-xs">Notes</Label><Textarea value={fjQuoteNotes} onChange={e => setFjQuoteNotes(e.target.value)} rows={2} placeholder="Additional notes..." /></div>
         </div>
-        <DialogFooter><Button onClick={handleSaveFjQuote} data-testid="fj-save-quote"><DollarSign className="w-4 h-4 mr-1" />Save Quote</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -208,8 +247,14 @@ export function FjQuoteBuilderDialog({ open, onOpenChange, fjQuoteItems, setFjQu
 export function FjAddEquipmentDialog({ open, onOpenChange, fjEquipForm, setFjEquipForm, handleAddFjEquipment }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Add Equipment</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field service workflow"
+        title="Add equipment"
+        description="Record the hardware and its identifiers so Nexus can connect the completed work to the client inventory."
+        icon={Plus}
+        tone="amber"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleAddFjEquipment} disabled={!fjEquipForm.equipment_type} data-testid="fj-save-equip"><Plus className="w-4 h-4 mr-1" />Add Equipment</Button></>}
+      >
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Type</Label>
@@ -249,8 +294,7 @@ export function FjAddEquipmentDialog({ open, onOpenChange, fjEquipForm, setFjEqu
           </div>
           <div><Label>Config Notes</Label><Textarea value={fjEquipForm.config_notes} onChange={e => setFjEquipForm({ ...fjEquipForm, config_notes: e.target.value })} rows={2} placeholder="SSID, channel, frequency, etc." /></div>
         </div>
-        <DialogFooter><Button onClick={handleAddFjEquipment} disabled={!fjEquipForm.equipment_type} data-testid="fj-save-equip"><Plus className="w-4 h-4 mr-1" />Add Equipment</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -258,8 +302,14 @@ export function FjAddEquipmentDialog({ open, onOpenChange, fjEquipForm, setFjEqu
 export function FjAddMaterialDialog({ open, onOpenChange, fjMatForm, setFjMatForm, handleAddFjMaterial }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Add Material Used</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field service workflow"
+        title="Record material used"
+        description="Capture billable site materials while the job is in progress so nothing is missed at invoicing."
+        icon={Plus}
+        tone="amber"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleAddFjMaterial} disabled={!fjMatForm.material} data-testid="fj-save-mat"><Plus className="w-4 h-4 mr-1" />Add Material</Button></>}
+      >
         <div className="space-y-3">
           <div><Label>Material</Label><Input value={fjMatForm.material} onChange={e => setFjMatForm({ ...fjMatForm, material: e.target.value })} placeholder="Cat6 cable, RJ45 connectors, Cable ties..." data-testid="fj-mat-name" /></div>
           <div className="grid grid-cols-3 gap-3">
@@ -281,8 +331,7 @@ export function FjAddMaterialDialog({ open, onOpenChange, fjMatForm, setFjMatFor
           </div>
           <div className="text-right font-bold text-green-400">Total: ${((fjMatForm.quantity || 1) * (fjMatForm.unit_cost || 0)).toFixed(2)}</div>
         </div>
-        <DialogFooter><Button onClick={handleAddFjMaterial} disabled={!fjMatForm.material} data-testid="fj-save-mat"><Plus className="w-4 h-4 mr-1" />Add Material</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -290,8 +339,15 @@ export function FjAddMaterialDialog({ open, onOpenChange, fjMatForm, setFjMatFor
 export function FjSiteInfoDialog({ open, onOpenChange, fjSiteInfo, setFjSiteInfo, handleSaveFjSiteInfo }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>Site Survey & Access Info</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field service workflow"
+        title="Capture site survey"
+        description="Record access, safety and installation context so future technicians arrive prepared."
+        icon={CheckCircle}
+        tone="amber"
+        className="max-w-2xl"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleSaveFjSiteInfo} data-testid="fj-save-site"><CheckCircle className="w-4 h-4 mr-1" />Save Site Info</Button></>}
+      >
         <div className="space-y-3 max-h-[60vh] overflow-y-auto">
           <div><Label>Customer Email</Label><Input value={fjSiteInfo.customer_email || ""} onChange={e => setFjSiteInfo({ ...fjSiteInfo, customer_email: e.target.value })} placeholder="customer@example.com" /></div>
           <div className="grid grid-cols-3 gap-3">
@@ -338,8 +394,7 @@ export function FjSiteInfoDialog({ open, onOpenChange, fjSiteInfo, setFjSiteInfo
             <label className="flex items-center gap-1.5 text-sm"><Checkbox checked={fjSiteInfo.roof_access || false} onCheckedChange={c => setFjSiteInfo({ ...fjSiteInfo, roof_access: c })} />Roof Access</label>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleSaveFjSiteInfo} data-testid="fj-save-site"><CheckCircle className="w-4 h-4 mr-1" />Save Site Info</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -347,8 +402,13 @@ export function FjSiteInfoDialog({ open, onOpenChange, fjSiteInfo, setFjSiteInfo
 export function FjNotifyCustomerDialog({ open, onOpenChange, viewFjJob, fjNotifyForm, setFjNotifyForm, handleFjNotifyCustomer }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Notify Customer</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field communication"
+        title="Notify customer"
+        description="Choose a milestone update or compose a clear message about the technician visit."
+        icon={Send}
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleFjNotifyCustomer} data-testid="fj-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></>}
+      >
         <div className="space-y-4">
           <div><Label>Email</Label><Input value={fjNotifyForm.email} onChange={e => setFjNotifyForm({ ...fjNotifyForm, email: e.target.value })} placeholder="customer@example.com" data-testid="fj-notify-email" /></div>
           <div><Label>Subject</Label><Input value={fjNotifyForm.subject} onChange={e => setFjNotifyForm({ ...fjNotifyForm, subject: e.target.value })} /></div>
@@ -359,8 +419,7 @@ export function FjNotifyCustomerDialog({ open, onOpenChange, viewFjJob, fjNotify
             <Button variant="outline" size="sm" onClick={() => setFjNotifyForm(prev => ({ ...prev, message: `Hi ${viewFjJob.customer_name},\n\nGreat news! Your ${viewFjJob.job_category} job has been completed at ${viewFjJob.service_address}.\n\nJob: ${viewFjJob.job_number}\nSignal: ${viewFjJob.signal_strength || "N/A"} dBm\nSpeed: ${viewFjJob.speed_test_down || "N/A"} / ${viewFjJob.speed_test_up || "N/A"} Mbps\n\nPlease don't hesitate to contact us if you have any issues.\n\nRegards,\nNexusOps Field Services`, subject: `Job Completed - ${viewFjJob.job_number}` }))}>Completed</Button>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleFjNotifyCustomer} data-testid="fj-send-notify"><Send className="w-4 h-4 mr-1" />Send Notification</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -368,8 +427,14 @@ export function FjNotifyCustomerDialog({ open, onOpenChange, viewFjJob, fjNotify
 export function FjPushInvoiceDialog({ open, onOpenChange, fjMatTotal, fjInvoiceList, handleFjPushToInvoice }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Push Field Job to Invoice</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field billing"
+        title="Send job to invoice"
+        description="Create a new invoice or add the field work to an existing customer invoice."
+        icon={DollarSign}
+        tone="emerald"
+        footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>}
+      >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">Materials (${fjMatTotal.toFixed(2)}) + Labour will be added to the invoice.</p>
           <Button className="w-full" onClick={() => handleFjPushToInvoice(null)} data-testid="fj-new-invoice"><Plus className="w-4 h-4 mr-1" />Create New Invoice</Button>
@@ -385,7 +450,7 @@ export function FjPushInvoiceDialog({ open, onOpenChange, fjMatTotal, fjInvoiceL
             </ScrollArea>
           </>}
         </div>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -393,8 +458,14 @@ export function FjPushInvoiceDialog({ open, onOpenChange, fjMatTotal, fjInvoiceL
 export function FjTemplatePickerDialog({ open, onOpenChange, fjTemplates, handleLoadFjTemplate }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>Load Field Checklist Template</DialogTitle></DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Field service workflow"
+        title="Load a checklist template"
+        description="Use the correct job checklist to keep field work safe, complete and consistently documented."
+        icon={CheckCircle}
+        tone="amber"
+        footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>}
+      >
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Select a job category template to load pre-built checklist items.</p>
           {Object.entries(fjTemplates).map(([key, items]) => (
@@ -404,7 +475,7 @@ export function FjTemplatePickerDialog({ open, onOpenChange, fjTemplates, handle
             </Button>
           ))}
         </div>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
