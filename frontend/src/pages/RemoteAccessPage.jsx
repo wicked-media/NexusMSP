@@ -26,6 +26,7 @@ import { MetricStrip, MetricTile } from "@/components/design-system";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
 import RemoteAccessButton from "@/components/devices/RemoteAccessButton";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
@@ -998,11 +999,7 @@ export default function RemoteAccessPage() {
 
       {/* Remote Connection Dialog */}
       <Dialog open={!!connectDialog} onOpenChange={v => { if (!v) setConnectDialog(null); }}>
-        <DialogContent className="max-w-md" aria-describedby="connect-dialog-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Play className="w-5 h-5 text-emerald-400" />Connect to {connectDialog?.device_name}</DialogTitle>
-            <DialogDescription id="connect-dialog-desc">Choose how to connect to this device</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog eyebrow="Remote session" title={`Connect to ${connectDialog?.device_name || "device"}`} description="Choose how to connect to this device. Nexus will retain the session context alongside the managed asset." icon={Play} tone="emerald" className="max-w-md" data-testid="remote-connect-workflow" footer={<Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>}>
           {connectDialog && (
             <div className="space-y-4">
               {/* Device Info */}
@@ -1080,10 +1077,7 @@ export default function RemoteAccessPage() {
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Provider Configuration Dialog */}
