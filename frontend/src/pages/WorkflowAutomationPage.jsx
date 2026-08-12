@@ -12,6 +12,7 @@ import {
 
 import { API, useAuth } from "@/App";
 import HeroTile from "@/components/HeroTile";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -402,6 +403,7 @@ export default function WorkflowAutomationPage() {
   const [packClientId, setPackClientId] = useState("");
   const [editWf, setEditWf] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteWorkflowOpen, setDeleteWorkflowOpen] = useState(false);
   const [createForm, setCreateForm] = useState(EMPTY_CREATE);
   const [saving, setSaving] = useState(false);
   const [installing, setInstalling] = useState("");
@@ -609,11 +611,16 @@ export default function WorkflowAutomationPage() {
       toast.error(error.response?.data?.detail || "Workflow state could not be changed");
     }
   };
-  const deleteWorkflow = async () => {
-    if (!editWf || !window.confirm(`Delete "${editWf.name}"? Its audit and simulation history will remain.`)) return;
+  const deleteWorkflow = async (confirmed = false) => {
+    if (!editWf) return;
+    if (!confirmed) {
+      setDeleteWorkflowOpen(true);
+      return;
+    }
     try {
       await axios.delete(`${API}/workflows/${editWf.id}`, { headers });
       toast.success("Workflow deleted");
+      setDeleteWorkflowOpen(false);
       setEditWf(null);
       await load({ quiet: true });
     } catch (error) { toast.error(error.response?.data?.detail || "Workflow could not be deleted"); }
@@ -986,6 +993,27 @@ export default function WorkflowAutomationPage() {
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button><Button onClick={createWorkflow} disabled={saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create draft</Button></DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteWorkflowOpen} onOpenChange={setDeleteWorkflowOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Automation lifecycle"
+          title="Delete this workflow?"
+          description="The workflow will stop immediately. Its audit trail and simulation evidence remain available for governance."
+          icon={Trash2}
+          tone="amber"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setDeleteWorkflowOpen(false)}>Keep workflow</Button>
+              <Button variant="destructive" onClick={() => deleteWorkflow(true)}>Delete workflow</Button>
+            </>
+          }
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4">
+            <p className="text-sm font-semibold">{editWf?.name || "Selected workflow"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Use this only when the automation is no longer needed. Deleting does not erase the governed operational history.</p>
+          </div>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <PackPreviewDialog
