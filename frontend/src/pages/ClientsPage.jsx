@@ -4,6 +4,7 @@ import { API, useAuth } from "@/App";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -16,7 +17,7 @@ import {
   Mail, Phone, MapPin, Plus, Loader2, Cloud, Shield, Sparkles,
   Activity, ChevronRight, RefreshCw, Filter, X,
   Link as LinkIcon, UserPlus, KeyRound, Lock, Unlock, UserX, ExternalLink, MoreHorizontal,
-  ChevronDown, BarChart3, Scale, Globe, FileText, ArrowRight, CheckCircle2, Rocket
+  ChevronDown, BarChart3, Scale, Globe, FileText, ArrowRight, CheckCircle2, Rocket, Pencil, Trash2, Star, Save
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ClientAIBundle } from "@/components/ai/ClientAIBundle";
@@ -986,6 +987,67 @@ function ClientDigitalTwinOverview({ client, activity, healthDetail, onNavigate 
   );
 }
 
+function ClientContactsPanel({ clientId, token, onCountChange }) {
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const empty = { name: "", email: "", phone: "", role: "general", is_primary: false };
+  const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editor, setEditor] = useState(null);
+  const [form, setForm] = useState(empty);
+  const [deleting, setDeleting] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API}/clients/${clientId}/contacts`, { headers });
+      const rows = Array.isArray(response.data) ? response.data : [];
+      setContacts(rows);
+      onCountChange?.(rows.length);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not load client contacts");
+    } finally { setLoading(false); }
+  }, [clientId, headers, onCountChange]);
+
+  useEffect(() => { load(); }, [load]);
+  const openCreate = () => { setEditor("create"); setForm({ ...empty, is_primary: contacts.length === 0 }); };
+  const openEdit = (contact) => { setEditor(contact); setForm({ ...empty, ...contact }); };
+  const save = async () => {
+    if (!form.name.trim()) return toast.error("Contact name is required");
+    setSaving(true);
+    try {
+      if (editor === "create") await axios.post(`${API}/clients/${clientId}/contacts`, form, { headers });
+      else await axios.put(`${API}/clients/${clientId}/contacts/${editor.id}`, form, { headers });
+      toast.success(editor === "create" ? "Contact added" : "Contact updated");
+      setEditor(null); await load();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not save contact"); }
+    finally { setSaving(false); }
+  };
+  const remove = async () => {
+    if (!deleting) return;
+    setSaving(true);
+    try {
+      await axios.delete(`${API}/clients/${clientId}/contacts/${deleting.id}`, { headers });
+      toast.success(`${deleting.name} removed from this client`);
+      setDeleting(null); await load();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not remove contact"); }
+    finally { setSaving(false); }
+  };
+
+  return <section className="space-y-4" data-testid="client-contacts-panel">
+    <div className="flex flex-col gap-3 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/[0.08] via-card to-card p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">People & contact channels</p><h2 className="mt-1 text-base font-semibold">Contacts are part of the client record</h2><p className="mt-1 text-xs text-muted-foreground">Keep the primary person, email and phone details accurate for tickets, approvals and service updates.</p></div>
+      <Button size="sm" onClick={openCreate} data-testid="client-contact-add"><Plus className="mr-1.5 h-4 w-4" />Add contact</Button>
+    </div>
+    {loading ? <div className="flex items-center justify-center rounded-2xl border border-border/70 py-12 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading contacts…</div> : contacts.length === 0 ? <div className="rounded-2xl border border-dashed border-border/70 px-5 py-10 text-center"><Users className="mx-auto h-7 w-7 text-muted-foreground" /><p className="mt-3 text-sm font-medium">No contacts yet</p><p className="mt-1 text-xs text-muted-foreground">Add the main person technicians should contact before working this account.</p><Button size="sm" className="mt-4" onClick={openCreate}><Plus className="mr-1.5 h-4 w-4" />Add first contact</Button></div> : <div className="grid gap-3 lg:grid-cols-2">{contacts.map((contact) => <article key={contact.id} className="group rounded-2xl border border-border/70 bg-card/55 p-4 transition hover:border-primary/30 hover:bg-primary/[0.025]">
+      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold">{contact.name || "Unnamed contact"}</p>{contact.is_primary && <Badge className="border-amber-400/30 bg-amber-400/10 text-amber-200"><Star className="mr-1 h-3 w-3" />Primary</Badge>}</div><p className="mt-1 text-xs capitalize text-muted-foreground">{String(contact.role || "general").replace(/_/g, " ")}</p></div><div className="flex gap-1"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(contact)} aria-label={`Edit ${contact.name}`}><Pencil className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" className="h-8 w-8 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200" onClick={() => setDeleting(contact)} aria-label={`Delete ${contact.name}`}><Trash2 className="h-3.5 w-3.5" /></Button></div></div>
+      <div className="mt-4 grid gap-2 text-xs">{contact.email ? <a className="flex items-center gap-2 text-sky-300 hover:underline" href={`mailto:${contact.email}`}><Mail className="h-3.5 w-3.5" />{contact.email}</a> : <p className="flex items-center gap-2 text-muted-foreground"><Mail className="h-3.5 w-3.5" />No email recorded</p>}{contact.phone ? <a className="flex items-center gap-2 text-emerald-300 hover:underline" href={`tel:${contact.phone}`}><Phone className="h-3.5 w-3.5" />{contact.phone}</a> : <p className="flex items-center gap-2 text-muted-foreground"><Phone className="h-3.5 w-3.5" />No phone recorded</p>}</div>
+    </article>)}</div>}
+    <Dialog open={Boolean(editor)} onOpenChange={(open) => !open && setEditor(null)}><NexusWorkflowDialog eyebrow="Client contact workflow" title={editor === "create" ? "Add a client contact" : "Edit client contact"} description="Keep operational contact details correct before they are used for tickets, approvals or customer updates." icon={Users} tone="sky" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setEditor(null)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Save className="mr-1.5 h-4 w-4" />}{editor === "create" ? "Add contact" : "Save changes"}</Button></>}><div className="grid gap-4"><div className="grid gap-2"><Label htmlFor="client-contact-name">Full name</Label><Input id="client-contact-name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Sarah Jones" autoFocus /></div><div className="grid gap-4 sm:grid-cols-2"><div className="grid gap-2"><Label htmlFor="client-contact-email">Email</Label><Input id="client-contact-email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="sarah@client.com" /></div><div className="grid gap-2"><Label htmlFor="client-contact-phone">Phone</Label><Input id="client-contact-phone" type="tel" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="0400 000 000" /></div></div><div className="grid gap-2"><Label>Contact role</Label><Select value={form.role} onValueChange={(role) => setForm((current) => ({ ...current, role }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="general">General contact</SelectItem><SelectItem value="technical">Technical contact</SelectItem><SelectItem value="billing">Billing contact</SelectItem><SelectItem value="authorised">Authorised approver</SelectItem></SelectContent></Select></div><label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/70 bg-muted/[0.14] p-3"><input type="checkbox" className="mt-0.5" checked={Boolean(form.is_primary)} onChange={(event) => setForm((current) => ({ ...current, is_primary: event.target.checked }))} /><span><span className="text-sm font-medium">Primary contact</span><span className="mt-0.5 block text-xs text-muted-foreground">Use this person as the main contact for the account.</span></span></label></div></NexusWorkflowDialog></Dialog>
+    <Dialog open={Boolean(deleting)} onOpenChange={(open) => !open && setDeleting(null)}><NexusWorkflowDialog eyebrow="Client contact workflow" title="Remove client contact" description={`Remove ${deleting?.name || "this contact"} from this client record. Tickets and historical audit evidence are retained.`} icon={Trash2} tone="amber" className="max-w-lg" footer={<><Button variant="outline" onClick={() => setDeleting(null)} disabled={saving}>Keep contact</Button><Button variant="destructive" onClick={remove} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}Remove contact</Button></>}><p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This changes the current client contact list only. Nexus retains related ticket, approval and audit history.</p></NexusWorkflowDialog></Dialog>
+  </section>;
+}
+
 function ClientDetailPane({ client: clientProp, detail: _detail, activity, healthDetail, tab, setTab, loading: _loading, onClose }) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
@@ -1296,10 +1358,11 @@ function ClientDetailPane({ client: clientProp, detail: _detail, activity, healt
           </TabsContent>
 
           <TabsContent value="contacts" className="mt-0">
-            <div className="border border-zinc-800 rounded-md p-6 text-center text-sm text-zinc-500">
-              <Users className="w-8 h-8 mx-auto mb-3 opacity-40" />
-              <Link className="text-indigo-400 hover:underline" to={`/contacts?clientId=${client.id}`}>Open {client.contact_count} contacts</Link>
-            </div>
+            <ClientContactsPanel
+              clientId={client.id}
+              token={token}
+              onCountChange={(contact_count) => applyClientPatch({ contact_count })}
+            />
           </TabsContent>
 
           <TabsContent value="billing" className="mt-0 space-y-2">
