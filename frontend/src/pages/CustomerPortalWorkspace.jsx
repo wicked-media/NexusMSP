@@ -1396,9 +1396,14 @@ export default function CustomerPortalWorkspace() {
   };
 
   return (
-    <div className="min-h-screen bg-[#080d12] text-slate-100" data-testid="portal-dashboard" style={{ "--portal-primary": primaryColor }}>
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_72%_-12%,rgba(52,211,153,0.08),transparent_32%)]" />
-      <aside className={cx("fixed inset-y-0 left-0 z-50 w-[270px] border-r border-white/[0.07] bg-[#0a1016]/95 p-4 backdrop-blur-xl transition-transform lg:translate-x-0", mobileNav ? "translate-x-0" : "-translate-x-full")}>
+    <div className="portal-experience min-h-screen bg-[#080d12] text-slate-100" data-testid="portal-dashboard" style={{ "--portal-primary": primaryColor }}>
+      <div className="portal-atmosphere pointer-events-none fixed inset-0" aria-hidden="true">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_-12%,rgba(52,211,153,0.13),transparent_32%),radial-gradient(circle_at_92%_92%,rgba(56,189,248,0.09),transparent_28%)]" />
+        <div className="portal-grid absolute inset-0 opacity-[0.18]" />
+        <div className="portal-orb portal-orb-one" />
+        <div className="portal-orb portal-orb-two" />
+      </div>
+      <aside className={cx("portal-sidebar fixed inset-y-0 left-0 z-50 w-[270px] border-r border-white/[0.07] bg-[#0a1016]/95 p-4 backdrop-blur-xl transition-transform lg:translate-x-0", mobileNav ? "translate-x-0" : "-translate-x-full")}>
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between px-2 py-2">
             <button type="button" onClick={() => selectView("overview")} className="flex min-w-0 items-center gap-3 text-left">
@@ -1421,7 +1426,7 @@ export default function CustomerPortalWorkspace() {
               if (item.id === "knowledge") return features.can_view_kb !== false;
               return true;
             }).map(({ id, label, icon: Icon }) => (
-              <button key={id} type="button" onClick={() => selectView(id)} className={cx("group flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-medium transition",
+              <button key={id} type="button" onClick={() => selectView(id)} className={cx("portal-nav-item group flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-medium transition",
                 view === id ? "bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-400/15" : "text-slate-500 hover:bg-white/[0.035] hover:text-slate-200")}>
                 <Icon className={cx("h-4 w-4", view === id ? "text-emerald-300" : "text-slate-600 group-hover:text-slate-400")} />
                 <span className="flex-1">{label}</span>
@@ -1444,7 +1449,7 @@ export default function CustomerPortalWorkspace() {
       {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden" />}
 
       <div className="relative lg:pl-[270px]">
-        <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#080d12]/88 px-4 py-3 backdrop-blur-xl sm:px-6">
+        <header className="portal-topbar sticky top-0 z-30 border-b border-white/[0.07] bg-[#080d12]/88 px-4 py-3 backdrop-blur-xl sm:px-6">
           <div className="mx-auto flex max-w-[1500px] items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => setMobileNav(true)} className="h-9 w-9 shrink-0 text-slate-400 lg:hidden"><Menu className="h-5 w-5" /></Button>
             <div className="relative max-w-2xl flex-1">
@@ -1486,9 +1491,32 @@ export default function CustomerPortalWorkspace() {
           </div>
         </header>
         <main className="mx-auto max-w-[1500px] p-4 pb-12 sm:p-6 lg:p-8">
-          {viewContent[view]?.()}
+          <div key={view} className="portal-view-enter">
+            {viewContent[view]?.()}
+          </div>
         </main>
       </div>
+
+      <style>{`
+        @keyframes portalAtmosphere { 0%,100% { transform:translate3d(0,0,0) scale(1); opacity:.7; } 50% { transform:translate3d(2%,-2%,0) scale(1.08); opacity:1; } }
+        @keyframes portalOrbitalDrift { 0%,100% { transform:translate3d(0,0,0) scale(1); } 50% { transform:translate3d(-28px,18px,0) scale(1.11); } }
+        @keyframes portalViewEnter { from { opacity:0; transform:translate3d(0,9px,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+        @keyframes portalEdgeScan { 0%,100% { opacity:.12; transform:scaleX(.72); } 50% { opacity:.5; transform:scaleX(1); } }
+        .portal-atmosphere > div:first-child { animation:portalAtmosphere 18s ease-in-out infinite; }
+        .portal-grid { background-image:linear-gradient(rgba(148,163,184,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.12) 1px,transparent 1px); background-size:56px 56px; mask-image:linear-gradient(to bottom,black,transparent 68%); }
+        .portal-orb { position:absolute; border-radius:9999px; filter:blur(68px); opacity:.18; animation:portalOrbitalDrift 16s ease-in-out infinite; }
+        .portal-orb-one { top:12%; right:18%; height:16rem; width:16rem; background:rgba(16,185,129,.3); }
+        .portal-orb-two { bottom:2%; right:2%; height:13rem; width:13rem; background:rgba(56,189,248,.26); animation-delay:-8s; }
+        .portal-sidebar { box-shadow:20px 0 70px -58px rgba(0,0,0,.85); }
+        .portal-sidebar::after { content:""; position:absolute; right:-1px; top:0; height:34%; width:1px; background:linear-gradient(transparent,rgba(52,211,153,.45),transparent); animation:portalEdgeScan 5.5s ease-in-out infinite; }
+        .portal-nav-item { position:relative; transition:background-color .22s ease,color .22s ease,transform .22s ease; }
+        .portal-nav-item:hover { transform:translateX(2px); }
+        .portal-topbar { box-shadow:0 12px 34px -32px rgba(0,0,0,.9); }
+        .portal-view-enter { animation:portalViewEnter .42s cubic-bezier(.2,.75,.2,1) both; }
+        .portal-experience main button:not([aria-label="Close navigation"]) { transition:transform .2s ease,border-color .2s ease,background-color .2s ease,box-shadow .2s ease; }
+        .portal-experience main button:hover { transform:translateY(-1px); }
+        @media (prefers-reduced-motion: reduce) { .portal-experience *, .portal-experience *::before, .portal-experience *::after { animation:none !important; transition:none !important; transform:none !important; } }
+      `}</style>
 
       <Dialog open={showRequest} onOpenChange={setShowRequest}>
         <NexusWorkflowDialog
