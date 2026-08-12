@@ -13,6 +13,12 @@ const buttonVariants = cva(
           "bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:-translate-y-px hover:bg-primary/90 hover:shadow-md hover:shadow-primary/25 active:translate-y-0",
         destructive:
           "bg-destructive text-destructive-foreground shadow-sm shadow-destructive/20 hover:-translate-y-px hover:bg-destructive/90 hover:shadow-md active:translate-y-0",
+        success:
+          "bg-emerald-500 text-emerald-950 shadow-sm shadow-emerald-500/20 hover:-translate-y-px hover:bg-emerald-400 hover:shadow-md hover:shadow-emerald-500/25 active:translate-y-0",
+        info:
+          "border-cyan-400/25 bg-cyan-500/[0.08] text-cyan-100 shadow-sm shadow-cyan-500/10 hover:-translate-y-px hover:border-cyan-300/40 hover:bg-cyan-500/[0.16] hover:shadow-md active:translate-y-0",
+        warning:
+          "border-amber-400/30 bg-amber-500/[0.08] text-amber-100 shadow-sm shadow-amber-500/10 hover:-translate-y-px hover:border-amber-300/45 hover:bg-amber-500/[0.16] hover:shadow-md active:translate-y-0",
         outline:
           "border-border/70 bg-background/70 text-foreground shadow-sm hover:-translate-y-px hover:border-primary/35 hover:bg-accent hover:text-accent-foreground hover:shadow-md active:translate-y-0",
         secondary:

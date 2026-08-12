@@ -984,7 +984,7 @@ export default function InvoicesPage() {
               )}
             </div>
           </div>
-          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><p className="mr-auto text-xs text-zinc-500">Saved invoices remain drafts until you explicitly send or mark them as sent.</p><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleSave} data-testid="save-invoice-btn">{editing ? "Save audited changes" : "Create draft invoice"}</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><p className="mr-auto text-xs text-zinc-500">Saved invoices remain drafts until you explicitly send or mark them as sent.</p><Button variant="success" onClick={handleSave} data-testid="save-invoice-btn">{editing ? "Save audited changes" : "Create draft invoice"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1061,7 +1061,7 @@ export default function InvoicesPage() {
               );
             })()}
           </div>
-          <DialogFooter className="shrink-0 border-t border-violet-400/15 bg-black/20 px-6 py-4"><p className="mr-auto max-w-lg text-xs text-zinc-500">This cannot be reversed automatically. If a payer invoice has already been sent or paid, use the normal credit-note process for corrections.</p><Button variant="outline" onClick={() => setSplitBillingOpen(false)} disabled={splitBillingBusy}>Cancel</Button><Button className="bg-violet-400 text-violet-950 hover:bg-violet-300" onClick={handleCreateSplitBilling} disabled={splitBillingBusy || splitAllocations.length < 2} data-testid="confirm-split-billing-btn">{splitBillingBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Users className="mr-1.5 h-4 w-4" />}Create payer invoices</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-violet-400/15 bg-black/20 px-6 py-4"><p className="mr-auto max-w-lg text-xs text-zinc-500">This cannot be reversed automatically. If a payer invoice has already been sent or paid, use the normal credit-note process for corrections.</p><Button variant="outline" onClick={() => setSplitBillingOpen(false)} disabled={splitBillingBusy}>Cancel</Button><Button onClick={handleCreateSplitBilling} disabled={splitBillingBusy || splitAllocations.length < 2} data-testid="confirm-split-billing-btn">{splitBillingBusy ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Users className="mr-1.5 h-4 w-4" />}Create payer invoices</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1144,7 +1144,7 @@ export default function InvoicesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEmailDialog(false)}>Cancel</Button>
-            <Button onClick={handleEmailInvoice} className="bg-blue-600 hover:bg-blue-700" data-testid="send-invoice-email-btn"><Send className="w-4 h-4 mr-1" />Send</Button>
+            <Button variant="info" onClick={handleEmailInvoice} data-testid="send-invoice-email-btn"><Send className="w-4 h-4 mr-1" />Send</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1187,7 +1187,7 @@ export default function InvoicesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreditNoteDialog(false)}>Cancel</Button>
-            <Button onClick={handleCreateCreditNote} className="bg-amber-600 hover:bg-amber-700" data-testid="create-credit-note-btn"><Receipt className="w-4 h-4 mr-1" />Issue Credit Note</Button>
+            <Button variant="warning" onClick={handleCreateCreditNote} data-testid="create-credit-note-btn"><Receipt className="w-4 h-4 mr-1" />Issue Credit Note</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1242,7 +1242,7 @@ export default function InvoicesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSmsDialog(false)}>Cancel</Button>
-            <Button onClick={handleSendInvoiceSms} disabled={smsSending} className="bg-emerald-600 hover:bg-emerald-700" data-testid="send-invoice-sms-btn">
+            <Button variant="success" onClick={handleSendInvoiceSms} disabled={smsSending} data-testid="send-invoice-sms-btn">
               {smsSending ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Send className="w-4 h-4 mr-1" />}Send SMS
             </Button>
           </DialogFooter>
@@ -1293,8 +1293,8 @@ export default function InvoicesPage() {
                 <p className="truncate text-xl font-semibold tracking-tight text-white">{inv.invoice_name || inv.client_name || "Client invoice"}</p>
                 <p className="mt-1 text-xs text-zinc-400">{isSplitParent ? <><span>Source record retained for audit</span><span className="px-1.5 text-zinc-600">/</span><span className="text-violet-200">{(inv.split_billing?.allocations || []).length} payer invoice{(inv.split_billing?.allocations || []).length === 1 ? "" : "s"} issued</span></> : <>{inv.invoice_name && <><span>{inv.client_name || "Client invoice"}</span><span className="px-1.5 text-zinc-600">/</span></>}Due {inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "date not set"} <span className="px-1.5 text-zinc-600">/</span> Balance <span className={balance > 0 ? "font-mono text-amber-200" : "font-mono text-emerald-200"}>${Math.max(0, balance).toFixed(2)}</span></>}</p>
               </div>
-              {balance > 0 && <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
-              {!isSplitParent && <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] px-3 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
+              {balance > 0 && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
+              {!isSplitParent && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
               <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="header-preview-invoice-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3">
@@ -1537,11 +1537,11 @@ export default function InvoicesPage() {
             <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
               <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Invoice controls</CardTitle></CardHeader>
               <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
-                {!isSplitParent && pStatus !== "paid" && <Button className="w-full bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
+                {!isSplitParent && pStatus !== "paid" && <Button variant="success" className="w-full" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
                 {!isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
                 {isSplitParent && <div className="rounded-lg border border-violet-400/25 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-100"><span className="font-medium">Payer invoices issued.</span> Open the Payer invoices tab to email each customer or record their payment.</div>}
                 <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground"><span className="font-medium text-sky-300">Xero</span> {xeroStatus.connected ? `Connected to ${xeroStatus.org_name || "your organisation"}. Reconcile payments after they are recorded.` : xeroStatus.configured ? "Setup is incomplete. Finish Xero OAuth before relying on sync or reconciliation." : "Not connected. Configure Xero before relying on sync or reconciliation."}</div>
-                <Button variant="outline" className="w-full border-cyan-400/25 bg-cyan-500/[0.08] text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="open-xero-btn"><Building2 className="mr-1.5 h-4 w-4" />{xeroStatus.connected ? "Open Xero hub" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
+                <Button variant="info" className="w-full" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="open-xero-btn"><Building2 className="mr-1.5 h-4 w-4" />{xeroStatus.connected ? "Open Xero hub" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
                 <Separator />
                 <Button variant="outline" className="w-full border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="preview-pdf-btn">
                   <Eye className="mr-1.5 h-4 w-4" />Preview PDF
@@ -1714,14 +1714,14 @@ export default function InvoicesPage() {
         </div>
         <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
           <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Zap className="w-3.5 h-3.5 mr-1.5" />Billing Command</Button>
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-cyan-400/25 bg-cyan-500/[0.08] text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-500/[0.16]" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="invoice-xero-button"><Building2 className="w-3.5 h-3.5 mr-1.5" />{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
+          <Button variant="info" size="sm" className="h-9 rounded-lg" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="invoice-xero-button"><Building2 className="w-3.5 h-3.5 mr-1.5" />{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
           <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/reports?tab=commercial")} data-testid="aging-report-btn">
             <Timer className="w-4 h-4 mr-1" />Receivables Report
           </Button>
           <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn">
             <BarChart3 className="w-4 h-4 mr-1" />Revenue Analytics
           </Button>
-          <Button className="h-9 rounded-lg bg-emerald-500 px-3 text-emerald-950 shadow-[0_8px_20px_rgba(16,185,129,0.22)] hover:bg-emerald-400" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New Invoice</Button>
+          <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New Invoice</Button>
         </div>
       </div>
 
