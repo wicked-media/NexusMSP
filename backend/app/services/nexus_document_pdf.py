@@ -281,14 +281,16 @@ def render_nexus_document_pdf(
         story.extend([metric_table, Spacer(1, 6 * mm)])
 
     for section_name, section_value in sections:
-        story.append(_section_title(section_name, primary, styles))
-        story.append(Spacer(1, 2.5 * mm))
+        section_flowables = [_section_title(section_name, primary, styles), Spacer(1, 2.5 * mm)]
         content = _flowable_for_section(section_name.lower().replace(" ", "_"), section_value, styles, primary)
         if isinstance(content, list):
-            story.extend(content)
+            section_flowables.extend(content)
         else:
-            story.append(content)
-        story.append(Spacer(1, 5 * mm))
+            section_flowables.append(content)
+        section_flowables.append(Spacer(1, 5 * mm))
+        # Keep short sections together so a section label is never stranded at
+        # the bottom of one page while its evidence begins on the next.
+        story.append(KeepTogether(section_flowables))
 
     story.extend([
         Spacer(1, 3 * mm),

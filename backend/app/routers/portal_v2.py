@@ -7,6 +7,7 @@ import jwt
 import pyotp
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import hash_password, verify_password
+from app.services.nexus_document_pdf import render_nexus_document_pdf
 from app.services.portal_audit import record_portal_event
 from app.services.remote_runtime import build_rustdesk_uri, rustdesk_config
 
@@ -1004,6 +1005,80 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
     )
     if not rec:
         raise HTTPException(status_code=404, detail="Remote session record not found")
+
+    # All portal evidence uses the same renderer as reports and procurement
+    # records.  This prevents a client download from looking like a separate,
+    # generic product surface.
+    branding_record = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    if not branding_record:
+        branding_record = await db.settings.find_one({"key": "branding"}, {"_id": 0})
+    branding = (branding_record or {}).get("value", branding_record or {}) or {}
+
+    def duration_label(raw_seconds):
+        if raw_seconds is None:
+            return "In progress"
+        total = max(int(raw_seconds or 0), 0)
+        hours, remainder = divmod(total, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        if minutes:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
+
+    status = str(rec.get("status") or "completed").replace("_", " ").title()
+    session_ref = str(rec.get("id") or "session")[:8].upper()
+    client_name = rec.get("client_name") or user.get("client_name") or "Client portal"
+    device_name = rec.get("device_name") or "Not recorded"
+    details = {
+        "Client": client_name,
+        "Requested by": f"{rec.get('portal_user_name') or user.get('name') or 'Portal user'} ({rec.get('portal_user_email') or user.get('email') or 'Not recorded'})",
+        "Device": device_name,
+        "Operating system": rec.get("device_os") or "Not recorded",
+        "Remote service": rec.get("provider") or "Nexus Remote / RustDesk",
+        "Session reference": session_ref,
+        "Started": rec.get("started_at") or "Not recorded",
+        "Ended": rec.get("ended_at") or "In progress",
+        "Duration": duration_label(rec.get("duration_seconds")),
+        "Status": status,
+        "Origin IP": rec.get("ip_address") or "Not recorded",
+    }
+    consent = {
+        "Acknowledgement": rec.get("consent_text") or "Client consent was captured before the remote session started.",
+        "Acknowledged at": rec.get("consent_acknowledged_at") or "Not recorded",
+        "Client-initiated": "Yes" if rec.get("portal_user_id") else "No",
+    }
+    sections = [("Session evidence", details), ("Consent & authorisation", consent)]
+    if rec.get("notes"):
+        sections.append(("Session notes", rec.get("notes")))
+
+    pdf_bytes = render_nexus_document_pdf(
+        title=f"Remote Session {session_ref}",
+        document_kind="Remote access audit",
+        subtitle="Client-initiated remote access evidence retained by NexusMSP.",
+        metadata=[
+            ("Client", client_name),
+            ("Device", device_name),
+            ("Status", status),
+            ("Started", rec.get("started_at")),
+        ],
+        metric_cards=[
+            ("Session status", status),
+            ("Duration", duration_label(rec.get("duration_seconds"))),
+            ("Consent", "Captured" if rec.get("consent_acknowledged_at") else "Retained"),
+            ("Remote service", rec.get("provider") or "Nexus Remote"),
+        ],
+        sections=sections,
+        branding=branding,
+        footer="This is a retained, tamper-evident NexusMSP record of a client-initiated remote-access session.",
+        generated_by=user.get("name") or user.get("email") or "NexusMSP",
+    )
+    filename = f"remote-session-{session_ref.lower()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
     # Fetch MSP branding
     branding = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}

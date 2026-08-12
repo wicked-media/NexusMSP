@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1073,7 +1074,7 @@ export default function CustomerPortalWorkspace() {
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/[0.04] text-slate-400"><Network className="h-4 w-4" /></div>
                   <div><p className="text-xs font-semibold text-slate-200">{session.device_name || "Managed device"}</p><p className="mt-0.5 text-[10px] text-slate-600">{dateLabel(session.started_at, true)} · {titleCase(session.status)}</p></div>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => downloadSessionPdf(session.id)} className="h-8 rounded-lg border-white/10 bg-white/[0.03] text-[11px]"><Download className="mr-1.5 h-3.5 w-3.5" />Audit PDF</Button>
+                <Button variant="outline" size="sm" onClick={() => downloadSessionPdf(session.id)} className="h-8 rounded-lg border-white/10 bg-white/[0.03] text-[11px]" title="Download the Nexus-branded audit record"><Download className="mr-1.5 h-3.5 w-3.5" />Branded audit PDF</Button>
               </div>
             )) : <div className="p-8 text-center text-sm text-slate-600">No client-initiated remote sessions yet.</div>}
           </CardContent>
@@ -1156,7 +1157,7 @@ export default function CustomerPortalWorkspace() {
                   <p className="mt-2 text-sm text-slate-400">{companyName} · Issued {dateLabel(selectedInvoice.issued_date || selectedInvoice.created_at)}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={downloadInvoice} disabled={downloadingInvoice} className="h-10 rounded-xl border-white/10 bg-white/[0.03]"><Download className="mr-2 h-4 w-4" />PDF</Button>
+                  <Button variant="outline" onClick={downloadInvoice} disabled={downloadingInvoice} className="h-10 rounded-xl border-white/10 bg-white/[0.03]" title="Download the Nexus-branded invoice record"><Download className="mr-2 h-4 w-4" />{downloadingInvoice ? "Preparing PDF" : "Branded PDF"}</Button>
                   {Math.max(Number(selectedInvoice.total || 0) - Number(selectedInvoice.amount_paid || 0), 0) > 0.01 && (
                     <Button variant="success" onClick={payInvoice} disabled={payingInvoice} className="h-10 rounded-xl font-semibold"><CreditCard className="mr-2 h-4 w-4" />Pay securely</Button>
                   )}
@@ -1490,13 +1491,19 @@ export default function CustomerPortalWorkspace() {
       </div>
 
       <Dialog open={showRequest} onOpenChange={setShowRequest}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto border-white/10 bg-[#101820] p-0 [scrollbar-color:rgba(255,255,255,0.14)_transparent] [scrollbar-width:thin] sm:max-w-[780px] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1.5" aria-describedby="portal-request-description">
-          <DialogHeader className="border-b border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.12),transparent_38%)] p-6 text-left">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/20"><LifeBuoy className="h-5 w-5" /></div>
-            <DialogTitle className="pt-3 text-2xl font-semibold tracking-tight text-white">Create a service request</DialogTitle>
-            <DialogDescription id="portal-request-description" className="max-w-xl text-sm leading-6 text-slate-400">Give the service desk enough context to route and resolve your request quickly. Every update becomes part of the shared audit trail.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-6 p-6">
+        <NexusWorkflowDialog
+          eyebrow="Client service workflow"
+          title="Create a service request"
+          description="Give the service desk enough context to route and resolve your request quickly. Every update becomes part of the shared audit trail."
+          icon={LifeBuoy}
+          tone="emerald"
+          aria-describedby="portal-request-description"
+          className="max-h-[92vh] border-white/10 bg-[#101820] sm:max-w-[780px]"
+          contentClassName="[scrollbar-color:rgba(255,255,255,0.14)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1.5"
+          footer={<><Button variant="ghost" onClick={() => setShowRequest(false)} className="rounded-xl">Cancel</Button><Button variant="success" onClick={createRequest} disabled={creatingRequest} className="rounded-xl font-semibold" data-testid="portal-ticket-submit">{creatingRequest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Submit request</Button></>}
+        >
+          <div id="portal-request-description" className="sr-only">Create a service request using the Nexus workflow.</div>
+          <div className="space-y-6">
             <section>
               <div className="flex items-center gap-3"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-400/10 text-[10px] font-bold text-emerald-300">1</span><div><p className="text-sm font-semibold text-white">What do you need?</p><p className="text-[10px] text-slate-600">Choose the request type and summarise the outcome you need.</p></div></div>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -1520,11 +1527,7 @@ export default function CustomerPortalWorkspace() {
               <div className="flex gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /><div><p className="text-xs font-semibold text-slate-200">Shared service record</p><p className="mt-1 text-[10px] leading-5 text-slate-500">Your description and all public replies are retained with timestamps for service history and audit. Technician-only internal notes remain private.</p></div></div>
             </div>
           </div>
-          <DialogFooter className="border-t border-white/[0.07] bg-black/10 p-4 sm:px-6">
-            <Button variant="ghost" onClick={() => setShowRequest(false)} className="rounded-xl">Cancel</Button>
-            <Button variant="success" onClick={createRequest} disabled={creatingRequest} className="rounded-xl font-semibold" data-testid="portal-ticket-submit">{creatingRequest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Submit request</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
