@@ -76,7 +76,8 @@
     "build": "craco build",
     "test": "craco test",
     "lint:ci": "eslint \"src/**/*.{js,jsx}\" --max-warnings 127",
-    "audit:production": "node scripts/audit-production.mjs"
+    "audit:production": "node scripts/audit-production.mjs",
+    "audit:consistency": "node scripts/audit-workspace-consistency.mjs"
   },
   "browserslist": {
     "production": [

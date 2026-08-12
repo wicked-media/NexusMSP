@@ -692,12 +692,15 @@ html[data-motion="none"] .nexus-global-pulse.needs-attention .nexus-global-pulse
     /* Shared action hierarchy for every create, edit, review and confirmation flow. */
     .nx-dialog-header {
         padding-right: 2.25rem;
+        border-radius: 0.85rem;
+        background: linear-gradient(105deg, hsl(var(--primary) / 0.055), transparent 55%);
     }
 
     .nx-dialog-footer:not(.nx-workflow-dialog__footer) {
         margin-top: 0.25rem;
         padding-top: 1rem;
         border-top: 1px solid hsl(var(--border) / 0.7);
+        background: linear-gradient(180deg, transparent, hsl(var(--nx-surface) / 0.32));
     }
 
     .nx-dialog-footer > button {
