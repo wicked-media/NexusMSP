@@ -5,7 +5,7 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -189,6 +189,59 @@ function BackupOperationsTicker({ items, onNavigate, statusText = "Select an ite
       </div>
       <span className="nx-live-ticker__refresh">{statusText}</span>
     </div>
+  );
+}
+
+function BackupLifecycleNavigator({ activeTab, onSelect, orphanCount = 0 }) {
+  const groups = [
+    {
+      label: "Operate", description: "See protection and live activity", tone: "sky",
+      items: [["dashboard", "Overview", Database], ["live", "Live activity", Activity], ["status", "Coverage", Server]],
+    },
+    {
+      label: "Organise", description: "Keep tenant data clean", tone: "violet",
+      items: [["tenants", "Tenant mapping", Users], ["acronis", "Provider health", Cloud], ["orphans", "Hygiene", Ghost]],
+    },
+    {
+      label: "Assure", description: "Prove recoverability", tone: "emerald",
+      items: [["compliance", "Assurance", Shield], ["verify", "Recovery tests", CheckCircle]],
+    },
+    {
+      label: "Bill", description: "Reconcile protected usage", tone: "amber",
+      items: [["billing", "Usage billing", DollarSign]],
+    },
+  ];
+
+  const toneClasses = {
+    sky: "data-[active=true]:border-sky-400/45 data-[active=true]:bg-sky-500/10 data-[active=true]:text-sky-100",
+    violet: "data-[active=true]:border-violet-400/45 data-[active=true]:bg-violet-500/10 data-[active=true]:text-violet-100",
+    emerald: "data-[active=true]:border-emerald-400/45 data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-100",
+    amber: "data-[active=true]:border-amber-400/45 data-[active=true]:bg-amber-500/10 data-[active=true]:text-amber-100",
+  };
+
+  return (
+    <nav className="grid gap-3 lg:grid-cols-4" aria-label="Backup Centre workflow" data-testid="backup-lifecycle-navigator">
+      {groups.map((group) => (
+        <section key={group.label} className="rounded-2xl border border-border/60 bg-muted/[0.12] p-3">
+          <div className="mb-2"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{group.label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{group.description}</p></div>
+          <div className="flex flex-wrap gap-1.5">
+            {group.items.map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                data-active={activeTab === value}
+                onClick={() => onSelect(value)}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground ${toneClasses[group.tone]}`}
+                data-testid={`tab-${value}`}
+              >
+                <Icon className="h-3.5 w-3.5" />{label}
+                {value === "orphans" && orphanCount > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200">{orphanCount}</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
+    </nav>
   );
 }
 
@@ -674,39 +727,7 @@ export default function BackupCenterPage() {
       </div>
 
       <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 bg-transparent p-0 sm:grid-cols-3 xl:grid-cols-9">
-          <TabsTrigger value="dashboard" data-testid="tab-dashboard" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Database className="w-3.5 h-3.5 mr-1" />Dashboard
-          </TabsTrigger>
-          <TabsTrigger value="live" data-testid="tab-live" className="relative h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Activity className="w-3.5 h-3.5 mr-1" />Live
-            {liveCount > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
-          </TabsTrigger>
-          <TabsTrigger value="tenants" data-testid="tab-tenants" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Users className="w-3.5 h-3.5 mr-1" />Tenants
-          </TabsTrigger>
-          <TabsTrigger value="status" data-testid="tab-status" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Server className="w-3.5 h-3.5 mr-1" />Backup Status
-          </TabsTrigger>
-          <TabsTrigger value="acronis" data-testid="tab-acronis" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Cloud className="w-3.5 h-3.5 mr-1" />Acronis Console
-          </TabsTrigger>
-          <TabsTrigger value="orphans" data-testid="tab-orphans" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Ghost className="w-3.5 h-3.5 mr-1" />Orphans
-            {orphans && orphans.totals?.total_orphans > 0 && (
-              <Badge variant="destructive" className="ml-1.5 h-4 text-[9px] px-1">{orphans.totals.total_orphans}</Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="compliance" data-testid="tab-compliance" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <Shield className="w-3.5 h-3.5 mr-1" />Compliance
-          </TabsTrigger>
-          <TabsTrigger value="billing" data-testid="tab-billing" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <DollarSign className="w-3.5 h-3.5 mr-1" />Billing
-          </TabsTrigger>
-          <TabsTrigger value="verify" data-testid="tab-verify" className="h-10 justify-start rounded-xl border border-border/60 bg-muted/20 px-3 text-xs data-[state=active]:border-sky-500/35 data-[state=active]:bg-sky-500/10 data-[state=active]:text-sky-100">
-            <CheckCircle className="w-3.5 h-3.5 mr-1" />Verify
-          </TabsTrigger>
-        </TabsList>
+        <BackupLifecycleNavigator activeTab={tab} onSelect={selectTab} orphanCount={orphans?.totals?.total_orphans || 0} />
 
         {/* DASHBOARD */}
         <TabsContent value="dashboard" className="mt-4 space-y-4">
