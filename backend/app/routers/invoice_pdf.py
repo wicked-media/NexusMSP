@@ -5,7 +5,7 @@ import os
 import jwt
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
-from app.services.nexus_document_pdf import render_nexus_invoice_pdf, render_nexus_purchase_order_pdf
+from app.services.nexus_document_pdf import render_nexus_estimate_pdf, render_nexus_invoice_pdf, render_nexus_purchase_order_pdf
 
 router = APIRouter()
 
@@ -610,8 +610,8 @@ async def preview_theme_pdf(theme_id: str, user: dict = Depends(_get_user_from_t
 
 # ──────── ESTIMATE PDF ────────
 
-def generate_estimate_pdf(estimate, branding=None, theme_config=None):
-    """Generate a branded estimate/quote PDF."""
+def _generate_legacy_estimate_pdf(estimate, branding=None, theme_config=None):
+    """Legacy estimate renderer retained for historical template reference."""
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -813,6 +813,16 @@ def generate_estimate_pdf(estimate, branding=None, theme_config=None):
     pdf.cell(0, 4, "This is an estimate only - not a tax invoice.", ln=True, align="C")
 
     return pdf.output()
+
+
+def generate_estimate_pdf(estimate, branding=None, theme_config=None, generated_by=None):
+    """Generate an estimate through the shared Nexus commercial renderer."""
+    del theme_config
+    return render_nexus_estimate_pdf(
+        estimate or {},
+        branding=branding,
+        generated_by=generated_by,
+    )
 
 
 @router.get("/estimates/{estimate_id}/pdf")

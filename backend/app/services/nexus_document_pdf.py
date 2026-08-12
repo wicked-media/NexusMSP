@@ -512,3 +512,87 @@ def render_nexus_invoice_pdf(
         footer=(branding or {}).get("invoice_footer_text") or "This invoice is a retained NexusMSP commercial record. Please quote the invoice number with any enquiry.",
         generated_by=generated_by,
     )
+
+
+def render_nexus_estimate_pdf(
+    estimate: dict[str, Any],
+    *,
+    branding: dict[str, Any] | None = None,
+    generated_by: str | None = None,
+) -> bytes:
+    """Render quotes and estimates through the shared Nexus document system."""
+    record = estimate or {}
+
+    def as_number(value: Any) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def money(value: Any) -> str:
+        return f"${as_number(value):,.2f}"
+
+    estimate_number = _as_text(record.get("estimate_number") or record.get("id") or "Draft")
+    subtotal = as_number(record.get("subtotal") or record.get("sub_total"))
+    tax = as_number(record.get("tax_amount") or record.get("tax"))
+    total = as_number(record.get("total"))
+    status = _as_text(record.get("status") or "draft").replace("_", " ").title()
+    items: list[dict[str, Any]] = []
+    for item in record.get("line_items") or []:
+        quantity = as_number(item.get("quantity") or 1)
+        rate = as_number(item.get("unit_price") or item.get("rate"))
+        amount = as_number(item.get("total")) or quantity * rate
+        items.append({
+            "Item": item.get("product_name") or item.get("name") or "Proposed service",
+            "Description": item.get("description") or "-",
+            "Quantity": f"{quantity:g}",
+            "Rate": money(rate),
+            "Amount": money(amount),
+        })
+
+    prepared_for = {
+        "Organisation": record.get("client_name") or "Not recorded",
+        "Email": record.get("client_email") or "Not recorded",
+        "Contact": record.get("client_contact") or record.get("billing_contact") or "Not recorded",
+        "Address": record.get("client_address") or record.get("billing_address") or "Not recorded",
+    }
+    pricing = {
+        "Subtotal": money(subtotal),
+        "Discount": money(record.get("discount")) if as_number(record.get("discount")) else "None",
+        "Tax": money(tax),
+        "Proposed total": money(total),
+        "Status": status,
+    }
+    sections: list[tuple[str, Any]] = [("Prepared for", prepared_for)]
+    if record.get("description"):
+        sections.append(("Proposal overview", record.get("description")))
+    sections.extend([
+        ("Proposed items", items or [{"Item": "No proposed line items", "Description": "-", "Quantity": "-", "Rate": "-", "Amount": money(total)}]),
+        ("Pricing summary", pricing),
+    ])
+    if record.get("notes"):
+        sections.append(("Notes", record.get("notes")))
+    if record.get("terms"):
+        sections.append(("Terms & conditions", record.get("terms")))
+
+    return render_nexus_document_pdf(
+        title=record.get("title") or f"Estimate {estimate_number}",
+        document_kind="Service estimate",
+        subtitle=f"{_as_text(record.get('client_name') or 'Client proposal')} | Valid until {_as_text(record.get('valid_until') or 'Not specified')}",
+        metadata=[
+            ("Estimate", estimate_number),
+            ("Prepared", record.get("created_at")),
+            ("Valid until", record.get("valid_until")),
+            ("Status", status),
+        ],
+        metric_cards=[
+            ("Proposed total", money(total)),
+            ("Tax", money(tax)),
+            ("Line items", len(items)),
+            ("Status", status),
+        ],
+        sections=sections,
+        branding=branding,
+        footer=(branding or {}).get("invoice_footer_text") or "This estimate is a retained NexusMSP proposal and is not a tax invoice.",
+        generated_by=generated_by,
+    )
