@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -17,6 +17,7 @@ import { Snowflake, Plus, Loader2, Trash2, Pencil, Calendar, Shield, RefreshCw, 
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const KIND_OPTIONS = [
   { v: "patch", label: "Patches" },
@@ -47,22 +48,23 @@ export default function ChangeFreezePage() {
   const [editing, setEditing] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const reload = () => {
+  const reload = useCallback(() => {
     setLoading(true);
     api.get("/change-freezes")
       .then((d) => setFreezes(d.freezes || []))
       .catch((e) => toast.error(e.response?.data?.detail || e.message))
       .finally(() => setLoading(false));
-  };
+  }, [api]);
 
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { reload(); }, [reload]);
 
   useEffect(() => {
+    let active = true;
     api.get("/clients").then((d) => {
-      setClients(Array.isArray(d) ? d : (d?.clients || []));
+      if (active) setClients(Array.isArray(d) ? d : (d?.clients || []));
     }).catch(() => {});
-    // eslint-disable-next-line
-  }, []);
+    return () => { active = false; };
+  }, [api]);
 
   const remove = async (id) => {
     try {
@@ -284,13 +286,17 @@ function FreezeEditor({ open, initial, clients, onClose, onSave }) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto border-sky-400/20 bg-background p-0" data-testid="freeze-editor">
-        <DialogHeader className="border-b border-sky-400/15 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),rgba(15,23,42,0.92))] px-6 py-5 pr-14">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Change control</p>
-          <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-400/25 bg-sky-400/10"><Snowflake className="h-4 w-4 text-sky-300" /></span>{d.id ? "Edit freeze window" : "Create freeze window"}</DialogTitle>
-          <DialogDescription className="mt-2">Automation matching this scope and change type will pause for the approved window, leaving the exception auditable.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-4 px-6 py-5">
+      <NexusWorkflowDialog
+        eyebrow="Change control"
+        title={d.id ? "Edit freeze window" : "Create freeze window"}
+        description="Automation matching this scope and change type will pause for the approved window, leaving the exception auditable."
+        icon={Snowflake}
+        tone="cyan"
+        className="max-w-xl"
+        contentClassName="space-y-4"
+        data-testid="freeze-editor"
+        footer={<><Button variant="outline" size="sm" onClick={onClose}>Cancel</Button><Button size="sm" onClick={submit} data-testid="freeze-save">{d.id ? "Save audited changes" : "Create freeze window"}</Button></>}
+      >
           <div>
             <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Title</label>
             <Input value={d.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="EOFY blackout · Acme Corp" data-testid="freeze-title" />
@@ -336,12 +342,7 @@ function FreezeEditor({ open, initial, clients, onClose, onSave }) {
             <Switch checked={d.active !== false} onCheckedChange={(v) => set("active", v)} data-testid="freeze-active" />
             <span className="text-xs text-muted-foreground">Active</span>
           </div>
-        </div>
-        <DialogFooter className="border-t border-border/70 bg-muted/10 px-6 py-4">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={submit} data-testid="freeze-save">{d.id ? "Save audited changes" : "Create freeze window"}</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
