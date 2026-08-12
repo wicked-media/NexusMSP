@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Loader2, DollarSign, RefreshCw, Save, Eye, FileText, XCircle, Plus, Users, CalendarDays, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import HeroTile from "@/components/HeroTile";
@@ -318,16 +319,22 @@ export default function BillingTab({ token, onOpenTenants }) {
       </Card>
 
       <Dialog open={syncConfirmOpen} onOpenChange={setSyncConfirmOpen}>
-        <DialogContent className="max-w-xl overflow-hidden border-emerald-400/20 bg-background p-0" data-testid="backup-billing-sync-confirmation">
-          <DialogHeader className="border-b border-emerald-400/15 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Billing control</p>
-            <DialogTitle className="mt-1 flex items-center gap-2 text-xl">
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><FileText className="h-4 w-4 text-emerald-300" /></span>
-              Apply Acronis usage to billing
-            </DialogTitle>
-            <DialogDescription>Review the current calculation before NexusMSP creates or updates billable line items. The resulting changes remain linked to the affected client records.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 px-6 py-5">
+        <NexusWorkflowDialog
+          eyebrow="Billing control"
+          title="Apply Acronis usage to billing"
+          description="Review the current calculation before NexusMSP creates or updates billable line items. The resulting changes remain linked to the affected client records."
+          icon={FileText}
+          tone="emerald"
+          className="max-w-xl"
+          data-testid="backup-billing-sync-confirmation"
+          footer={<>
+            <Button variant="outline" onClick={() => setSyncConfirmOpen(false)} disabled={syncingBilling}>Cancel</Button>
+            <Button onClick={confirmBillingSync} disabled={syncingBilling} className="bg-emerald-600 hover:bg-emerald-700">
+              {syncingBilling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm & sync
+            </Button>
+          </>}
+        >
+          <div className="space-y-3">
             <div className="grid grid-cols-3 gap-3">
               <div className="rounded-xl border border-border/70 bg-muted/20 p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Clients</p><p className="mt-1 text-lg font-semibold">{billingPreview?.linked_clients || 0}</p></div>
               <div className="rounded-xl border border-border/70 bg-muted/20 p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Period</p><p className="mt-1 text-sm font-semibold">{billingPreview?.period || "Current"}</p></div>
@@ -335,25 +342,30 @@ export default function BillingTab({ token, onOpenTenants }) {
             </div>
             <p className="text-xs text-muted-foreground">Use Dry Run if you need to refresh the calculation before applying it. This action does not issue an invoice; it syncs approved usage into the relevant billing line items.</p>
           </div>
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4">
-            <Button variant="outline" onClick={() => setSyncConfirmOpen(false)} disabled={syncingBilling}>Cancel</Button>
-            <Button onClick={confirmBillingSync} disabled={syncingBilling} className="bg-emerald-600 hover:bg-emerald-700">
-              {syncingBilling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm & sync
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={!!autoBillDialog} onOpenChange={v => !v && setAutoBillDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <RefreshCw className="w-5 h-5 text-sky-400" />Link Acronis Billing to Recurring Invoice
-            </DialogTitle>
-            <DialogDescription>
-              {autoBillDialog?.client_name} has no active recurring invoices. Create one now so Acronis usage auto-attaches every period?
-            </DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Recurring billing"
+          title="Link Acronis Billing to Recurring Invoice"
+          description={`${autoBillDialog?.client_name || "This client"} has no active recurring invoices. Create one now so Acronis usage auto-attaches every period?`}
+          icon={RefreshCw}
+          tone="cyan"
+          className="max-w-xl"
+          footer={<>
+            <Button variant="outline" onClick={() => setAutoBillDialog(null)}>Cancel</Button>
+            <Button
+              onClick={() => enableAutoBill(autoBillDialog.client_id, true)}
+              disabled={autoBillBusy === autoBillDialog?.client_id}
+              className="bg-sky-600 hover:bg-sky-700"
+              data-testid="confirm-auto-bill"
+            >
+              {autoBillBusy === autoBillDialog?.client_id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
+              Create & Link
+            </Button>
+          </>}
+        >
           <div className="space-y-3">
             <div className="border rounded-md p-3 bg-sky-500/[0.04] border-sky-500/20 text-xs space-y-1">
               <p className="font-semibold">Scaffold summary</p>
@@ -372,19 +384,7 @@ export default function BillingTab({ token, onOpenTenants }) {
               </Select>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setAutoBillDialog(null)}>Cancel</Button>
-            <Button
-              onClick={() => enableAutoBill(autoBillDialog.client_id, true)}
-              disabled={autoBillBusy === autoBillDialog?.client_id}
-              className="bg-sky-600 hover:bg-sky-700"
-              data-testid="confirm-auto-bill"
-            >
-              {autoBillBusy === autoBillDialog?.client_id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}
-              Create & Link
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
