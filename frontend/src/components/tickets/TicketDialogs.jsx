@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,15 +138,11 @@ export function LogTimeDialog({ open, onOpenChange, timeForm, setTimeForm, handl
 export function NotifyClientDialog({ open, onOpenChange, notifyForm, setNotifyForm, handleNotifyClient }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
-        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Client communication</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><BellRing className="h-4 w-4 text-cyan-200" /></span>Send service record</DialogTitle><p className="mt-2 text-sm text-zinc-400">Email the client a branded PDF of this ticket’s conversation and service history. Sending is recorded against the ticket.</p></DialogHeader>
-        <div className="space-y-4 px-6 py-5">
+      <NexusWorkflowDialog eyebrow="Client communication" title="Send service record" description="Email the client a branded PDF of this ticket’s conversation and service history. Sending is recorded against the ticket." icon={BellRing} tone="cyan" className="max-w-2xl" contentClassName="space-y-4" data-testid="notify-client-workflow" footer={<><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleNotifyClient} data-testid="send-notify-btn"><BellRing className="mr-2 h-4 w-4" />Send service record</Button></>}>
           <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Recipient</Label><Input value={notifyForm.email} onChange={e => setNotifyForm({ ...notifyForm, email: e.target.value })} placeholder="client@email.com" data-testid="notify-email" /></div>
           <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Email subject</Label><Input value={notifyForm.subject} onChange={e => setNotifyForm({ ...notifyForm, subject: e.target.value })} data-testid="notify-subject" /></div>
           <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Message to client</Label><Textarea value={notifyForm.message} onChange={e => setNotifyForm({ ...notifyForm, message: e.target.value })} rows={4} data-testid="notify-message" /></div>
-        </div>
-        <DialogFooter className="border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={handleNotifyClient} data-testid="send-notify-btn"><BellRing className="mr-2 h-4 w-4" />Send service record</Button></DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
@@ -243,9 +239,7 @@ export function PushInvoiceDialog({
   const unbilledTotal = unbilledItems.reduce((sum, item) => sum + (item.total || 0), 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl gap-0 overflow-hidden border-cyan-500/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
-        <DialogHeader className="border-b border-cyan-400/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.08),transparent)] px-6 py-5 pr-14"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Billing hand-off</p><DialogTitle className="mt-1 flex items-center gap-2 text-xl text-zinc-100"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><Receipt className="h-4 w-4 text-emerald-300" /></span>Send ticket items to invoice</DialogTitle><p className="mt-2 text-sm text-zinc-400">Review the unbilled work, then create a new invoice or safely append it to an existing draft.</p></DialogHeader>
-        <div className="space-y-4 px-6 py-5">
+      <NexusWorkflowDialog eyebrow="Billing hand-off" title="Send ticket items to invoice" description="Review the unbilled work, then create a new invoice or safely append it to an existing draft." icon={Receipt} tone="emerald" className="max-w-xl" contentClassName="space-y-4" data-testid="push-invoice-workflow" footer={<Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>}>
           <div className="flex items-center justify-between gap-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] px-3 py-2.5">
             <div className="min-w-0"><p className="truncate text-xs font-semibold text-zinc-200">{ticket?.ticket_number || "Ticket billing"}</p><p className="mt-0.5 truncate text-[10px] text-zinc-500">{ticket?.client_name || "No customer selected"}</p></div>
             <span className="shrink-0 rounded-md border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-emerald-200">Ready to bill</span>
@@ -272,8 +266,7 @@ export function PushInvoiceDialog({
               </>
             )}
           </div>
-        </div>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
