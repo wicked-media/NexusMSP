@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
@@ -1603,11 +1603,15 @@ function CippTenantPanel({ client }) {
         </div>
 
         <Dialog open={linkOpen} onOpenChange={setLinkOpen}>
-          <DialogContent data-testid="client-cipp-link-dialog">
-            <DialogHeader>
-              <DialogTitle>Link Microsoft tenant</DialogTitle>
-              <DialogDescription>Map {client.name} to the correct Microsoft 365 tenant in Nexus Control Plane.</DialogDescription>
-            </DialogHeader>
+          <NexusWorkflowDialog
+            eyebrow="Client Microsoft setup"
+            title="Link Microsoft tenant"
+            description={`Map ${client.name} to the correct Microsoft 365 tenant in Nexus Control Plane.`}
+            icon={LinkIcon}
+            tone="cyan"
+            data-testid="client-cipp-link-dialog"
+            footer={<><Button variant="outline" onClick={() => setLinkOpen(false)}>Cancel</Button><Button onClick={doLink} disabled={busy || !selectedTenantId} data-testid="client-cipp-link-submit">Link tenant</Button></>}
+          >
             <div className="space-y-2">
               <select
                 value={selectedTenantId}
@@ -1620,11 +1624,7 @@ function CippTenantPanel({ client }) {
               </select>
               {tenants.length === 0 && <p className="text-xs text-muted-foreground">No tenants returned — verify the Microsoft tenant provider in Settings.</p>}
             </div>
-            <DialogFooter>
-              <Button variant="ghost" onClick={() => setLinkOpen(false)}>Cancel</Button>
-              <Button variant="outline" className="text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/10" onClick={doLink} disabled={busy || !selectedTenantId} data-testid="client-cipp-link-submit">Link</Button>
-            </DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
       </div>
     );
@@ -1788,11 +1788,16 @@ function CippTenantPanel({ client }) {
 
       {/* Create user dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-xl" data-testid="client-cipp-create-dialog">
-          <DialogHeader>
-            <DialogTitle>Create M365 user</DialogTitle>
-            <DialogDescription>{clientDoc?.cipp_tenant_display}</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Client Microsoft setup"
+          title="Create Microsoft 365 user"
+          description={`Create the identity in ${clientDoc?.cipp_tenant_display || "the linked tenant"}, then assign the required licences.`}
+          icon={UserPlus}
+          tone="cyan"
+          className="max-w-xl"
+          data-testid="client-cipp-create-dialog"
+          footer={<><Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button><Button onClick={doCreateUser} disabled={busy} data-testid="client-cipp-create-submit">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <UserPlus className="w-4 h-4 mr-1" />}Create user</Button></>}
+        >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <Input placeholder="First name" value={createForm.firstName} onChange={e => setCreateForm({ ...createForm, firstName: e.target.value })} />
@@ -1827,17 +1832,20 @@ function CippTenantPanel({ client }) {
               Force password change at next sign-in
             </label>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setCreateOpen(false)}>Cancel</Button>
-            <Button onClick={doCreateUser} disabled={busy} data-testid="client-cipp-create-submit">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <UserPlus className="w-4 h-4 mr-1" />}Create</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* License dialog */}
       <Dialog open={!!licenseDialog} onOpenChange={() => setLicenseDialog(null)}>
-        <DialogContent data-testid="client-cipp-license-dialog">
-          <DialogHeader><DialogTitle>Manage licenses · {licenseDialog?.userPrincipalName}</DialogTitle></DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Client Microsoft licensing"
+          title="Manage licences"
+          description={`Review licence changes for ${licenseDialog?.userPrincipalName || "this user"} before applying them to the linked tenant.`}
+          icon={KeyRound}
+          tone="emerald"
+          data-testid="client-cipp-license-dialog"
+          footer={<><Button variant="outline" onClick={() => setLicenseDialog(null)}>Cancel</Button><Button onClick={doAssignLicense} disabled={busy || (licAdd.length === 0 && licRemove.length === 0)} data-testid="client-cipp-license-submit">{busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}Apply changes</Button></>}
+        >
           <div className="space-y-3">
             <div>
               <div className="text-xs mb-1">Add</div>
@@ -1863,13 +1871,7 @@ function CippTenantPanel({ client }) {
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setLicenseDialog(null)}>Cancel</Button>
-            <Button onClick={doAssignLicense} disabled={busy || (licAdd.length === 0 && licRemove.length === 0)} data-testid="client-cipp-license-submit">
-              {busy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <KeyRound className="w-4 h-4 mr-1" />}Apply
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );

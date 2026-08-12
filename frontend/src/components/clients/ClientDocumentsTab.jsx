@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { FileText, Upload, BookOpen, Trash2, Download, Loader2, Pin, Save, X } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -229,13 +230,16 @@ export default function ClientDocumentsTab({ client }) {
 
       {/* Runbook editor */}
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="max-w-3xl" data-testid="runbook-editor-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-violet-400" />
-              {editingDoc?.id ? "Edit Runbook" : "New Runbook"}
-            </DialogTitle>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Client knowledge"
+          title={editingDoc?.id ? "Edit runbook" : "Create runbook"}
+          description="Capture a reusable client procedure where technicians can find it alongside the account and related work."
+          icon={BookOpen}
+          tone="violet"
+          className="max-w-3xl"
+          data-testid="runbook-editor-dialog"
+          footer={<><Button variant="outline" onClick={() => setEditorOpen(false)} data-testid="runbook-cancel-btn"><X className="w-3 h-3 mr-1" />Cancel</Button><Button onClick={saveRunbook} data-testid="runbook-save-btn"><Save className="w-3 h-3 mr-1" />Save Runbook</Button></>}
+        >
           {editingDoc && (
             <div className="space-y-3">
               <div>
@@ -277,15 +281,7 @@ export default function ClientDocumentsTab({ client }) {
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditorOpen(false)} data-testid="runbook-cancel-btn">
-              <X className="w-3 h-3 mr-1" />Cancel
-            </Button>
-            <Button onClick={saveRunbook} data-testid="runbook-save-btn">
-              <Save className="w-3 h-3 mr-1" />Save Runbook
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
