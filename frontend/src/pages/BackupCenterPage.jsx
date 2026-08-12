@@ -27,6 +27,7 @@ import BillingTab from "@/components/backups/BillingTab";
 import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -277,6 +278,7 @@ export default function BackupCenterPage() {
   const [selectedAgents, setSelectedAgents] = useState([]);
   const [cleaning, setCleaning] = useState(false);
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [orphanCleanupTarget, setOrphanCleanupTarget] = useState(null);
   const [backupStatuses, setBackupStatuses] = useState(null);
   const [verificationCompletion, setVerificationCompletion] = useState(null);
   const [verificationSaving, setVerificationSaving] = useState(false);
@@ -521,8 +523,8 @@ export default function BackupCenterPage() {
     setSelectedAgents(prev => prev.find(s => s.agent_id === a.agent_id) ? prev.filter(s => s.agent_id !== a.agent_id) : [...prev, a]);
   };
 
-  const handleRemoveZombie = async (z) => {
-    if (!window.confirm(`Remove zombie plan "${z.policy_name || "(unnamed)"}"? This unassigns it from the missing resource.`)) return;
+  const handleRemoveZombie = async (z, confirmed = false) => {
+    if (!confirmed) { setOrphanCleanupTarget({ kind: "zombie", item: z, bulk: false }); return; }
     try {
       await axios.delete(`${API}/acronis/applications/${z.application_id}`, { headers });
       toast.success("Zombie plan removed");
@@ -534,9 +536,9 @@ export default function BackupCenterPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Remove failed"); }
   };
 
-  const handleBulkCleanupZombies = async () => {
+  const handleBulkCleanupZombies = async (confirmed = false) => {
     if (selectedZombies.length === 0) { toast.error("No zombie plans selected"); return; }
-    if (!window.confirm(`Permanently remove ${selectedZombies.length} zombie backup plan(s)? This cannot be undone.`)) return;
+    if (!confirmed) { setOrphanCleanupTarget({ kind: "zombie", bulk: true }); return; }
     setCleaning(true);
     try {
       const ids = selectedZombies.map(z => z.application_id);
@@ -553,8 +555,8 @@ export default function BackupCenterPage() {
     finally { setCleaning(false); }
   };
 
-  const handleRemoveAgent = async (a) => {
-    if (!window.confirm(`Uninstall offline agent "${a.agent_name}" (${a.days_offline}d offline)? This frees up the storage but cannot be undone.`)) return;
+  const handleRemoveAgent = async (a, confirmed = false) => {
+    if (!confirmed) { setOrphanCleanupTarget({ kind: "agent", item: a, bulk: false }); return; }
     try {
       await axios.delete(`${API}/acronis/agents/${a.agent_id}`, { headers });
       toast.success("Agent removed");
@@ -566,9 +568,9 @@ export default function BackupCenterPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Remove failed"); }
   };
 
-  const handleBulkCleanupAgents = async () => {
+  const handleBulkCleanupAgents = async (confirmed = false) => {
     if (selectedAgents.length === 0) { toast.error("No agents selected"); return; }
-    if (!window.confirm(`Permanently uninstall ${selectedAgents.length} offline agent(s)? This cannot be undone.`)) return;
+    if (!confirmed) { setOrphanCleanupTarget({ kind: "agent", bulk: true }); return; }
     setCleaning(true);
     try {
       const ids = selectedAgents.map(a => a.agent_id);
@@ -1517,6 +1519,23 @@ export default function BackupCenterPage() {
           if (orphans) handleScanOrphans();
         }}
       />
+
+      <Dialog open={Boolean(orphanCleanupTarget)} onOpenChange={(open) => !open && setOrphanCleanupTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Backup estate hygiene"
+          title={orphanCleanupTarget?.kind === "zombie" ? "Remove zombie backup plan?" : "Uninstall offline backup agent?"}
+          description={orphanCleanupTarget?.kind === "zombie"
+            ? `${orphanCleanupTarget.bulk ? selectedZombies.length : 1} plan${(orphanCleanupTarget.bulk ? selectedZombies.length : 1) === 1 ? "" : "s"} will be unassigned from missing resources.`
+            : `${orphanCleanupTarget.bulk ? selectedAgents.length : 1} offline agent${(orphanCleanupTarget.bulk ? selectedAgents.length : 1) === 1 ? "" : "s"} will be removed from the backup estate.`}
+          icon={orphanCleanupTarget?.kind === "zombie" ? Skull : WifiOff}
+          tone="amber"
+          className="max-w-xl"
+          data-testid="backup-orphan-cleanup-workflow"
+          footer={<><Button variant="outline" onClick={() => setOrphanCleanupTarget(null)} disabled={cleaning}>Keep records</Button><Button variant="destructive" disabled={cleaning} onClick={async () => { const target = orphanCleanupTarget; setOrphanCleanupTarget(null); if (target?.kind === "zombie") await (target.bulk ? handleBulkCleanupZombies(true) : handleRemoveZombie(target.item, true)); else await (target?.bulk ? handleBulkCleanupAgents(true) : handleRemoveAgent(target?.item, true)); }}>{cleaning && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{orphanCleanupTarget?.kind === "zombie" ? "Remove plan" : "Uninstall agent"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">This is an irreversible cleanup. Nexus retains the audit evidence, but the backup resource or assignment will no longer consume platform capacity.</div>
+        </NexusWorkflowDialog>
+      </Dialog>
 
       {/* Cancel Backup Confirmation */}
       <Dialog open={!!cancelTarget} onOpenChange={v => !v && setCancelTarget(null)}>
