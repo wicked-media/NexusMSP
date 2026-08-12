@@ -15,6 +15,7 @@ export default function NexusWorkflowDialog({
   icon: Icon,
   children,
   footer,
+  headerAccessory,
   className,
   contentClassName,
   tone = "cyan",
@@ -37,14 +38,17 @@ export default function NexusWorkflowDialog({
       {...props}
     >
       <div className={`nx-workflow-dialog__header border-b border-border/70 bg-gradient-to-r ${selectedTone} px-5 py-5 pr-12 md:px-7`}>
-        <DialogHeader className="space-y-2 text-left">
-          <p className="text-[10px] font-bold uppercase tracking-[0.24em] opacity-90">{eyebrow}</p>
-          <DialogTitle className="flex items-center gap-2 text-xl tracking-tight md:text-2xl">
-            {Icon && <Icon className="h-5 w-5 shrink-0" />}
-            {title}
-          </DialogTitle>
-          {description && <DialogDescription className="max-w-2xl text-left leading-6">{description}</DialogDescription>}
-        </DialogHeader>
+        <div className="flex items-start gap-4">
+          <DialogHeader className="min-w-0 flex-1 space-y-2 text-left">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] opacity-90">{eyebrow}</p>
+            <DialogTitle className="flex items-center gap-2 text-xl tracking-tight md:text-2xl">
+              {Icon && <Icon className="h-5 w-5 shrink-0" />}
+              {title}
+            </DialogTitle>
+            {description && <DialogDescription className="max-w-2xl text-left leading-6">{description}</DialogDescription>}
+          </DialogHeader>
+          {headerAccessory && <div className="hidden shrink-0 xl:block">{headerAccessory}</div>}
+        </div>
       </div>
       <div className={cn("min-h-0 flex-1 overflow-y-auto px-5 py-5 md:px-7 md:py-6", contentClassName)}>
         {children}

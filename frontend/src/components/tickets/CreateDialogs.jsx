@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,16 +80,16 @@ export function CreateTicketDialog({
   ];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden gap-0 p-0">
-        <DialogHeader className="border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))] px-6 py-5">
-          <div className="flex items-start gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-400/30 bg-cyan-400/[0.10] shadow-[0_10px_28px_rgba(6,182,212,0.12)]"><FileText className="h-5 w-5 text-cyan-200" /></div>
-            <div className="min-w-0 space-y-1">
-              <div className="flex flex-wrap items-center gap-2"><span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-300">Service desk intake</span><Badge variant="outline" className="border-cyan-500/25 bg-cyan-500/[0.06] text-[9px] text-cyan-100">AUDIT READY</Badge></div>
-              <DialogTitle className="text-xl tracking-tight">Create a service ticket</DialogTitle>
-              <p className="max-w-2xl text-sm text-muted-foreground">Capture the operational brief once. NexusMSP will inherit the client service tier, calculate SLA targets, and preserve the intake context on the ticket.</p>
-            </div>
-            <div className="ml-auto hidden shrink-0 grid-cols-4 gap-1.5 xl:grid">
+      <NexusWorkflowDialog
+        eyebrow="Service desk intake · audit ready"
+        title="Create a service ticket"
+        description="Capture the operational brief once. NexusMSP will inherit the client service tier, calculate SLA targets, and preserve the intake context on the ticket."
+        icon={FileText}
+        tone="cyan"
+        className="max-w-6xl"
+        contentClassName="scrollbar-thin space-y-4"
+        data-testid="create-ticket-workflow"
+        headerAccessory={<div className="grid grid-cols-4 gap-1.5">
               {readiness.map((item, index) => (
                 <div key={item.label} className={`min-w-[92px] rounded-lg border px-2.5 py-2 ${item.ready ? "border-emerald-400/25 bg-emerald-400/[0.07]" : "border-white/[0.08] bg-white/[0.025]"}`}>
                   <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.11em] text-zinc-500">
@@ -97,10 +98,9 @@ export function CreateTicketDialog({
                   <p className={`mt-1 text-[10px] ${item.ready ? "text-emerald-100" : "text-zinc-500"}`}>{item.label}</p>
                 </div>
               ))}
-            </div>
-          </div>
-        </DialogHeader>
-        <div className="scrollbar-thin space-y-4 overflow-y-auto max-h-[68vh] px-6 py-5 pr-4">
+            </div>}
+        footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p><Button onClick={handleCreateTicket} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit"><Plus className="mr-1.5 w-4 h-4" />Create and open ticket</Button></>}
+      >
           <section className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/[0.14] p-3 md:grid-cols-4" data-testid="ticket-intake-summary">
             <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Client</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedClient?.name || "Not selected"}</p><p className="truncate text-[10px] text-zinc-600">{selectedContact?.name || "No requester selected"}</p></div>
             <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Service policy</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedService?.name || "Manual routing"}</p><p className="truncate text-[10px] text-zinc-600">{selectedService ? `${selectedService.sla_resolve_hours || "—"}h resolution target` : "Client SLA inherited"}</p></div>
@@ -373,12 +373,7 @@ export function CreateTicketDialog({
             <Input placeholder="Type a tag and press Enter" data-testid="create-tags"
               onKeyDown={e => { if (e.key === "Enter" && e.target.value.trim()) { e.preventDefault(); setFormData({ ...formData, tags: [...(formData.tags || []), e.target.value.trim()] }); e.target.value = ""; } }} />
           </div></section>
-        </div>
-        <DialogFooter className="border-t border-white/[0.06] bg-background/92 px-6 py-4 sm:justify-between">
-          <p className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p>
-          <Button onClick={handleCreateTicket} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit"><Plus className="w-4 h-4 mr-1.5" />Create and open ticket</Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
