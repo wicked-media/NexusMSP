@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -73,17 +74,15 @@ export default function ChangePlanDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Cloud className="w-5 h-5 text-cyan-400" />
-            Apply Acronis Backup Plan
-          </DialogTitle>
-          <DialogDescription>
-            Pick a backup plan to apply to {resources.length} selected resource{resources.length === 1 ? "" : "s"}.
-            Optional: run immediately after applying.
-          </DialogDescription>
-        </DialogHeader>
+      <NexusWorkflowDialog
+        eyebrow="Backup protection"
+        title="Apply backup plan"
+        description={`Pick a protection plan for ${resources.length} selected resource${resources.length === 1 ? "" : "s"}. You can optionally start a backup immediately after applying it.`}
+        icon={Cloud}
+        tone="cyan"
+        className="max-w-3xl"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>Cancel</Button><Button onClick={handleApply} disabled={!selected || applying || resources.length === 0} data-testid="apply-plan-confirm">{applying ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Applying...</> : <><Cloud className="w-4 h-4 mr-2" />Apply{runNow ? " & Run Now" : ""}</>}</Button></>}
+      >
 
         {/* Targets */}
         <div className="rounded-lg border border-border/50 bg-muted/20 p-2 max-h-[80px] overflow-y-auto" data-testid="apply-plan-targets">
@@ -163,20 +162,7 @@ export default function ChangePlanDialog({
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={applying}>Cancel</Button>
-          <Button
-            onClick={handleApply}
-            disabled={!selected || applying || resources.length === 0}
-            className="bg-cyan-600 hover:bg-cyan-700"
-            data-testid="apply-plan-confirm"
-          >
-            {applying
-              ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Applying...</>
-              : <><Cloud className="w-4 h-4 mr-2" />Apply{runNow ? " & Run Now" : ""}</>}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
