@@ -97,6 +97,7 @@ export default function DevicesPage() {
   const [pulseCount, setPulseCount] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [isLinkingAcronis, setIsLinkingAcronis] = useState(false);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const filterSource = searchParams.get("source");
@@ -211,6 +212,19 @@ export default function DevicesPage() {
         : "recommendation";
 
   const openCreate = () => { setEditing(null); setForm(emptyForm); setIsFormOpen(true); };
+  const handleAutoLinkAcronis = async () => {
+    setIsLinkingAcronis(true);
+    try {
+      const response = await axios.post(`${API}/devices/auto-link-acronis`, {}, { headers });
+      toast.success(`Acronis reconciliation complete: ${response.data.matched} linked, ${response.data.no_match} need review`);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Acronis reconciliation failed");
+    } finally {
+      setIsLinkingAcronis(false);
+    }
+  };
+
   const openEdit = (d) => {
     setEditing(d);
     setForm({ name: d.name, client_id: d.client_id, device_type: d.device_type, os: d.os || "", ip_address: d.ip_address || "", serial_number: d.serial_number || "", mac_address: d.mac_address || "", manufacturer: d.manufacturer || "", model: d.model || "", processor: d.processor || "", ram_gb: d.ram_gb || "", storage_total_gb: d.storage_total_gb || "", location: d.location || "", assigned_user: d.assigned_user || "", tags: (d.tags || []).join(", "), notes: d.notes || "" });
@@ -355,32 +369,30 @@ export default function DevicesPage() {
           <p className="text-sm text-zinc-500">{devices.length} managed endpoints · live telemetry · fan-out actions · site map</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button
-            size="sm" variant="outline"
-            className="text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/10"
-            onClick={async () => {
-              try {
-                const r = await axios.post(`${API}/devices/auto-link-acronis`, {}, { headers: { Authorization: `Bearer ${token}` } });
-                toast.success(`Auto-linked ${r.data.matched}/${r.data.scanned} (${r.data.no_match} no match)`);
-                fetchData();
-              } catch (e) { toast.error(e.response?.data?.detail || "Auto-link failed"); }
-            }}
-            data-testid="auto-link-acronis-btn"
-            title="Match device names to Acronis resources"
-          >
-            <Cloud className="w-3 h-3 mr-1" />Acronis
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
-            <BarChart3 className="w-3 h-3 mr-1" />Compare
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }} data-testid="discover-devices-btn">
-            <Radar className="w-3 h-3 mr-1" />Discover
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1.5" data-testid="device-asset-actions">
+                <MoreHorizontal className="h-3.5 w-3.5" />Asset actions<ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onSelect={() => { setDiscoveryResults(null); setSelectedDiscovered([]); setIsDiscoveryOpen(true); }}>
+                <Radar className="mr-2 h-3.5 w-3.5" />Discover network assets
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleAutoLinkAcronis} disabled={isLinkingAcronis} data-testid="auto-link-acronis-btn">
+                {isLinkingAcronis ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Cloud className="mr-2 h-3.5 w-3.5" />}
+                {isLinkingAcronis ? "Reconciling Acronis..." : "Reconcile Acronis backups"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => navigate("/devices/compare")} data-testid="compare-devices-btn">
+                <BarChart3 className="mr-2 h-3.5 w-3.5" />Compare healthy devices
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" variant="success" onClick={openCreate} data-testid="add-device-btn">
             <Plus className="w-4 h-4 mr-1" />Add managed asset
           </Button>
-          <Button size="sm" variant="outline" onClick={fetchData} data-testid="devices-refresh-btn">
-            <RefreshCw className="w-4 h-4 mr-1" />Refresh
+          <Button size="icon" variant="outline" className="h-9 w-9" onClick={fetchData} data-testid="devices-refresh-btn" title="Refresh fleet data" aria-label="Refresh fleet data">
+            <RefreshCw className="w-4 h-4" />
           </Button>
         </div>
       </div>
