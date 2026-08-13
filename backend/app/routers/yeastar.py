@@ -585,15 +585,25 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
     # Sharing it prevents concurrent reads from queuing behind the token lock and
     # all timing out together on a slower appliance or cloud connection.
     token = await bounded_read("authentication", _yeastar_get_token(pbx), None)
+    skipped_reads: list[str] = []
     if token:
-        system_raw, extensions, active_calls, call_logs = await asyncio.gather(
-            bounded_read("system", _yeastar_api_get("system/information", settings=pbx, token=token), None),
-            bounded_read("extensions", get_yeastar_extensions(current_user, settings=pbx, token=token), cached_extensions),
-            bounded_read("active calls", get_yeastar_active_calls(current_user, settings=pbx, token=token), []),
-            bounded_read("recent calls", get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx, token=token), {"data": []}),
-        )
+        # Check the inexpensive baseline endpoint first. Some PBXs serialise or
+        # throttle OpenAPI requests; if the API is already unavailable, issuing
+        # three more calls merely amplifies load and gives technicians no extra
+        # signal. Cached extension context remains available in that case.
+        system_raw = await bounded_read("system", _yeastar_api_get("system/information", settings=pbx, token=token), None)
+        if isinstance(system_raw, dict) and system_raw.get("errcode") == 0:
+            extensions, active_calls, call_logs = await asyncio.gather(
+                bounded_read("extensions", get_yeastar_extensions(current_user, settings=pbx, token=token), cached_extensions),
+                bounded_read("active calls", get_yeastar_active_calls(current_user, settings=pbx, token=token), []),
+                bounded_read("recent calls", get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx, token=token), {"data": []}),
+            )
+        else:
+            extensions, active_calls, call_logs = cached_extensions, [], {"data": []}
+            skipped_reads = ["extensions", "active calls", "recent calls"]
     else:
         system_raw, extensions, active_calls, call_logs = None, cached_extensions, [], {"data": []}
+        skipped_reads = ["system", "extensions", "active calls", "recent calls"]
     system = system_raw.get("data", {}) if isinstance(system_raw, dict) and system_raw.get("errcode") == 0 else {}
     uptime_seconds = int(system.get("up_time", 0) or 0)
     online_extensions = len([extension for extension in extensions if extension.get("registered")])
@@ -604,6 +614,7 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         "health": "online" if system else "degraded",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "degraded_reads": read_issues,
+        "skipped_reads": skipped_reads,
         "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
         "system": {"name": system.get("device_name") or pbx.get("name") or "Yeastar PBX", "model": system.get("model_name", ""), "firmware_version": system.get("firmware_version", ""), "uptime_seconds": uptime_seconds},
         "extensions": {"total": len(extensions), "registered": online_extensions, "unregistered": len(extensions) - online_extensions},
