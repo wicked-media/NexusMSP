@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -250,6 +250,7 @@ const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis"
 
 export default function BackupCenterPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const headers = { Authorization: `Bearer ${token}` };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
@@ -310,6 +311,8 @@ export default function BackupCenterPage() {
     setStatusFilter(nextFilter);
     selectTab("dashboard");
   };
+
+  const openAcronisSettings = () => navigate("/settings?tab=integrations&anchor=acronis-settings-card");
 
   // ── Widget grid (Orphans tab) ────────────────────────────────────────
   const orphanGrid = useWidgetGrid({
@@ -700,7 +703,7 @@ export default function BackupCenterPage() {
         items={backupTickerItems}
         statusText={backupSourceUnavailable ? "Acronis source needs attention" : "Select an item to investigate"}
         onNavigate={(action) => {
-          if (action === "settings") window.location.assign("/settings?tab=integrations&anchor=acronis-settings-card");
+          if (action === "settings") openAcronisSettings();
           else if (action === "failed") openDashboardFilter("failed");
           else selectTab(action);
         }}
@@ -713,7 +716,10 @@ export default function BackupCenterPage() {
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
               <div><p className="text-sm font-semibold text-rose-100">Backup source unavailable</p><p className="mt-0.5 text-xs text-muted-foreground">{sourceIssues[0]}</p></div>
             </div>
-            <Button size="sm" variant="outline" className="shrink-0 border-rose-400/35 text-rose-100 hover:bg-rose-500/10" onClick={() => window.location.assign("/settings?tab=integrations&anchor=acronis-settings-card")}>Open Acronis settings</Button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="ghost" className="text-rose-100 hover:bg-rose-500/10" onClick={() => { fetchData(); fetchLive(); }}>Retry connection</Button>
+              <Button size="sm" variant="outline" className="border-rose-400/35 text-rose-100 hover:bg-rose-500/10" onClick={openAcronisSettings}>Open Acronis settings</Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -723,9 +729,9 @@ export default function BackupCenterPage() {
         <HeroMetric label="Total backups" value={ds.total_jobs || 0} icon={Database} glow="cyan" subtitle="All protected workloads" onClick={() => openDashboardFilter("all")} />
         <HeroMetric label="Successful" value={ds.successful || 0} icon={CheckCircle} glow="emerald" subtitle={`${ds.success_rate || 0}% success rate`} onClick={() => openDashboardFilter("success")} />
         <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle={ds.failed ? "Needs attention" : "All healthy"} onClick={() => openDashboardFilter("failed")} />
-        <HeroMetric label="Running" value={liveCount} icon={Activity} glow={backupSourceUnavailable ? "rose" : "violet"} subtitle={backupSourceUnavailable ? "Source unavailable" : "Live now"} onClick={() => backupSourceUnavailable ? window.location.assign("/settings?tab=integrations&anchor=acronis-settings-card") : selectTab("live")} />
-        <HeroMetric label="Online agents" value={ah.online || 0} icon={Wifi} glow={backupSourceUnavailable ? "rose" : "emerald"} subtitle={backupSourceUnavailable ? "Source unavailable" : `${ah.online_pct || 0}% of ${ah.total || 0}`} onClick={() => backupSourceUnavailable ? window.location.assign("/settings?tab=integrations&anchor=acronis-settings-card") : selectTab("status")} />
-        <HeroMetric label="Active alerts" value={acronisAlerts.length} icon={Bell} glow={backupSourceUnavailable ? "rose" : acronisAlerts.length > 0 ? "amber" : "cyan"} subtitle={backupSourceUnavailable ? "Source unavailable" : acronisUsage?.critical_alerts ? `${acronisUsage.critical_alerts} critical` : "Acronis monitoring"} onClick={() => backupSourceUnavailable ? window.location.assign("/settings?tab=integrations&anchor=acronis-settings-card") : selectTab("acronis")} />
+        <HeroMetric label="Running" value={liveCount} icon={Activity} glow={backupSourceUnavailable ? "rose" : "violet"} subtitle={backupSourceUnavailable ? "Source unavailable" : "Live now"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("live")} />
+        <HeroMetric label="Online agents" value={ah.online || 0} icon={Wifi} glow={backupSourceUnavailable ? "rose" : "emerald"} subtitle={backupSourceUnavailable ? "Source unavailable" : `${ah.online_pct || 0}% of ${ah.total || 0}`} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("status")} />
+        <HeroMetric label="Active alerts" value={acronisAlerts.length} icon={Bell} glow={backupSourceUnavailable ? "rose" : acronisAlerts.length > 0 ? "amber" : "cyan"} subtitle={backupSourceUnavailable ? "Source unavailable" : acronisUsage?.critical_alerts ? `${acronisUsage.critical_alerts} critical` : "Acronis monitoring"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("acronis")} />
       </div>
 
       <Tabs value={tab} onValueChange={selectTab}>
