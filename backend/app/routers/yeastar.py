@@ -637,6 +637,7 @@ async def _voice_extensions_with_overrides(current_user: dict, pbx: dict | None 
             included = included and bool(extension.get("registered"))
         enriched.append({
             **extension,
+            "presence_state": _normalise_extension_presence(extension.get("status"), bool(extension.get("registered"))),
             "id": override_key,
             "pbx_id": pbx_id,
             "pbx_name": pbx_name,
