@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const PROJECT_STATUSES = {
   planning: { label: "Planning", className: "border-zinc-500/30 bg-zinc-500/10 text-zinc-200" },
@@ -115,6 +116,7 @@ export default function ProjectsPage() {
   const [assigneeQuery, setAssigneeQuery] = useState("");
   const [ticketQuery, setTicketQuery] = useState("");
   const [savingTask, setSavingTask] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchData = useCallback(async ({ quiet = false } = {}) => {
     if (quiet) setRefreshing(true);
@@ -235,12 +237,16 @@ export default function ProjectsPage() {
     }
   };
 
-  const deleteProject = async (project) => {
-    if (!window.confirm(`Delete ${project.name}? All project tasks will be removed. This is recorded in the audit trail.`)) return;
+  const deleteProject = async (project, confirmed = false) => {
+    if (!confirmed) {
+      setDeleteTarget({ type: "project", item: project });
+      return;
+    }
     try {
       await axios.delete(`${API}/projects/${project.id}`, { headers });
       toast.success("Project deleted");
       setSelectedProject(null);
+      setDeleteTarget(null);
       await fetchData({ quiet: true });
     } catch (error) {
       toast.error(error.response?.data?.detail || "Project could not be deleted");
@@ -319,11 +325,16 @@ export default function ProjectsPage() {
     }
   };
 
-  const deleteTask = async (task) => {
-    if (!selectedProject || !window.confirm(`Delete task \"${task.title}\"?`)) return;
+  const deleteTask = async (task, confirmed = false) => {
+    if (!selectedProject) return;
+    if (!confirmed) {
+      setDeleteTarget({ type: "task", item: task });
+      return;
+    }
     try {
       await axios.delete(`${API}/projects/${selectedProject.id}/tasks/${task.id}`, { headers });
       toast.success("Task deleted");
+      setDeleteTarget(null);
       await reloadProjectDetail();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Task could not be deleted");
@@ -494,6 +505,24 @@ export default function ProjectsPage() {
             <DialogFooter className="border-t border-border/80 pt-5"><Button type="button" variant="outline" onClick={() => setTaskDialog(null)} disabled={savingTask}>Cancel</Button><Button type="submit" disabled={savingTask}>{savingTask && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{taskDialog?.mode === "edit" ? "Save task" : "Create task"}</Button></DialogFooter>
           </form>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Client delivery"
+          title={deleteTarget?.type === "project" ? "Delete delivery project" : "Delete project task"}
+          description={deleteTarget?.type === "project"
+            ? `Delete ${deleteTarget.item.name}? All project tasks will be removed.`
+            : `Delete ${deleteTarget?.item?.title || "this task"}?`}
+          icon={Trash2}
+          tone="amber"
+          testId="project-delete-dialog"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep {deleteTarget?.type === "project" ? "project" : "task"}</Button><Button variant="destructive" onClick={() => deleteTarget?.type === "project" ? deleteProject(deleteTarget.item, true) : deleteTask(deleteTarget.item, true)}>Delete {deleteTarget?.type === "project" ? "project" : "task"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">
+            {deleteTarget?.type === "project" ? "The project, its tasks and the associated delivery board are removed. Nexus keeps the recorded audit event." : "The task is removed from the delivery board and Nexus records the decision in project activity."}
+          </div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
