@@ -5,13 +5,15 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle, XCircle, Clock, Plus } from "lucide-react";
 import { toast } from "sonner";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const statusColors = { pending: "secondary", approved: "default", rejected: "destructive" };
 
@@ -70,23 +72,33 @@ export default function ApprovalWorkflowsPage() {
         </div>
         <Dialog open={showCreate} onOpenChange={setShowCreate}>
           <DialogTrigger asChild><Button data-testid="create-approval"><Plus className="w-4 h-4 mr-2" />New Request</Button></DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Create Approval Request</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <Select value={form.type} onValueChange={v => setForm(p => ({ ...p, type: v }))}>
-                <SelectTrigger data-testid="approval-type-select"><SelectValue /></SelectTrigger>
-                <SelectContent>
+          <NexusWorkflowDialog
+            eyebrow="Governed request"
+            title="Create approval request"
+            description="Capture the decision, impact, and cost once so approvers have the context they need without chasing for details."
+            icon={Clock}
+            tone="amber"
+            headerAccessory={<Badge variant="outline" className="border-amber-500/25 bg-amber-500/10 text-amber-300">Awaiting decision</Badge>}
+            footer={<><Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button><Button onClick={createApproval} data-testid="submit-approval">Submit for approval</Button></>}
+          >
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="approval-request-type">Request type</Label>
+                <Select value={form.type} onValueChange={v => setForm(p => ({ ...p, type: v }))}>
+                  <SelectTrigger data-testid="approval-type-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
                   {["general","purchase","device_change","contract_change","discount"].map(t => (
                     <SelectItem key={t} value={t} className="capitalize">{t.replace("_"," ")}</SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-              <Input placeholder="Title" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} data-testid="approval-title-input" />
-              <Textarea placeholder="Description" value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
-              <Input type="number" placeholder="Amount ($)" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} />
-              <Button onClick={createApproval} className="w-full" data-testid="submit-approval">Submit Request</Button>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground"><p className="font-medium text-foreground">Review-ready by design</p><p className="mt-1 leading-5">The request is recorded with its decision and approver, creating a durable operational trail.</p></div>
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="approval-request-title">Clear request title</Label><Input id="approval-request-title" placeholder="e.g. Approve firewall replacement" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} data-testid="approval-title-input" /></div>
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="approval-request-description">Business context</Label><Textarea id="approval-request-description" rows={4} placeholder="What will change, why it matters, and the outcome being requested." value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
+              <div className="space-y-2"><Label htmlFor="approval-request-amount">Amount (optional)</Label><Input id="approval-request-amount" type="number" min="0" placeholder="0.00" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} /></div>
             </div>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
       </div>
 
