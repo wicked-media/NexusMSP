@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
   Power, RefreshCw, Wifi, Terminal, FolderOpen, Monitor,
@@ -16,6 +16,7 @@ import {
   Skull, Download, Search,
 } from "lucide-react";
 import { API } from "@/App";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const fmtBytes = (n) => {
   if (n == null) return "—";
@@ -51,7 +52,7 @@ function Gauge({ label, value, unit = "%", color = "violet", icon: Icon }) {
 export default function TicketDeviceCockpit({ ticketId, deviceStatus, headers, hasAgent, refreshTicketDetails }) {
   const [agent, setAgent] = useState(null);
   const [busyAction, setBusyAction] = useState(null);
-  const [confirm, setConfirm] = useState(null); // { kind: "reboot"|"shutdown"|"send-message", title }
+  const [confirm, setConfirm] = useState(null); // { kind: "reboot"|"shutdown"|"send-message"|"kill-process", process? }
   const [msgBody, setMsgBody] = useState("");
   const [services, setServices] = useState([]);
   const [serviceQuery, setServiceQuery] = useState("");
@@ -166,8 +167,11 @@ export default function TicketDeviceCockpit({ ticketId, deviceStatus, headers, h
     } finally { setBusyAction(null); }
   };
 
-  const killProcess = async (p) => {
-    if (!window.confirm(`Kill process ${p.name} (PID ${p.pid})?`)) return;
+  const killProcess = async (p, confirmed = false) => {
+    if (!confirmed) {
+      setConfirm({ kind: "kill-process", process: p });
+      return;
+    }
     setBusyAction(`kill-${p.pid}`);
     try {
       await axios.post(`${API}/tickets/${ticketId}/device/processes/${p.pid}/kill`, {}, { headers });
@@ -189,6 +193,34 @@ export default function TicketDeviceCockpit({ ticketId, deviceStatus, headers, h
     const arr = [...processes].sort((a, b) => (b.cpu_percent || 0) - (a.cpu_percent || 0));
     return arr.slice(0, 25);
   }, [processes]);
+
+  const confirmDetails = {
+    reboot: {
+      title: "Reboot device",
+      description: "The device will reboot immediately. Nexus records the action against this ticket.",
+      icon: Power,
+      tone: "amber",
+    },
+    shutdown: {
+      title: "Shutdown device",
+      description: "The device will shut down after a 60-second grace period. Nexus records the action against this ticket.",
+      icon: Power,
+      tone: "amber",
+    },
+    "send-message": {
+      title: "Message the user",
+      description: "A notification will appear on the user's screen and be recorded in the ticket activity.",
+      icon: MessageSquareWarning,
+      tone: "cyan",
+    },
+    "kill-process": {
+      title: "End running process",
+      description: `This immediately ends ${confirm?.process?.name || "the selected process"}${confirm?.process?.pid ? ` (PID ${confirm.process.pid})` : ""}. Unsaved work in that process may be lost.`,
+      icon: Skull,
+      tone: "amber",
+    },
+  };
+  const activeConfirmation = confirm ? confirmDetails[confirm.kind] : null;
 
   if (!hasAgent) {
     return (
@@ -355,31 +387,29 @@ export default function TicketDeviceCockpit({ ticketId, deviceStatus, headers, h
         </CardContent>
       </Card>
 
-      {/* Confirm dialog (reboot/shutdown/message) */}
+      {/* Confirm operational actions */}
       <Dialog open={!!confirm} onOpenChange={(v) => !v && setConfirm(null)}>
-        <DialogContent className="max-w-sm" data-testid="cockpit-confirm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {confirm?.kind === "reboot" && <><Power className="w-4 h-4 text-amber-400" />Reboot device</>}
-              {confirm?.kind === "shutdown" && <><Power className="w-4 h-4 text-rose-400" />Shutdown device</>}
-              {confirm?.kind === "send-message" && <><MessageSquareWarning className="w-4 h-4 text-cyan-400" />Message the user</>}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {confirm?.kind === "reboot" && "The device will reboot immediately. The action will be logged on this ticket."}
-              {confirm?.kind === "shutdown" && "The device will shutdown after a 60s grace period. The action will be logged on this ticket."}
-              {confirm?.kind === "send-message" && "A notification popup will appear on the user's screen."}
-            </DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Ticket device control"
+          title={activeConfirmation?.title || "Confirm device action"}
+          description={activeConfirmation?.description}
+          icon={activeConfirmation?.icon || Monitor}
+          tone={activeConfirmation?.tone || "cyan"}
+          testId="cockpit-confirm"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
+              {confirm?.kind === "reboot" && <Button onClick={() => { runAction("reboot", "Reboot"); setConfirm(null); }} disabled={!!busyAction} data-testid="cockpit-confirm-reboot">Reboot now</Button>}
+              {confirm?.kind === "shutdown" && <Button variant="destructive" onClick={() => { runAction("shutdown", "Shutdown"); setConfirm(null); }} disabled={!!busyAction} data-testid="cockpit-confirm-shutdown">Shutdown</Button>}
+              {confirm?.kind === "send-message" && <Button onClick={sendMessage} disabled={!msgBody.trim() || !!busyAction} data-testid="cockpit-confirm-message">Send</Button>}
+              {confirm?.kind === "kill-process" && <Button variant="destructive" onClick={async () => { await killProcess(confirm.process, true); setConfirm(null); }} disabled={!!busyAction} data-testid="cockpit-confirm-kill-process">End process</Button>}
+            </>
+          }
+        >
           {confirm?.kind === "send-message" && (
             <Textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} placeholder="Hi! Just a heads up — I'll be working on your machine for a few minutes…" rows={4} data-testid="cockpit-message-body" />
           )}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
-            {confirm?.kind === "reboot" && <Button onClick={() => { runAction("reboot", "Reboot"); setConfirm(null); }} disabled={!!busyAction} data-testid="cockpit-confirm-reboot">Reboot now</Button>}
-            {confirm?.kind === "shutdown" && <Button variant="destructive" onClick={() => { runAction("shutdown", "Shutdown"); setConfirm(null); }} disabled={!!busyAction} data-testid="cockpit-confirm-shutdown">Shutdown</Button>}
-            {confirm?.kind === "send-message" && <Button onClick={sendMessage} disabled={!msgBody.trim() || !!busyAction} data-testid="cockpit-confirm-message">Send</Button>}
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Terminal modal */}
