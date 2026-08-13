@@ -673,6 +673,7 @@ async def _cache_voice_extensions(pbx: dict, extensions: list[dict], captured_at
 
 @router.get("/yeastar/voice-workspace")
 async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)):
+    client_scope = scope_query(current_user)
     sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
     billing_history = await db.yeastar_billing_snapshots.find({}, {"_id": 0}).sort("created_at", -1).to_list(24)
     activity = await db.activity_logs.find(
@@ -680,13 +681,13 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
         {"_id": 0},
     ).sort("created_at", -1).to_list(50)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
-    pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    pbx_records = await db.yeastar_pbxs.find(client_scope, {"_id": 0}).sort("created_at", -1).to_list(500)
 
     # Keep the landing workspace independent of an external PBX response. A
     # live call to every customer PBX belongs in the explicit Monitor and
     # Wallboard workflows; this page should be immediately usable during a
     # provider outage. Extension details are refreshed by the governed sync.
-    extensions = await db.yeastar_extension_cache.find({}, {"_id": 0}).to_list(5000)
+    extensions = await db.yeastar_extension_cache.find(client_scope, {"_id": 0}).to_list(5000)
     billable = sum(int(pbx.get("billable_extension_count", 0) or 0) for pbx in pbx_records if pbx.get("enabled", True))
     summary_history = [item for item in billing_history if not item.get("pbx_id")]
     previous_quantity = summary_history[1].get("billable_quantity", billable) if len(summary_history) > 1 else billable
