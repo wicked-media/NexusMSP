@@ -1374,10 +1374,12 @@ export default function BackupCenterPage() {
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
                   <Table>
-                  <TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Type</TableHead><TableHead>Last Backup</TableHead><TableHead>RPO</TableHead><TableHead>RTO</TableHead><TableHead>Size</TableHead><TableHead>Compliance</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Type</TableHead><TableHead>Last Backup</TableHead><TableHead>RPO</TableHead><TableHead>RTO</TableHead><TableHead>Size</TableHead><TableHead>Compliance</TableHead><TableHead className="text-right">Next step</TableHead></TableRow></TableHeader>
                   <TableBody>
-                    {(compData.devices || []).map(d => (
-                      <TableRow key={d.device_id}>
+                    {(compData.devices || []).map(d => {
+                      const needsAttention = ["non_compliant", "no_backup"].includes(d.compliance);
+                      return (
+                      <TableRow key={d.device_id} className={needsAttention ? "bg-amber-500/[0.025]" : ""}>
                         <TableCell className="font-medium">{d.device_name}</TableCell>
                         <TableCell className="text-sm">{d.client_name}</TableCell>
                         <TableCell className="capitalize text-xs">{d.device_type}</TableCell>
@@ -1386,8 +1388,9 @@ export default function BackupCenterPage() {
                         <TableCell>{d.rto_hours ? `${d.rto_hours}h` : "-"}</TableCell>
                         <TableCell>{d.size_gb ? `${d.size_gb}GB` : "-"}</TableCell>
                         <TableCell><Badge variant={complianceColors[d.compliance]} className="capitalize text-xs">{d.compliance?.replace("_", " ")}</Badge></TableCell>
+                        <TableCell className="text-right"><Button size="sm" variant="ghost" className={`h-7 px-2 text-[10px] ${needsAttention ? "text-amber-200 hover:bg-amber-500/10" : "text-sky-300 hover:bg-sky-500/10"}`} onClick={() => navigate(`/devices/${encodeURIComponent(d.device_id)}`)} data-testid={`open-backup-asset-${d.device_id}`}><ArrowUpRight className="mr-1 h-3 w-3" />{needsAttention ? "Investigate" : "Open asset"}</Button></TableCell>
                       </TableRow>
-                    ))}
+                    );})}
                   </TableBody>
                   </Table>
                 </div>
