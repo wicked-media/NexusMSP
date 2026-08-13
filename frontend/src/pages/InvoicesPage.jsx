@@ -21,7 +21,6 @@ import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   Plus, Search, FileText, Loader2, Send, Check, ArrowLeft,
@@ -298,6 +297,7 @@ export default function InvoicesPage() {
   const [topView, setTopView] = useState("list"); // list | revenue
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkConfirmAction, setBulkConfirmAction] = useState(null);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
     line_items: [], tax_rate: "0", discount_pct: "0", discount_amount: "0",
@@ -427,17 +427,19 @@ export default function InvoicesPage() {
   };
 
   const removeLineItem = (idx) => setForm(f => ({ ...f, line_items: f.line_items.filter((_, i) => i !== idx) }));
-  const handleBulkAction = async (action) => {
+  const handleBulkAction = async (action, confirmed = false) => {
     if (selectedIds.size === 0) return;
-    const confirmMsg = action === "delete" ? `Delete ${selectedIds.size} invoice(s)? This cannot be undone.` :
-                       action === "void" ? `Void ${selectedIds.size} invoice(s)?` : null;
-    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    if (["delete", "void"].includes(action) && !confirmed) {
+      setBulkConfirmAction(action);
+      return;
+    }
     setBulkBusy(true);
     try {
       const res = await axios.post(`${API}/billing-pro/invoices/bulk-action`, { invoice_ids: [...selectedIds], action }, { headers });
       const n = res.data.updated ?? res.data.deleted ?? 0;
       toast.success(`${action.replace("_", " ")} → ${n} invoice(s)`);
       setSelectedIds(new Set());
+      setBulkConfirmAction(null);
       fetchAll();
     } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
     finally { setBulkBusy(false); }
@@ -1248,22 +1250,37 @@ export default function InvoicesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {deleteTarget?.invoice_number}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently removes the unpaid draft invoice. Sent, paid, and voided invoices remain as financial history.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep Invoice</AlertDialogCancel>
-            <HoldToConfirmButton onComplete={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-invoice">
-              Hold to delete draft
-            </HoldToConfirmButton>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <Dialog open={Boolean(bulkConfirmAction)} onOpenChange={open => !open && setBulkConfirmAction(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Billing record control"
+          title={bulkConfirmAction === "delete" ? "Delete selected invoices" : "Void selected invoices"}
+          description={bulkConfirmAction === "delete"
+            ? `Delete ${selectedIds.size} selected invoice${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`
+            : `Void ${selectedIds.size} selected invoice${selectedIds.size === 1 ? "" : "s"}?`}
+          icon={bulkConfirmAction === "delete" ? Trash2 : Ban}
+          tone="amber"
+          testId="invoice-bulk-confirm-dialog"
+          footer={<><Button variant="outline" onClick={() => setBulkConfirmAction(null)} disabled={bulkBusy}>Cancel</Button><Button variant="destructive" onClick={() => handleBulkAction(bulkConfirmAction, true)} disabled={bulkBusy}>{bulkBusy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{bulkConfirmAction === "delete" ? "Delete invoices" : "Void invoices"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">
+            {bulkConfirmAction === "delete" ? "Deleted invoices can no longer be recovered from Nexus. Confirm only after any required financial correction has been made." : "Voiding preserves the billing record and audit history while preventing further collection or reconciliation activity."}
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={open => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Billing record control"
+          title={`Delete ${deleteTarget?.invoice_number || "draft invoice"}?`}
+          description="This permanently removes the unpaid draft invoice. Sent, paid, and voided invoices remain as financial history."
+          icon={Trash2}
+          tone="amber"
+          testId="invoice-delete-dialog"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep invoice</Button><HoldToConfirmButton onComplete={() => deleteTarget && handleDelete(deleteTarget.id)} data-testid="confirm-delete-invoice">Hold to delete draft</HoldToConfirmButton></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">Nexus keeps sent, paid, and voided invoices as financial history. This option is deliberately limited to removable drafts.</div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </>
   );
   if (viewInvoice) {
