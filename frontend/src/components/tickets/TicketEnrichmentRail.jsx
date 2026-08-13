@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { Sparkles } from "lucide-react";
 
 /**
  * Right-rail AI enrichment cards for the Ticket Detail view.
@@ -17,56 +18,32 @@ export function TicketEnrichmentRail({ enrichment }) {
   const healthColor = ctx.health_score >= 80 ? "#10b981" : ctx.health_score >= 60 ? "#f97316" : "#ef4444";
 
   return (
-    <>
-      {/* TTR Prediction */}
-      <Card data-testid="ttr-card">
-        <CardContent className="pt-4 pb-3">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Resolution Prediction</span>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-primary">{ttrLabel}</span>
-            <span className="text-[10px] text-muted-foreground">estimated</span>
-          </div>
-          <div className="flex items-center gap-2 mt-1.5">
-            <div className="h-1 flex-1 rounded-full bg-muted/50 overflow-hidden">
-              <div className="h-full rounded-full bg-primary/60" style={{ width: `${(ttr.confidence || 0) * 100}%` }} />
-            </div>
-            <span className="text-[10px] text-muted-foreground">{Math.round((ttr.confidence || 0) * 100)}% conf.</span>
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1">{ttr.based_on}</p>
-        </CardContent>
-      </Card>
+    <Card className="overflow-hidden border-violet-500/15 bg-[linear-gradient(145deg,rgba(139,92,246,0.07),rgba(17,19,24,0.82)_46%,rgba(34,211,238,0.04))]" data-testid="ticket-enrichment-rail">
+      <CardContent className="space-y-4 p-4">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 place-items-center rounded-lg border border-violet-400/20 bg-violet-400/[0.08]"><Sparkles className="h-3.5 w-3.5 text-violet-200" /></span>
+          <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Nexus context</p><p className="text-[11px] text-muted-foreground">Signals that matter for this ticket</p></div>
+        </div>
 
-      {/* Blast Radius */}
-      {blast.affected_users > 0 && (
-        <Card data-testid="blast-radius-card" className={blast.affected_users > 10 ? "pulse-warning" : ""}>
-          <CardContent className="pt-4 pb-3">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-2">Impact Blast Radius</span>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
-                <span className="text-sm font-bold text-orange-400">{blast.affected_users}</span>
-              </div>
-              <div>
-                <p className="text-sm font-medium">Users Affected</p>
-                {blast.device_name && (
-                  <p className="text-[10px] text-muted-foreground">{blast.device_name} ({blast.device_type})</p>
-                )}
-              </div>
-            </div>
-            {blast.affected_services?.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {blast.affected_services.map((s, i) => (
-                  <span key={`k-${i}`} className="px-1.5 py-0.5 rounded text-[10px] bg-orange-500/10 text-orange-400 border border-orange-500/20">{s}</span>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+        <section className="rounded-lg border border-white/[0.07] bg-black/10 p-3" data-testid="ttr-card">
+          <div className="flex items-baseline justify-between gap-2"><span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Expected resolution</span><span className="text-[10px] text-muted-foreground">{Math.round((ttr.confidence || 0) * 100)}% confidence</span></div>
+          <div className="mt-1 flex items-baseline gap-2"><span className="text-xl font-semibold text-primary">{ttrLabel}</span><span className="text-[10px] text-muted-foreground">estimated</span></div>
+          <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted/50"><div className="h-full rounded-full bg-primary/60" style={{ width: `${(ttr.confidence || 0) * 100}%` }} /></div>
+          {ttr.based_on && <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground">{ttr.based_on}</p>}
+        </section>
 
-      {/* Client Health */}
-      <Card data-testid="client-context-card">
-        <CardContent className="pt-4 pb-3 space-y-2.5">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Client Health</span>
+        {blast.affected_users > 0 && (
+          <section className={`rounded-lg border border-orange-500/15 bg-orange-500/[0.045] p-3 ${blast.affected_users > 10 ? "pulse-warning" : ""}`} data-testid="blast-radius-card">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-orange-500/15 text-sm font-bold text-orange-300">{blast.affected_users}</span>
+              <div className="min-w-0"><p className="text-xs font-medium">Users affected</p>{blast.device_name && <p className="truncate text-[10px] text-muted-foreground">{blast.device_name} · {blast.device_type}</p>}</div>
+            </div>
+            {blast.affected_services?.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{blast.affected_services.map((service, index) => <span key={`${service}-${index}`} className="rounded border border-orange-500/20 bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-300">{service}</span>)}</div>}
+          </section>
+        )}
+
+        <section className="border-t border-white/[0.07] pt-3" data-testid="client-context-card">
+          <div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Client health</span><span className="text-[10px] text-muted-foreground">Live service context</span></div>
           <div className="flex items-center gap-3">
             <div className="relative w-11 h-11">
               <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
@@ -90,9 +67,9 @@ export function TicketEnrichmentRail({ enrichment }) {
             <div className="flex justify-between"><span className="text-muted-foreground">NPS</span><span className="font-medium">{ctx.nps_score}/10</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">CSAT</span><span className="font-medium">{ctx.avg_satisfaction}/5</span></div>
           </div>
-        </CardContent>
-      </Card>
-    </>
+        </section>
+      </CardContent>
+    </Card>
   );
 }
 
