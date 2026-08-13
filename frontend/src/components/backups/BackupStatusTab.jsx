@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { ChevronLeft, ChevronRight, Loader2, Play, Wifi, WifiOff, Search, FilterX, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +19,7 @@ export default function BackupStatusTab({ token, onDataChange }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [runningId, setRunningId] = useState(null);
+  const [bulkRunTarget, setBulkRunTarget] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -51,7 +54,7 @@ export default function BackupStatusTab({ token, onDataChange }) {
     }
   };
 
-  const handleBulkRun = async () => {
+  const handleBulkRun = async (confirmed = false) => {
     const machines = (data?.machines || []).filter(m =>
       (statusFilter === "all" || m.backup_health === statusFilter) &&
       m.agent_online === true &&
@@ -61,12 +64,16 @@ export default function BackupStatusTab({ token, onDataChange }) {
       toast.error("No eligible machines (must be online with applied backup plans)");
       return;
     }
-    if (!window.confirm(`Trigger backup for ${machines.length} online machine(s)?`)) return;
+    if (!confirmed) {
+      setBulkRunTarget({ count: machines.length, planCount: new Set(machines.flatMap((machine) => machine.backup_application_ids || [])).size });
+      return;
+    }
     setRunningId("__bulk__");
     const allAppIds = [...new Set(machines.flatMap(m => m.backup_application_ids || []))];
     try {
       const res = await axios.post(`${API}/acronis/backup/run`, { application_ids: allAppIds }, { headers: { Authorization: `Bearer ${token}` } });
       toast.success(res.data?.message || `Bulk backup triggered for ${machines.length} machines`);
+      setBulkRunTarget(null);
       setTimeout(fetchData, 3000);
     } catch (e) {
       toast.error(e.response?.data?.detail || "Bulk backup failed");
@@ -211,6 +218,19 @@ export default function BackupStatusTab({ token, onDataChange }) {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(bulkRunTarget)} onOpenChange={(open) => !open && setBulkRunTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Backup recovery"
+          title="Run backups across affected machines?"
+          description="This queues a backup run for every eligible online machine in the current filtered view. Review the scope before proceeding."
+          icon={Play}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setBulkRunTarget(null)}>Cancel</Button><Button onClick={() => handleBulkRun(true)} disabled={runningId === "__bulk__"}>{runningId === "__bulk__" && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Queue {bulkRunTarget?.count || 0} backups</Button></>}
+        >
+          <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="text-2xl font-semibold">{bulkRunTarget?.count || 0}</p><p className="mt-1 text-sm text-muted-foreground">eligible online machines</p></div><div className="rounded-xl border border-border bg-muted/20 p-4"><p className="text-2xl font-semibold">{bulkRunTarget?.planCount || 0}</p><p className="mt-1 text-sm text-muted-foreground">backup application assignments</p></div></div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
