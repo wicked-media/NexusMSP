@@ -9,6 +9,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import {
   Terminal, FileCode, Zap, Cpu, Package, RefreshCw,
@@ -89,6 +91,7 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
   const [procFilter, setProcFilter] = useState("");
   const [procSort, setProcSort] = useState("cpu_percent");
   const [procLoading, setProcLoading] = useState(false);
+  const [killTarget, setKillTarget] = useState(null);
 
   // Software + Updates
   const [software, setSoftware] = useState([]);
@@ -305,11 +308,11 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
   }, [agentId, headers]);
 
   const killProcess = async (pid, name) => {
-    if (!window.confirm(`Kill process ${name} (PID ${pid})?`)) return;
     try {
       const res = await axios.post(`${API}/trmm/agents/${agentId}/processes/${pid}/kill`, {}, { headers });
       if (res.data?.success === false) toast.error(res.data.message);
       else { toast.success(`Killed ${name}`); loadProcesses(); }
+      setKillTarget(null);
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
   };
 
@@ -383,6 +386,7 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
   if (!agent) return null;
 
   return (
+    <>
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <SheetContent side="right" className="w-full sm:max-w-[min(1200px,95vw)] p-0 flex flex-col" data-testid="trmm-agent-workspace">
         <SheetHeader className="px-5 py-3 border-b border-border space-y-0">
@@ -713,7 +717,7 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
                         <TableCell className="text-right font-mono text-xs">{Math.round(p.cpu_percent || 0)}%</TableCell>
                         <TableCell className="text-right font-mono text-xs">{p.mem_mb ? `${Math.round(p.mem_mb)} MB` : "—"}</TableCell>
                         <TableCell className="text-right">
-                          <Button size="sm" variant="ghost" className="h-6 text-rose-400 hover:bg-rose-500/10" onClick={() => killProcess(p.pid, p.name)} data-testid={`trmm-ws-proc-kill-${p.pid}`}>
+                          <Button size="sm" variant="ghost" className="h-6 text-rose-400 hover:bg-rose-500/10" onClick={() => setKillTarget(p)} data-testid={`trmm-ws-proc-kill-${p.pid}`}>
                             <Trash2 className="w-3 h-3" />
                           </Button>
                         </TableCell>
@@ -826,5 +830,19 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
         </Tabs>
       </SheetContent>
     </Sheet>
+    <Dialog open={Boolean(killTarget)} onOpenChange={(open) => !open && setKillTarget(null)}>
+      <NexusWorkflowDialog
+        eyebrow="Endpoint process control"
+        title="End running process"
+        description={`This immediately ends ${killTarget?.name || "the selected process"}${killTarget?.pid ? ` (PID ${killTarget.pid})` : ""} on ${agent.hostname || agentId}. Unsaved work in that process may be lost.`}
+        icon={Trash2}
+        tone="amber"
+        testId="trmm-process-kill-dialog"
+        footer={<><Button variant="outline" onClick={() => setKillTarget(null)}>Keep process running</Button><Button variant="destructive" onClick={() => killProcess(killTarget.pid, killTarget.name)}>End process</Button></>}
+      >
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">Nexus records the endpoint action against the technician session and refreshes the process inventory when it completes.</div>
+      </NexusWorkflowDialog>
+    </Dialog>
+    </>
   );
 }
