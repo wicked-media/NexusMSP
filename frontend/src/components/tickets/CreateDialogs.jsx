@@ -72,6 +72,7 @@ export function CreateTicketDialog({
   const selectedAssignee = users.find(user => user.id === formData.assigned_to);
   const selectedService = services?.find(service => service.code === formData.service_code);
   const linkedDeviceCount = new Set([...(formData.device_ids || []), ...(formData.device_id ? [formData.device_id] : [])]).size;
+  const canCreate = Boolean(formData.title?.trim() && formData.client_id);
   const readiness = [
     { label: "Service brief", ready: Boolean(formData.title?.trim()) },
     { label: "Client", ready: Boolean(selectedClient) },
@@ -99,7 +100,7 @@ export function CreateTicketDialog({
                 </div>
               ))}
             </div>}
-        footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p><Button onClick={handleCreateTicket} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit"><Plus className="mr-1.5 w-4 h-4" />Create and open ticket</Button></>}
+        footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateTicket} disabled={!canCreate} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit"><Plus className="mr-1.5 w-4 h-4" />Create and open ticket</Button></div></>}
       >
           <section className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/[0.14] p-3 md:grid-cols-4" data-testid="ticket-intake-summary">
             <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Client</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedClient?.name || "Not selected"}</p><p className="truncate text-[10px] text-zinc-600">{selectedContact?.name || "No requester selected"}</p></div>
