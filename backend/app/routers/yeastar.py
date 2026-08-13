@@ -384,6 +384,17 @@ async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user
         for call in (raw if isinstance(raw, list) else []):
             caller = str(call.get("caller", call.get("call_from", "")))
             callee = str(call.get("callee", call.get("call_to", "")))
+            # Yeastar call/query field names vary slightly by P-Series release
+            # and call type. Preserve the operational destination where it is
+            # provided, without assuming a queue/ring group for every call.
+            landing_target = (
+                call.get("ring_group_name") or call.get("ring_group") or call.get("ringgroup")
+                or call.get("queue_name") or call.get("queue") or call.get("destination_name") or ""
+            )
+            answered_by = (
+                call.get("answered_by_name") or call.get("answered_by") or call.get("answer_by")
+                or call.get("answered_extension") or call.get("agent_name") or call.get("agent") or ""
+            )
             result.append({
                 "call_id": str(call.get("id", call.get("call_id", uuid.uuid4()))),
                 "caller": caller,
@@ -394,6 +405,8 @@ async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user
                 "duration": call.get("duration", call.get("talk_duration", 0)),
                 "status": call.get("status", call.get("call_status", "answered")).lower(),
                 "started_at": call.get("started_at", call.get("time_start", datetime.now(timezone.utc).isoformat())),
+                "landing_target": str(landing_target),
+                "answered_by": str(answered_by),
             })
         return result
     return []
