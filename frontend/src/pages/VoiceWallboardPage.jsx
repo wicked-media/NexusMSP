@@ -68,6 +68,7 @@ export default function VoiceWallboardPage() {
   const activeCalls = snapshots.flatMap((snapshot) => (snapshot.active_calls || []).map((call) => ({ ...call, pbx: snapshot.pbx })));
   const online = snapshots.filter((snapshot) => snapshot.health === "online").length;
   const attention = snapshots.length - online;
+  const attentionSnapshots = snapshots.filter((snapshot) => snapshot.health !== "online");
   const openPbx = (pbxId) => navigate(`/voice?tab=monitoring${pbxId ? `&pbxId=${encodeURIComponent(pbxId)}` : ""}`);
 
   return <div className="space-y-5">
@@ -80,6 +81,11 @@ export default function VoiceWallboardPage() {
       <MetricTile label="Calls in progress" value={activeCalls.length} accent="sky" icon={Phone} />
       <MetricTile label="Registered extensions" value={`${snapshots.reduce((sum, item) => sum + (item.extensions?.registered || 0), 0)}/${snapshots.reduce((sum, item) => sum + (item.extensions?.total || 0), 0)}`} accent="emerald" icon={Users} />
     </MetricStrip>
+
+    <Card className={attention ? "border-amber-500/25 bg-amber-500/[0.035]" : "border-emerald-500/20 bg-emerald-500/[0.025]"}>
+      <CardHeader className="pb-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2 text-sm">{attention ? <AlertTriangle className="h-4 w-4 text-amber-300" /> : <Cloud className="h-4 w-4 text-emerald-300" />}{attention ? "PBXs needing a technician" : "Voice estate is operating normally"}</CardTitle><CardDescription>{attention ? "Open the client-scoped monitor to investigate a failed API check or an incomplete PBX configuration." : "Every PBX available to you passed its most recent live health check."}</CardDescription></div><Badge variant="outline" className={attention ? "border-amber-500/30 text-amber-200" : "border-emerald-500/30 text-emerald-200"}>{attention ? `${attention} need attention` : "All healthy"}</Badge></div></CardHeader>
+      {attention ? <CardContent className="grid gap-2 pt-0 lg:grid-cols-2">{attentionSnapshots.map((snapshot) => <div key={snapshot.pbx?.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/15 bg-background/40 p-3"><div className="min-w-0"><p className="truncate text-sm font-medium">{snapshot.pbx?.client_name || "Client"} / {snapshot.pbx?.name || "PBX"}</p><p className="mt-1 text-xs text-muted-foreground">{snapshot.health === "not_configured" ? "Needs API credentials or a completed connection test." : "The most recent live check did not complete successfully."}</p></div><Button size="sm" variant="outline" onClick={() => openPbx(snapshot.pbx?.id)}>Investigate</Button></div>)}</CardContent> : null}
+    </Card>
 
     <Card className="overflow-hidden border-cyan-500/25 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.14),transparent_42%),linear-gradient(135deg,rgba(8,47,73,0.24),rgba(15,23,42,0.4))]" data-testid="voice-all-tenant-wallboard">
       <CardHeader className="border-b border-cyan-500/10"><div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2 text-base"><Radio className="h-4 w-4 text-emerald-300" />Live calls across your PBX estate</CardTitle><CardDescription>Caller, landing group or queue, and the extension that answers — refreshed automatically every 10 seconds.</CardDescription></div><div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/[0.08] px-3 py-1.5 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>Live estate feed</div></div></CardHeader>
