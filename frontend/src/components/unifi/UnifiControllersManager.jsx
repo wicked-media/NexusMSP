@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, Wifi, RefreshCw, Loader2, Trash2, Pencil, CheckCircle2, XCircle } from "lucide-react";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 export default function UnifiControllersManager() {
   const { token } = useAuth();
@@ -18,6 +19,7 @@ export default function UnifiControllersManager() {
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(null);
+  const [removeTarget, setRemoveTarget] = useState(null);
 
   const blank = { name: "", controller_url: "", api_key: "", network_site_id: "default", verify_tls: true, notes: "" };
 
@@ -53,10 +55,10 @@ export default function UnifiControllersManager() {
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Remove this controller? Linked Network API access will stop working.")) return;
     try {
       await axios.delete(`${API}/unifi/controllers/${id}`, { headers });
       toast.success("Removed");
+      setRemoveTarget(null);
       load();
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
@@ -110,7 +112,7 @@ export default function UnifiControllersManager() {
                     <span className="ml-1">Test</span>
                   </Button>
                   <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setEditing({ ...c, api_key: "" })} data-testid={`unifi-controller-edit-${c.id}`}><Pencil className="w-3 h-3" /></Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-400" onClick={() => remove(c.id)} data-testid={`unifi-controller-remove-${c.id}`}><Trash2 className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-400" onClick={() => setRemoveTarget(c)} data-testid={`unifi-controller-remove-${c.id}`}><Trash2 className="w-3 h-3" /></Button>
                 </div>
               </div>
             </div>
@@ -168,6 +170,20 @@ export default function UnifiControllersManager() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Network integration"
+          title="Remove UniFi controller"
+          description={`Remove ${removeTarget?.name || "this controller"}? Linked Network API access and controller-backed actions will stop working.`}
+          icon={Trash2}
+          tone="amber"
+          testId="unifi-controller-remove-dialog"
+          footer={<><Button variant="outline" onClick={() => setRemoveTarget(null)}>Keep controller</Button><Button variant="destructive" onClick={() => remove(removeTarget.id)}>Remove controller</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">The controller credential is removed from Nexus. Existing network inventory remains as historical context.</div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
