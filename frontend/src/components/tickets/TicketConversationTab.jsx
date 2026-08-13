@@ -128,7 +128,7 @@ export default function TicketConversationTab({
                 </div>
               )}
             </div>
-            <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Write a clear customer update, the next action, and when they should expect to hear from you…" minHeight="150px" />
+            <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Write a clear customer update, the next action, and when they should expect to hear from you…" minHeight="150px" compactToolbar />
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-400/15 pt-3">
               <button type="button" onClick={() => setPublicEmailEnabled(value => !value)} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition ${publicEmailEnabled ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-100" : "border-white/[0.08] bg-white/[0.025] text-zinc-400"}`} data-testid="public-update-email-toggle">
                 <span className={`flex h-7 w-7 items-center justify-center rounded-md ${publicEmailEnabled ? "bg-emerald-400/15" : "bg-white/[0.04]"}`}><MailCheck className="h-3.5 w-3.5" /></span>
@@ -166,7 +166,7 @@ export default function TicketConversationTab({
       {/* Internal Note Form */}
       {conversationType === "note" && (
         <div className="space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.035] p-3">
-          <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Add an internal note..." minHeight="80px" />
+          <RichTextEditor content={newNote} onChange={setNewNote} placeholder="Add an internal note..." minHeight="80px" compactToolbar />
           <div className="flex items-center justify-between gap-3 flex-wrap border-t border-amber-500/15 pt-2">
             <span className="text-[10px] text-amber-300/80">Notes stay private to your team.</span>
             <div className="flex items-center gap-2">

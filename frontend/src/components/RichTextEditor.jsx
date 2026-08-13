@@ -16,10 +16,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { useCallback, useRef, useState, useEffect } from 'react';
 
-export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true }) {
+export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true, compactToolbar = false }) {
   const fileInputRef = useRef(null);
   const [htmlMode, setHtmlMode] = useState(false);
   const [htmlDraft, setHtmlDraft] = useState(content || '');
+  const [showAdvancedTools, setShowAdvancedTools] = useState(false);
 
   const editor = useEditor({
     extensions: [
@@ -143,26 +144,26 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
       <div className="flex items-center gap-0.5 px-2 py-1 border-b bg-muted/30 flex-wrap">
         <ToolBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Bold" disabled={htmlMode}><Bold className="w-3.5 h-3.5" /></ToolBtn>
         <ToolBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Italic" disabled={htmlMode}><Italic className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Underline" disabled={htmlMode}><UnderlineIcon className="w-3.5 h-3.5" /></ToolBtn>
-        <div className="w-px h-4 bg-border mx-0.5" />
-        <ToolBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Heading" disabled={htmlMode}><Heading2 className="w-3.5 h-3.5" /></ToolBtn>
         <ToolBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} title="Bullet List" disabled={htmlMode}><List className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Numbered List" disabled={htmlMode}><ListOrdered className="w-3.5 h-3.5" /></ToolBtn>
-        <div className="w-px h-4 bg-border mx-0.5" />
-        <ToolBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Quote" disabled={htmlMode}><Quote className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive('codeBlock')} title="Code Block" disabled={htmlMode}><Code className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Divider" disabled={htmlMode}><Minus className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: false }).run()} title="Insert Table" disabled={htmlMode}><TableIcon className="w-3.5 h-3.5" /></ToolBtn>
-        <div className="w-px h-4 bg-border mx-0.5" />
-        <ToolBtn onClick={() => editor.chain().focus().setTextAlign('left').run()} active={editor.isActive({ textAlign: 'left' })} title="Left" disabled={htmlMode}><AlignLeft className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })} title="Center" disabled={htmlMode}><AlignCenter className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })} title="Right" disabled={htmlMode}><AlignRight className="w-3.5 h-3.5" /></ToolBtn>
-        <div className="w-px h-4 bg-border mx-0.5" />
-        <ToolBtn onClick={() => {
-          const url = window.prompt('Enter URL');
-          if (url) editor.chain().focus().setLink({ href: url }).run();
-        }} active={editor.isActive('link')} title="Link" disabled={htmlMode}><LinkIcon className="w-3.5 h-3.5" /></ToolBtn>
-        <ToolBtn onClick={handleImageUpload} title="Insert Image" disabled={htmlMode}><ImageIcon className="w-3.5 h-3.5" /></ToolBtn>
+        {compactToolbar && <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground" onClick={() => setShowAdvancedTools((open) => !open)} aria-expanded={showAdvancedTools} data-testid="rte-more-formatting">{showAdvancedTools ? "Less formatting" : "More formatting"}</Button>}
+        {(!compactToolbar || showAdvancedTools) && <>
+          <div className="w-px h-4 bg-border mx-0.5" />
+          <ToolBtn onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Underline" disabled={htmlMode}><UnderlineIcon className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Heading" disabled={htmlMode}><Heading2 className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Numbered List" disabled={htmlMode}><ListOrdered className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Quote" disabled={htmlMode}><Quote className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive('codeBlock')} title="Code Block" disabled={htmlMode}><Code className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Divider" disabled={htmlMode}><Minus className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: false }).run()} title="Insert Table" disabled={htmlMode}><TableIcon className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().setTextAlign('left').run()} active={editor.isActive({ textAlign: 'left' })} title="Left" disabled={htmlMode}><AlignLeft className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })} title="Center" disabled={htmlMode}><AlignCenter className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })} title="Right" disabled={htmlMode}><AlignRight className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => {
+            const url = window.prompt('Enter URL');
+            if (url) editor.chain().focus().setLink({ href: url }).run();
+          }} active={editor.isActive('link')} title="Link" disabled={htmlMode}><LinkIcon className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={handleImageUpload} title="Insert Image" disabled={htmlMode}><ImageIcon className="w-3.5 h-3.5" /></ToolBtn>
+        </>}
         <div className="w-px h-4 bg-border mx-0.5" />
         <ToolBtn onClick={() => editor.chain().focus().undo().run()} title="Undo" disabled={htmlMode}><Undo className="w-3.5 h-3.5" /></ToolBtn>
         <ToolBtn onClick={() => editor.chain().focus().redo().run()} title="Redo" disabled={htmlMode}><Redo className="w-3.5 h-3.5" /></ToolBtn>
