@@ -7,9 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { Mic, MicOff, Send, Loader2, AlertCircle, CheckCircle, MessageSquare, Plus } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 export default function VoiceTicketPage() {
   const { token } = useAuth();
@@ -23,6 +26,7 @@ export default function VoiceTicketPage() {
   const [clientId, setClientId] = useState("");
   const [clients, setClients] = useState([]);
   const [history, setHistory] = useState([]);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const recognitionRef = useRef(null);
 
   useEffect(() => {
@@ -76,6 +80,7 @@ export default function VoiceTicketPage() {
         client_id: clientId || undefined, client_name: selectedClient?.name || undefined
       }, { headers });
       setResult(res.data);
+      setReviewOpen(false);
       if (res.data.action === "ticket_created") {
         toast.success("Ticket created from voice!");
         setTranscript("");
@@ -89,16 +94,14 @@ export default function VoiceTicketPage() {
 
   return (
     <div className="space-y-5" data-testid="voice-ticket-page">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Voice to Ticket</h1>
-        <p className="text-sm text-muted-foreground">Dictate ticket updates or create new tickets using your voice</p>
-      </div>
+      <OperationalPageHeader eyebrow="Technician capture" title="Voice to Ticket" description="Capture work while it is fresh, then review the transcript and destination before Nexus creates or updates ticket work." icon={Mic} tone="violet" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Main Recording Area */}
         <div className="lg:col-span-2 space-y-4">
-          <Card>
+          <Card className="border-border/60 shadow-sm">
             <CardContent className="pt-6 space-y-4">
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-3 text-xs text-muted-foreground"><span className="font-semibold text-violet-200">Capture → Review → Commit.</span> Dictate or type the detail first; Nexus only creates work after you confirm the outcome.</div>
               {/* Action selector */}
               <div className="flex items-center gap-3">
                 <Select value={action} onValueChange={setAction}>
@@ -149,9 +152,8 @@ export default function VoiceTicketPage() {
 
               {/* Process button */}
               <div className="flex items-center gap-3">
-                <Button onClick={processVoice} disabled={processing || !transcript.trim()} data-testid="voice-process-btn">
-                  {processing ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Send className="w-4 h-4 mr-1" />}
-                  {action === "create" ? "Create Ticket" : action === "note" ? "Add Note" : "Transcribe"}
+                <Button onClick={() => setReviewOpen(true)} disabled={processing || !transcript.trim()} data-testid="voice-process-btn">
+                  <Send className="mr-1.5 h-4 w-4" />Review outcome
                 </Button>
                 <Button variant="outline" onClick={() => { setTranscript(""); setResult(null); }}>Clear</Button>
               </div>
@@ -218,6 +220,12 @@ export default function VoiceTicketPage() {
           )}
         </div>
       </div>
+
+      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+        <NexusWorkflowDialog eyebrow="Technician capture" title={action === "create" ? "Review ticket from voice" : action === "note" ? "Review ticket note" : "Review transcription"} description="Check the captured detail and where it will be recorded. Nexus keeps the original voice transcript as evidence for the resulting work." icon={Mic} tone="violet" footer={<><Button variant="outline" onClick={() => setReviewOpen(false)}>Keep editing</Button><Button onClick={processVoice} disabled={processing || !transcript.trim() || (action === "note" && !ticketId.trim())} data-testid="confirm-voice-ticket">{processing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}{action === "create" ? "Create ticket" : action === "note" ? "Add note" : "Save transcription"}</Button></>}>
+          <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg border border-border/60 bg-muted/20 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Outcome</p><p className="mt-1 text-sm font-medium">{action === "create" ? "Create new ticket" : action === "note" ? `Add note to ${ticketId || "ticket required"}` : "Store transcription"}</p></div><div className="rounded-lg border border-border/60 bg-muted/20 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Client context</p><p className="mt-1 text-sm font-medium">{clients.find(client => client.id === clientId)?.name || (action === "note" ? "Inferred from ticket" : "No client selected")}</p></div></div><div className="rounded-xl border border-violet-500/20 bg-black/20 p-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-violet-300">Captured transcript</p><p className="whitespace-pre-wrap text-sm leading-6">{transcript}</p></div>{action === "note" && !ticketId && <p className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs text-amber-100">Enter the ticket ID before committing this note.</p>}</div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
