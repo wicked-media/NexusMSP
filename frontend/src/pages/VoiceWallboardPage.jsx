@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -76,18 +76,22 @@ export default function VoiceWallboardPage() {
   const [wallboard, setWallboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const requestInFlight = useRef(false);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     if (!quiet) setLoading(true);
-    else setRefreshing(true);
+    if (!quiet) setRefreshing(true);
     try {
-      const { data } = await axios.get(`${API}/yeastar/monitoring/wallboard`, { headers });
+      const { data } = await axios.get(`${API}/yeastar/monitoring/wallboard`, { headers, timeout: 9000 });
       setWallboard(data);
     } catch (error) {
       if (!quiet) toast.error(error.response?.data?.detail || "Could not load the Voice wallboard");
     } finally {
+      requestInFlight.current = false;
       setLoading(false);
-      setRefreshing(false);
+      if (!quiet) setRefreshing(false);
     }
   }, [headers]);
 
