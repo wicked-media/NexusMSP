@@ -279,6 +279,7 @@ export default function TicketsPage() {
   const [wsIntakeForm, setWsIntakeForm] = useState({ customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", condition_on_arrival: "", accessories_received: [], customer_password: "", warranty_status: "unknown", warranty_expiry: "" });
   const [wsHeaderEdit, setWsHeaderEdit] = useState(false);
   const [wsHeaderDraft, setWsHeaderDraft] = useState("");
+  const [wsStatusTarget, setWsStatusTarget] = useState(null);
   const [wsTemplateDialog, setWsTemplateDialog] = useState(false);
   const [wsTemplates, setWsTemplates] = useState({});
   // Field job enrichment state
@@ -2548,6 +2549,7 @@ export default function TicketsPage() {
     const wsActiveIdx = wsIdx >= 0 ? wsIdx : 0;
     const wsProgress = Math.round((wsActiveIdx / (wsStages.length - 1)) * 100);
     const wsCheckDone = wsChecklist.filter(c => c.checked).length;
+    const wsNextStage = wsActiveIdx < wsStages.length - 1 ? wsStages[wsActiveIdx + 1] : null;
 
     return (
       <div className="space-y-4" data-testid="ws-job-detail">
@@ -2573,12 +2575,9 @@ export default function TicketsPage() {
               </div>
             </div>
             <div className="contents">
-            <TicketHeaderAction icon={Bell} tone="accent" onClick={() => { setWsNotifyForm({ email: viewWsJob.customer_email || wsIntakeForm.customer_email || "", subject: `Update: ${viewWsJob.job_number}`, message: "" }); setWsNotifyDialog(true); }} data-testid="ws-notify-btn">Notify</TicketHeaderAction>
-            <TicketHeaderAction icon={ClipboardList} onClick={() => setWsIntakeDialog(true)} data-testid="ws-intake-btn">Intake</TicketHeaderAction>
-            <TicketHeaderAction icon={DollarSign} onClick={() => { setWsQuoteItems(wsQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote?.notes || ""); setWsQuoteDialog(true); }} data-testid="ws-quote-btn">Quote</TicketHeaderAction>
-            <TicketHeaderAction icon={Receipt} tone="success" onClick={() => { setWsInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setWsInvoiceList(r.data)).catch(() => {}); setWsInvoiceDialog(true); }} data-testid="ws-invoice-btn">Invoice</TicketHeaderAction>
-            <TicketHeaderAction icon={Download} onClick={handleDownloadWsPdf} data-testid="ws-pdf-btn">PDF</TicketHeaderAction>
-            <TicketHeaderAction icon={QrCode} onClick={handleDownloadWsQr} data-testid="ws-qr-btn">QR</TicketHeaderAction>
+            {wsNextStage && <TicketHeaderAction icon={CheckCircle} tone="success" onClick={() => setWsStatusTarget(wsNextStage)} data-testid="ws-advance-btn">Advance to {wsNextStage.label}</TicketHeaderAction>}
+            <TicketHeaderAction icon={Bell} tone="accent" onClick={() => { setWsNotifyForm({ email: viewWsJob.customer_email || wsIntakeForm.customer_email || "", subject: `Update: ${viewWsJob.job_number}`, message: "" }); setWsNotifyDialog(true); }} data-testid="ws-notify-btn">Notify client</TicketHeaderAction>
+            <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-9 border-white/[0.1] bg-white/[0.025] text-zinc-200 hover:bg-white/[0.08]" data-testid="ws-more-actions"><Settings2 className="mr-1.5 h-3.5 w-3.5" />More<ChevronDown className="ml-1 h-3 w-3 opacity-60" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52"><DropdownMenuItem onClick={() => setWsIntakeDialog(true)}><ClipboardList className="mr-2 h-3.5 w-3.5" />Edit service record</DropdownMenuItem><DropdownMenuItem onClick={() => { setWsQuoteItems(wsQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setWsQuoteNotes(wsQuote?.notes || ""); setWsQuoteDialog(true); }}><DollarSign className="mr-2 h-3.5 w-3.5" />Build repair quote</DropdownMenuItem><DropdownMenuItem onClick={() => { setWsInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setWsInvoiceList(r.data)).catch(() => {}); setWsInvoiceDialog(true); }}><Receipt className="mr-2 h-3.5 w-3.5" />Send to billing</DropdownMenuItem><DropdownMenuItem onClick={handleDownloadWsPdf}><Download className="mr-2 h-3.5 w-3.5" />Download service PDF</DropdownMenuItem><DropdownMenuItem onClick={handleDownloadWsQr}><QrCode className="mr-2 h-3.5 w-3.5" />Download intake QR</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
             </div>
           </div>
         </div>
@@ -2598,7 +2597,7 @@ export default function TicketsPage() {
                 const isActive = i === wsActiveIdx;
                 const isPast = i < wsActiveIdx;
                 return (
-                  <button key={stage.key} onClick={() => handleWsStatus(viewWsJob.id, stage.key)}
+                  <button key={stage.key} onClick={() => setWsStatusTarget(stage)}
                     className={`rounded-lg p-2 text-center transition-all border ${isActive ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg` : isPast ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/40"}`}
                     data-testid={`ws-progress-${stage.key}`}>
                     <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
@@ -2900,13 +2899,13 @@ export default function TicketsPage() {
               </CardContent>
             </Card>
 
-            {/* Update Status */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
-              <CardContent className="space-y-1.5">
-                {Object.entries(WS_STATUSES).filter(([k]) => k !== viewWsJob.repair_status).map(([k, v]) => (
-                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleWsStatus(viewWsJob.id, k)} data-testid={`ws-status-${k}`}>{v.label}</Button>
-                ))}
+            {/* Repair stage */}
+            <Card className="border-cyan-500/20">
+              <CardHeader className="border-b border-cyan-500/15 bg-cyan-500/[0.035] pb-3"><CardTitle className="text-sm">Repair stage</CardTitle></CardHeader>
+              <CardContent className="space-y-3 pt-4">
+                <div><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Current stage</p><p className="mt-1 text-sm font-medium">{wsStages[wsActiveIdx].label}</p></div>
+                {wsNextStage ? <><div><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recommended next step</p><p className="mt-1 text-sm font-medium text-cyan-100">{wsNextStage.label}</p></div><Button className="w-full" size="sm" onClick={() => setWsStatusTarget(wsNextStage)} data-testid="ws-advance-sidebar"><CheckCircle className="mr-1.5 h-4 w-4" />Advance repair</Button></> : <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-200">This repair has completed its service workflow.</p>}
+                <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="w-full text-xs" size="sm"><Settings2 className="mr-1.5 h-3.5 w-3.5" />Correct or change stage<ChevronDown className="ml-auto h-3.5 w-3.5 opacity-60" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52">{wsStages.filter(stage => stage.key !== viewWsJob.repair_status).map(stage => <DropdownMenuItem key={stage.key} onClick={() => setWsStatusTarget(stage)}>{stage.label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
               </CardContent>
             </Card>
 
@@ -2922,6 +2921,12 @@ export default function TicketsPage() {
         </div>
 
         {/* ============ DIALOGS ============ */}
+
+        <Dialog open={Boolean(wsStatusTarget)} onOpenChange={(open) => !open && setWsStatusTarget(null)}>
+          <NexusWorkflowDialog eyebrow="Workshop service" title={`Move repair to ${wsStatusTarget?.label || "next stage"}`} description="Confirm the repair stage before Nexus updates the customer timeline, bench view and audit trail." icon={Wrench} tone="cyan" footer={<><Button variant="outline" onClick={() => setWsStatusTarget(null)}>Cancel</Button><Button onClick={() => { if (wsStatusTarget) { handleWsStatus(viewWsJob.id, wsStatusTarget.key); setWsStatusTarget(null); } }} data-testid="ws-confirm-status"><CheckCircle className="mr-1.5 h-4 w-4" />Confirm stage</Button></>}>
+            <div className="space-y-3"><div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-300">Repair transition</p><p className="mt-2 text-sm"><span className="text-muted-foreground">From </span><strong>{wsStages[wsActiveIdx].label}</strong><span className="mx-2 text-muted-foreground">→</span><strong>{wsStatusTarget?.label}</strong></p></div>{wsStatusTarget?.key === "collected" && <p className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] px-3 py-2 text-xs text-amber-100">Marking a repair as collected completes the handover. Confirm the device has been returned to the customer.</p>}<p className="text-xs text-muted-foreground">Nexus records the technician, timestamp and transition in the workshop history.</p></div>
+          </NexusWorkflowDialog>
+        </Dialog>
 
         {/* Add Part Dialog */}
         <Dialog open={wsPartDialog} onOpenChange={setWsPartDialog}>
