@@ -22,7 +22,7 @@ import {
   Loader2, Phone, Plus, RefreshCw, Search, Settings, Users, Wifi, WifiOff,
 } from "lucide-react";
 
-const VOICE_TABS = ["dashboard", "pbxs", "extensions", "billing", "sync", "activity", "diagnostics"];
+const VOICE_TABS = ["dashboard", "monitoring", "pbxs", "extensions", "billing", "sync", "activity", "diagnostics"];
 const emptyPbxForm = {
   client_id: "", name: "", pbx_url: "", client_api_id: "", client_secret: "",
   billing_policy: "all_enabled", agreement_mapping: "", product_mapping: "",
@@ -49,6 +49,8 @@ export default function VoiceWorkspacePage() {
   const [editingPbx, setEditingPbx] = useState(null);
   const [extensionChange, setExtensionChange] = useState(null);
   const [pbxForm, setPbxForm] = useState(emptyPbxForm);
+  const [monitoring, setMonitoring] = useState(null);
+  const [monitoringPbxId, setMonitoringPbxId] = useState("");
 
   const clientScope = searchParams.get("clientId") || "";
   const openAddPbx = () => {
@@ -117,6 +119,19 @@ export default function VoiceWorkspacePage() {
     } finally {
       setBusy("");
     }
+  };
+
+  const loadMonitoring = async (pbxId = monitoringPbxId) => {
+    if (!pbxId) return;
+    setMonitoringPbxId(pbxId);
+    setBusy("monitoring");
+    try {
+      const { data } = await axios.get(`${API}/yeastar/pbxs/${pbxId}/monitoring`, { headers });
+      setMonitoring(data);
+    } catch (error) {
+      setMonitoring(null);
+      toast.error(error.response?.data?.detail || "PBX monitoring check failed");
+    } finally { setBusy(""); }
   };
 
   const testScopedPbxs = async (pbxs) => {
@@ -289,12 +304,17 @@ export default function VoiceWorkspacePage() {
 
     <Tabs value={tab} onValueChange={(next) => updateRoute(next)}>
       <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
-        <TabsTrigger value="dashboard">Dashboard</TabsTrigger><TabsTrigger value="pbxs">PBXs ({pbxs.length})</TabsTrigger><TabsTrigger value="extensions">Extensions ({scopedExtensions.length})</TabsTrigger><TabsTrigger value="billing">Billing</TabsTrigger><TabsTrigger value="sync">Sync history</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger><TabsTrigger value="diagnostics">API diagnostics</TabsTrigger>
+        <TabsTrigger value="dashboard">Dashboard</TabsTrigger><TabsTrigger value="monitoring">Live monitor</TabsTrigger><TabsTrigger value="pbxs">PBXs ({pbxs.length})</TabsTrigger><TabsTrigger value="extensions">Extensions ({scopedExtensions.length})</TabsTrigger><TabsTrigger value="billing">Billing</TabsTrigger><TabsTrigger value="sync">Sync history</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger><TabsTrigger value="diagnostics">API diagnostics</TabsTrigger>
       </TabsList>
 
       <TabsContent value="dashboard" className="mt-4 grid gap-4 lg:grid-cols-3">
         <Card className="border-sky-500/20 lg:col-span-2"><CardHeader><CardTitle className="text-sm">Direct PBX health</CardTitle><CardDescription>Connection readiness is measured from client-owned P-Series API credentials, never a shared provider credential.</CardDescription></CardHeader><CardContent className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 p-4"><div className="flex items-center gap-3"><div className={`flex h-10 w-10 items-center justify-center rounded-lg ${workspace.provider?.connected ? "bg-emerald-500/10" : "bg-amber-500/10"}`}><Cloud className={`h-5 w-5 ${workspace.provider?.connected ? "text-emerald-300" : "text-amber-300"}`} /></div><div><p className="font-semibold">Yeastar P-Series OpenAPI</p><p className="text-xs text-muted-foreground">{workspace.provider?.connected ? "Client PBX connections are ready for live checks" : "Add a client PBX to begin managed voice operations"}</p></div></div><Badge variant="outline" className={workspace.provider?.connected ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}>{readable(workspace.system_health)}</Badge></div><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border border-border/60 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Last successful sync</p><p className="mt-1 text-sm font-medium">{workspace.last_successful_sync ? compactDate(workspace.last_successful_sync) : "Not yet synchronised"}</p></div><div className="rounded-lg border border-border/60 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Client linkage</p><p className="mt-1 text-sm font-medium">{allPbxs.length} client PBX{allPbxs.length === 1 ? "" : "s"}</p></div><div className="rounded-lg border border-border/60 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Billing review</p><p className="mt-1 text-sm font-medium">{(workspace.billing?.pending_changes || 0)} change{(workspace.billing?.pending_changes || 0) === 1 ? "" : "s"} pending</p></div></div></CardContent></Card>
         <Card><CardHeader><CardTitle className="text-sm">Recent activity</CardTitle></CardHeader><CardContent className="space-y-3">{(workspace.sync_history || []).slice(0, 4).map((entry) => <div className="flex gap-2 text-xs" key={entry.id}><Activity className={`mt-0.5 h-3.5 w-3.5 ${entry.status === "success" ? "text-emerald-300" : "text-rose-300"}`} /><div><p className="font-medium">{entry.pbx_name || "Yeastar PBX"} · {readable(entry.status)}</p><p className="text-muted-foreground">{entry.completed_at ? compactDate(entry.completed_at) : "In progress"}</p></div></div>)}{!workspace.sync_history?.length && <div className="space-y-3 py-1"><p className="text-sm text-muted-foreground">No PBX activity yet.</p><Button size="sm" className="w-full" onClick={openAddPbx}><Plus className="mr-2 h-3.5 w-3.5" />Add first client PBX</Button></div>}</CardContent></Card>
+      </TabsContent>
+
+      <TabsContent value="monitoring" className="mt-4 space-y-4">
+        <Card className="border-cyan-500/20"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end"><div className="min-w-0 flex-1 space-y-1.5"><Label>PBX to monitor</Label><Select value={monitoringPbxId} onValueChange={setMonitoringPbxId}><SelectTrigger><SelectValue placeholder="Choose a client PBX" /></SelectTrigger><SelectContent>{pbxs.map((pbx) => <SelectItem key={pbx.id} value={pbx.id}>{pbx.client_name} · {pbx.name}</SelectItem>)}</SelectContent></Select></div><Button onClick={() => loadMonitoring()} disabled={!monitoringPbxId || !!busy} data-testid="voice-run-monitoring"><Activity className={`mr-2 h-4 w-4 ${busy === "monitoring" ? "animate-pulse" : ""}`} />{busy === "monitoring" ? "Checking…" : "Run live check"}</Button></CardContent></Card>
+        {!monitoring ? <Card><CardContent className="py-14 text-center"><Activity className="mx-auto mb-3 h-9 w-9 text-cyan-300/50" /><p className="text-sm font-medium">Choose a PBX to see its live operational state</p><p className="mt-1 text-xs text-muted-foreground">Nexus checks the PBX API, active calls, extension registration and recent call outcomes without exposing credentials.</p></CardContent></Card> : <><MetricStrip columns={5}><MetricTile label="PBX health" value={monitoring.health === "online" ? "Online" : "Degraded"} accent={monitoring.health === "online" ? "emerald" : "amber"} icon={Cloud} /><MetricTile label="Active calls" value={monitoring.active_calls?.length || 0} accent="cyan" icon={Phone} /><MetricTile label="Registered" value={`${monitoring.extensions?.registered || 0}/${monitoring.extensions?.total || 0}`} accent="emerald" icon={Users} /><MetricTile label="Recent missed" value={monitoring.missed_calls || 0} accent={monitoring.missed_calls ? "amber" : "emerald"} icon={AlertTriangle} /><MetricTile label="API latency" value={`${monitoring.api_latency_ms || 0}ms`} accent="sky" icon={Wifi} /></MetricStrip><div className="grid gap-4 lg:grid-cols-2"><Card><CardHeader><CardTitle className="text-sm">Live calls</CardTitle><CardDescription>Current calls reported by the client PBX.</CardDescription></CardHeader><CardContent className="space-y-3">{monitoring.active_calls?.length ? monitoring.active_calls.map((call) => <div key={call.call_id} className="flex items-center justify-between rounded-lg border border-border/60 p-3 text-sm"><div><p className="font-medium">{call.caller_name || call.caller} → {call.callee_name || call.callee}</p><p className="text-xs text-muted-foreground">{call.direction} · {call.status}</p></div><span className="font-mono text-xs text-cyan-200">{call.duration || 0}s</span></div>) : <p className="py-7 text-center text-sm text-muted-foreground">No calls are active right now.</p>}</CardContent></Card><Card><CardHeader><CardTitle className="text-sm">PBX system</CardTitle><CardDescription>Live system information from {monitoring.pbx?.name}.</CardDescription></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2"><MonitoringFact label="Model" value={monitoring.system?.model || "Not reported"} /><MonitoringFact label="Firmware" value={monitoring.system?.firmware_version || "Not reported"} /><MonitoringFact label="Uptime" value={formatUptime(monitoring.system?.uptime_seconds)} /><MonitoringFact label="Last checked" value={compactDate(monitoring.checked_at)} /></CardContent></Card></div></>}
       </TabsContent>
 
       <TabsContent value="pbxs" className="mt-4 space-y-3">
@@ -332,6 +352,18 @@ function StatusBadge({ status }) {
   const healthy = ["online", "success", "verified"].includes(status);
   const pending = ["pending_configuration", "unknown"].includes(status);
   return <Badge variant="outline" className={healthy ? "border-emerald-500/30 text-emerald-300" : pending ? "border-amber-500/30 text-amber-300" : "border-rose-500/30 text-rose-300"}>{readable(status)}</Badge>;
+}
+
+function MonitoringFact({ label, value }) {
+  return <div className="rounded-lg border border-border/60 bg-background/30 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p><p className="mt-1 truncate text-sm font-medium" title={value}>{value}</p></div>;
+}
+
+function formatUptime(seconds) {
+  const total = Number(seconds || 0);
+  if (!total) return "Not reported";
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  return days ? `${days}d ${hours}h` : `${hours}h`;
 }
 
 function PbxForm({ form, setForm, clients, products = [], editing = false }) {

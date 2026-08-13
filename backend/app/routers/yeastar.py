@@ -374,8 +374,8 @@ async def get_yeastar_extensions(current_user: dict = Depends(get_current_user),
     return []
 
 @router.get("/yeastar/active-calls")
-async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user)):
-    data = await _yeastar_api_get("call/query")
+async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user), settings: dict | None = None):
+    data = await _yeastar_api_get("call/query", settings=settings)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
         if not raw or raw is None:
@@ -402,9 +402,10 @@ async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user
 async def get_yeastar_call_logs(
     page: int = 1,
     page_size: int = 20,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    settings: dict | None = None,
 ):
-    data = await _yeastar_api_get("cdr/list", {"page": page, "page_size": page_size})
+    data = await _yeastar_api_get("cdr/list", {"page": page, "page_size": page_size}, settings=settings)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
         total = data.get("total_number", len(raw) if isinstance(raw, list) else 0)
@@ -479,6 +480,40 @@ async def get_yeastar_dashboard(current_user: dict = Depends(get_current_user)):
         "avg_call_duration": f"{avg_m}m {avg_s}s",
         "total_talk_time_today": f"{tot_h}h {tot_m}m",
         "trunks": {"total": 0, "active": 0},
+    }
+
+
+@router.get("/yeastar/pbxs/{pbx_id}/monitoring")
+async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(get_current_user)):
+    """Return a live, client-scoped PBX operations snapshot without exposing credentials."""
+    pbx = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
+    if not pbx:
+        raise HTTPException(status_code=404, detail="PBX not found")
+    await assert_client_scope(current_user, pbx.get("client_id"), operation="monitor Yeastar PBX", mask_not_found=True)
+    if not _has_pbx_credentials(pbx):
+        raise HTTPException(status_code=400, detail="This PBX needs its API URL, Client ID, and Client Secret before monitoring can start")
+
+    started = time.perf_counter()
+    system_raw, extensions, active_calls, call_logs = await asyncio.gather(
+        _yeastar_api_get("system/information", settings=pbx),
+        get_yeastar_extensions(current_user, settings=pbx),
+        get_yeastar_active_calls(current_user, settings=pbx),
+        get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx),
+    )
+    system = system_raw.get("data", {}) if isinstance(system_raw, dict) and system_raw.get("errcode") == 0 else {}
+    uptime_seconds = int(system.get("up_time", 0) or 0)
+    online_extensions = len([extension for extension in extensions if extension.get("registered")])
+    missed = len([call for call in call_logs.get("data", []) if call.get("status") in {"missed", "failed"}])
+    return {
+        "pbx": {"id": pbx.get("id"), "name": pbx.get("name") or "Yeastar PBX", "client_id": pbx.get("client_id"), "client_name": pbx.get("client_name") or "Client"},
+        "health": "online" if system else "degraded",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
+        "system": {"name": system.get("device_name") or pbx.get("name") or "Yeastar PBX", "model": system.get("model_name", ""), "firmware_version": system.get("firmware_version", ""), "uptime_seconds": uptime_seconds},
+        "extensions": {"total": len(extensions), "registered": online_extensions, "unregistered": len(extensions) - online_extensions},
+        "active_calls": active_calls,
+        "recent_calls": call_logs.get("data", []),
+        "missed_calls": missed,
     }
 
 
