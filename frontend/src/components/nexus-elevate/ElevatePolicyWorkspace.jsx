@@ -120,6 +120,7 @@ export default function ElevatePolicyWorkspace({ api, headers, onPolicyCountChan
   const [simulation, setSimulation] = useState({ ...EMPTY_FORM, name: "Simulation" });
   const [simulating, setSimulating] = useState(false);
   const [simulationResult, setSimulationResult] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
@@ -182,11 +183,15 @@ export default function ElevatePolicyWorkspace({ api, headers, onPolicyCountChan
     }
   };
   const archive = async (policy) => {
-    if (!window.confirm(`Archive “${policy.name}”? It will stop matching new elevation requests and remain in the audit history.`)) return;
+    if (policy !== archiveTarget) {
+      setArchiveTarget(policy);
+      return;
+    }
     try {
       await axios.post(`${api}/nexus-elevate/policies/${encodeURIComponent(policy.id)}/archive`, {}, { headers });
       setPolicies((current) => current.filter((item) => item.id !== policy.id));
       toast.success("Policy archived and retained for audit");
+      setArchiveTarget(null);
       await load({ quiet: true });
     } catch (error) {
       toast.error(error.response?.data?.detail || "Policy could not be archived");
@@ -238,6 +243,8 @@ export default function ElevatePolicyWorkspace({ api, headers, onPolicyCountChan
 
     <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex gap-1 rounded-lg border border-border bg-muted/25 p-1">{[["all", "All"], ["enforce", "Enforced"], ["monitor", "Monitor"]].map(([value, label]) => <Button key={value} size="sm" variant={filter === value ? "default" : "ghost"} onClick={() => setFilter(value)}>{label}</Button>)}</div><span className="text-xs text-muted-foreground">{visiblePolicies.length} {visiblePolicies.length === 1 ? "policy" : "policies"}</span></div>
     {loading ? <Card><CardContent className="flex justify-center p-10"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></CardContent></Card> : visiblePolicies.length === 0 ? <Card><CardContent className="p-8 text-center"><ShieldCheck className="mx-auto h-6 w-6 text-emerald-300" /><p className="mt-3 font-medium">No policies in this view</p><p className="mt-1 text-sm text-muted-foreground">Create a monitor-only policy from a known good elevation request, then review the audit evidence before enforcing it.</p><Button className="mt-4" size="sm" onClick={startCreate} disabled={!canManage}>Create first policy</Button>{!canManage && <p className="mt-2 text-xs text-muted-foreground">An administrator can create and change elevation policies.</p>}</CardContent></Card> : <div className="grid gap-3 xl:grid-cols-2">{visiblePolicies.map((policy) => <Card key={policy.id} className="border-border/80" data-testid={`nexus-elevate-policy-${policy.id}`}><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold">{policy.name}</p><Badge variant="outline" className={`text-[10px] ${ACTION_META[policy.action]?.className}`}>{ACTION_META[policy.action]?.label}</Badge><Badge variant="outline" className={policy.mode === "enforce" ? "border-emerald-500/30 text-emerald-200" : "border-sky-500/30 text-sky-200"}>{policy.mode === "enforce" ? "Enforced" : "Monitor"}</Badge>{policy.enabled ? null : <Badge variant="outline" className="text-muted-foreground">Paused</Badge>}</div><p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{policy.description || "No policy purpose recorded."}</p></div><div className="flex shrink-0 gap-1"><Button size="icon" variant="ghost" aria-label={`Edit ${policy.name}`} onClick={() => startEdit(policy)} disabled={!canManage}><Pencil className="h-4 w-4" /></Button><Button size="icon" variant="ghost" className="text-muted-foreground hover:text-rose-200" aria-label={`Archive ${policy.name}`} onClick={() => archive(policy)} disabled={!canManage}><Trash2 className="h-4 w-4" /></Button></div></div><div className="mt-4 grid gap-2 text-xs sm:grid-cols-2"><div className="rounded-lg border border-border/70 bg-muted/15 p-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Scope</p><p className="mt-1 truncate" title="Customer and endpoint scope"><ScopeLabel policy={policy} catalog={catalog} /></p></div><div className="rounded-lg border border-border/70 bg-muted/15 p-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Application identity</p><p className="mt-1 truncate font-mono text-[10px]" title={policy.match?.program_path || policy.match?.sha256}>{policy.match?.program_path || policy.match?.sha256 || "Not configured"}</p></div></div><div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground"><span>Version {policy.version || 1} · Priority {policy.priority || 100}</span><span>{policy.constraints?.max_duration_minutes || 15} min cap</span></div></CardContent></Card>)}</div>}
+
+    <Dialog open={Boolean(archiveTarget)} onOpenChange={(open) => !open && setArchiveTarget(null)}><NexusWorkflowDialog eyebrow="Privilege control" title="Archive elevation policy" description={`Archive ${archiveTarget?.name || "this policy"}? It will stop matching new elevation requests and remain in the audit history.`} icon={Trash2} tone="amber" data-testid="nexus-elevate-policy-archive" footer={<><Button variant="outline" onClick={() => setArchiveTarget(null)}>Keep policy</Button><Button variant="destructive" onClick={() => archive(archiveTarget)}>Archive policy</Button></>}><div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">The rule can no longer influence elevation requests after archiving. Its decision history stays available for audit and investigation.</div></NexusWorkflowDialog></Dialog>
 
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}><NexusWorkflowDialog eyebrow="Privilege control" title={editing ? "Edit Nexus Elevate policy" : "Create Nexus Elevate policy"} description="Define the exact application, scope and approval boundary before Nexus applies the policy to managed endpoints." icon={ShieldCheck} tone="emerald" className="max-w-3xl" data-testid="nexus-elevate-policy-dialog" footer={<><Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>Cancel</Button><Button onClick={save} disabled={saving}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}{editing ? "Save new version" : "Create policy"}</Button></>}><FieldSet form={form} setForm={setForm} catalog={catalog} /></NexusWorkflowDialog></Dialog>
 
