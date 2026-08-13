@@ -173,6 +173,7 @@ export default function TicketsPage() {
   const [selectedRunbookSuggestion, setSelectedRunbookSuggestion] = useState(null);
   const [detailTab, setDetailTab] = useState("conversation");
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [edgeToolsOpen, setEdgeToolsOpen] = useState(false);
   const [ticketNotes, setTicketNotes] = useState([]);
   const [ticketEmails, setTicketEmails] = useState([]);
   const [childTickets, setChildTickets] = useState([]);
@@ -1935,9 +1936,24 @@ export default function TicketsPage() {
         {/* Finance Intel: Quote Nudge banner */}
         <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
 
-        <TicketConnectivityVerification ticket={viewingTicket} headers={headers} />
+        <Card className="overflow-hidden border border-border/70 bg-muted/[0.12]" data-testid="ticket-advanced-edge-tools">
+          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-500/20 bg-violet-500/[0.08]"><Shield className="h-4 w-4 text-violet-300" /></div>
+              <div><p className="text-sm font-medium">Advanced site access</p><p className="text-xs text-muted-foreground">Use Nexus Edge verification or Jump only when this ticket needs site-level diagnostics or controlled local access.</p></div>
+            </div>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={() => setEdgeToolsOpen((open) => !open)} data-testid="ticket-advanced-edge-tools-toggle">
+              {edgeToolsOpen ? "Hide advanced tools" : "Open advanced tools"}
+            </Button>
+          </CardContent>
+        </Card>
 
-        <TicketJumpAccessRequest ticket={viewingTicket} headers={headers} />
+        {edgeToolsOpen && (
+          <div className="grid gap-3 animate-in fade-in-0 slide-in-from-top-1 duration-200" data-testid="ticket-advanced-edge-tools-panel">
+            <TicketConnectivityVerification ticket={viewingTicket} headers={headers} />
+            <TicketJumpAccessRequest ticket={viewingTicket} headers={headers} />
+          </div>
+        )}
 
         {/* Title + Compact Progress side-by-side (saves vertical space) */}
         <div className="grid grid-cols-1 gap-4">
