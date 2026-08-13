@@ -24,6 +24,7 @@ import {
   Loader2, Activity, Zap, Search, Play, Square, RotateCcw, Skull, ChevronRight, Sparkles, Gauge, Camera, BrainCircuit,
 } from "lucide-react";
 import { API } from "@/App";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const fmtBytes = (n) => {
   if (n == null) return "—";
@@ -158,8 +159,11 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
     finally { setBusy(null); }
   };
 
-  const killProcess = async (p) => {
-    if (!window.confirm(`Kill ${p.name} (PID ${p.pid})?`)) return;
+  const killProcess = async (p, confirmed = false) => {
+    if (!confirmed) {
+      setConfirm({ kind: "kill-process", process: p });
+      return;
+    }
     setBusy(`kill-${p.pid}`);
     try {
       await axios.post(`${API}/tickets/${ticketId}/device/processes/${p.pid}/kill${qs}`, {}, { headers });
@@ -179,6 +183,34 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
     const arr = [...processes].sort((a, b) => (b.cpu_percent || 0) - (a.cpu_percent || 0));
     return arr.slice(0, 30);
   }, [processes]);
+
+  const confirmDetails = {
+    reboot: {
+      title: `Reboot ${device.name}`,
+      description: "The device will reboot immediately. Nexus records the action against this ticket.",
+      icon: Power,
+      tone: "amber",
+    },
+    shutdown: {
+      title: `Shutdown ${device.name}`,
+      description: "The device will shut down after a 60-second grace period. Nexus records the action against this ticket.",
+      icon: Power,
+      tone: "amber",
+    },
+    "send-message": {
+      title: `Message user on ${device.name}`,
+      description: "A notification will appear on the user's screen and be recorded in ticket activity.",
+      icon: MessageSquareWarning,
+      tone: "cyan",
+    },
+    "kill-process": {
+      title: "End running process",
+      description: `This immediately ends ${confirm?.process?.name || "the selected process"}${confirm?.process?.pid ? ` (PID ${confirm.process.pid})` : ""}. Unsaved work in that process may be lost.`,
+      icon: Skull,
+      tone: "amber",
+    },
+  };
+  const activeConfirmation = confirm ? confirmDetails[confirm.kind] : null;
 
   const disabled = !device.has_agent;
 
@@ -345,29 +377,27 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
 
       {/* Confirm dialog */}
       <Dialog open={!!confirm} onOpenChange={(v) => !v && setConfirm(null)}>
-        <DialogContent className="max-w-sm" data-testid={`confirm-${device.id}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {confirm?.kind === "reboot" && <><Power className="w-4 h-4 text-amber-400" />Reboot {device.name}?</>}
-              {confirm?.kind === "shutdown" && <><Power className="w-4 h-4 text-rose-400" />Shutdown {device.name}?</>}
-              {confirm?.kind === "send-message" && <><MessageSquareWarning className="w-4 h-4 text-cyan-400" />Message user on {device.name}</>}
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              {confirm?.kind === "reboot" && "The device will reboot immediately. Action audited on the ticket."}
-              {confirm?.kind === "shutdown" && "The device shuts down after a 60-second grace. Action audited on the ticket."}
-              {confirm?.kind === "send-message" && "A notification popup will appear on the user's screen."}
-            </DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Ticket device control"
+          title={activeConfirmation?.title || "Confirm device action"}
+          description={activeConfirmation?.description}
+          icon={activeConfirmation?.icon || Monitor}
+          tone={activeConfirmation?.tone || "cyan"}
+          testId={`confirm-${device.id}`}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
+              {confirm?.kind === "reboot" && <Button onClick={() => { runAction("reboot", "Reboot"); setConfirm(null); }} data-testid={`confirm-reboot-${device.id}`}>Reboot now</Button>}
+              {confirm?.kind === "shutdown" && <Button variant="destructive" onClick={() => { runAction("shutdown", "Shutdown"); setConfirm(null); }} data-testid={`confirm-shutdown-${device.id}`}>Shutdown</Button>}
+              {confirm?.kind === "send-message" && <Button onClick={sendMessage} disabled={!msgBody.trim()} data-testid={`confirm-message-${device.id}`}>Send</Button>}
+              {confirm?.kind === "kill-process" && <Button variant="destructive" onClick={async () => { await killProcess(confirm.process, true); setConfirm(null); }} disabled={!!busy} data-testid={`confirm-kill-process-${device.id}`}>End process</Button>}
+            </>
+          }
+        >
           {confirm?.kind === "send-message" && (
             <Textarea value={msgBody} onChange={e => setMsgBody(e.target.value)} placeholder="Hi! I'll be working on your machine for a few minutes…" rows={4} data-testid={`msg-body-${device.id}`} />
           )}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirm(null)}>Cancel</Button>
-            {confirm?.kind === "reboot" && <Button onClick={() => { runAction("reboot", "Reboot"); setConfirm(null); }} data-testid={`confirm-reboot-${device.id}`}>Reboot now</Button>}
-            {confirm?.kind === "shutdown" && <Button variant="destructive" onClick={() => { runAction("shutdown", "Shutdown"); setConfirm(null); }} data-testid={`confirm-shutdown-${device.id}`}>Shutdown</Button>}
-            {confirm?.kind === "send-message" && <Button onClick={sendMessage} disabled={!msgBody.trim()} data-testid={`confirm-message-${device.id}`}>Send</Button>}
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Data inspection pane (services / processes / patches) */}
