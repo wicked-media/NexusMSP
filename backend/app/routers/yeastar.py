@@ -248,14 +248,14 @@ async def _yeastar_get_token(settings: dict, *, strict: bool = False) -> str | N
                 raise error from exc
             return None
 
-async def _yeastar_api_get(path: str, params: dict = None, settings: dict | None = None, *, strict: bool = False) -> dict | list | None:
+async def _yeastar_api_get(path: str, params: dict = None, settings: dict | None = None, *, strict: bool = False, token: str | None = None) -> dict | list | None:
     """Make authenticated GET request to Yeastar PBX"""
     settings = settings or await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
     if not settings:
         if strict:
             raise YeastarConnectionError("PBX configuration was not found.", "configuration")
         return None
-    token = await _yeastar_get_token(settings, strict=strict)
+    token = token or await _yeastar_get_token(settings, strict=strict)
     if not token:
         return None
     pbx_url = _pbx_url(settings)
@@ -338,8 +338,8 @@ async def get_yeastar_system_info(current_user: dict = Depends(get_current_user)
     }
 
 @router.get("/yeastar/extensions")
-async def get_yeastar_extensions(current_user: dict = Depends(get_current_user), settings: dict | None = None):
-    data = await _yeastar_api_get("extension/list", settings=settings)
+async def get_yeastar_extensions(current_user: dict = Depends(get_current_user), settings: dict | None = None, token: str | None = None):
+    data = await _yeastar_api_get("extension/list", settings=settings, token=token)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
         result = []
@@ -434,8 +434,8 @@ def _extension_presence_snapshot(extensions: list[dict], active_calls: list[dict
     return items, counts
 
 @router.get("/yeastar/active-calls")
-async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user), settings: dict | None = None):
-    data = await _yeastar_api_get("call/query", settings=settings)
+async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user), settings: dict | None = None, token: str | None = None):
+    data = await _yeastar_api_get("call/query", settings=settings, token=token)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
         if not raw or raw is None:
@@ -477,8 +477,9 @@ async def get_yeastar_call_logs(
     page_size: int = 20,
     current_user: dict = Depends(get_current_user),
     settings: dict | None = None,
+    token: str | None = None,
 ):
-    data = await _yeastar_api_get("cdr/list", {"page": page, "page_size": page_size}, settings=settings)
+    data = await _yeastar_api_get("cdr/list", {"page": page, "page_size": page_size}, settings=settings, token=token)
     if data and data.get("errcode") == 0:
         raw = data.get("data", [])
         total = data.get("total_number", len(raw) if isinstance(raw, list) else 0)
@@ -580,12 +581,19 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
             read_issues.append(label)
             return fallback
 
-    system_raw, extensions, active_calls, call_logs = await asyncio.gather(
-        bounded_read("system", _yeastar_api_get("system/information", settings=pbx), None),
-        bounded_read("extensions", get_yeastar_extensions(current_user, settings=pbx), cached_extensions),
-        bounded_read("active calls", get_yeastar_active_calls(current_user, settings=pbx), []),
-        bounded_read("recent calls", get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx), {"data": []}),
-    )
+    # A PBX only needs one access token for a complete operational snapshot.
+    # Sharing it prevents concurrent reads from queuing behind the token lock and
+    # all timing out together on a slower appliance or cloud connection.
+    token = await bounded_read("authentication", _yeastar_get_token(pbx), None)
+    if token:
+        system_raw, extensions, active_calls, call_logs = await asyncio.gather(
+            bounded_read("system", _yeastar_api_get("system/information", settings=pbx, token=token), None),
+            bounded_read("extensions", get_yeastar_extensions(current_user, settings=pbx, token=token), cached_extensions),
+            bounded_read("active calls", get_yeastar_active_calls(current_user, settings=pbx, token=token), []),
+            bounded_read("recent calls", get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx, token=token), {"data": []}),
+        )
+    else:
+        system_raw, extensions, active_calls, call_logs = None, cached_extensions, [], {"data": []}
     system = system_raw.get("data", {}) if isinstance(system_raw, dict) and system_raw.get("errcode") == 0 else {}
     uptime_seconds = int(system.get("up_time", 0) or 0)
     online_extensions = len([extension for extension in extensions if extension.get("registered")])
