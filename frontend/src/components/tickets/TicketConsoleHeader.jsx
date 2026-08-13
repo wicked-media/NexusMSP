@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES } from "@/lib/ticketWorkspaceHelpers";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { ServiceTierChip } from "@/components/tickets/TicketServiceTierWidget";
 import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
@@ -53,6 +54,7 @@ export default function TicketConsoleHeader({
   const [descriptionDraft, setDescriptionDraft] = useState(ticket?.description || "");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState([]);
+  const [confirmRevert, setConfirmRevert] = useState(false);
 
   useEffect(() => { setTitleDraft(ticket?.title || ""); }, [ticket?.title]);
   useEffect(() => { setDescriptionDraft(ticket?.description || ""); }, [ticket?.description]);
@@ -65,11 +67,12 @@ export default function TicketConsoleHeader({
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
   };
 
-  const revert = async () => {
-    if (!window.confirm("Revert to previous customer?")) return;
+  const revert = async (confirmed = false) => {
+    if (!confirmed) { setConfirmRevert(true); return; }
     try {
       const r = await axios.post(`${API}/tickets/${ticket.id}/revert-customer`, {}, { headers });
       toast.success(`Reverted to ${r.data.ticket?.client_name || "previous customer"}`);
+      setConfirmRevert(false);
       onMutate && onMutate();
       setHistoryOpen(false);
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
@@ -273,6 +276,18 @@ export default function TicketConsoleHeader({
             <Button onClick={() => setHistoryOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+      <Dialog open={confirmRevert} onOpenChange={setConfirmRevert}>
+        <NexusWorkflowDialog
+          eyebrow="Ticket relationship"
+          title="Revert to the previous customer?"
+          description="This changes the ticket's customer relationship back to the previous recorded assignment and adds a durable audit entry."
+          icon={RotateCcw}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setConfirmRevert(false)}>Keep current customer</Button><Button onClick={() => revert(true)}>Revert customer</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{ticket.ticket_number || ticket.id?.slice(0, 8)}</p><p className="mt-1 text-sm text-muted-foreground">Current customer: {ticket.client_name || "Unassigned"}. Review the customer history before reversing the assignment.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </>
   );
