@@ -23,6 +23,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   AlertTriangle,
   Ban,
@@ -1638,43 +1639,29 @@ export default function RemediationPlaybooksPage() {
           }
         }}
       >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Record blocked response step</DialogTitle>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Response evidence"
+          title="Record blocked response step"
+          description="Explain what prevented the action and who owns the next step. This evidence becomes part of the immutable response record."
+          icon={Ban}
+          tone="amber"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => { setBlockedStep(null); setBlockedNote(""); }} disabled={saving}>Cancel</Button>
+              <Button variant="destructive" onClick={submitBlockedStep} disabled={saving || blockedNote.trim().length < 8}>{saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Record blocked step</Button>
+            </>
+          }
+        >
           <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Explain what prevented the action and who owns the next step. This
-              note becomes part of the immutable response record.
-            </p>
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">Document the blocker, the agreed next step, the owner, and the expected timing. This gives the next technician a complete handover.</div>
             <Textarea
               value={blockedNote}
               onChange={(event) => setBlockedNote(event.target.value)}
               rows={4}
               placeholder="Example: Endpoint was powered off; client contact requested a scheduled onsite visit. Assigned to Jordan for 09:00 tomorrow."
             />
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setBlockedStep(null);
-                  setBlockedNote("");
-                }}
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={submitBlockedStep}
-                disabled={saving || blockedNote.trim().length < 8}
-              >
-                {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                Record blocked step
-              </Button>
-            </div>
           </div>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
