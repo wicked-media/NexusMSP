@@ -309,6 +309,7 @@ export default function TicketsPage() {
   const [fjSiteDialog, setFjSiteDialog] = useState(false);
   const [fjHeaderEdit, setFjHeaderEdit] = useState(false);
   const [fjHeaderDraft, setFjHeaderDraft] = useState("");
+  const [fjStatusTarget, setFjStatusTarget] = useState(null);
   const [fjJobHistory, setFjJobHistory] = useState([]);
   const [fjNotifyDialog, setFjNotifyDialog] = useState(false);
   const [fjNotifyForm, setFjNotifyForm] = useState({ email: "", subject: "", message: "" });
@@ -3113,6 +3114,7 @@ export default function TicketsPage() {
     const fjProgress = Math.round((fjActiveIdx / (fjStages.length - 1)) * 100);
     const fjCheckDone = fjChecklist.filter(c => c.checked).length;
     const fjMatTotal = fjMaterials.reduce((s, m) => s + (m.total || 0), 0);
+    const fjNextStage = fjActiveIdx < fjStages.length - 1 ? fjStages[fjActiveIdx + 1] : null;
 
     return (
       <div className="space-y-4" data-testid="fj-detail">
@@ -3128,12 +3130,9 @@ export default function TicketsPage() {
               <div className="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs text-muted-foreground"><span className="font-medium text-foreground/75">{viewFjJob.customer_name || "Customer pending"}</span><span className="text-muted-foreground/30">•</span><span className="inline-flex items-center gap-1"><MapPin className="w-3 h-3 text-cyan-300" />{viewFjJob.service_address || "Site address pending"}</span>{viewFjJob.scheduled_date && <><span className="text-muted-foreground/30">•</span><span>{viewFjJob.scheduled_date} {viewFjJob.scheduled_time || ""}</span></>}</div>
             </div>
             <div className="contents">
-            <TicketHeaderAction icon={Bell} tone="accent" onClick={() => { setFjNotifyForm({ email: viewFjJob.customer_email || "", subject: `Update: ${viewFjJob.job_number}`, message: "" }); setFjNotifyDialog(true); }} data-testid="fj-notify-btn">Notify</TicketHeaderAction>
-            <TicketHeaderAction icon={MapPin} onClick={() => setFjSiteDialog(true)} data-testid="fj-site-btn">Site info</TicketHeaderAction>
-            <TicketHeaderAction icon={DollarSign} onClick={() => { setFjQuoteItems(fjQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote?.notes || ""); setFjQuoteDialog(true); }} data-testid="fj-quote-btn">Quote</TicketHeaderAction>
-            <TicketHeaderAction icon={Receipt} tone="success" onClick={() => { setFjInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setFjInvoiceList(r.data)).catch(() => {}); setFjInvoiceDialog(true); }} data-testid="fj-invoice-btn">Invoice</TicketHeaderAction>
-            <TicketHeaderAction icon={Download} onClick={handleDownloadFjPdf} data-testid="fj-pdf-btn">PDF</TicketHeaderAction>
-            <TicketHeaderAction icon={QrCode} onClick={handleDownloadFjQr} data-testid="fj-qr-btn">QR</TicketHeaderAction>
+            {fjNextStage && <TicketHeaderAction icon={CheckCircle} tone="success" onClick={() => setFjStatusTarget(fjNextStage)} data-testid="fj-advance-btn">Advance to {fjNextStage.label}</TicketHeaderAction>}
+            <TicketHeaderAction icon={Bell} tone="accent" onClick={() => { setFjNotifyForm({ email: viewFjJob.customer_email || "", subject: `Update: ${viewFjJob.job_number}`, message: "" }); setFjNotifyDialog(true); }} data-testid="fj-notify-btn">Notify client</TicketHeaderAction>
+            <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-9 border-white/[0.1] bg-white/[0.025] text-zinc-200 hover:bg-white/[0.08]" data-testid="fj-more-actions"><Settings2 className="mr-1.5 h-3.5 w-3.5" />More<ChevronDown className="ml-1 h-3 w-3 opacity-60" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52"><DropdownMenuItem onClick={() => setFjSiteDialog(true)}><MapPin className="mr-2 h-3.5 w-3.5" />Edit site information</DropdownMenuItem><DropdownMenuItem onClick={() => { setFjQuoteItems(fjQuote?.line_items?.map(li => ({ description: li.description, qty: li.quantity, price: li.unit_price })) || [{ description: "", qty: 1, price: 0 }]); setFjQuoteNotes(fjQuote?.notes || ""); setFjQuoteDialog(true); }}><DollarSign className="mr-2 h-3.5 w-3.5" />Build service quote</DropdownMenuItem><DropdownMenuItem onClick={() => { setFjInvoiceList([]); axios.get(`${API}/invoices`, { headers }).then(r => setFjInvoiceList(r.data)).catch(() => {}); setFjInvoiceDialog(true); }}><Receipt className="mr-2 h-3.5 w-3.5" />Send to billing</DropdownMenuItem><DropdownMenuItem onClick={handleDownloadFjPdf}><Download className="mr-2 h-3.5 w-3.5" />Download service PDF</DropdownMenuItem><DropdownMenuItem onClick={handleDownloadFjQr}><QrCode className="mr-2 h-3.5 w-3.5" />Download site QR</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
             </div>
           </div>
         </div>
@@ -3153,7 +3152,7 @@ export default function TicketsPage() {
                 const isActive = i === fjActiveIdx;
                 const isPast = i < fjActiveIdx;
                 return (
-                  <button key={stage.key} onClick={() => handleFjStatus(viewFjJob.id, stage.key)}
+                  <button key={stage.key} onClick={() => setFjStatusTarget(stage)}
                     className={`rounded-lg p-2 text-center transition-all border ${isActive ? `${stage.bg} ${stage.border} ring-1 ring-offset-1 ring-offset-background ${stage.border} shadow-lg` : isPast ? "bg-emerald-500/5 border-emerald-500/20" : "bg-muted/20 border-border/50 hover:bg-muted/40"}`}
                     data-testid={`fj-progress-${stage.key}`}>
                     <div className={`w-5 h-5 rounded-full mx-auto mb-1 flex items-center justify-center text-[9px] font-bold ${isActive ? `bg-gradient-to-br ${stage.color} text-white shadow-md` : isPast ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"}`}>
@@ -3467,13 +3466,13 @@ export default function TicketsPage() {
               </CardContent>
             </Card>
 
-            {/* Update Status */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Update Status</CardTitle></CardHeader>
-              <CardContent className="space-y-1.5">
-                {Object.entries(FJ_STATUSES).filter(([k]) => k !== viewFjJob.field_status).map(([k, v]) => (
-                  <Button key={k} variant="outline" className={`w-full text-xs justify-start ${v.class}`} size="sm" onClick={() => handleFjStatus(viewFjJob.id, k)} data-testid={`fj-status-${k}`}>{v.label}</Button>
-                ))}
+            {/* Field stage */}
+            <Card className="border-cyan-500/20">
+              <CardHeader className="border-b border-cyan-500/15 bg-cyan-500/[0.035] pb-3"><CardTitle className="text-sm">Field stage</CardTitle></CardHeader>
+              <CardContent className="space-y-3 pt-4">
+                <div><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Current stage</p><p className="mt-1 text-sm font-medium">{fjStages[fjActiveIdx].label}</p></div>
+                {fjNextStage ? <><div><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recommended next step</p><p className="mt-1 text-sm font-medium text-cyan-100">{fjNextStage.label}</p></div><Button className="w-full" size="sm" onClick={() => setFjStatusTarget(fjNextStage)} data-testid="fj-advance-sidebar"><CheckCircle className="mr-1.5 h-4 w-4" />Advance field job</Button></> : <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-200">This field job has completed its service workflow.</p>}
+                <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" className="w-full text-xs" size="sm"><Settings2 className="mr-1.5 h-3.5 w-3.5" />Correct or change stage<ChevronDown className="ml-auto h-3.5 w-3.5 opacity-60" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52">{fjStages.filter(stage => stage.key !== viewFjJob.field_status).map(stage => <DropdownMenuItem key={stage.key} onClick={() => setFjStatusTarget(stage)}>{stage.label}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
               </CardContent>
             </Card>
 
@@ -3489,6 +3488,12 @@ export default function TicketsPage() {
         </div>
 
         {/* ============ DIALOGS ============ */}
+
+        <Dialog open={Boolean(fjStatusTarget)} onOpenChange={(open) => !open && setFjStatusTarget(null)}>
+          <NexusWorkflowDialog eyebrow="Field service" title={`Move field job to ${fjStatusTarget?.label || "next stage"}`} description="Confirm the field stage before Nexus updates the dispatch view, customer timeline and audit trail." icon={Radio} tone="cyan" footer={<><Button variant="outline" onClick={() => setFjStatusTarget(null)}>Cancel</Button><Button onClick={() => { if (fjStatusTarget) { handleFjStatus(viewFjJob.id, fjStatusTarget.key); setFjStatusTarget(null); } }} data-testid="fj-confirm-status"><CheckCircle className="mr-1.5 h-4 w-4" />Confirm stage</Button></>}>
+            <div className="space-y-3"><div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.04] p-3"><p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-cyan-300">Field transition</p><p className="mt-2 text-sm"><span className="text-muted-foreground">From </span><strong>{fjStages[fjActiveIdx].label}</strong><span className="mx-2 text-muted-foreground">→</span><strong>{fjStatusTarget?.label}</strong></p></div>{fjStatusTarget?.key === "completed" && <p className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] px-3 py-2 text-xs text-amber-100">Completing a field job closes the onsite workflow. Confirm the evidence, materials and customer handover are recorded.</p>}<p className="text-xs text-muted-foreground">Nexus records the technician, timestamp and transition in the field-service history.</p></div>
+          </NexusWorkflowDialog>
+        </Dialog>
 
         {/* Quote Builder */}
         <Dialog open={fjQuoteDialog} onOpenChange={setFjQuoteDialog}>
