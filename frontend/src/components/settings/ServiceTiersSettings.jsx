@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getServiceTierVisual } from "@/lib/serviceTierVisuals";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const ICONS = { shield: Shield, award: Award, crown: Crown, gem: Gem, sparkles: Sparkles };
 const ICON_OPTIONS = [
@@ -57,6 +58,7 @@ export default function ServiceTiersSettings() {
   const [editing, setEditing] = useState(null);
   const [featureInput, setFeatureInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchTiers = useCallback(async () => {
     setLoading(true);
@@ -104,14 +106,12 @@ export default function ServiceTiersSettings() {
     }
   };
 
-  const remove = async (tier) => {
-    const msg = tier.is_default
-      ? `"${tier.name}" is a default tier. Deleting will deactivate it (you can re-enable later).`
-      : `Permanently delete "${tier.name}"? Any clients on this tier will be unassigned.`;
-    if (!window.confirm(msg)) return;
+  const remove = async (tier, confirmed = false) => {
+    if (!confirmed) { setDeleteTarget(tier); return; }
     try {
       await axios.delete(`${API}/service-tiers/${tier.id}`, { headers });
       toast.success(tier.is_default ? "Tier deactivated" : "Tier deleted");
+      setDeleteTarget(null);
       await fetchTiers();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Delete failed");
@@ -348,6 +348,18 @@ export default function ServiceTiersSettings() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Service catalogue"
+          title={deleteTarget?.is_default ? "Deactivate default service tier?" : "Delete service tier?"}
+          description={deleteTarget?.is_default ? "Default tiers are deactivated rather than permanently removed, so they can be restored if existing agreements still need them." : "Deleting this tier unassigns clients from it and removes the entitlement option from future service setup."}
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep tier</Button><Button variant="destructive" onClick={() => remove(deleteTarget, true)}>{deleteTarget?.is_default ? "Deactivate tier" : "Delete tier"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.name || "Selected service tier"}</p><p className="mt-1 text-sm text-muted-foreground">SLA targets: {fmtSla(deleteTarget?.response_sla_minutes)} response · {fmtSla(deleteTarget?.resolution_sla_minutes)} resolution.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </Card>
   );
