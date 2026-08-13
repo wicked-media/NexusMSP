@@ -615,6 +615,12 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "degraded_reads": read_issues,
         "skipped_reads": skipped_reads,
+        "last_connection_test": {
+            "at": pbx.get("last_test_at") or "",
+            "latency_ms": pbx.get("api_latency_ms"),
+            "status": pbx.get("status") or "unknown",
+            "error": pbx.get("last_test_error") or "",
+        },
         "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
         "system": {"name": system.get("device_name") or pbx.get("name") or "Yeastar PBX", "model": system.get("model_name", ""), "firmware_version": system.get("firmware_version", ""), "uptime_seconds": uptime_seconds},
         "extensions": {"total": len(extensions), "registered": online_extensions, "unregistered": len(extensions) - online_extensions},
