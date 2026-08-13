@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Camera, Trash2, Loader2, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,6 +20,7 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
   const { token } = useAuth();
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
   const src = resolveUrl(client.logo_url || client.profile_picture_url);
@@ -47,11 +50,12 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
     e.target.value = "";
   };
 
-  const handleRemove = async () => {
-    if (!window.confirm("Remove the business logo?")) return;
+  const handleRemove = async (confirmed = false) => {
+    if (!confirmed) { setConfirmRemove(true); return; }
     try {
       await axios.delete(`${API}/clients/${client.id}/logo`, { headers });
       toast.success("Business logo removed");
+      setConfirmRemove(false);
       onUpdated?.({ logo_url: "" });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to remove");
@@ -100,6 +104,11 @@ export function ClientProfilePictureUploader({ client, onUpdated, size = 80 }) {
           <Trash2 className="w-3 h-3" />
         </button>
       )}
+      <Dialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <NexusWorkflowDialog eyebrow="Client identity" title="Remove business logo?" description="The client will revert to its default identifier across the client workspace and branded ticket surfaces." icon={Trash2} tone="amber" footer={<><Button variant="outline" onClick={() => setConfirmRemove(false)}>Keep logo</Button><Button variant="destructive" onClick={() => handleRemove(true)}>Remove logo</Button></>}>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">Keep the logo where client-facing ticket, report, or portal branding still needs it.</div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
@@ -109,6 +118,7 @@ export function ClientCoverImage({ client, onUpdated, children }) {
   const { token } = useAuth();
   const fileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
   const src = resolveUrl(client.cover_image_url);
 
@@ -137,11 +147,12 @@ export function ClientCoverImage({ client, onUpdated, children }) {
     e.target.value = "";
   };
 
-  const handleRemove = async () => {
-    if (!window.confirm("Remove cover image?")) return;
+  const handleRemove = async (confirmed = false) => {
+    if (!confirmed) { setConfirmRemove(true); return; }
     try {
       await axios.delete(`${API}/clients/${client.id}/cover-image`, { headers });
       toast.success("Cover image removed");
+      setConfirmRemove(false);
       onUpdated?.({ cover_image_url: "" });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to remove");
@@ -176,6 +187,11 @@ export function ClientCoverImage({ client, onUpdated, children }) {
         )}
       </div>
       {children && <div className="absolute left-4 right-32 top-4 z-10">{children}</div>}
+      <Dialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <NexusWorkflowDialog eyebrow="Client identity" title="Remove cover image?" description="The client workspace will return to the standard Nexus cover treatment until a new image is uploaded." icon={Trash2} tone="amber" footer={<><Button variant="outline" onClick={() => setConfirmRemove(false)}>Keep cover</Button><Button variant="destructive" onClick={() => handleRemove(true)}>Remove cover</Button></>}>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">This changes the client profile’s visual identity but does not remove its business logo or any documents.</div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
