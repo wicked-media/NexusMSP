@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import {
   Sparkles, TrendingUp, AlertTriangle, Layers, Mail, PauseCircle, RefreshCcw,
@@ -46,6 +47,7 @@ export default function RecurringSmartActions({ ri, onReload }) {
   // Pre-bill state
   const [prebillEmail, setPrebillEmail] = useState("");
   const [prebillHtml, setPrebillHtml] = useState(null);
+  const [confirmImmediateUplift, setConfirmImmediateUplift] = useState(false);
 
   const loadRisk = async () => {
     setBusy(true);
@@ -68,13 +70,14 @@ export default function RecurringSmartActions({ ri, onReload }) {
     finally { setBusy(false); }
   };
 
-  const applyUpliftNow = async () => {
-    if (!window.confirm(`Apply +${upliftPct}% to all line items right now?`)) return;
+  const applyUpliftNow = async (confirmed = false) => {
+    if (!confirmed) { setConfirmImmediateUplift(true); return; }
     setBusy(true);
     try {
       const r = await axios.post(`${API}/recurring-invoices/${ri.id}/apply-uplift`, {}, { headers });
       toast.success(`+${upliftPct}% applied → $${r.data.new_amount.toFixed(2)}`);
       setShowUplift(false);
+      setConfirmImmediateUplift(false);
       onReload && onReload();
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
     finally { setBusy(false); }
@@ -258,6 +261,19 @@ export default function RecurringSmartActions({ ri, onReload }) {
           <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 px-6 py-4"><Button variant="outline" onClick={() => setShowPrebill(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={confirmImmediateUplift} onOpenChange={setConfirmImmediateUplift}>
+        <NexusWorkflowDialog
+          eyebrow="Revenue protection"
+          title="Apply immediate uplift?"
+          description="This changes every line item in this recurring billing stream now. The change will be auditable and reflected in future invoice totals."
+          icon={TrendingUp}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setConfirmImmediateUplift(false)}>Keep current pricing</Button><Button onClick={() => applyUpliftNow(true)} disabled={busy}>{busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Apply +{upliftPct}% now</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="text-2xl font-semibold">+{upliftPct}%</p><p className="mt-1 text-sm text-muted-foreground">applied immediately to the active recurring line items for {ri.client_name || "this client"}.</p></div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
@@ -265,19 +281,26 @@ export default function RecurringSmartActions({ ri, onReload }) {
 export function ConsolidateButton({ clientId, clientName, onDone }) {
   const { token } = useAuth();
   const [busy, setBusy] = useState(false);
-  const run = async () => {
-    if (!window.confirm(`Consolidate ALL active recurring streams for ${clientName} into a single monthly invoice?`)) return;
+  const [confirmConsolidate, setConfirmConsolidate] = useState(false);
+  const run = async (confirmed = false) => {
+    if (!confirmed) { setConfirmConsolidate(true); return; }
     setBusy(true);
     try {
       const r = await axios.post(`${API}/recurring-invoices/consolidate/${clientId}`, {}, { headers: { Authorization: `Bearer ${token}` } });
       toast.success(`Consolidated ${r.data.consolidates_streams.length} streams → $${r.data.amount.toFixed(2)}/mo`);
+      setConfirmConsolidate(false);
       onDone && onDone();
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
     finally { setBusy(false); }
   };
-  return (
-    <Button size="sm" variant="outline" onClick={run} disabled={busy} className="text-cyan-400 border-cyan-500/30" data-testid="consolidate-btn">
+  return (<>
+    <Button size="sm" variant="outline" onClick={() => run()} disabled={busy} className="text-cyan-400 border-cyan-500/30" data-testid="consolidate-btn">
       {busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Activity className="w-3 h-3 mr-1" />}Consolidate Streams
     </Button>
-  );
+    <Dialog open={confirmConsolidate} onOpenChange={setConfirmConsolidate}>
+      <NexusWorkflowDialog eyebrow="Billing consolidation" title="Consolidate active billing streams?" description="This combines all active recurring streams into one monthly invoice. Confirm the customer and billing structure are ready for this operational change." icon={Layers} tone="amber" footer={<><Button variant="outline" onClick={() => setConfirmConsolidate(false)}>Cancel</Button><Button onClick={() => run(true)} disabled={busy}>{busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Consolidate streams</Button></>}>
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{clientName}</p><p className="mt-1 text-sm text-muted-foreground">All active recurring streams will be consolidated into one monthly invoice. Review customer-specific exceptions first.</p></div>
+      </NexusWorkflowDialog>
+    </Dialog>
+  </>);
 }
