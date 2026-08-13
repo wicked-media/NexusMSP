@@ -983,16 +983,26 @@ export default function WorkflowAutomationPage() {
       </Tabs>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Automation Studio</p><DialogTitle className="mt-1 flex items-center gap-2"><Workflow className="h-5 w-5 text-cyan-300" />Create a governed workflow</DialogTitle><DialogDescription>Begin with a disabled draft. Nothing can run until it has been configured and simulated.</DialogDescription></DialogHeader>
-          <div className="grid gap-4 py-2 sm:grid-cols-2">
+        <NexusWorkflowDialog
+          eyebrow="Automation studio"
+          title="Create a governed workflow"
+          description="Begin with a disabled draft. Nothing can run until it has been configured, simulated, and approved where required."
+          icon={Workflow}
+          headerAccessory={<Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/10 text-emerald-300">Safe by default</Badge>}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+              <Button onClick={createWorkflow} disabled={saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create disabled draft</Button>
+            </>
+          }
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2"><Label>Workflow name</Label><Input className="mt-1" value={createForm.name} onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Approved new employee onboarding" /></div>
             <div className="sm:col-span-2"><Label>Business outcome</Label><Textarea className="mt-1" rows={4} value={createForm.description} onChange={(event) => setCreateForm((current) => ({ ...current, description: event.target.value }))} placeholder="Describe the intended result, owner, and safe operating scope." /></div>
             <div><Label>Category</Label><Input className="mt-1" value={createForm.category} onChange={(event) => setCreateForm((current) => ({ ...current, category: event.target.value }))} /></div>
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3"><p className="flex items-center gap-2 text-sm font-medium text-emerald-100"><LockKeyhole className="h-4 w-4" />Safe by default</p><p className="mt-1 text-xs text-muted-foreground">Created disabled with an empty action plan.</p></div>
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] p-4"><p className="flex items-center gap-2 text-sm font-medium text-emerald-100"><LockKeyhole className="h-4 w-4" />Safe by default</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Created disabled with an empty action plan. Configure, simulate, then approve before it can operate.</p></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button><Button onClick={createWorkflow} disabled={saving}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create draft</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={deleteWorkflowOpen} onOpenChange={setDeleteWorkflowOpen}>
