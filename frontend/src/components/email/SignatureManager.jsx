@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import {
   Bold, Italic, Underline, Link as LinkIcon, Image as ImageIcon,
@@ -204,6 +205,7 @@ export default function SignatureManager() {
   const [testOpen, setTestOpen] = useState(false);
   const [testRecipient, setTestRecipient] = useState("");
   const [testSending, setTestSending] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -241,11 +243,12 @@ export default function SignatureManager() {
     } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); }
   };
 
-  const del = async (id) => {
-    if (!window.confirm("Delete this signature?")) return;
+  const del = async (id, confirmed = false) => {
+    if (!confirmed) { setDeleteTarget(signatures.find((signature) => signature.id === id) || null); return; }
     try {
       await axios.delete(`${API}/email-signatures/${id}`, { headers });
       toast.success("Deleted");
+      setDeleteTarget(null);
       load();
     } catch { toast.error("Failed"); }
   };
@@ -379,6 +382,19 @@ export default function SignatureManager() {
           <div className="space-y-2"><Label>Send test to</Label><Input type="email" value={testRecipient} onChange={e => setTestRecipient(e.target.value)} placeholder="you@example.com" data-testid="sig-test-recipient" /></div>
           <DialogFooter><Button variant="ghost" onClick={() => setTestOpen(false)}>Cancel</Button><Button onClick={sendTest} disabled={testSending || !testRecipient.trim()}><Send className="w-3 h-3 mr-1" />{testSending ? "Sending…" : "Send test"}</Button></DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Communication identity"
+          title="Delete email signature?"
+          description="This removes the signature from technician communication options. Choose another default signature first if this one is still actively assigned."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep signature</Button><Button variant="destructive" onClick={() => del(deleteTarget?.id, true)}>Delete signature</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.name || "Selected signature"}</p><p className="mt-1 text-sm text-muted-foreground">Scope: {deleteTarget?.scope || "all outgoing communications"}{deleteTarget?.is_default ? " · currently the default signature" : ""}.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
