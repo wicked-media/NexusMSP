@@ -132,11 +132,11 @@ export default function VoiceWorkspacePage() {
     setBusy("monitoring");
     try {
       const url = pbxId === "all" ? `${API}/yeastar/monitoring/wallboard` : `${API}/yeastar/pbxs/${pbxId}/monitoring`;
-      const { data } = await axios.get(url, { headers });
+      const { data } = await axios.get(url, { headers, timeout: 9000 });
       setMonitoring(data);
     } catch (error) {
       setMonitoring(null);
-      toast.error(error.response?.data?.detail || "PBX monitoring check failed");
+      toast.error(error.response?.data?.detail || (error.code === "ECONNABORTED" ? "PBX monitoring did not respond in time. Retry the check or review the PBX connection." : "PBX monitoring check failed"));
     } finally { setBusy(""); }
   };
 

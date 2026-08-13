@@ -567,11 +567,24 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         raise HTTPException(status_code=400, detail="This PBX needs its API URL, Client ID, and Client Secret before monitoring can start")
 
     started = time.perf_counter()
+    cached_extensions = await db.yeastar_extension_cache.find({"pbx_id": str(pbx.get("id"))}, {"_id": 0}).to_list(1000)
+    read_issues: list[str] = []
+
+    async def bounded_read(label: str, operation, fallback):
+        try:
+            return await asyncio.wait_for(operation, timeout=6)
+        except Exception as exc:
+            # The technician still receives a usable degraded snapshot rather
+            # than an indefinitely loading page when a PBX stalls.
+            logger.info("PBX monitoring %s read timed out or failed for %s: %s", label, pbx.get("id"), exc)
+            read_issues.append(label)
+            return fallback
+
     system_raw, extensions, active_calls, call_logs = await asyncio.gather(
-        _yeastar_api_get("system/information", settings=pbx),
-        get_yeastar_extensions(current_user, settings=pbx),
-        get_yeastar_active_calls(current_user, settings=pbx),
-        get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx),
+        bounded_read("system", _yeastar_api_get("system/information", settings=pbx), None),
+        bounded_read("extensions", get_yeastar_extensions(current_user, settings=pbx), cached_extensions),
+        bounded_read("active calls", get_yeastar_active_calls(current_user, settings=pbx), []),
+        bounded_read("recent calls", get_yeastar_call_logs(page=1, page_size=20, current_user=current_user, settings=pbx), {"data": []}),
     )
     system = system_raw.get("data", {}) if isinstance(system_raw, dict) and system_raw.get("errcode") == 0 else {}
     uptime_seconds = int(system.get("up_time", 0) or 0)
@@ -582,6 +595,7 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         "pbx": {"id": pbx.get("id"), "name": pbx.get("name") or "Yeastar PBX", "client_id": pbx.get("client_id"), "client_name": pbx.get("client_name") or "Client"},
         "health": "online" if system else "degraded",
         "checked_at": datetime.now(timezone.utc).isoformat(),
+        "degraded_reads": read_issues,
         "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
         "system": {"name": system.get("device_name") or pbx.get("name") or "Yeastar PBX", "model": system.get("model_name", ""), "firmware_version": system.get("firmware_version", ""), "uptime_seconds": uptime_seconds},
         "extensions": {"total": len(extensions), "registered": online_extensions, "unregistered": len(extensions) - online_extensions},
