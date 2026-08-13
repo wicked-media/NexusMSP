@@ -98,9 +98,11 @@ export default function DevicesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [isLinkingAcronis, setIsLinkingAcronis] = useState(false);
+  const [maintenanceWindow, setMaintenanceWindow] = useState(null);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const filterSource = searchParams.get("source");
+  const maintenanceWindowId = searchParams.get("maintenanceWindow");
 
   useEffect(() => {
     const clientId = searchParams.get("clientId");
@@ -123,6 +125,27 @@ export default function DevicesPage() {
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!maintenanceWindowId) {
+      setMaintenanceWindow(null);
+      return undefined;
+    }
+    let current = true;
+    axios.get(`${API}/maintenance-windows/${maintenanceWindowId}`, { headers })
+      .then((response) => {
+        if (!current) return;
+        const window = response.data;
+        const deviceIds = [...new Set((window.device_ids || []).filter(Boolean))];
+        setMaintenanceWindow(window);
+        setSelectedDevices(deviceIds);
+        setTab("directory");
+      })
+      .catch((error) => {
+        if (current) toast.error(error.response?.data?.detail || "Maintenance window could not be loaded");
+      });
+    return () => { current = false; };
+  }, [headers, maintenanceWindowId]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -507,6 +530,30 @@ export default function DevicesPage() {
           if (f.search !== undefined) setSearch(f.search);
         }}
       />
+      {maintenanceWindow && (
+        <Card className="border-amber-500/25 bg-amber-500/[0.055]" data-testid="maintenance-window-scope">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-400/20 bg-amber-400/[0.08]">
+                <CalendarClock className="h-4 w-4 text-amber-200" />
+              </div>
+              <div>
+                <p className="text-sm font-medium">Maintenance scope: {maintenanceWindow.name || "Scheduled window"}</p>
+                <p className="text-xs text-muted-foreground">{selectedDevices.length} asset{selectedDevices.length === 1 ? "" : "s"} selected · {(maintenanceWindow.actions || []).join(", ") || "No actions recorded"}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => navigate("/maintenance-scheduler")}>Open schedule</Button>
+              <Button size="sm" variant="ghost" className="text-zinc-400" onClick={() => {
+                setSelectedDevices([]);
+                const next = new URLSearchParams(searchParams);
+                next.delete("maintenanceWindow");
+                setSearchParams(next, { replace: true });
+              }}>Clear scope</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
