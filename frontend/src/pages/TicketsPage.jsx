@@ -56,6 +56,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
@@ -68,7 +69,7 @@ import {
   Download, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, DollarSign, Package,
   Camera, QrCode, ClipboardList, Bell, Image as ImageIcon, ListChecks,
-  Settings2, AlertTriangle, Pencil
+  Settings2, AlertTriangle, Pencil, ChevronDown
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG } from "@/config/ticketConfig";
@@ -3715,17 +3716,20 @@ export default function TicketsPage() {
         title="Ticket queue"
         subtitle={`${tickets.length} support · ${workshopJobs.length} workshop · ${fieldJobs.length} field jobs · saved views and live service signals`}
         actions={<>
-          <Button size="sm" className="h-8 text-xs" onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn">
-            <Plus className="w-3 h-3 mr-1" />New ticket
-          </Button>
-          <Button variant="info" size="sm" className="h-8 text-xs" onClick={() => setWsDialog(true)} data-testid="create-ws-btn">
-            <Wrench className="w-3 h-3 mr-1" />Workshop
-          </Button>
-          <Button variant="info" size="sm" className="h-8 text-xs" onClick={() => setFjDialog(true)} data-testid="create-fj-btn">
-            <Radio className="w-3 h-3 mr-1" />Cabling
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={fetchTickets} data-testid="refresh-tickets-btn">
-            <RefreshCw className="w-3 h-3 mr-1" />Refresh
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="h-8 text-xs" data-testid="new-ticket-menu-btn">
+                <Plus className="mr-1 h-3 w-3" />New work<ChevronDown className="ml-1 h-3 w-3 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Ticket className="mr-2 h-3.5 w-3.5 text-cyan-300" />Support ticket</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWsDialog(true)} data-testid="create-ws-btn"><Wrench className="mr-2 h-3.5 w-3.5 text-amber-300" />Workshop job</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setFjDialog(true)} data-testid="create-fj-btn"><Radio className="mr-2 h-3.5 w-3.5 text-violet-300" />Cabling / field job</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground" onClick={fetchTickets} data-testid="refresh-tickets-btn" aria-label="Refresh ticket queue" title="Refresh ticket queue">
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         </>}
       />
