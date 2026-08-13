@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   AlertTriangle, ArrowRight, BadgeDollarSign, Boxes, CheckCircle2, CircleDollarSign,
   CloudCog, Database, ExternalLink, Layers3, Loader2, PackageCheck, Pencil, Plus,
@@ -92,6 +93,7 @@ export default function LicenseManagementPage() {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -159,11 +161,15 @@ export default function LicenseManagementPage() {
     }
   };
 
-  const deleteLicence = async (item) => {
-    if (!window.confirm(`Remove the confirmed licence record for ${item.name}?`)) return;
+  const deleteLicence = async (item, confirmed = false) => {
+    if (!confirmed) {
+      setDeleteTarget(item);
+      return;
+    }
     try {
       await axios.delete(`${API}/license-management/licenses/${item.source_record_id}`, { headers });
       toast.success("Confirmed licence removed");
+      setDeleteTarget(null);
       await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Unable to remove the licence");
@@ -492,6 +498,20 @@ export default function LicenseManagementPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Subscription evidence"
+          title="Remove confirmed licence"
+          description={`Remove the confirmed licence record for ${deleteTarget?.name || "this subscription"}?`}
+          icon={Trash2}
+          tone="amber"
+          testId="confirmed-licence-delete-dialog"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep licence</Button><Button variant="destructive" onClick={() => deleteLicence(deleteTarget, true)}>Remove record</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] p-3 text-sm text-muted-foreground">This removes only the manually confirmed evidence record. Provider usage and billing data remain available for reconciliation.</div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
