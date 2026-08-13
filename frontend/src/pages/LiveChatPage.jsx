@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 export default function LiveChatPage() {
   const { token, user } = useAuth();
@@ -42,6 +43,7 @@ export default function LiveChatPage() {
   const [newCanned, setNewCanned] = useState({ shortcut: "", title: "", content: "" });
   const [typingUsers, setTypingUsers] = useState([]);
   const [creatingTicket, setCreatingTicket] = useState(false);
+  const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false);
   const messagesEndRef = useRef(null);
   const typingAtRef = useRef(0);
   const headers = { Authorization: `Bearer ${token}` };
@@ -133,10 +135,10 @@ export default function LiveChatPage() {
 
   const closeSession = async () => {
     if (!activeSession) return;
-    if (!window.confirm("Close this chat session?")) return;
     try {
       await axios.post(`${API}/live-chat/sessions/${activeSession.id}/close`, {}, { headers });
       toast.success("Session closed");
+      setCloseConfirmationOpen(false);
       setActiveSession(null);
       setMessages([]);
       fetchSessions(); fetchStats();
@@ -311,7 +313,7 @@ export default function LiveChatPage() {
                     <Button size="sm" variant="outline" onClick={() => activeSession.ticket_id ? navigate(`/tickets?ticket=${activeSession.ticket_id}`) : createTicket()} disabled={creatingTicket} data-testid="create-ticket-from-chat">
                       <Ticket className="w-3 h-3 mr-1" />{activeSession.ticket_id ? "Open ticket" : creatingTicket ? "Creating…" : "Create ticket"}
                     </Button>
-                    <Button size="sm" variant="destructive" onClick={closeSession} disabled={activeSession.status === "closed"} data-testid="close-chat">
+                    <Button size="sm" variant="destructive" onClick={() => setCloseConfirmationOpen(true)} disabled={activeSession.status === "closed"} data-testid="close-chat">
                       <X className="w-3 h-3 mr-1" />Close
                     </Button>
                   </div>
@@ -479,11 +481,14 @@ export default function LiveChatPage() {
 
       {/* Transfer dialog */}
       <Dialog open={transferDialog} onOpenChange={setTransferDialog}>
-        <DialogContent aria-describedby="transfer-desc">
-          <DialogHeader>
-            <DialogTitle>Transfer chat session</DialogTitle>
-            <p id="transfer-desc" className="text-xs text-muted-foreground">Hand this session over to another agent. A system message will be posted.</p>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Client communication"
+          title="Transfer chat session"
+          description="Hand this conversation to the right technician while preserving the customer context and an auditable handover note."
+          icon={ArrowRightLeft}
+          tone="cyan"
+          footer={<><Button variant="outline" onClick={() => setTransferDialog(false)}>Cancel</Button><Button onClick={transferSession} disabled={!transferAgent} data-testid="confirm-transfer-btn"><ArrowRightLeft className="mr-2 h-4 w-4" />Transfer conversation</Button></>}
+        >
           <div className="space-y-3">
             <div>
               <Label className="text-xs">Transfer to agent</Label>
@@ -506,22 +511,20 @@ export default function LiveChatPage() {
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setTransferDialog(false)}>Cancel</Button>
-            <Button onClick={transferSession} disabled={!transferAgent} data-testid="confirm-transfer-btn">
-              <ArrowRightLeft className="w-4 h-4 mr-1" />Transfer
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Manage canned responses dialog */}
       <Dialog open={manageCanned} onOpenChange={setManageCanned}>
-        <DialogContent className="max-w-[600px]" aria-describedby="canned-desc">
-          <DialogHeader>
-            <DialogTitle>Canned responses</DialogTitle>
-            <p id="canned-desc" className="text-xs text-muted-foreground">Use shortcuts to paste quick replies. Placeholders <span className="font-mono">{"{visitor}"}</span> and <span className="font-mono">{"{eta}"}</span> auto-substitute.</p>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Response library"
+          title="Canned responses"
+          description="Maintain fast, consistent customer replies. Visitor and ETA placeholders are applied automatically when a technician sends the message."
+          icon={Zap}
+          tone="emerald"
+          className="max-w-[600px]"
+          footer={<Button variant="outline" onClick={() => setManageCanned(false)}>Done</Button>}
+        >
           <ScrollArea className="max-h-[300px]">
             <div className="space-y-2">
               {canned.map(c => (
@@ -551,7 +554,23 @@ export default function LiveChatPage() {
               <Plus className="w-3 h-3 mr-1" />Add canned response
             </Button>
           </div>
-        </DialogContent>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={closeConfirmationOpen} onOpenChange={setCloseConfirmationOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Client communication"
+          title="Close this conversation?"
+          description="The customer can no longer reply in this session once it is closed. Create or link a ticket first if follow-up work is needed."
+          icon={AlertTriangle}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setCloseConfirmationOpen(false)}>Keep open</Button><Button variant="destructive" onClick={closeSession} data-testid="confirm-close-chat"><X className="mr-2 h-4 w-4" />Close conversation</Button></>}
+        >
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm leading-6 text-muted-foreground">
+            <p className="font-semibold text-foreground">Before you close</p>
+            <p className="mt-1">Nexus keeps the transcript and any linked ticket for audit. Use the ticket workflow if work needs to continue after the customer leaves chat.</p>
+          </div>
+        </NexusWorkflowDialog>
       </Dialog>
       </div>
     </PageShell>
