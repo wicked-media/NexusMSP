@@ -8,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   BellOff, Plus, Clock, Shield, Trash2, RefreshCw, Loader2, Search, Settings
 } from "lucide-react";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 export default function AlertSuppressionPage() {
   const { token } = useAuth();
@@ -24,6 +25,7 @@ export default function AlertSuppressionPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [tab, setTab] = useState("rules");
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [form, setForm] = useState({ name: "", description: "", match_type: "message_contains", match_value: "", scope: "all" });
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -50,12 +52,16 @@ export default function AlertSuppressionPage() {
     } catch { toast.error("Failed to update"); }
   };
 
-  const deleteRule = async (ruleId) => {
-    if (!window.confirm("Delete this suppression rule?")) return;
+  const deleteRule = async (ruleId, confirmed = false) => {
+    if (!confirmed) {
+      setDeleteTarget(rules.find((rule) => rule.id === ruleId) || null);
+      return;
+    }
     try {
       await axios.delete(`${API}/alert-suppression/rules/${ruleId}`, { headers });
       setRules(prev => prev.filter(r => r.id !== ruleId));
       toast.success("Rule deleted");
+      setDeleteTarget(null);
     } catch { toast.error("Failed to delete"); }
   };
 
@@ -241,12 +247,15 @@ export default function AlertSuppressionPage() {
 
       {/* Create Rule Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-md" aria-describedby="create-rule-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Plus className="w-5 h-5 text-blue-400" />Create Suppression Rule</DialogTitle>
-            <DialogDescription id="create-rule-desc">Define a new alert suppression rule</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={createRule} className="space-y-4">
+        <NexusWorkflowDialog
+          eyebrow="Noise management"
+          title="Create suppression rule"
+          description="Define the signals that can be safely quieted, then retain the rationale for every technician who reviews alert behaviour later."
+          icon={BellOff}
+          tone="amber"
+          footer={<><Button variant="outline" type="button" onClick={() => setShowCreate(false)}>Cancel</Button><Button type="submit" form="suppression-rule-form" data-testid="save-rule-btn">Create rule</Button></>}
+        >
+          <form id="suppression-rule-form" onSubmit={createRule} className="space-y-4">
             <div className="space-y-2"><Label>Rule Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Suppress agent heartbeat noise" required data-testid="rule-name-input" /></div>
             <div className="space-y-2"><Label>Description</Label><Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Why this rule exists..." /></div>
             <div className="grid grid-cols-2 gap-4">
@@ -273,9 +282,21 @@ export default function AlertSuppressionPage() {
               </div>
             </div>
             <div className="space-y-2"><Label>Match Value *</Label><Input value={form.match_value} onChange={e => setForm({ ...form, match_value: e.target.value })} placeholder="e.g., agent_check_in or Sunday 02:00-06:00" required /></div>
-            <DialogFooter><Button type="submit" data-testid="save-rule-btn">Create Rule</Button></DialogFooter>
           </form>
-        </DialogContent>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Noise management"
+          title="Delete suppression rule?"
+          description="Alerts matching this rule will resume immediately. The historic suppression count remains in the audit record."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep rule</Button><Button variant="destructive" onClick={() => deleteRule(deleteTarget?.id, true)}>Delete rule</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.name || "Selected rule"}</p><p className="mt-1 text-sm text-muted-foreground">Confirm only when the alert noise is no longer expected or has been addressed at its source.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
