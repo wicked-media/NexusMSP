@@ -3693,9 +3693,7 @@ export default function TicketsPage() {
   const completedTickets = tickets.filter(t => ["resolved", "closed"].includes(t.status));
   const completedCount = completedTickets.length;
   const criticalCount = tickets.filter(t => t.priority === "critical" && t.status !== "closed" && t.status !== "resolved").length;
-  const unassignedCount = tickets.filter(t => !t.assigned_to && !["closed", "resolved"].includes(t.status)).length;
   const staleCount = tickets.filter(t => !t.last_response_at && Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000 && !["closed", "resolved"].includes(t.status)).length;
-  const breachedCount = tickets.filter(t => (t.sla_due || t.sla_due_at) && new Date(t.sla_due || t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status)).length;
   const completedDurations = completedTickets.map(resolutionMinutes).filter(value => value != null);
   const avgResTime = completedDurations.length
     ? Math.round(completedDurations.reduce((total, value) => total + value, 0) / completedDurations.length)
@@ -3800,30 +3798,6 @@ export default function TicketsPage() {
           );
         })()}
        </div>
-
-       <Card className="overflow-hidden border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.055] via-card to-violet-500/[0.035]" data-testid="ticket-queue-cockpit">
-         <CardContent className="flex flex-col gap-3 p-3.5 lg:flex-row lg:items-center lg:justify-between">
-           <div className="min-w-0">
-             <div className="flex flex-wrap items-center gap-2">
-               <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-700 dark:text-cyan-300">Queue cockpit</span>
-               <Badge variant="outline" className="border-white/10 bg-background/40 text-[9px] text-muted-foreground">Live triage</Badge>
-             </div>
-             <p className="mt-1 text-sm font-medium text-foreground">Focus the queue, then act without leaving it.</p>
-             <p className="mt-0.5 text-xs text-muted-foreground">Hover a ticket to claim it, start work, resolve it, or open a linked device in Nexus Remote.</p>
-           </div>
-           <div className="flex flex-wrap gap-2">
-             <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => applyQueueFilter({ attention: "sla_breach" })}>
-               <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />{breachedCount} breached
-             </Button>
-             <Button size="sm" variant="warning" className="h-8 text-xs" onClick={() => applyQueueFilter({ attention: "unassigned" })}>
-               <User className="mr-1.5 h-3.5 w-3.5" />{unassignedCount} unassigned
-             </Button>
-             <Button size="sm" variant="info" className="h-8 text-xs" onClick={() => applyQueueFilter({ priority: "critical" })}>
-               <Shield className="mr-1.5 h-3.5 w-3.5" />{criticalCount} critical
-             </Button>
-           </div>
-         </CardContent>
-       </Card>
 
        {/* Type Filter Tabs */}
       <div key="type-tabs" className="min-w-0">
