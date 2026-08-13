@@ -43,6 +43,7 @@ export default function ClientDocumentsTab({ client }) {
   const fileRef = useRef(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchDocs = async () => {
     setLoading(true);
@@ -83,11 +84,12 @@ export default function ClientDocumentsTab({ client }) {
     }
   };
 
-  const handleDelete = async (doc) => {
-    if (!window.confirm(`Delete "${doc.title}"?`)) return;
+  const handleDelete = async (doc, confirmed = false) => {
+    if (!confirmed) { setDeleteTarget(doc); return; }
     try {
       await axios.delete(`${API}/clients/${client.id}/documents/${doc.id}`, { headers });
       toast.success("Deleted");
+      setDeleteTarget(null);
       await fetchDocs();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Delete failed");
@@ -281,6 +283,19 @@ export default function ClientDocumentsTab({ client }) {
               </div>
             </div>
           )}
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Client knowledge"
+          title="Delete client document?"
+          description="This permanently removes the file or runbook from the client's shared knowledge record. Make sure a newer approved document is available first."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep document</Button><Button variant="destructive" onClick={() => handleDelete(deleteTarget, true)}>Delete document</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.title || "Selected document"}</p><p className="mt-1 text-sm text-muted-foreground">{deleteTarget?.kind === "runbook" ? "Technicians will no longer be able to use this procedure from the client workspace." : "The uploaded file will no longer be available to authorised technicians."}</p></div>
         </NexusWorkflowDialog>
       </Dialog>
     </div>
