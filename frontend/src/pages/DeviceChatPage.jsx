@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import { 
   MessageSquare,
@@ -79,6 +81,8 @@ export default function DeviceChatPage() {
   const [sending, setSending] = useState(false);
   const [activeTab, setActiveTab] = useState("chat");
   const [commandInput, setCommandInput] = useState("");
+  const [commandConfirmationOpen, setCommandConfirmationOpen] = useState(false);
+  const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
   const messagesEndRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -100,11 +104,12 @@ export default function DeviceChatPage() {
     }
   };
 
+  // fetchChat is intentionally invoked only when the route device changes.
   useEffect(() => {
     if (deviceId) {
       fetchChat();
     }
-  }, [deviceId]);
+  }, [deviceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     scrollToBottom();
@@ -137,6 +142,7 @@ export default function DeviceChatPage() {
     try {
       await axios.post(`${API}/devices/${deviceId}/chat/command?command=${encodeURIComponent(commandInput)}`, {}, { headers });
       setCommandInput("");
+      setCommandConfirmationOpen(false);
       fetchChat();
       toast.success("Command sent");
     } catch (error) {
@@ -147,10 +153,10 @@ export default function DeviceChatPage() {
   };
 
   const clearChat = async () => {
-    if (!window.confirm("Clear all chat history for this device?")) return;
     try {
       await axios.delete(`${API}/devices/${deviceId}/chat`, { headers });
       setMessages([]);
+      setClearConfirmationOpen(false);
       toast.success("Chat cleared");
     } catch (error) {
       toast.error("Failed to clear chat");
@@ -190,9 +196,9 @@ export default function DeviceChatPage() {
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={clearChat}>
+          <Button variant="outline" size="sm" onClick={() => setClearConfirmationOpen(true)}>
             <Trash2 className="w-4 h-4 mr-2" />
-            Clear
+            Clear transcript
           </Button>
         </div>
       </div>
@@ -266,8 +272,8 @@ export default function DeviceChatPage() {
                       data-testid="command-input"
                     />
                   </div>
-                  <Button type="submit" disabled={sending || !commandInput.trim()}>
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Execute"}
+                  <Button type="button" onClick={() => setCommandConfirmationOpen(true)} disabled={sending || !commandInput.trim()}>
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Review command"}
                   </Button>
                 </div>
                 <div className="flex gap-2">
@@ -289,6 +295,32 @@ export default function DeviceChatPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={commandConfirmationOpen} onOpenChange={setCommandConfirmationOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Device operations"
+          title="Review device command"
+          description="Confirm the exact command before Nexus sends it to the device agent. The request and resulting output remain in this device timeline."
+          icon={Terminal}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setCommandConfirmationOpen(false)}>Cancel</Button><Button onClick={sendCommand} disabled={!commandInput.trim() || sending} data-testid="confirm-device-command"><Terminal className="mr-2 h-4 w-4" />{sending ? "Sending…" : "Send to device"}</Button></>}
+        >
+          <div className="space-y-3"><div className="rounded-xl border border-amber-400/20 bg-black/25 p-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300">Command</p><code className="block whitespace-pre-wrap break-words font-mono text-sm text-foreground">{commandInput}</code></div><p className="text-xs leading-5 text-muted-foreground">Only use commands that are safe for this client and ticket context. For a high-impact change, create an approved change first.</p></div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={clearConfirmationOpen} onOpenChange={setClearConfirmationOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Device operations"
+          title="Clear device transcript?"
+          description="This removes the chat history shown in Nexus for this endpoint. It cannot be restored from this workspace."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setClearConfirmationOpen(false)}>Keep transcript</Button><Button variant="destructive" onClick={clearChat} data-testid="confirm-clear-device-chat"><Trash2 className="mr-2 h-4 w-4" />Clear transcript</Button></>}
+        >
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm leading-6 text-muted-foreground">Consider preserving command output and technician instructions in the related ticket before removing the device conversation.</div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
