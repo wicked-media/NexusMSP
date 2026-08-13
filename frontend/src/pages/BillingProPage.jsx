@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import {
   Sparkles, Hash, Warehouse, ShoppingCart, FileCheck, Receipt, Plus, Trash2, Save, Upload, Loader2, CheckCircle, XCircle
@@ -247,6 +248,7 @@ function CalendarPanel({ headers }) {
 function WarehousesPanel({ headers }) {
   const [items, setItems] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [form, setForm] = useState({ name: "", code: "", address: "", is_default: false });
   const fetch = () => axios.get(`${API}/billing-pro/warehouses`, { headers }).then(r => setItems(r.data));
   useEffect(() => { fetch(); }, []); // eslint-disable-line
@@ -254,9 +256,9 @@ function WarehousesPanel({ headers }) {
     if (!form.name) return toast.error("Name required");
     try { await axios.post(`${API}/billing-pro/warehouses`, form, { headers }); toast.success("Location added"); setShowAdd(false); setForm({ name: "", code: "", address: "", is_default: false }); fetch(); } catch { toast.error("Create failed"); }
   };
-  const remove = async (id) => {
-    if (!window.confirm("Delete this location?")) return;
-    try { await axios.delete(`${API}/billing-pro/warehouses/${id}`, { headers }); toast.success("Deleted"); fetch(); } catch { toast.error("Delete failed"); }
+  const remove = async (id, confirmed = false) => {
+    if (!confirmed) { setDeleteTarget(items.find((item) => item.id === id) || null); return; }
+    try { await axios.delete(`${API}/billing-pro/warehouses/${id}`, { headers }); toast.success("Deleted"); setDeleteTarget(null); fetch(); } catch { toast.error("Delete failed"); }
   };
   return (
     <Card><CardHeader><CardTitle className="flex items-center justify-between"><span className="flex items-center gap-2"><Warehouse className="w-4 h-4" />Stock Locations</span><Button size="sm" onClick={() => setShowAdd(true)} data-testid="add-warehouse"><Plus className="w-3.5 h-3.5 mr-1" />Add Location</Button></CardTitle></CardHeader><CardContent>
@@ -279,6 +281,18 @@ function WarehousesPanel({ headers }) {
           </div>
           <DialogFooter><Button variant="ghost" onClick={() => setShowAdd(false)}>Cancel</Button><Button onClick={create} data-testid="confirm-add-wh">Add</Button></DialogFooter>
         </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Inventory control"
+          title="Delete stock location?"
+          description="This removes the location from new stock movements. Confirm that no inventory, fulfilment, or billing process still relies on it."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep location</Button><Button variant="destructive" onClick={() => remove(deleteTarget?.id, true)}>Delete location</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.name || "Selected location"}</p><p className="mt-1 text-sm text-muted-foreground">Review current stock and active purchasing workflows before removing this record.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </CardContent></Card>
   );
