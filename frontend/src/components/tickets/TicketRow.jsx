@@ -115,7 +115,16 @@ export function TicketRow({
   return (
     <div
       onClick={() => onOpen?.(ticket)}
-      className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer transition-colors [&>span:has(+.ticket-client-brand)]:md:hidden
+      onKeyDown={(event) => {
+        if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) {
+          event.preventDefault();
+          onOpen?.(ticket);
+        }
+      }}
+      tabIndex={0}
+      role="button"
+      aria-label={`Open ${ticket.ticket_number || "ticket"}: ${ticket.title || "Untitled ticket"}`}
+      className={`group/row relative flex items-center gap-3 ${d.row} border-b border-white/[0.04] border-l-2 cursor-pointer outline-none transition-colors focus-visible:bg-cyan-500/[0.06] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-400/40 [&>span:has(+.ticket-client-brand)]:md:hidden
         ${TICKET_PRIORITY_STYLES[ticket.priority]?.border || "border-l-zinc-700"}
         ${isSelected ? "bg-violet-500/[0.08]" : isOverdue ? "bg-rose-500/[0.025] hover:bg-rose-500/[0.055]" : ticket.priority === "critical" ? "bg-amber-500/[0.02] hover:bg-amber-500/[0.05]" : "hover:bg-white/[0.025]"}
         ${isClosed ? "opacity-55" : ""}`}
@@ -182,7 +191,7 @@ export function TicketRow({
 
       {/* Technician cockpit actions appear only once a row is targeted. */}
       {quickActions.length > 0 && (
-        <div className="hidden xl:flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-black/20 p-0.5 opacity-0 shadow-sm transition-all group-hover/row:opacity-100 group-focus-within/row:opacity-100" onClick={event => event.stopPropagation()}>
+        <div className="hidden xl:flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-black/20 p-0.5 opacity-0 shadow-sm transition-all group-hover/row:opacity-100 group-focus/row:opacity-100 group-focus-within/row:opacity-100" onClick={event => event.stopPropagation()}>
           {quickActions.map(({ id, label, icon: QuickIcon, tone }) => (
             <TooltipProvider key={id} delayDuration={250}>
               <Tooltip>
