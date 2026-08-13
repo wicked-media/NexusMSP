@@ -168,6 +168,7 @@ export function MaintenanceWindowHistory({ open, onClose }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState(null);
+  const [actionTarget, setActionTarget] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,16 +181,16 @@ export function MaintenanceWindowHistory({ open, onClose }) {
 
   useEffect(() => { if (open) load(); }, [load, open]);
 
-  const cancel = async (w) => {
-    if (!window.confirm(`Cancel "${w.name}"?`)) return;
+  const cancel = async (w, confirmed = false) => {
+    if (!confirmed) { setActionTarget({ window: w, action: "cancel" }); return; }
     try { await axios.delete(`${API}/maintenance-windows/${w.id}`, { headers }); toast.success("Cancelled"); load(); }
-    catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    catch (e) { toast.error(e.response?.data?.detail || e.message); } finally { setActionTarget(null); }
   };
 
-  const runNow = async (w) => {
-    if (!window.confirm(`Run "${w.name}" right now?`)) return;
+  const runNow = async (w, confirmed = false) => {
+    if (!confirmed) { setActionTarget({ window: w, action: "run" }); return; }
     try { await axios.post(`${API}/maintenance-windows/${w.id}/run-now`, {}, { headers }); toast.success("Triggered"); setTimeout(load, 800); }
-    catch (e) { toast.error(e.response?.data?.detail || e.message); }
+    catch (e) { toast.error(e.response?.data?.detail || e.message); } finally { setActionTarget(null); }
   };
 
   const openDetail = async (w) => {
@@ -285,6 +286,19 @@ export function MaintenanceWindowHistory({ open, onClose }) {
             </>
           )}
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(actionTarget)} onOpenChange={(open) => !open && setActionTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Device operations"
+          title={actionTarget?.action === "cancel" ? "Cancel maintenance window?" : "Run maintenance now?"}
+          description={actionTarget?.action === "cancel" ? "This removes the scheduled maintenance before its queued actions are dispatched." : "This starts the selected actions immediately across the scheduled device scope, outside its planned window."}
+          icon={actionTarget?.action === "cancel" ? Trash2 : Play}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setActionTarget(null)}>Cancel</Button><Button variant={actionTarget?.action === "cancel" ? "destructive" : "default"} onClick={() => actionTarget?.action === "cancel" ? cancel(actionTarget.window, true) : runNow(actionTarget.window, true)}>{actionTarget?.action === "cancel" ? "Cancel window" : "Run now"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{actionTarget?.window?.name || "Selected maintenance window"}</p><p className="mt-1 text-sm text-muted-foreground">{(actionTarget?.window?.device_ids || []).length} devices · {(actionTarget?.window?.actions || []).join(", ") || "No actions recorded"}</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </>
   );
