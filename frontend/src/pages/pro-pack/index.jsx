@@ -49,6 +49,7 @@ const PageHeader = ({ title, subtitle, icon: Icon = Sparkles, children }) => (
 /* ============== TRIAGE QUEUE ============== */
 export function TriageQueuePage({ embedded = false }) {
   const { headers } = useApi();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(false);
   const load = () => axios.get(`${API}/pro-pack/triage-queue`, { headers })
@@ -79,16 +80,17 @@ export function TriageQueuePage({ embedded = false }) {
           />
         ))}
       </div>
-      <Card><CardContent className="p-0"><Table>
-        <TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Title</TableHead><TableHead>Client</TableHead><TableHead>Priority</TableHead><TableHead>Source</TableHead><TableHead>Age</TableHead></TableRow></TableHeader>
+      <Card className="overflow-hidden border-white/[0.08] bg-[#101217]/80"><CardContent className="p-0"><Table>
+        <TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Service brief</TableHead><TableHead>Client</TableHead><TableHead>Priority</TableHead><TableHead>Source</TableHead><TableHead>Age</TableHead><TableHead className="text-right">Next step</TableHead></TableRow></TableHeader>
         <TableBody>{(data.items || []).map(t => (
-          <TableRow key={t.id} className="cursor-pointer hover:bg-muted/40" onClick={() => window.location.href = `/tickets?ticket=${encodeURIComponent(t.id)}`}>
+          <TableRow key={t.id} className="group cursor-pointer transition-colors hover:bg-cyan-500/[0.035]" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(t.id)}`)}>
             <TableCell className="font-mono text-xs">{t.ticket_number}</TableCell>
-            <TableCell>{t.title}</TableCell>
-            <TableCell>{t.client_name}</TableCell>
+            <TableCell><p className="max-w-[440px] truncate font-medium text-foreground">{t.title}</p><p className="mt-0.5 text-[10px] text-muted-foreground">Unassigned · ready for technician ownership</p></TableCell>
+            <TableCell className="text-sm text-muted-foreground">{t.client_name}</TableCell>
             <TableCell><Badge className={`text-[10px] capitalize ${TICKET_PRIORITY_STYLES[t.priority]?.badge || TICKET_PRIORITY_STYLES.medium.badge}`}>{t.priority}</Badge></TableCell>
             <TableCell><Badge variant="outline" className="text-[10px]">{t.source || "manual"}</Badge></TableCell>
-            <TableCell className="text-xs">{t.created_at?.slice(0, 16).replace("T", " ")}</TableCell>
+            <TableCell className="font-mono text-xs text-muted-foreground">{t.created_at?.slice(0, 16).replace("T", " ")}</TableCell>
+            <TableCell className="text-right"><Button type="button" size="sm" variant="outline" className="h-8 border-cyan-500/20 text-xs text-cyan-200 opacity-70 transition-opacity group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); navigate(`/tickets?ticket=${encodeURIComponent(t.id)}`); }} data-testid={`triage-review-${t.id}`}>Review & assign<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button></TableCell>
           </TableRow>
         ))}</TableBody>
       </Table>{(data.items || []).length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No unassigned tickets need triage.</p>}</CardContent></Card>
