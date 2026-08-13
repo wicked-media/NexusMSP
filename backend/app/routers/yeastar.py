@@ -654,6 +654,23 @@ async def _voice_extensions_with_overrides(current_user: dict, pbx: dict | None 
     return enriched
 
 
+async def _cache_voice_extensions(pbx: dict, extensions: list[dict], captured_at: str) -> None:
+    """Persist the last successful roster for a responsive, offline-safe workspace."""
+    pbx_id = str(pbx.get("id") or "primary")
+    await db.yeastar_extension_cache.delete_many({"pbx_id": pbx_id})
+    if not extensions:
+        return
+    snapshots = []
+    for extension in extensions:
+        snapshots.append({
+            **{key: value for key, value in extension.items() if key != "_id"},
+            "pbx_id": pbx_id,
+            "client_id": pbx.get("client_id") or pbx.get("linked_client_id") or "",
+            "cached_at": captured_at,
+        })
+    await db.yeastar_extension_cache.insert_many(snapshots)
+
+
 @router.get("/yeastar/voice-workspace")
 async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)):
     sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
@@ -669,7 +686,7 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
     # live call to every customer PBX belongs in the explicit Monitor and
     # Wallboard workflows; this page should be immediately usable during a
     # provider outage. Extension details are refreshed by the governed sync.
-    extensions: list[dict] = []
+    extensions = await db.yeastar_extension_cache.find({}, {"_id": 0}).to_list(5000)
     billable = sum(int(pbx.get("billable_extension_count", 0) or 0) for pbx in pbx_records if pbx.get("enabled", True))
     summary_history = [item for item in billing_history if not item.get("pbx_id")]
     previous_quantity = summary_history[1].get("billable_quantity", billable) if len(summary_history) > 1 else billable
@@ -775,6 +792,7 @@ async def create_yeastar_pbx(data: dict, current_user: dict = Depends(get_curren
         await db.yeastar_pbxs.insert_one(dict(record))
     except DuplicateKeyError as exc:
         raise HTTPException(status_code=409, detail="This client PBX was linked by another request. Open the existing record instead.") from exc
+    await _cache_voice_extensions(record, extensions, completed_at)
     await db.yeastar_sync_history.insert_one({
         "id": str(uuid.uuid4()),
         "pbx_id": record["id"],
@@ -918,6 +936,7 @@ async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: di
             entry.update({"status": "success", "completed_at": completed_at.isoformat(), "duration_ms": duration_ms, "extensions_processed": len(extensions), "token_refreshes": 0, "api_latency_ms": duration_ms})
             successful_extensions += len(extensions)
             successful_pbxs += 1
+            await _cache_voice_extensions(pbx, extensions, completed_at.isoformat())
             await db.yeastar_pbxs.update_one({"id": pbx_id}, {"$set": {"status": "online", "last_sync": completed_at.isoformat(), "extension_count": len(extensions), "billable_extension_count": len([extension for extension in extensions if extension.get("included_in_billing")]), "updated_at": completed_at.isoformat()}})
         except Exception as exc:
             completed_at = datetime.now(timezone.utc)
