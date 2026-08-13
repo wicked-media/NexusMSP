@@ -247,6 +247,7 @@ function BackupLifecycleNavigator({ activeTab, onSelect, orphanCount = 0 }) {
 }
 
 const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis", "orphans", "compliance", "billing", "verify"]);
+const BACKUP_STATUS_FILTERS = new Set(["all", "success", "failed", "running"]);
 
 export default function BackupCenterPage() {
   const { token } = useAuth();
@@ -254,6 +255,7 @@ export default function BackupCenterPage() {
   const headers = { Authorization: `Bearer ${token}` };
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
+  const requestedStatusFilter = searchParams.get("status");
   const [tab, setTab] = useState(() => BACKUP_TABS.has(requestedTab) ? requestedTab : "dashboard");
   const [dashData, setDashData] = useState(null);
   const [compData, setCompData] = useState(null);
@@ -268,7 +270,7 @@ export default function BackupCenterPage() {
   const [liveActivities, setLiveActivities] = useState({ running: [], recent: [], stats: {} });
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(() => BACKUP_STATUS_FILTERS.has(requestedStatusFilter) ? requestedStatusFilter : "all");
   const [search, setSearch] = useState("");
   const [dashboardPage, setDashboardPage] = useState(1);
   const [dashboardPageSize, setDashboardPageSize] = useState(25);
@@ -296,6 +298,11 @@ export default function BackupCenterPage() {
   }, [requestedTab]);
 
   useEffect(() => {
+    if (BACKUP_STATUS_FILTERS.has(requestedStatusFilter)) setStatusFilter(requestedStatusFilter);
+    else setStatusFilter("all");
+  }, [requestedStatusFilter]);
+
+  useEffect(() => {
     setDashboardPage(1);
   }, [search, statusFilter, dashboardPageSize]);
 
@@ -307,9 +314,22 @@ export default function BackupCenterPage() {
     setSearchParams(nextParams, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  const openDashboardFilter = (nextFilter) => {
+  const selectStatusFilter = useCallback((nextFilter) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextFilter === "all") nextParams.delete("status");
+    else nextParams.set("status", nextFilter);
     setStatusFilter(nextFilter);
-    selectTab("dashboard");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const openDashboardFilter = (nextFilter) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("tab");
+    if (nextFilter === "all") nextParams.delete("status");
+    else nextParams.set("status", nextFilter);
+    setStatusFilter(nextFilter);
+    setTab("dashboard");
+    setSearchParams(nextParams, { replace: true });
   };
 
   const openAcronisSettings = () => navigate("/settings?tab=integrations&anchor=acronis-settings-card");
@@ -751,7 +771,7 @@ export default function BackupCenterPage() {
                 data-testid="backup-dashboard-search"
               />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={selectStatusFilter}>
               <SelectTrigger className="w-full sm:w-44" aria-label="Filter backup status" data-testid="backup-status-filter"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
