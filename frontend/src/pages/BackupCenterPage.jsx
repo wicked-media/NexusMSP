@@ -624,7 +624,7 @@ export default function BackupCenterPage() {
     agentsHealth?.error ? `Agent health: ${agentsHealth.error}` : null,
     liveActivities?.error ? `Live activity feed: ${liveActivities.error}` : null,
   ].filter(Boolean);
-  const backupSourceUnavailable = sourceIssues.length > 0;
+  const backupSourceUnavailable = !loading && sourceIssues.length > 0;
   const backupTickerItems = [
     {
       key: "activity",
