@@ -99,6 +99,13 @@ export default function VoiceWorkspacePage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (tab !== "monitoring" || monitoringPbxId || !workspace?.pbxs?.length) return;
+    const permittedPbxs = clientScope ? workspace.pbxs.filter((pbx) => pbx.client_id === clientScope) : workspace.pbxs;
+    const preferredPbx = permittedPbxs.find((pbx) => pbx.has_credentials) || permittedPbxs[0];
+    if (preferredPbx?.id) setMonitoringPbxId(preferredPbx.id);
+  }, [clientScope, monitoringPbxId, tab, workspace]);
+
   const runSync = async (pbxId = "") => {
     const action = pbxId ? `sync-${pbxId}` : "sync";
     setBusy(action);
