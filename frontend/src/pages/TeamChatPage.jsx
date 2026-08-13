@@ -25,6 +25,7 @@ import {
   ArrowRightLeft,
   ArrowLeft,
   AtSign,
+  Bell,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -836,14 +837,22 @@ export default function TeamChatPage() {
                       aria-label={`Message ${channelDisplayName(activeChannel)}`}
                       data-testid="chat-input"
                     />
-                    <div className="flex flex-wrap items-center gap-1 px-3 pb-1.5 text-[10px]">
-                      <span className="mr-1 uppercase tracking-[0.14em] text-zinc-600">Ops actions</span>
-                      <button type="button" onClick={() => setInput("/ticket ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link ticket</button>
-                      <button type="button" onClick={() => setInput("/invoice ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link invoice</button>
-                      <button type="button" onClick={() => setInput("/po ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link PO</button>
-                      <button type="button" onClick={() => setInput("/note ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Add note</button>
-                      <button type="button" onClick={() => setInput("/page ")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-200">Page on-call</button>
-                      <button type="button" onClick={() => setInput("/summarize")} className="rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-emerald-500/30 hover:bg-emerald-500/10 hover:text-emerald-100">AI summary</button>
+                    <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5 text-[10px]">
+                      <span className="mr-1 uppercase tracking-[0.14em] text-zinc-600">Turn chat into work</span>
+                      <button type="button" onClick={() => setInput("/ticket ")} className="rounded-md border border-cyan-500/20 bg-cyan-500/[0.08] px-2 py-1 font-medium text-cyan-100 transition hover:border-cyan-400/45 hover:bg-cyan-500/[0.16]">Link ticket</button>
+                      <button type="button" onClick={() => setInput("/summarize")} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.08] px-2 py-1 font-medium text-emerald-100 transition hover:border-emerald-400/45 hover:bg-emerald-500/[0.16]">AI summary</button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild><button type="button" className="inline-flex items-center gap-1 rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-white/15 hover:bg-white/[0.07] hover:text-zinc-100">More actions<ChevronDown className="h-3 w-3" /></button></DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-48">
+                          <DropdownMenuLabel>Operational actions</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => setInput("/invoice ")}><FileText className="mr-2 h-3.5 w-3.5" />Link invoice</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setInput("/po ")}><FileText className="mr-2 h-3.5 w-3.5" />Link purchase order</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setInput("/note ")}><Edit3 className="mr-2 h-3.5 w-3.5" />Add internal note</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={() => setInput("/page ")}><Bell className="mr-2 h-3.5 w-3.5" />Page on-call</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                     <div className="flex items-center gap-1 px-2 pb-2">
                       <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
