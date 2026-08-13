@@ -703,6 +703,7 @@ export default function BackupCenterPage() {
   const dashboardPageBackups = filteredBackups.slice(dashboardStartIndex, dashboardStartIndex + dashboardPageSize);
   const dashboardRangeStart = filteredBackups.length ? dashboardStartIndex + 1 : 0;
   const dashboardRangeEnd = Math.min(dashboardStartIndex + dashboardPageSize, filteredBackups.length);
+  const pendingVerificationTests = (verifyData?.tests || []).filter((test) => test.result === "pending" || test.status === "scheduled");
 
   return (
     <div className="space-y-5" data-testid="backup-center-page">
@@ -1426,6 +1427,28 @@ export default function BackupCenterPage() {
               <HeroMetric label="Failed" value={vs.failed || 0} icon={XCircle} glow="rose" subtitle="Recovery exceptions" />
               <HeroMetric label="Average restore" value={vs.avg_restore_time_min != null ? vs.avg_restore_time_min : "—"} suffix={vs.avg_restore_time_min != null ? "m" : ""} animated={vs.avg_restore_time_min != null} icon={Activity} glow="violet" subtitle={vs.avg_restore_time_min != null ? "Measured recovery time" : "No measured result yet"} />
             </div>
+            {pendingVerificationTests.length > 0 && (
+              <Card className="border-amber-400/25 bg-amber-500/[0.045]" data-testid="pending-recovery-evidence">
+                <CardContent className="p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="flex items-center gap-2 text-sm font-semibold text-amber-100"><Clock className="h-4 w-4 text-amber-300" />Recovery evidence needs completion</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{pendingVerificationTests.length} scheduled test{pendingVerificationTests.length === 1 ? "" : "s"} still need a measured restore outcome. Record the result as soon as the test is complete.</p>
+                    </div>
+                    <Badge variant="outline" className="w-fit border-amber-400/30 text-amber-200">{pendingVerificationTests.length} pending</Badge>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    {pendingVerificationTests.slice(0, 3).map((test) => (
+                      <div key={test.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-400/15 bg-black/[0.10] px-3 py-2.5">
+                        <div className="min-w-0"><p className="truncate text-xs font-medium">{test.client_name}</p><p className="mt-0.5 truncate text-[10px] text-muted-foreground">{test.backup_type} · {test.backup_solution}</p></div>
+                        <Button size="sm" variant="outline" className="h-7 shrink-0 border-amber-400/25 px-2 text-[10px] text-amber-100" onClick={() => openVerificationCompletion(test)} data-testid={`complete-pending-verification-${test.id}`}>Record</Button>
+                      </div>
+                    ))}
+                  </div>
+                  {pendingVerificationTests.length > 3 && <p className="mt-2 text-[10px] text-muted-foreground">+{pendingVerificationTests.length - 3} more pending tests are listed below.</p>}
+                </CardContent>
+              </Card>
+            )}
             <div className="space-y-2">
               {(verifyData.tests || []).length === 0 && (
                 <Card className="border-sky-500/20 bg-sky-500/[0.025]">
