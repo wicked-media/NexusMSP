@@ -609,10 +609,13 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
     online_extensions = len([extension for extension in extensions if extension.get("registered")])
     missed = len([call for call in call_logs.get("data", []) if call.get("status") in {"missed", "failed"}])
     presence_extensions, presence_summary = _extension_presence_snapshot(extensions, active_calls)
-    return {
+    checked_at = datetime.now(timezone.utc).isoformat()
+    api_latency_ms = max(1, int((time.perf_counter() - started) * 1000))
+    health = "online" if system else "degraded"
+    snapshot = {
         "pbx": {"id": pbx.get("id"), "name": pbx.get("name") or "Yeastar PBX", "client_id": pbx.get("client_id"), "client_name": pbx.get("client_name") or "Client"},
-        "health": "online" if system else "degraded",
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "health": health,
+        "checked_at": checked_at,
         "degraded_reads": read_issues,
         "skipped_reads": skipped_reads,
         "last_connection_test": {
@@ -621,7 +624,7 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
             "status": pbx.get("status") or "unknown",
             "error": pbx.get("last_test_error") or "",
         },
-        "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
+        "api_latency_ms": api_latency_ms,
         "system": {"name": system.get("device_name") or pbx.get("name") or "Yeastar PBX", "model": system.get("model_name", ""), "firmware_version": system.get("firmware_version", ""), "uptime_seconds": uptime_seconds},
         "extensions": {"total": len(extensions), "registered": online_extensions, "unregistered": len(extensions) - online_extensions},
         "presence": {"extensions": presence_extensions, "summary": presence_summary},
@@ -629,6 +632,20 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         "recent_calls": call_logs.get("data", []),
         "missed_calls": missed,
     }
+    # Persist the operational result separately from the connection-test state.
+    # A transient monitor failure should be visible throughout Voice without
+    # overwriting the last verified credential test or marking a PBX offline.
+    await db.yeastar_pbxs.update_one(
+        {"id": pbx_id},
+        {"$set": {
+            "last_monitoring_at": checked_at,
+            "last_monitoring_health": health,
+            "last_monitoring_latency_ms": api_latency_ms,
+            "last_monitoring_degraded_reads": read_issues,
+            "last_monitoring_skipped_reads": skipped_reads,
+        }},
+    )
+    return snapshot
 
 
 @router.get("/yeastar/monitoring/wallboard")
