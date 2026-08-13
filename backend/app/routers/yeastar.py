@@ -373,6 +373,66 @@ async def get_yeastar_extensions(current_user: dict = Depends(get_current_user),
         return result
     return []
 
+
+def _normalise_extension_presence(raw_status: Any, registered: bool) -> str:
+    """Map provider/version-specific presence values to stable Nexus states.
+
+    P-Series versions may return a named presence, a custom label, or omit the
+    field entirely.  The raw value stays with the monitoring payload for
+    diagnosis, while the UI only depends on this small, predictable vocabulary.
+    """
+    value = str(raw_status or "").strip().lower().replace("_", " ").replace("-", " ")
+    if "ring" in value:
+        return "ringing"
+    if any(token in value for token in ("busy", "call", "talking", "in use")):
+        return "on_call"
+    if any(token in value for token in ("dnd", "do not disturb")):
+        return "do_not_disturb"
+    if any(token in value for token in ("away", "break", "lunch", "meeting")):
+        return "away"
+    if any(token in value for token in ("offline", "unavailable", "logout", "unregistered")):
+        return "offline"
+    if any(token in value for token in ("available", "online", "idle", "ready")):
+        return "available"
+    return "available" if registered else "offline"
+
+
+def _call_mentions_extension(call: dict, extension_number: str) -> bool:
+    """Avoid assuming an exact call/query format while matching a live extension."""
+    if not extension_number:
+        return False
+    for value in (call.get("caller"), call.get("callee"), call.get("answered_by"), call.get("landing_target")):
+        if re.search(rf"(?<!\d){re.escape(extension_number)}(?!\d)", str(value or "")):
+            return True
+    return False
+
+
+def _extension_presence_snapshot(extensions: list[dict], active_calls: list[dict]) -> tuple[list[dict], dict[str, int]]:
+    """Overlay live calls over extension-list presence for the operator wallboard."""
+    items = []
+    counts: dict[str, int] = {}
+    for extension in extensions:
+        live_call = next((call for call in active_calls if _call_mentions_extension(call, str(extension.get("number") or ""))), None)
+        if live_call:
+            raw_call_status = str(live_call.get("status") or "").lower()
+            state = "ringing" if "ring" in raw_call_status else "on_call"
+            source = "live_call"
+        else:
+            state = _normalise_extension_presence(extension.get("status"), bool(extension.get("registered")))
+            source = "extension_presence"
+        counts[state] = counts.get(state, 0) + 1
+        items.append({
+            "id": str(extension.get("id") or extension.get("number") or uuid.uuid4()),
+            "number": str(extension.get("number") or ""),
+            "name": extension.get("name") or f"Extension {extension.get('number') or ''}".strip(),
+            "state": state,
+            "registered": bool(extension.get("registered")),
+            "device": extension.get("device") or "Unknown",
+            "raw_status": extension.get("status") or "",
+            "source": source,
+        })
+    return items, counts
+
 @router.get("/yeastar/active-calls")
 async def get_yeastar_active_calls(current_user: dict = Depends(get_current_user), settings: dict | None = None):
     data = await _yeastar_api_get("call/query", settings=settings)
@@ -517,6 +577,7 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
     uptime_seconds = int(system.get("up_time", 0) or 0)
     online_extensions = len([extension for extension in extensions if extension.get("registered")])
     missed = len([call for call in call_logs.get("data", []) if call.get("status") in {"missed", "failed"}])
+    presence_extensions, presence_summary = _extension_presence_snapshot(extensions, active_calls)
     return {
         "pbx": {"id": pbx.get("id"), "name": pbx.get("name") or "Yeastar PBX", "client_id": pbx.get("client_id"), "client_name": pbx.get("client_name") or "Client"},
         "health": "online" if system else "degraded",
@@ -524,6 +585,7 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         "api_latency_ms": max(1, int((time.perf_counter() - started) * 1000)),
         "system": {"name": system.get("device_name") or pbx.get("name") or "Yeastar PBX", "model": system.get("model_name", ""), "firmware_version": system.get("firmware_version", ""), "uptime_seconds": uptime_seconds},
         "extensions": {"total": len(extensions), "registered": online_extensions, "unregistered": len(extensions) - online_extensions},
+        "presence": {"extensions": presence_extensions, "summary": presence_summary},
         "active_calls": active_calls,
         "recent_calls": call_logs.get("data", []),
         "missed_calls": missed,

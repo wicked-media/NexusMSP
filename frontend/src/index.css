@@ -358,6 +358,20 @@
     animation: nx-page-enter var(--nx-motion-standard) var(--nx-ease-out) both;
 }
 
+/* A brief phone-like oscillation marks a live incoming call without relying on
+   colour alone. It is opt-out through the shared motion accessibility setting. */
+.nx-voice-ringing {
+    animation: nx-voice-ringing 620ms ease-in-out infinite;
+}
+
+@keyframes nx-voice-ringing {
+    0%, 100% { transform: rotate(0deg); }
+    18% { transform: rotate(-13deg); }
+    36% { transform: rotate(11deg); }
+    54% { transform: rotate(-8deg); }
+    72% { transform: rotate(5deg); }
+}
+
 /* Safe sharing is deliberate and opt-in: sensitive values are marked at the
    source with data-sensitive, so Nexus never claims to hide unknown content. */
 html[data-privacy-curtain="active"] [data-sensitive] {
@@ -516,6 +530,7 @@ html[data-motion="minimal"] .nx-ambient-motion,
 html[data-motion="minimal"] .nx-ambient-surface::before,
 html[data-motion="minimal"] .nx-ambient-surface::after,
 html[data-motion="minimal"] .nx-status-orb__wave,
+html[data-motion="minimal"] .nx-voice-ringing,
 html[data-motion="minimal"] .animate-ping,
 html[data-motion="minimal"] .animate-pulse,
 html[data-motion="minimal"] .animated-border {
