@@ -14,6 +14,7 @@ import {
   Image as ImageIcon, Code, Minus, Quote, Undo, Redo, Code2, Table as TableIcon
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useCallback, useRef, useState, useEffect } from 'react';
 
 export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true, compactToolbar = false }) {
@@ -21,6 +22,8 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
   const [htmlMode, setHtmlMode] = useState(false);
   const [htmlDraft, setHtmlDraft] = useState(content || '');
   const [showAdvancedTools, setShowAdvancedTools] = useState(false);
+  const [linkComposerOpen, setLinkComposerOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
 
   const editor = useEditor({
     extensions: [
@@ -131,6 +134,25 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
     }
   }, [editor, htmlMode, htmlDraft, onChange]);
 
+  const openLinkComposer = useCallback(() => {
+    if (!editor) return;
+    if (editor.isActive('link')) {
+      editor.chain().focus().unsetLink().run();
+      return;
+    }
+    setLinkUrl('');
+    setLinkComposerOpen(true);
+  }, [editor]);
+
+  const applyLink = useCallback(() => {
+    const value = linkUrl.trim();
+    if (!editor || !value || /^javascript:/i.test(value)) return;
+    const href = /^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`;
+    editor.chain().focus().setLink({ href }).run();
+    setLinkComposerOpen(false);
+    setLinkUrl('');
+  }, [editor, linkUrl]);
+
   if (!editor) return null;
 
   const ToolBtn = ({ onClick, active, children, title, disabled }) => (
@@ -158,10 +180,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
           <ToolBtn onClick={() => editor.chain().focus().setTextAlign('left').run()} active={editor.isActive({ textAlign: 'left' })} title="Left" disabled={htmlMode}><AlignLeft className="w-3.5 h-3.5" /></ToolBtn>
           <ToolBtn onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })} title="Center" disabled={htmlMode}><AlignCenter className="w-3.5 h-3.5" /></ToolBtn>
           <ToolBtn onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })} title="Right" disabled={htmlMode}><AlignRight className="w-3.5 h-3.5" /></ToolBtn>
-          <ToolBtn onClick={() => {
-            const url = window.prompt('Enter URL');
-            if (url) editor.chain().focus().setLink({ href: url }).run();
-          }} active={editor.isActive('link')} title="Link" disabled={htmlMode}><LinkIcon className="w-3.5 h-3.5" /></ToolBtn>
+          <ToolBtn onClick={openLinkComposer} active={editor.isActive('link') || linkComposerOpen} title={editor.isActive('link') ? "Remove link" : "Add link"} disabled={htmlMode}><LinkIcon className="w-3.5 h-3.5" /></ToolBtn>
           <ToolBtn onClick={handleImageUpload} title="Insert Image" disabled={htmlMode}><ImageIcon className="w-3.5 h-3.5" /></ToolBtn>
         </>}
         <div className="w-px h-4 bg-border mx-0.5" />
@@ -181,6 +200,30 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
           </Button>
         </div>
       </div>
+      {linkComposerOpen && (
+        <div className="flex items-center gap-2 border-b bg-muted/10 px-3 py-2 animate-in fade-in slide-in-from-top-1 duration-200" data-testid="rte-link-composer">
+          <Input
+            value={linkUrl}
+            onChange={(event) => setLinkUrl(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                applyLink();
+              }
+              if (event.key === 'Escape') {
+                setLinkComposerOpen(false);
+                setLinkUrl('');
+              }
+            }}
+            placeholder="https://example.com"
+            aria-label="Link address"
+            autoFocus
+            className="h-8 text-xs"
+          />
+          <Button type="button" size="sm" className="h-8 shrink-0" onClick={applyLink} disabled={!linkUrl.trim()}>Apply link</Button>
+          <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => { setLinkComposerOpen(false); setLinkUrl(''); }}>Cancel</Button>
+        </div>
+      )}
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
       {htmlMode ? (
         <textarea
