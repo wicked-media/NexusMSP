@@ -4,6 +4,8 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { StickyNote, Trash2, Loader2, Pin, Plus } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -16,6 +18,7 @@ export default function ClientNotesTab({ client }) {
   const [body, setBody] = useState("");
   const [pinned, setPinned] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const fetchNotes = useCallback(async () => {
     setLoading(true);
@@ -50,11 +53,12 @@ export default function ClientNotesTab({ client }) {
     }
   };
 
-  const deleteNote = async (id) => {
-    if (!window.confirm("Delete this note?")) return;
+  const deleteNote = async (id, confirmed = false) => {
+    if (!confirmed) { setDeleteTarget(notes.find((note) => note.id === id) || null); return; }
     try {
       await axios.delete(`${API}/clients/${client.id}/notes/${id}`, { headers });
       toast.success("Note deleted");
+      setDeleteTarget(null);
       await fetchNotes();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Delete failed");
@@ -120,6 +124,18 @@ export default function ClientNotesTab({ client }) {
           ))}
         </div>
       )}
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Client knowledge"
+          title="Delete internal note?"
+          description="This removes the note from the account record for every technician. Confirm that its operational context has been retained elsewhere if needed."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep note</Button><Button variant="destructive" onClick={() => deleteNote(deleteTarget?.id, true)}>Delete note</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="line-clamp-3 text-sm text-foreground">{deleteTarget?.body || "Selected note"}</p><p className="mt-3 text-xs text-muted-foreground">Recorded by {deleteTarget?.author_name || "Unknown technician"}.</p></div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
