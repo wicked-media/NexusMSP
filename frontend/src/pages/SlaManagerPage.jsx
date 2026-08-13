@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
-import { Loader2, AlertTriangle, FileText, DollarSign, Timer, ShieldCheck } from "lucide-react";
+import { Loader2, AlertTriangle, ArrowUpRight, FileText, DollarSign, Timer, ShieldCheck } from "lucide-react";
 
 const SLA_TABS = ["timers", "predictions", "penalties", "reports"];
 
@@ -31,10 +31,10 @@ export default function SlaManagerPage() {
 
   const selectTab = (nextTab) => {
     setTab(nextTab);
-    const url = new URL(window.location.href);
-    if (nextTab === "timers") url.searchParams.delete("tab");
-    else url.searchParams.set("tab", nextTab);
-    window.history.replaceState({}, "", url);
+    const params = new URLSearchParams(location.search);
+    if (nextTab === "timers") params.delete("tab");
+    else params.set("tab", nextTab);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   };
 
   useEffect(() => {
@@ -90,19 +90,19 @@ export default function SlaManagerPage() {
           {timerList.length === 0 && <p className="text-center text-muted-foreground py-8">No active SLA timers</p>}
         </TabsContent>
         <TabsContent value="predictions" className="space-y-2">
-          {predList.map((p, i) => { const risk = p.breach_risk || p.risk || "medium"; const high = risk === "high"; return <Card key={i} className={high ? "border-red-500/30 bg-red-500/[0.035]" : "border-amber-500/20"}><CardContent className="py-3"><div className="flex items-start gap-3"><div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${high ? "bg-red-500/15" : "bg-amber-500/15"}`}><AlertTriangle className={`w-4 h-4 ${high ? "text-red-300" : "text-amber-300"}`} /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><div><span className="font-mono text-xs text-muted-foreground">{p.ticket_id || p.id}</span><p className="font-semibold text-sm mt-0.5">{p.client_name || "Client pending"}</p></div><Badge variant={high ? "destructive" : "outline"} className={`text-[10px] capitalize ${!high ? "border-amber-500/25 text-amber-300" : ""}`}>{risk} risk</Badge></div><p className="text-xs text-muted-foreground mt-2">{p.reason || `${p.probability_pct || 0}% breach probability`}</p></div></div></CardContent></Card>; })}
+          {predList.map((p, i) => { const risk = p.breach_risk || p.risk || "medium"; const high = risk === "high"; const ticketReference = p.ticket_id || p.id; return <button type="button" key={i} onClick={() => openTicket(ticketReference)} disabled={!ticketReference} className={`group w-full text-left rounded-xl border transition-all duration-200 ${high ? "border-red-500/30 bg-red-500/[0.035] hover:bg-red-500/[0.07]" : "border-amber-500/20 hover:border-amber-500/35 hover:bg-amber-500/[0.035]"} ${ticketReference ? "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70" : "cursor-default"}`}><CardContent className="py-3"><div className="flex items-start gap-3"><div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${high ? "bg-red-500/15" : "bg-amber-500/15"}`}><AlertTriangle className={`w-4 h-4 ${high ? "text-red-300" : "text-amber-300"}`} /></div><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><div><span className="font-mono text-xs text-muted-foreground">{ticketReference || "Ticket pending"}</span><p className="font-semibold text-sm mt-0.5">{p.client_name || "Client pending"}</p></div><div className="flex items-center gap-2"><Badge variant={high ? "destructive" : "outline"} className={`text-[10px] capitalize ${!high ? "border-amber-500/25 text-amber-300" : ""}`}>{risk} risk</Badge>{ticketReference && <ArrowUpRight className="w-4 h-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />}</div></div><p className="text-xs text-muted-foreground mt-2">{p.reason || `${p.probability_pct || 0}% breach probability`}</p><p className="text-[11px] font-medium text-cyan-300/90 mt-2">{ticketReference ? "Review ticket and take ownership" : "Waiting for ticket context"}</p></div></div></CardContent></button>; })}
           {predList.length === 0 && <p className="text-center text-muted-foreground py-8">No breach predictions</p>}
         </TabsContent>
         <TabsContent value="penalties">
           {penContracts.length > 0 ? (
-            <Table><TableHeader><TableRow><TableHead>Contract</TableHead><TableHead>Client</TableHead><TableHead>Breaches</TableHead><TableHead className="text-right">Penalty</TableHead><TableHead>Period</TableHead></TableRow></TableHeader>
-              <TableBody>{penContracts.map((c, i) => (<TableRow key={i}><TableCell className="font-medium">{c.contract_name || c.name}</TableCell><TableCell>{c.client_name}</TableCell><TableCell><Badge variant="destructive" className="text-[10px]">{c.breach_count || c.breaches}</Badge></TableCell><TableCell className="text-right font-mono text-amber-400">${(c.penalty_amount || c.penalty || 0).toLocaleString()}</TableCell><TableCell className="text-sm">{c.period || "Current"}</TableCell></TableRow>))}</TableBody></Table>
+            <Card className="overflow-hidden"><CardContent className="p-0"><div className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-3"><div><p className="text-sm font-semibold">Commercial exposure</p><p className="text-xs text-muted-foreground">Contracts with recorded SLA credits or penalties.</p></div><Badge variant="outline" className="font-mono text-amber-300 border-amber-500/25">${(penSummary.total_penalties || 0).toLocaleString()} YTD</Badge></div><Table><TableHeader><TableRow><TableHead>Contract</TableHead><TableHead>Client</TableHead><TableHead>Breaches</TableHead><TableHead className="text-right">Penalty</TableHead><TableHead>Period</TableHead></TableRow></TableHeader>
+              <TableBody>{penContracts.map((c, i) => (<TableRow key={i}><TableCell className="font-medium">{c.contract_name || c.name}</TableCell><TableCell>{c.client_name}</TableCell><TableCell><Badge variant="destructive" className="text-[10px]">{c.breach_count || c.breaches}</Badge></TableCell><TableCell className="text-right font-mono text-amber-400">${(c.penalty_amount || c.penalty || 0).toLocaleString()}</TableCell><TableCell className="text-sm">{c.period || "Current"}</TableCell></TableRow>))}</TableBody></Table></CardContent></Card>
           ) : <p className="text-center text-muted-foreground py-8">No SLA penalties recorded</p>}
         </TabsContent>
         <TabsContent value="reports">
           {reports.length > 0 ? (
-            <Table><TableHeader><TableRow><TableHead>Report</TableHead><TableHead>Period</TableHead><TableHead>Generated</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
-              <TableBody>{reports.map((r, i) => (<TableRow key={i}><TableCell className="font-medium">{r.name || r.title}</TableCell><TableCell className="text-sm">{r.period}</TableCell><TableCell className="text-sm">{(r.generated_at || r.created_at || "").slice(0, 10)}</TableCell><TableCell><Badge variant="outline" className="text-[10px] capitalize">{r.status || "complete"}</Badge></TableCell></TableRow>))}</TableBody></Table>
+            <Card className="overflow-hidden"><CardContent className="p-0"><div className="border-b border-border/70 px-4 py-3"><p className="text-sm font-semibold">Published SLA reports</p><p className="text-xs text-muted-foreground">Completed evidence ready to review with the client.</p></div><Table><TableHeader><TableRow><TableHead>Report</TableHead><TableHead>Period</TableHead><TableHead>Generated</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+              <TableBody>{reports.map((r, i) => (<TableRow key={i}><TableCell className="font-medium">{r.name || r.title}</TableCell><TableCell className="text-sm">{r.period}</TableCell><TableCell className="text-sm">{(r.generated_at || r.created_at || "").slice(0, 10)}</TableCell><TableCell><Badge variant="outline" className="text-[10px] capitalize">{r.status || "complete"}</Badge></TableCell></TableRow>))}</TableBody></Table></CardContent></Card>
           ) : <p className="text-center text-muted-foreground py-8">No SLA reports generated yet</p>}
         </TabsContent>
       </Tabs>
