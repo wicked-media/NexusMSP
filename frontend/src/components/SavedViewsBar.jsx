@@ -3,6 +3,7 @@ import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -34,6 +35,7 @@ export default function SavedViewsBar({ scope, headers, currentSnapshot, onApply
   const [color, setColor] = useState("violet");
   const [pinned, setPinned] = useState(true);
   const [shared, setShared] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const reload = useCallback(async () => {
     try {
@@ -76,11 +78,12 @@ export default function SavedViewsBar({ scope, headers, currentSnapshot, onApply
     } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); }
   };
 
-  const deleteView = async (v) => {
-    if (!window.confirm(`Delete saved view "${v.name}"?`)) return;
+  const deleteView = async (v, confirmed = false) => {
+    if (!confirmed) { setDeleteTarget(v); return; }
     try {
       await axios.delete(`${API}/saved-views/${v.id}`, { headers });
       toast.success("Deleted");
+      setDeleteTarget(null);
       reload();
     } catch (e) { toast.error(e.response?.data?.detail || "Delete failed"); }
   };
@@ -191,6 +194,18 @@ export default function SavedViewsBar({ scope, headers, currentSnapshot, onApply
             <Button onClick={submitSave} disabled={!name.trim()} data-testid="save-view-confirm">{editing ? "Update" : "Save"}</Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Workspace navigation"
+          title="Delete saved view?"
+          description="This removes the saved filters and layout shortcut. It does not change any tickets, devices, clients, or shared operational data."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep view</Button><Button variant="destructive" onClick={() => deleteView(deleteTarget, true)}>Delete view</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.name || "Selected saved view"}</p><p className="mt-1 text-sm text-muted-foreground">{deleteTarget?.shared ? "This view is shared with the team and will no longer be available to them." : "This is a personal workspace shortcut."}</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </>
   );
