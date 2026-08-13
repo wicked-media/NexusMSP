@@ -12,6 +12,8 @@ import { Loader2, BarChart3, X } from "lucide-react";
 
 const ROW = (label, fn, fmt = (v) => v ?? "—") => ({ label, fn, fmt });
 
+const normalizeDeviceIds = (values) => [...new Set(values.filter(Boolean))].slice(0, 4);
+
 const ROWS = [
   ROW("Status", d => d.device.status),
   ROW("OS", d => d.device.os || d.device.os_name),
@@ -35,8 +37,8 @@ export default function DeviceComparePage() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [params, setParams] = useSearchParams();
-  const initialIds = (params.get("ids") || "").split(",").filter(Boolean);
-  const [ids, setIds] = useState(initialIds.slice(0, 4));
+  const queryIds = params.get("ids") || "";
+  const [ids, setIds] = useState(() => normalizeDeviceIds(queryIds.split(",")));
   const [allDevices, setAllDevices] = useState([]);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -44,6 +46,15 @@ export default function DeviceComparePage() {
   useEffect(() => {
     axios.get(`${API}/devices`, { headers }).then(r => setAllDevices(r.data || [])).catch(() => {});
   }, [headers]);
+
+  useEffect(() => {
+    const normalizedIds = normalizeDeviceIds(queryIds.split(","));
+    const normalizedQuery = normalizedIds.join(",");
+    if (normalizedQuery !== queryIds) {
+      setParams(normalizedQuery ? { ids: normalizedQuery } : {}, { replace: true });
+    }
+    setIds(current => current.join(",") === normalizedQuery ? current : normalizedIds);
+  }, [queryIds, setParams]);
 
   const load = useCallback(async () => {
     if (ids.length === 0) { setData([]); return; }
@@ -60,12 +71,13 @@ export default function DeviceComparePage() {
   const setIdAt = (idx, val) => {
     const next = [...ids];
     next[idx] = val;
-    setIds(next.filter(Boolean));
-    setParams({ ids: next.filter(Boolean).join(",") });
+    const normalizedIds = normalizeDeviceIds(next);
+    setIds(normalizedIds);
+    setParams(normalizedIds.length ? { ids: normalizedIds.join(",") } : {});
   };
 
   const removeAt = (idx) => {
-    const next = ids.filter((_, i) => i !== idx);
+    const next = normalizeDeviceIds(ids.filter((_, i) => i !== idx));
     setIds(next);
     setParams(next.length ? { ids: next.join(",") } : {});
   };
@@ -90,7 +102,7 @@ export default function DeviceComparePage() {
                   <SelectValue placeholder={`Device ${idx + 1}`} />
                 </SelectTrigger>
                 <SelectContent className="max-h-[400px]">
-                  {allDevices.map(d => <SelectItem key={d.id} value={d.id}>{d.name} · {d.client_name}</SelectItem>)}
+                  {allDevices.map(d => <SelectItem key={d.id} value={d.id} disabled={d.id !== curId && ids.includes(d.id)}>{d.name} · {d.client_name}</SelectItem>)}
                 </SelectContent>
               </Select>
               {curId && (
