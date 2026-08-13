@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCallback, useRef, useState, useEffect } from 'react';
 
-export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true, compactToolbar = false }) {
+export function RichTextEditor({ content, onChange, placeholder, minHeight = "120px", resizable = true, compactToolbar = false, showHtmlToggle = true }) {
   const fileInputRef = useRef(null);
   const [htmlMode, setHtmlMode] = useState(false);
   const [htmlDraft, setHtmlDraft] = useState(content || '');
@@ -186,7 +186,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
         <div className="w-px h-4 bg-border mx-0.5" />
         <ToolBtn onClick={() => editor.chain().focus().undo().run()} title="Undo" disabled={htmlMode}><Undo className="w-3.5 h-3.5" /></ToolBtn>
         <ToolBtn onClick={() => editor.chain().focus().redo().run()} title="Redo" disabled={htmlMode}><Redo className="w-3.5 h-3.5" /></ToolBtn>
-        <div className="ml-auto flex items-center gap-1">
+        {showHtmlToggle && <div className="ml-auto flex items-center gap-1">
           <Button
             type="button"
             variant={htmlMode ? "secondary" : "ghost"}
@@ -198,7 +198,7 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
           >
             <Code2 className="w-3.5 h-3.5 mr-1" />{htmlMode ? "Visual" : "HTML"}
           </Button>
-        </div>
+        </div>}
       </div>
       {linkComposerOpen && (
         <div className="flex items-center gap-2 border-b bg-muted/10 px-3 py-2 animate-in fade-in slide-in-from-top-1 duration-200" data-testid="rte-link-composer">
@@ -240,9 +240,9 @@ export function RichTextEditor({ content, onChange, placeholder, minHeight = "12
       )}
       <div className="px-3 py-1 border-t bg-muted/20 flex items-center justify-between">
         <span className="text-[10px] text-muted-foreground/60">
-          {htmlMode
+          {showHtmlToggle && htmlMode
             ? "Raw HTML — click Visual to render. Inline images must be data URIs or https URLs (not Outlook cid:)."
-            : "Paste images directly · drag & drop · toggle HTML to paste full signature source"}
+            : showHtmlToggle ? "Paste images directly · drag & drop · toggle HTML to paste full signature source" : "Paste images directly · drag & drop"}
         </span>
         <span className="text-[10px] text-muted-foreground/40">Resize ↕</span>
       </div>
