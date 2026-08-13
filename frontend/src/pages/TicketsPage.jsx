@@ -309,6 +309,7 @@ export default function TicketsPage() {
   const [fjSiteDialog, setFjSiteDialog] = useState(false);
   const [fjHeaderEdit, setFjHeaderEdit] = useState(false);
   const [fjHeaderDraft, setFjHeaderDraft] = useState("");
+  const [fjVerificationSaving, setFjVerificationSaving] = useState(false);
   const [fjStatusTarget, setFjStatusTarget] = useState(null);
   const [fjJobHistory, setFjJobHistory] = useState([]);
   const [fjNotifyDialog, setFjNotifyDialog] = useState(false);
@@ -1061,6 +1062,24 @@ export default function TicketsPage() {
       await fetchTickets();
       if (viewFjJob?.id === jobId) setViewFjJob(response.data?.job || viewFjJob);
     } catch { toast.error("Failed"); }
+  };
+
+  const handleSaveFjVerification = async () => {
+    if (!viewFjJob?.id) return;
+    setFjVerificationSaving(true);
+    try {
+      const response = await axios.put(`${API}/field-jobs/${viewFjJob.id}`, {
+        signal_strength: viewFjJob.signal_strength || null,
+        speed_test_down: viewFjJob.speed_test_down || null,
+        speed_test_up: viewFjJob.speed_test_up || null,
+      }, { headers });
+      setViewFjJob(response.data?.job || { ...viewFjJob });
+      toast.success("Site verification readings saved");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not save site verification readings");
+    } finally {
+      setFjVerificationSaving(false);
+    }
   };
 
   const refreshJobConversation = async (kind, jobId) => {
@@ -3446,12 +3465,13 @@ export default function TicketsPage() {
             <Card className="overflow-hidden border-cyan-500/20">
               <CardHeader className="pb-3 bg-cyan-500/[0.045] border-b border-cyan-500/15"><CardTitle className="text-sm flex items-center gap-2"><Radio className="w-4 h-4 text-cyan-300" />Site verification</CardTitle></CardHeader>
               <CardContent className="space-y-3 pt-4">
-                <p className="text-[11px] text-muted-foreground">Record live readings at site. They save automatically as you enter them.</p>
-                <div><Label className="text-xs">Signal <span className="text-muted-foreground">(dBm)</span></Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, signal_strength: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { signal_strength: v }, { headers }); }} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
+                <p className="text-[11px] text-muted-foreground">Record the readings taken onsite, then save them to the field job and audit trail.</p>
+                <div><Label className="text-xs">Signal <span className="text-muted-foreground">(dBm)</span></Label><Input type="number" value={viewFjJob.signal_strength || ""} onChange={e => setViewFjJob({ ...viewFjJob, signal_strength: e.target.value })} placeholder="-65" className="font-mono" data-testid="fj-signal" /></div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div><Label className="text-xs">Down (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_down: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_down: v }, { headers }); }} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
-                  <div><Label className="text-xs">Up (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => { const v = e.target.value; setViewFjJob({ ...viewFjJob, speed_test_up: v }); axios.put(`${API}/field-jobs/${viewFjJob.id}`, { speed_test_up: v }, { headers }); }} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
+                  <div><Label className="text-xs">Down (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_down || ""} onChange={e => setViewFjJob({ ...viewFjJob, speed_test_down: e.target.value })} placeholder="100" className="font-mono" data-testid="fj-speed-down" /></div>
+                  <div><Label className="text-xs">Up (Mbps)</Label><Input type="number" value={viewFjJob.speed_test_up || ""} onChange={e => setViewFjJob({ ...viewFjJob, speed_test_up: e.target.value })} placeholder="50" className="font-mono" data-testid="fj-speed-up" /></div>
                 </div>
+                <Button className="w-full" size="sm" onClick={handleSaveFjVerification} disabled={fjVerificationSaving} data-testid="fj-save-verification">{fjVerificationSaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}Save readings</Button>
               </CardContent>
             </Card>
 
@@ -4012,8 +4032,8 @@ export default function TicketsPage() {
         {((typeFilter === "all" && supportFiltersClear) || typeFilter === "workshop") && filteredWorkshopJobs.map(j => {
           const wsStatus = WS_STATUSES[j.repair_status] || WS_STATUSES.checked_in;
           return (
-            <Card key={`ws-${j.id}`} className="group cursor-pointer overflow-hidden border border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.05] via-background to-background hover:border-cyan-500/35 hover:shadow-md hover:shadow-cyan-950/15 transition-all"
-              onClick={() => fetchWsJobDetail(j)} data-testid={`ws-job-${j.id}`}>
+            <Card key={`ws-${j.id}`} className="group cursor-pointer overflow-hidden border border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.05] via-background to-background transition-all hover:border-cyan-500/35 hover:shadow-md hover:shadow-cyan-950/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+              onClick={() => fetchWsJobDetail(j)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fetchWsJobDetail(j); } }} role="button" tabIndex={0} data-testid={`ws-job-${j.id}`}>
               <CardContent className="py-0 px-0">
                 <div className="flex items-stretch">
                   <div className="w-1 shrink-0 bg-gradient-to-b from-cyan-300 via-cyan-500 to-emerald-600" />
@@ -4053,19 +4073,20 @@ export default function TicketsPage() {
         {((typeFilter === "all" && supportFiltersClear) || typeFilter === "cabling_wisp") && filteredFieldJobs.map(j => {
           const fjStatus = FJ_STATUSES[j.field_status] || FJ_STATUSES.scheduled;
           return (
-            <Card key={`fj-${j.id}`} className="cursor-pointer hover:bg-muted/30 transition-all border-l-4 border-l-cyan-500"
-              onClick={() => fetchFjJobDetail(j)} data-testid={`fj-job-${j.id}`}>
+            <Card key={`fj-${j.id}`} className="group cursor-pointer overflow-hidden border border-cyan-500/15 border-l-4 border-l-cyan-500 bg-gradient-to-r from-cyan-500/[0.05] via-background to-background transition-all hover:border-cyan-500/35 hover:shadow-md hover:shadow-cyan-950/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
+              onClick={() => fetchFjJobDetail(j)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fetchFjJobDetail(j); } }} role="button" tabIndex={0} data-testid={`fj-job-${j.id}`}>
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-4">
                   <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-cyan-500/10">
                     <Wifi className="w-4 h-4 text-cyan-400" />
                   </div>
-                  <div className="relative flex flex-col items-center gap-1 w-20 flex-shrink-0">
+                  <div className="relative flex flex-col items-center gap-1 w-24 flex-shrink-0">
+                    <span className="text-[9px] uppercase tracking-[0.14em] font-semibold text-cyan-300/70">Field service</span>
                     <div className="relative w-full rounded-lg py-1.5 px-1 text-center font-mono text-xs font-bold tracking-wider bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">{j.job_number}</div>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <p className="font-medium text-sm truncate">{j.description || "Cabling / WISP Job"}</p>
+                      <p className="font-semibold text-sm truncate group-hover:text-cyan-100 transition-colors">{j.description || "Cabling / WISP Job"}</p>
                       <Badge className="bg-cyan-500/10 text-cyan-400 text-[9px] border-cyan-500/30">CABLING / WISP</Badge>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
