@@ -665,12 +665,12 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
     pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
-    extensions = []
-    for pbx in pbx_records:
-        if not pbx.get("enabled", True):
-            continue
-        extensions.extend(await _voice_extensions_with_overrides(current_user, pbx))
-    billable = len([extension for extension in extensions if extension.get("included_in_billing")])
+    # Keep the landing workspace independent of an external PBX response. A
+    # live call to every customer PBX belongs in the explicit Monitor and
+    # Wallboard workflows; this page should be immediately usable during a
+    # provider outage. Extension details are refreshed by the governed sync.
+    extensions: list[dict] = []
+    billable = sum(int(pbx.get("billable_extension_count", 0) or 0) for pbx in pbx_records if pbx.get("enabled", True))
     summary_history = [item for item in billing_history if not item.get("pbx_id")]
     previous_quantity = summary_history[1].get("billable_quantity", billable) if len(summary_history) > 1 else billable
     pbxs = [{
@@ -689,7 +689,7 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
     billing_by_pbx = []
     for pbx in pbxs:
         pbx_id = str(pbx.get("id") or "primary")
-        current_quantity = len([extension for extension in extensions if extension.get("pbx_id") == pbx_id and extension.get("included_in_billing")])
+        current_quantity = int(pbx.get("billable_extension_count", 0) or 0)
         previous = next((item for item in billing_history if str(item.get("pbx_id") or "") == pbx_id), None)
         previous_pbx_quantity = int((previous or {}).get("billable_quantity", current_quantity) or 0)
         billing_by_pbx.append({

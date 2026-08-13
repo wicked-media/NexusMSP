@@ -39,6 +39,7 @@ export default function VoiceWorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [workspace, setWorkspace] = useState(null);
+  const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [query, setQuery] = useState("");
   const [registration, setRegistration] = useState("all");
@@ -76,9 +77,10 @@ export default function VoiceWorkspacePage() {
 
   const load = useCallback(async () => {
     setBusy("load");
+    setLoadError(false);
     try {
       const [{ data: voice }, { data: clientRows }, { data: productRows }] = await Promise.all([
-        axios.get(`${API}/yeastar/voice-workspace`, { headers }),
+        axios.get(`${API}/yeastar/voice-workspace`, { headers, timeout: 8000 }),
         axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/products`, { headers }).catch(() => ({ data: [] })),
       ]);
@@ -86,6 +88,7 @@ export default function VoiceWorkspacePage() {
       setClients(clientRows || []);
       setProducts(productRows || []);
     } catch {
+      setLoadError(true);
       toast.error("Could not load Voice services");
     } finally {
       setBusy("");
@@ -265,7 +268,7 @@ export default function VoiceWorkspacePage() {
     }
   };
 
-  if (!workspace) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-sky-300" /></div>;
+  if (!workspace) return loadError ? <Card className="mx-auto mt-12 max-w-xl border-amber-500/25"><CardContent className="space-y-4 py-10 text-center"><AlertTriangle className="mx-auto h-8 w-8 text-amber-300" /><div><p className="font-semibold">Voice services did not respond in time</p><p className="mt-1 text-sm text-muted-foreground">Nexus has kept the rest of the platform available. Retry the workspace, or use the live wallboard when you need to investigate a specific PBX.</p></div><div className="flex flex-wrap justify-center gap-2"><Button variant="outline" onClick={() => navigate("/voice/wallboard")}>Open live wallboard</Button><Button onClick={load}><RefreshCw className="mr-2 h-4 w-4" />Retry Voice</Button></div></CardContent></Card> : <div className="flex h-64 items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-sky-300" /></div>;
 
   const allPbxs = workspace.pbxs || [];
   const pbxs = clientScope ? allPbxs.filter((pbx) => pbx.client_id === clientScope) : allPbxs;
