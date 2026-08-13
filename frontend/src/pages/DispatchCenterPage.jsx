@@ -95,9 +95,9 @@ export default function DispatchCenterPage() {
 
   const selectTab = (nextTab) => {
     setTab(nextTab);
-    const url = new URL(window.location.href);
-    if (nextTab === "board") url.searchParams.delete("tab"); else url.searchParams.set("tab", nextTab);
-    window.history.replaceState({}, "", url);
+    const params = new URLSearchParams(location.search);
+    if (nextTab === "board") params.delete("tab"); else params.set("tab", nextTab);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" }, { replace: true });
   };
   const unassigned = board.unassigned || [];
   const dispatched = board.dispatched || [];
@@ -142,12 +142,12 @@ export default function DispatchCenterPage() {
   if (loading) return <div className="space-y-5"><TicketModuleHeader title="Dispatch & scheduling" subtitle="Loading live assignments and technician availability..." /><div className="flex justify-center py-20"><Loader2 className="h-8 w-8 animate-spin" /></div></div>;
 
   return <div className="space-y-5" data-testid="dispatch-center">
-    <TicketModuleHeader title="Dispatch & scheduling" subtitle="Assign work, protect calendar commitments, and balance technician capacity." />
+    <TicketModuleHeader title="Dispatch & scheduling" subtitle="Assign work, protect calendar commitments, and balance technician capacity." actions={<Button size="sm" onClick={() => { setConflict(null); setBookingOpen(true); }} data-testid="create-dispatch-appointment"><Plus className="mr-1.5 h-4 w-4" />Book appointment</Button>} />
     <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <HeroTile label="Unassigned" value={unassigned.length} icon={Clock} glow="amber" subtitle="Needs a technician owner" testId="dispatch-metric-unassigned" />
-      <HeroTile label="Dispatched" value={dispatched.length} icon={Truck} glow="sky" subtitle="In technician ownership" testId="dispatch-metric-dispatched" />
-      <HeroTile label="Scheduled" value={events.length} icon={CalendarDays} glow="violet" subtitle="Calendar commitments" testId="dispatch-metric-scheduled" />
-      <HeroTile label="Available" value={`${technicians.filter((tech) => tech.available || tech.status === "available").length}/${technicians.length}`} icon={Users} glow="emerald" subtitle="Ready for new work" animated={false} testId="dispatch-metric-available" />
+      <HeroTile label="Unassigned" value={unassigned.length} icon={Clock} glow="amber" subtitle="Needs a technician owner" active={tab === "board"} onClick={() => selectTab("board")} testId="dispatch-metric-unassigned" />
+      <HeroTile label="Dispatched" value={dispatched.length} icon={Truck} glow="sky" subtitle="In technician ownership" active={tab === "board"} onClick={() => selectTab("board")} testId="dispatch-metric-dispatched" />
+      <HeroTile label="Scheduled" value={events.length} icon={CalendarDays} glow="violet" subtitle="Calendar commitments" active={tab === "calendar"} onClick={() => selectTab("calendar")} testId="dispatch-metric-scheduled" />
+      <HeroTile label="Available" value={`${technicians.filter((tech) => tech.available || tech.status === "available").length}/${technicians.length}`} icon={Users} glow="emerald" subtitle="Ready for new work" animated={false} active={tab === "availability"} onClick={() => selectTab("availability")} testId="dispatch-metric-available" />
     </div>
     <Tabs value={tab} onValueChange={selectTab}>
       <TabsList className="h-auto flex-wrap gap-1"><TabsTrigger value="board"><Zap className="mr-1 h-3 w-3" />Dispatch board</TabsTrigger><TabsTrigger value="calendar"><CalendarDays className="mr-1 h-3 w-3" />Calendar</TabsTrigger><TabsTrigger value="availability"><Users className="mr-1 h-3 w-3" />Availability</TabsTrigger></TabsList>
@@ -158,7 +158,7 @@ export default function DispatchCenterPage() {
         </div>
       </TabsContent>
       <TabsContent value="calendar" className="space-y-3">
-        <div className="flex flex-col justify-between gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 sm:flex-row sm:items-center"><div><p className="text-sm font-semibold">Calendar-aware booking</p><p className="mt-1 text-xs text-muted-foreground">Double bookings and same-location opportunities need a recorded approval reason and are written to the linked ticket audit trail.</p></div><Button size="sm" onClick={() => { setConflict(null); setBookingOpen(true); }} data-testid="create-dispatch-appointment"><Plus className="mr-1.5 h-4 w-4" />Book appointment</Button></div>
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4"><p className="text-sm font-semibold">Calendar-aware booking</p><p className="mt-1 text-xs text-muted-foreground">Use <span className="font-medium text-foreground">Book appointment</span> above to check double bookings and same-location opportunities. Any exception needs a recorded approval reason and is written to the linked ticket audit trail.</p></div>
         {requestedClientId && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] px-4 py-3 text-xs text-cyan-100">Booking context is set to the selected client. Link a ticket in the appointment form to inherit its full client and audit context.</div>}
         {events.length ? <Card className="overflow-hidden"><CardHeader className="border-b bg-violet-500/[0.035] pb-3"><CardTitle className="flex items-center gap-2 text-sm"><CalendarDays className="h-4 w-4 text-violet-300" />Scheduled commitments</CardTitle></CardHeader><CardContent className="space-y-2 p-3">{events.slice(0, 30).map((event) => {
           const calendarState = event.calendar_sync_state;
