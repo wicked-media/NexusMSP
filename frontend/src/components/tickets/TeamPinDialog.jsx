@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -41,16 +42,23 @@ export default function TeamPinDialog({ open, onOpenChange, ticketTitle, onConfi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <NexusWorkflowDialog
+        eyebrow="Team operations"
+        title="Pin ticket for the team"
+        description="Make this work visible in the shared NOC strip until it is unpinned by you or an administrator."
+        icon={Siren}
+        tone="amber"
+        footer={<><Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button><Button className="bg-rose-600 hover:bg-rose-700" onClick={handleConfirm} disabled={busy} data-testid="team-pin-confirm">{busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Siren className="w-4 h-4 mr-2" />}Pin for team</Button></>}
+      >
+        <div className="sr-only">
+          <p className="flex items-center gap-2">
             <Siren className="w-5 h-5 text-rose-400 animate-pulse" />
             Pin for Team — NOC Strip
-          </DialogTitle>
-          <DialogDescription>
+          </p>
+          <p>
             Pinning <span className="font-mono">{ticketTitle}</span> will surface it on every team member's Dashboard until you (or an admin) unpin it.
-          </DialogDescription>
-        </DialogHeader>
+          </p>
+        </div>
 
         <div className="space-y-4">
           <div>
@@ -76,19 +84,7 @@ export default function TeamPinDialog({ open, onOpenChange, ticketTitle, onConfi
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-          <Button
-            className="bg-rose-600 hover:bg-rose-700"
-            onClick={handleConfirm}
-            disabled={busy}
-            data-testid="team-pin-confirm"
-          >
-            {busy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Siren className="w-4 h-4 mr-2" />}
-            Pin for Team
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
