@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Clipboard, Plus, Trash2, Edit2, Loader2, ListChecks, Wand2, GripVertical, X, Sparkles, Users, ChevronRight, Send, GitBranch, Monitor } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import HeroTile from "@/components/HeroTile";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const FIELD_TYPES = [
   { value: "text", label: "Short text" },
@@ -51,6 +52,7 @@ export default function BlueprintsPage() {
   const [saving, setSaving] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [archiveTarget, setArchiveTarget] = useState(null);
   const [form, setForm] = useState(EMPTY_BP);
 
   const load = useCallback(async () => {
@@ -111,11 +113,14 @@ export default function BlueprintsPage() {
     finally { setSaving(false); }
   };
 
-  const remove = async (bp) => {
-    if (!window.confirm(`Archive "${bp.name}"?`)) return;
+  const remove = async (bp, confirmed = false) => {
+    if (!confirmed) {
+      setArchiveTarget(bp);
+      return;
+    }
     try {
       await axios.delete(`${API}/blueprints/${bp.id}`, { headers });
-      toast.success("Archived"); load();
+      toast.success("Archived"); setArchiveTarget(null); load();
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
   };
 
@@ -413,6 +418,19 @@ export default function BlueprintsPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(archiveTarget)} onOpenChange={(nextOpen) => !nextOpen && setArchiveTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Blueprint lifecycle"
+          title="Archive this blueprint?"
+          description="The template will no longer be offered for new work. Existing tickets retain their copied workflow and audit history."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setArchiveTarget(null)}>Keep blueprint</Button><Button variant="destructive" onClick={() => remove(archiveTarget, true)}>Archive blueprint</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{archiveTarget?.name || "Selected blueprint"}</p><p className="mt-1 text-sm text-muted-foreground">Archive templates that are superseded or no longer approved for delivery. This preserves the standardisation history without exposing it for new requests.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
