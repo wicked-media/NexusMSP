@@ -81,6 +81,9 @@ export default function TicketConsoleHeader({
   const sla = ticket?.sla_status || ticket?.sla;
   const overdue = (ticket?.sla_overdue_hours || 0) > 0 || sla === "breached" || sla === "overdue";
   const hasHistory = (ticket?.customer_history || []).length > 0;
+  const isClosed = ticket?.status === "closed";
+  const isResolved = ticket?.status === "resolved";
+  const isActiveTicket = !isResolved && !isClosed;
   const signal = ["resolved", "closed"].includes(ticket?.status) ? "healthy" : ticket?.status === "on_hold" ? "attention" : ticket?.status === "in_progress" ? "working" : overdue ? "critical" : "recommendation";
   const formatElapsed = (seconds) => {
     const total = Math.max(0, Number(seconds) || 0);
@@ -153,7 +156,7 @@ export default function TicketConsoleHeader({
               )}
             </div>
 
-            <TicketHeaderAction icon={MessageSquareReply} onClick={onReply} data-testid="console-reply-btn">Reply</TicketHeaderAction>
+            <TicketHeaderAction icon={MessageSquareReply} onClick={onReply} data-testid="console-reply-btn">Update client</TicketHeaderAction>
             <TicketHeaderAction
               icon={isTimerRunning ? Square : Play}
               tone={isTimerRunning ? "warning" : "compact"}
@@ -161,10 +164,10 @@ export default function TicketConsoleHeader({
               title={isTimerRunning ? `Stop timer at ${formatElapsed(timerElapsed)}` : "Start time tracking"}
               data-testid="console-timer-btn"
             >{isTimerRunning ? formatElapsed(timerElapsed) : "Start timer"}</TicketHeaderAction>
-            <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>
-            <TicketHeaderAction icon={Receipt} tone="success" onClick={onInvoice} data-testid="console-invoice-btn">Invoice</TicketHeaderAction>
-            <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={onResolve} data-testid="console-resolve-btn">Resolve & close</TicketHeaderAction>
-            <TicketHeaderAction icon={Wrench} tone="accent" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
+            {isActiveTicket && <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>}
+            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={onResolve} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
+            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => onStatusChange?.("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
+            <TicketHeaderAction icon={Wrench} tone="compact" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -172,6 +175,7 @@ export default function TicketConsoleHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Quick actions</DropdownMenuLabel>
+                <DropdownMenuItem onClick={onInvoice} data-testid="console-invoice-btn"><Receipt className="w-3.5 h-3.5 mr-2" />Review billing</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onMoreAction?.("transfer")}><ArrowLeftRight className="w-3.5 h-3.5 mr-2" />Reassign technician</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onPinObject?.()} data-testid="pin-ticket-object"><Bookmark className="w-3.5 h-3.5 mr-2" />Pin to Object Dock</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setChangeOpen(true)} data-testid="more-change-customer"><Building2 className="w-3.5 h-3.5 mr-2" />Change customer…</DropdownMenuItem>
