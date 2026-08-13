@@ -26,8 +26,9 @@ import {
   Heart, Calendar, Phone, KeySquare, Briefcase, BookOpen,
   ShieldOff, ScanLine, BarChart3, BellRing, FileSpreadsheet, Activity, MapPin,
   Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt, ChevronRight,
-  Shield, Clock,
+  Shield, Clock, Copy, PhoneCall,
 } from "lucide-react";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 const useApi = () => {
   const { token } = useAuth();
@@ -770,17 +771,34 @@ export function FinancialAnalyticsHubPage() {
 export function PhoneIntegrationPage() {
   const { headers } = useApi();
   const [hookUrl] = useState(`${API}/pro-pack/phone/inbound`);
-  const test = async () => { try { const r = await axios.post(`${API}/pro-pack/phone/inbound`, { caller_number: "+61400000000", caller_name: "Test Caller" }, { headers }); toast.success(`Test ticket: ${r.data.ticket_number}`); } catch { toast.error("Test failed"); } };
+  const [testOpen, setTestOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const copyWebhook = async () => {
+    try { await navigator.clipboard.writeText(hookUrl); toast.success("Webhook URL copied"); }
+    catch { toast.error("Could not copy the webhook URL"); }
+  };
+  const test = async () => {
+    setTesting(true);
+    try {
+      const r = await axios.post(`${API}/pro-pack/phone/inbound`, { caller_number: "+61400000000", caller_name: "Nexus test caller", callee_number: "+61800000000" }, { headers });
+      setTestResult(r.data); setTestOpen(false); toast.success(`Test ticket created: ${r.data.ticket_number}`);
+    } catch { toast.error("Test call could not create a ticket"); }
+    finally { setTesting(false); }
+  };
   return (
-    <div className="p-6 space-y-4" data-testid="phone-integration-page">
-      <PageHeader title="Phone System Integration" subtitle="3CX / RingCentral / Twilio inbound webhook" icon={Phone} />
-      <Card><CardContent className="pt-6 space-y-3">
+    <div className="space-y-5" data-testid="phone-integration-page">
+      <OperationalPageHeader eyebrow="Inbound communication" title="Phone System Integration" description="Turn approved PBX call events into a traceable ticket draft, matched to the caller’s client record whenever Nexus can prove the relationship." icon={Phone} tone="sky" actions={<Button size="sm" onClick={() => setTestOpen(true)} data-testid="test-phone-hook"><PhoneCall className="mr-1.5 h-4 w-4" />Run safe test</Button>} />
+      <Card className="border-sky-500/20"><CardContent className="pt-5 space-y-4">
+        <div className="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-4"><Webhook className="mt-0.5 h-5 w-5 shrink-0 text-sky-300" /><div><p className="text-sm font-semibold">PBX-to-ticket intake</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Configure your trusted PBX integration to POST an incoming-call event here. Nexus creates a draft ticket with the call evidence, then a technician owns the response.</p></div></div>
         <div><Label className="text-xs">Inbound webhook URL — POST this from your PBX:</Label>
-          <code className="block p-2 bg-muted/30 rounded text-xs font-mono break-all">{hookUrl}</code>
+          <div className="flex gap-2"><code className="min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-xs leading-5 break-all">{hookUrl}</code><Button variant="outline" size="icon" onClick={copyWebhook} aria-label="Copy inbound webhook URL"><Copy className="h-4 w-4" /></Button></div>
         </div>
         <p className="text-xs text-muted-foreground">Body: <code className="font-mono">{`{caller_number, caller_name, callee_number}`}</code> — creates a draft ticket auto-linked to the caller's client.</p>
-        <Button onClick={test} data-testid="test-phone-hook">Send Test Call</Button>
+        <div className="grid gap-3 sm:grid-cols-3">{[["1", "Receive call", "PBX posts a trusted inbound event."], ["2", "Match context", "Nexus matches caller number to client data."], ["3", "Create draft", "Ticket keeps caller, dialled number and time."]].map(([number, title, copy]) => <div key={number} className="rounded-lg border border-border/60 p-3"><span className="text-xs font-bold text-sky-300">{number}</span><p className="mt-2 text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{copy}</p></div>)}</div>
       </CardContent></Card>
+      {testResult && <Card className="border-emerald-500/25 bg-emerald-500/[0.05]"><CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4"><div><p className="text-sm font-semibold text-emerald-200">Test event received and ticket drafted</p><p className="mt-1 text-xs text-muted-foreground">{testResult.ticket_number} is ready for a technician to review in the ticket queue.</p></div><Button variant="outline" size="sm" asChild><a href={`/tickets?ticket=${encodeURIComponent(testResult.ticket_id)}`}>Open test ticket</a></Button></CardContent></Card>}
+      <Dialog open={testOpen} onOpenChange={setTestOpen}><NexusWorkflowDialog eyebrow="Inbound communication" title="Run phone integration test" description="Nexus will submit a clearly marked test call and create one draft ticket. It does not dial a number or contact a customer." icon={PhoneCall} tone="sky" footer={<><Button variant="outline" onClick={() => setTestOpen(false)}>Cancel</Button><Button onClick={test} disabled={testing} data-testid="confirm-phone-hook-test">{testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{testing ? "Creating test…" : "Create test ticket"}</Button></>}><div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-4 text-sm leading-6 text-muted-foreground"><p className="font-semibold text-foreground">What this proves</p><p className="mt-1">Nexus accepts the event shape and can turn it into a visible ticket draft. Configure the PBX webhook only after your integration credentials and network path are ready.</p></div></NexusWorkflowDialog></Dialog>
     </div>
   );
 }
