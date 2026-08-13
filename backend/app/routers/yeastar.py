@@ -13,7 +13,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, scope_query
 from app.models import *
 
 router = APIRouter()
@@ -528,6 +528,27 @@ async def get_yeastar_pbx_monitoring(pbx_id: str, current_user: dict = Depends(g
         "recent_calls": call_logs.get("data", []),
         "missed_calls": missed,
     }
+
+
+@router.get("/yeastar/monitoring/wallboard")
+async def get_yeastar_voice_wallboard(current_user: dict = Depends(get_current_user)):
+    """Live PBX summaries for every client the signed-in technician may see."""
+    pbxs = await db.yeastar_pbxs.find(
+        {**scope_query(current_user), "enabled": {"$ne": False}},
+        {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "name": 1, "client_api_id": 1, "client_secret": 1, "pbx_url": 1},
+    ).to_list(100)
+
+    async def collect(pbx: dict) -> dict:
+        if not _has_pbx_credentials(pbx):
+            return {"pbx": {"id": pbx.get("id"), "name": pbx.get("name") or "Yeastar PBX", "client_id": pbx.get("client_id"), "client_name": pbx.get("client_name") or "Client"}, "health": "not_configured", "active_calls": [], "extensions": {"total": 0, "registered": 0, "unregistered": 0}, "missed_calls": 0}
+        try:
+            return await get_yeastar_pbx_monitoring(str(pbx.get("id")), current_user=current_user)
+        except Exception as exc:  # Individual PBX failures must not hide every tenant's voice state.
+            logger.info("Voice wallboard check failed for PBX %s: %s", pbx.get("id"), exc)
+            return {"pbx": {"id": pbx.get("id"), "name": pbx.get("name") or "Yeastar PBX", "client_id": pbx.get("client_id"), "client_name": pbx.get("client_name") or "Client"}, "health": "degraded", "active_calls": [], "extensions": {"total": 0, "registered": 0, "unregistered": 0}, "missed_calls": 0}
+
+    snapshots = await asyncio.gather(*(collect(pbx) for pbx in pbxs))
+    return {"scope": "all", "checked_at": datetime.now(timezone.utc).isoformat(), "pbxs": snapshots}
 
 
 # ============== VOICE WORKSPACE (YEASTAR PROVIDER) ==============
