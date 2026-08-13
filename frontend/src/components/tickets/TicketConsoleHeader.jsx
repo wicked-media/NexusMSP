@@ -55,6 +55,7 @@ export default function TicketConsoleHeader({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState([]);
   const [confirmRevert, setConfirmRevert] = useState(false);
+  const [resolutionTarget, setResolutionTarget] = useState(null);
 
   useEffect(() => { setTitleDraft(ticket?.title || ""); }, [ticket?.title]);
   useEffect(() => { setDescriptionDraft(ticket?.description || ""); }, [ticket?.description]);
@@ -165,8 +166,8 @@ export default function TicketConsoleHeader({
               data-testid="console-timer-btn"
             >{isTimerRunning ? formatElapsed(timerElapsed) : "Start timer"}</TicketHeaderAction>
             {isActiveTicket && <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>}
-            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={onResolve} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
-            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => onStatusChange?.("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
+            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => setResolutionTarget("resolved")} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
+            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => setResolutionTarget("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
             <TicketHeaderAction icon={Wrench} tone="compact" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
 
             <DropdownMenu>
@@ -224,7 +225,7 @@ export default function TicketConsoleHeader({
                 return (
                   <button
                     key={s}
-                    onClick={() => onStatusChange?.(s)}
+                    onClick={() => ["resolved", "closed"].includes(s) ? setResolutionTarget(s) : onStatusChange?.(s)}
                 className={`text-[10px] uppercase tracking-[0.1em] px-2 py-1 rounded-md transition-colors ${
                       active ? "bg-white/[0.12] text-white ring-1 ring-white/[0.14]" :
                       past ? "text-emerald-300/70 hover:bg-emerald-500/[0.06]" :
@@ -291,6 +292,22 @@ export default function TicketConsoleHeader({
           footer={<><Button variant="outline" onClick={() => setConfirmRevert(false)}>Keep current customer</Button><Button onClick={() => revert(true)}>Revert customer</Button></>}
         >
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{ticket.ticket_number || ticket.id?.slice(0, 8)}</p><p className="mt-1 text-sm text-muted-foreground">Current customer: {ticket.client_name || "Unassigned"}. Review the customer history before reversing the assignment.</p></div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={Boolean(resolutionTarget)} onOpenChange={(open) => !open && setResolutionTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Ticket resolution"
+          title={resolutionTarget === "closed" ? "Close this ticket?" : "Resolve this ticket?"}
+          description={resolutionTarget === "closed" ? "Closing preserves the complete service record and removes the ticket from active operational queues." : "Confirm the issue is fixed before Nexus records the resolution and moves it out of the active queue."}
+          icon={CheckCircle2}
+          tone="emerald"
+          footer={<><Button variant="outline" onClick={() => setResolutionTarget(null)}>Keep working</Button><Button onClick={() => { if (resolutionTarget === "resolved") onResolve?.(); else onStatusChange?.("closed"); setResolutionTarget(null); }} data-testid="confirm-ticket-resolution">{resolutionTarget === "closed" ? "Close ticket" : "Confirm resolution"}</Button></>}
+        >
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.05] p-4">
+            <p className="font-medium">{ticket.ticket_number || ticket.id?.slice(0, 8)} · {ticket.title || "Untitled ticket"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{resolutionTarget === "closed" ? "The service record, timeline and billing history remain available after close." : "Make sure the customer impact is resolved, the work is recorded and any required customer update has been sent."}</p>
+          </div>
         </NexusWorkflowDialog>
       </Dialog>
     </>
