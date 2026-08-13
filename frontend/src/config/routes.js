@@ -316,6 +316,7 @@ export const routeConfig = [
   { path: "/sla-hub", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/sla-timer" },
   // Voice is provider-agnostic; the legacy route remains for bookmarks and integrations.
   { path: "/voice", component: page("VoiceWorkspacePage"), auth: true, layout: true },
+  { path: "/voice/wallboard", component: page("VoiceWallboardPage"), auth: true, layout: true },
   { path: "/phone-integration", component: page("VoiceWorkspacePage"), auth: true, layout: true },
 
   // Auth callback (no auth, no layout)

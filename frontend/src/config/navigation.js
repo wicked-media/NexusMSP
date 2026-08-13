@@ -91,6 +91,7 @@ export const navGroups = [
       {
         path: "/voice", icon: Phone, label: "Voice",
         children: [
+          { path: "/voice/wallboard", label: "Live wallboard" },
           { path: "/voice?tab=pbxs", label: "PBXs" },
           { path: "/voice?tab=extensions", label: "Extensions" },
           { path: "/voice?tab=billing", label: "Voice billing" },
