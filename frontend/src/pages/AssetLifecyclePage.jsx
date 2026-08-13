@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   Plus, Search, Package, ArrowRight, Loader2, RefreshCw, Trash2,
   ShoppingCart, Truck, CheckCircle, Wrench, Archive, AlertTriangle,
@@ -40,6 +41,7 @@ export default function AssetLifecyclePage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [isTransitionOpen, setIsTransitionOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [transitionForm, setTransitionForm] = useState({ new_stage: "", notes: "" });
   const [form, setForm] = useState({
     name: "", asset_type: "hardware", category: "computer", manufacturer: "",
@@ -88,11 +90,15 @@ export default function AssetLifecyclePage() {
     } catch { toast.error("Failed to transition"); }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this asset?")) return;
+  const handleDelete = async (id, confirmed = false) => {
+    if (!confirmed) {
+      setDeleteTarget(assets.find((asset) => asset.id === id) || null);
+      return;
+    }
     try {
       await axios.delete(`${API}/asset-lifecycle/${id}`, { headers });
       toast.success("Asset deleted");
+      setDeleteTarget(null);
       if (selectedAsset?.id === id) setSelectedAsset(null);
       fetchData();
     } catch { toast.error("Failed to delete"); }
@@ -338,6 +344,19 @@ export default function AssetLifecyclePage() {
           </div>
           <DialogFooter><Button onClick={handleCreate} data-testid="create-asset-submit"><Plus className="w-4 h-4 mr-1" />Create Asset</Button></DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteTarget)} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Asset lifecycle"
+          title="Delete asset record?"
+          description="This removes the lifecycle record from Nexus. Use a stage transition when the asset should remain in history as retired or disposed."
+          icon={Trash2}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setDeleteTarget(null)}>Keep record</Button><Button variant="destructive" onClick={() => handleDelete(deleteTarget?.id, true)}>Delete asset</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4"><p className="font-medium">{deleteTarget?.name || "Selected asset"}</p><p className="mt-1 text-sm text-muted-foreground">Serial, ownership, cost, warranty, and lifecycle history will no longer be available from this record.</p></div>
+        </NexusWorkflowDialog>
       </Dialog>
     </div>
   );
