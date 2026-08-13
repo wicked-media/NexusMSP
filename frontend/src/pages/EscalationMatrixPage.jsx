@@ -6,8 +6,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog } from "@/components/ui/dialog";
 import { MetricStrip, MetricTile } from "@/components/design-system";
-import { Bell, Settings, Zap } from "lucide-react";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { AlertTriangle, Bell, RefreshCw, Settings, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 export default function EscalationMatrixPage() {
@@ -16,6 +18,7 @@ export default function EscalationMatrixPage() {
   const [logs, setLogs] = useState([]);
   const [tab, setTab] = useState("rules");
   const [checking, setChecking] = useState(false);
+  const [checkConfirmationOpen, setCheckConfirmationOpen] = useState(false);
   const headers = { Authorization: `Bearer ${token}` };
 
   const fetchData = () => {
@@ -33,22 +36,30 @@ export default function EscalationMatrixPage() {
       const { data } = await axios.post(`${API}/escalation-matrix/check`, {}, { headers });
       toast.success(`Checked ${data.checked_tickets} tickets, escalated ${data.escalated}`);
       fetchData();
-    } catch { toast.error("Check failed"); }
+    } catch { toast.error("Escalation check failed. Nothing was changed."); }
     setChecking(false);
   };
 
   const toggleRule = async (rule) => {
-    await axios.put(`${API}/escalation-matrix/rules/${rule.id}`, { enabled: !rule.enabled }, { headers });
-    fetchData();
+    try {
+      await axios.put(`${API}/escalation-matrix/rules/${rule.id}`, { enabled: !rule.enabled }, { headers });
+      toast.success(`${rule.name} ${rule.enabled ? "paused" : "activated"}`);
+      fetchData();
+    } catch {
+      toast.error(`Couldn't update ${rule.name}`);
+    }
   };
 
   return (
     <div className="space-y-6" data-testid="escalation-matrix-page">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold tracking-tight">Escalation Matrix</h1>
-          <p className="text-muted-foreground text-sm mt-1">Automated ticket escalation with custom rules</p></div>
-        <Button onClick={runCheck} disabled={checking} data-testid="run-escalation-check">
-          <Zap className={`w-4 h-4 mr-2 ${checking ? "animate-spin" : ""}`} />{checking ? "Checking..." : "Run Escalation Check"}
+      <div className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 shadow-sm md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-violet-400">Service desk guardrail</p>
+          <h1 className="text-2xl font-bold tracking-tight">Escalation Matrix</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Keep ownership visible when a ticket needs a faster response. Review the rules, then run a controlled check.</p>
+        </div>
+        <Button onClick={() => setCheckConfirmationOpen(true)} disabled={checking} data-testid="run-escalation-check">
+          <Zap className="mr-2 h-4 w-4" />Run escalation check
         </Button>
       </div>
 
@@ -58,10 +69,13 @@ export default function EscalationMatrixPage() {
         <MetricTile label="Escalations" value={logs.length} accent="amber" icon={<Bell className="w-2.5 h-2.5 text-amber-400" />} testid="escalation-metric-log" />
       </MetricStrip>
 
-      <Card>
+      <Card className="border-border/60 shadow-sm">
         <CardContent className="pt-4">
           <Tabs value={tab} onValueChange={setTab}>
-            <TabsList className="mb-4"><TabsTrigger value="rules">Escalation Rules</TabsTrigger><TabsTrigger value="log">Escalation Log ({logs.length})</TabsTrigger></TabsList>
+            <div className="mb-4 flex flex-col gap-3 border-b border-border/60 pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <div><p className="text-sm font-semibold">Escalation control</p><p className="text-xs text-muted-foreground">Rules define what changes; the activity log proves what happened.</p></div>
+              <TabsList><TabsTrigger value="rules">Rules ({rules.length})</TabsTrigger><TabsTrigger value="log">Activity ({logs.length})</TabsTrigger></TabsList>
+            </div>
             <TabsContent value="rules">
               <Table>
                 <TableHeader><TableRow><TableHead>Rule</TableHead><TableHead>Trigger</TableHead><TableHead>Priority</TableHead><TableHead>Time Threshold</TableHead><TableHead>Escalate To</TableHead><TableHead>Notify</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
@@ -74,8 +88,8 @@ export default function EscalationMatrixPage() {
                       <TableCell>{r.time_threshold_minutes}min</TableCell>
                       <TableCell>{r.escalate_to}</TableCell>
                       <TableCell className="text-xs">{r.notification}</TableCell>
-                      <TableCell><Badge variant={r.enabled ? "default" : "outline"}>{r.enabled ? "Active" : "Off"}</Badge></TableCell>
-                      <TableCell><Button variant="ghost" size="sm" onClick={() => toggleRule(r)}>{r.enabled ? "Disable" : "Enable"}</Button></TableCell>
+                       <TableCell><Badge variant={r.enabled ? "default" : "outline"} className={r.enabled ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/15" : ""}>{r.enabled ? "Active" : "Paused"}</Badge></TableCell>
+                       <TableCell className="text-right"><Button variant="outline" size="sm" onClick={() => toggleRule(r)}>{r.enabled ? "Pause rule" : "Activate rule"}</Button></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -103,6 +117,21 @@ export default function EscalationMatrixPage() {
           </Tabs>
         </CardContent>
       </Card>
+
+      <Dialog open={checkConfirmationOpen} onOpenChange={setCheckConfirmationOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Escalation control"
+          title="Run escalation check"
+          description="Nexus will evaluate open tickets against active rules and apply only the escalations that match. Every action will appear in the activity log."
+          icon={AlertTriangle}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setCheckConfirmationOpen(false)}>Cancel</Button><Button onClick={async () => { setCheckConfirmationOpen(false); await runCheck(); }} disabled={checking} data-testid="confirm-escalation-check"><RefreshCw className={`mr-2 h-4 w-4 ${checking ? "animate-spin" : ""}`} />{checking ? "Checking…" : "Run check"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
+            <div className="flex gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" /><div><p className="text-sm font-semibold">Safe, auditable escalation</p><p className="mt-1 text-sm leading-6 text-muted-foreground">This does not close tickets or notify customers directly. It applies the configured ownership and notification rules, then records the reason and destination for review.</p></div></div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
