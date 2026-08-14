@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import backup_center, client_portal, invoice_smart, invoices, mega_features, mission_control, workflow_automation, yeastar
+from app.routers import backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -33,6 +33,9 @@ class _ListCursor:
         self.rows = rows
 
     def sort(self, *_args):
+        return self
+
+    def limit(self, _limit):
         return self
 
     async def to_list(self, _limit):
@@ -483,3 +486,82 @@ def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkey
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "automation.run.approve"
+
+
+def test_microsoft_tenant_registry_only_reads_allowed_client_records(monkeypatch):
+    captured = {}
+
+    class Collection:
+        def __init__(self, name):
+            self.name = name
+
+        def find(self, query, _projection):
+            captured[self.name] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        control_plane,
+        "db",
+        type("ControlPlaneDB", (), {
+            "clients": Collection("clients"),
+            "m365_tenant_connections": Collection("connections"),
+            "m365_tenants": Collection("tenants"),
+        })(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(control_plane._microsoft_tenant_registry({}, user)) == []
+    assert captured["clients"] == {"id": {"$in": ["client-a"]}}
+    assert captured["connections"] == {"client_id": {"$in": ["client-a"]}}
+    assert captured["tenants"] == {
+        "$and": [
+            {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
+            {"client_id": {"$in": ["client-a"]}},
+        ]
+    }
+
+
+def test_control_plane_search_scopes_client_bearing_results(monkeypatch):
+    captured = {}
+
+    class Collection:
+        def __init__(self, name):
+            self.name = name
+
+        def find(self, query, _projection):
+            captured[self.name] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        control_plane,
+        "db",
+        type("ControlPlaneSearchDB", (), {
+            "clients": Collection("clients"),
+            "tickets": Collection("tickets"),
+            "devices": Collection("devices"),
+            "m365_users": Collection("m365_users"),
+            "invoices": Collection("invoices"),
+            "yeastar_pbxs": Collection("voice"),
+            "backup_jobs": Collection("backups"),
+            "kb_articles": Collection("knowledge"),
+            "products": Collection("products"),
+        })(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    result = asyncio.run(control_plane.control_plane_search("printer", user))
+
+    assert result["count"] == 0
+    assert captured["clients"]["$and"][1] == {"id": {"$in": ["client-a"]}}
+    for name in ("tickets", "devices", "m365_users", "invoices", "voice", "backups", "knowledge"):
+        assert captured[name]["$and"][1] == {"client_id": {"$in": ["client-a"]}}

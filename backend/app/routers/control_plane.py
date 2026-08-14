@@ -27,7 +27,7 @@ from app.services.event_backbone import event_backbone_health
 from app.services.nexus_ideas import ideas_snapshot
 from app.services.platform_foundation import EVENT_SUBJECTS
 from app.services.product_roadmap import build_product_roadmap
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 
 router = APIRouter()
@@ -582,9 +582,16 @@ def _normalise_action_options(template: dict, raw_options) -> tuple[dict, list[s
     return output, missing
 
 
-async def _recent_activity() -> list[dict]:
+async def _recent_activity(current_user: dict) -> list[dict]:
+    """Return activity only when it can be tied to an allowed client.
+
+    Older activity records without a client reference deliberately do not show
+    to restricted technicians: attribution is safer than guessing from a
+    mutable name or a related object at read time.
+    """
+    query = scoped_query(current_user, {}, site_field=None)
     rows = await db.activity_logs.find(
-        {},
+        query,
         {
             "_id": 0,
             "id": 1,
@@ -627,16 +634,16 @@ async def control_plane_overview(current_user: dict = Depends(get_current_user))
         linked_clients,
         recent_activity,
     ) = await asyncio.gather(
-        db.clients.count_documents({}),
-        db.devices.count_documents({}),
-        db.tickets.count_documents({"status": {"$nin": ["closed", "resolved", "cancelled"]}}),
-        db.invoices.count_documents({"status": {"$nin": ["paid", "void", "cancelled"]}}),
-        db.m365_tenants.count_documents({"source": {"$in": ["m365_graph", "m365_partner_center"]}}),
-        db.m365_users.count_documents({"source": {"$in": ["m365_graph", "m365_partner_center"]}}),
-        db.yeastar_pbxs.count_documents({"enabled": {"$ne": False}}),
-        db.backup_jobs.count_documents({}),
-        db.clients.count_documents({"cipp_tenant_id": {"$exists": True, "$nin": [None, ""]}}),
-        _recent_activity(),
+        db.clients.count_documents(scoped_query(current_user, {}, field="id", site_field=None)),
+        db.devices.count_documents(scoped_query(current_user, {})),
+        db.tickets.count_documents(scoped_query(current_user, {"status": {"$nin": ["closed", "resolved", "cancelled"]}})),
+        db.invoices.count_documents(scoped_query(current_user, {"status": {"$nin": ["paid", "void", "cancelled"]}})),
+        db.m365_tenants.count_documents(scoped_query(current_user, {"source": {"$in": ["m365_graph", "m365_partner_center"]}}, site_field=None)),
+        db.m365_users.count_documents(scoped_query(current_user, {"source": {"$in": ["m365_graph", "m365_partner_center"]}}, site_field=None)),
+        db.yeastar_pbxs.count_documents(scoped_query(current_user, {"enabled": {"$ne": False}})),
+        db.backup_jobs.count_documents(scoped_query(current_user, {})),
+        db.clients.count_documents(scoped_query(current_user, {"cipp_tenant_id": {"$exists": True, "$nin": [None, ""]}}, field="id", site_field=None)),
+        _recent_activity(current_user),
     )
 
     cipp_connected = bool(
@@ -705,12 +712,18 @@ async def control_plane_overview(current_user: dict = Depends(get_current_user))
     }
 
 
-async def _microsoft_provider_state() -> dict:
+async def _microsoft_provider_state(current_user: dict | None = None) -> dict:
     cipp_settings, graph_settings, verified_tenant_count = await asyncio.gather(
         db.settings.find_one({"type": "cipp"}, {"_id": 0}),
         db.settings.find_one({"key": "m365_connection"}, {"_id": 0}),
         db.m365_tenants.count_documents(
-            {"source": {"$in": ["m365_graph", "m365_partner_center"]}}
+            scoped_query(
+                current_user,
+                {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
+                site_field=None,
+            )
+            if current_user
+            else {"source": {"$in": ["m365_graph", "m365_partner_center"]}}
         ),
     )
     graph_value = (graph_settings or {}).get("value") or {}
@@ -755,11 +768,11 @@ async def _microsoft_provider_state() -> dict:
     }
 
 
-async def _microsoft_tenant_registry(provider: dict) -> list[dict]:
+async def _microsoft_tenant_registry(provider: dict, current_user: dict) -> list[dict]:
     """Merge legacy, Partner Center and verified Graph tenant evidence once."""
     clients, connections, verified_tenants = await asyncio.gather(
         db.clients.find(
-            {},
+            scoped_query(current_user, {}, field="id", site_field=None),
             {
                 "_id": 0,
                 "id": 1,
@@ -769,11 +782,17 @@ async def _microsoft_tenant_registry(provider: dict) -> list[dict]:
                 "cipp_tenant_domain": 1,
             },
         ).sort("name", 1).to_list(2000),
-        db.m365_tenant_connections.find({}, {"_id": 0})
+        db.m365_tenant_connections.find(
+            scoped_query(current_user, {}, site_field=None), {"_id": 0}
+        )
         .sort("tenant_name", 1)
         .to_list(2000),
         db.m365_tenants.find(
-            {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
+            scoped_query(
+                current_user,
+                {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
+                site_field=None,
+            ),
             {
                 "_id": 0,
                 "id": 1,
@@ -916,9 +935,13 @@ def _public_action_template(template: dict, permission: dict) -> dict:
 async def microsoft_control_readiness(current_user: dict = Depends(get_current_user)):
     """Return evidence required before a technician plans a Microsoft action."""
     provider, recent_plans = await asyncio.gather(
-        _microsoft_provider_state(),
+        _microsoft_provider_state(current_user),
         db.control_plane_action_plans.find(
-            {"domain": "microsoft365"},
+            scoped_query(
+                current_user,
+                {"domain": "microsoft365"},
+                site_field=None,
+            ),
             {"_id": 0},
         ).sort("created_at", -1).limit(12).to_list(12),
     )
@@ -928,7 +951,7 @@ async def microsoft_control_readiness(current_user: dict = Depends(get_current_u
             for template in MICROSOFT_ACTION_TEMPLATES
         ]
     )
-    tenants = await _microsoft_tenant_registry(provider)
+    tenants = await _microsoft_tenant_registry(provider, current_user)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -993,10 +1016,10 @@ async def preview_microsoft_action(
         )
 
     provider, permission = await asyncio.gather(
-        _microsoft_provider_state(),
+        _microsoft_provider_state(current_user),
         evaluate_action_permission(current_user, template["permission"]),
     )
-    registry = await _microsoft_tenant_registry(provider)
+    registry = await _microsoft_tenant_registry(provider, current_user)
     tenant = next((item for item in registry if item.get("id") == tenant_id), None)
     if not tenant:
         raise HTTPException(
@@ -1219,10 +1242,10 @@ async def submit_microsoft_action_plan(
     if not template:
         raise HTTPException(status_code=409, detail="The action template is no longer available")
     provider, permission = await asyncio.gather(
-        _microsoft_provider_state(),
+        _microsoft_provider_state(current_user),
         evaluate_action_permission(current_user, template["permission"]),
     )
-    registry = await _microsoft_tenant_registry(provider)
+    registry = await _microsoft_tenant_registry(provider, current_user)
     tenant = next(
         (item for item in registry if item.get("id") == plan.get("tenant_id")),
         None,
@@ -1680,42 +1703,47 @@ async def control_plane_search(
     ) = await asyncio.gather(
         _find(
             db.clients,
-            {"$or": [{"name": regex}, {"company_name": regex}, {"email": regex}, {"phone": regex}]},
+            scoped_query(
+                current_user,
+                {"$or": [{"name": regex}, {"company_name": regex}, {"email": regex}, {"phone": regex}]},
+                field="id",
+                site_field=None,
+            ),
             {"id": 1, "name": 1, "company_name": 1, "email": 1, "status": 1},
         ),
         _find(
             db.tickets,
-            {"$or": [{"title": regex}, {"ticket_number": regex}, {"client_name": regex}, {"requester_email": regex}]},
+            scoped_query(current_user, {"$or": [{"title": regex}, {"ticket_number": regex}, {"client_name": regex}, {"requester_email": regex}]}),
             {"id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "status": 1, "priority": 1},
         ),
         _find(
             db.devices,
-            {"$or": [{"hostname": regex}, {"name": regex}, {"serial_number": regex}, {"client_name": regex}]},
+            scoped_query(current_user, {"$or": [{"hostname": regex}, {"name": regex}, {"serial_number": regex}, {"client_name": regex}]}),
             {"id": 1, "hostname": 1, "name": 1, "serial_number": 1, "client_name": 1, "status": 1},
         ),
         _find(
             db.m365_users,
-            {"source": {"$in": ["m365_graph", "m365_partner_center"]}, "$or": [{"display_name": regex}, {"upn": regex}, {"tenant_name": regex}]},
+            scoped_query(current_user, {"source": {"$in": ["m365_graph", "m365_partner_center"]}, "$or": [{"display_name": regex}, {"upn": regex}, {"tenant_name": regex}]}, site_field=None),
             {"id": 1, "display_name": 1, "upn": 1, "tenant_name": 1, "tenant_id": 1, "account_enabled": 1},
         ),
         _find(
             db.invoices,
-            {"$or": [{"invoice_number": regex}, {"invoice_name": regex}, {"name": regex}, {"client_name": regex}]},
+            scoped_query(current_user, {"$or": [{"invoice_number": regex}, {"invoice_name": regex}, {"name": regex}, {"client_name": regex}]}),
             {"id": 1, "invoice_number": 1, "invoice_name": 1, "name": 1, "client_name": 1, "status": 1, "total": 1},
         ),
         _find(
             db.yeastar_pbxs,
-            {"$or": [{"name": regex}, {"pbx_name": regex}, {"client_name": regex}, {"fqdn": regex}, {"cloud_url": regex}]},
+            scoped_query(current_user, {"$or": [{"name": regex}, {"pbx_name": regex}, {"client_name": regex}, {"fqdn": regex}, {"cloud_url": regex}]}),
             {"id": 1, "name": 1, "pbx_name": 1, "client_name": 1, "status": 1, "extension_count": 1},
         ),
         _find(
             db.backup_jobs,
-            {"$or": [{"name": regex}, {"job_name": regex}, {"client_name": regex}, {"device_name": regex}]},
+            scoped_query(current_user, {"$or": [{"name": regex}, {"job_name": regex}, {"client_name": regex}, {"device_name": regex}]}),
             {"id": 1, "name": 1, "job_name": 1, "client_name": 1, "status": 1, "last_run": 1},
         ),
         _find(
             db.kb_articles,
-            {"$or": [{"title": regex}, {"summary": regex}, {"category": regex}, {"tags": regex}]},
+            scoped_query(current_user, {"$or": [{"title": regex}, {"summary": regex}, {"category": regex}, {"tags": regex}]}, site_field=None),
             {"id": 1, "slug": 1, "title": 1, "summary": 1, "category": 1, "status": 1},
         ),
         _find(
