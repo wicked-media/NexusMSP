@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends
 from app.auth import get_current_user
 from app.database import db
 from app.routers.license_management import _is_confirmed, _normalise
+from app.services.scope_permissions import scoped_query
 
 
 router = APIRouter(prefix="/service-subscriptions", tags=["service-subscriptions"])
@@ -91,10 +92,13 @@ def _attention(*reasons):
 
 @router.get("/overview")
 async def service_subscription_overview(current_user: dict = Depends(get_current_user)):
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(2000)
+    clients = await db.clients.find(
+        scoped_query(current_user, {}, field="id", site_field=None),
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(2000)
     by_client_id, by_client_name = _client_lookup(clients)
 
-    recurring = await db.recurring_invoices.find({}, {"_id": 0}).to_list(2000)
+    recurring = await db.recurring_invoices.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
     recurring_by_client = defaultdict(list)
     for stream in recurring:
         if stream.get("client_id"):
@@ -154,7 +158,7 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
             })
 
     # Technician-confirmed or integration-supplied licence evidence.
-    raw_licences = await db.licenses.find({}, {"_id": 0}).to_list(5000)
+    raw_licences = await db.licenses.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(5000)
     for raw in raw_licences:
         if not _is_confirmed(raw):
             continue
@@ -197,7 +201,7 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
         })
 
     # Generic Nexus-native subscriptions retained for backwards compatibility.
-    generic_subscriptions = await db.subscriptions.find({}, {"_id": 0}).to_list(5000)
+    generic_subscriptions = await db.subscriptions.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(5000)
     for record in generic_subscriptions:
         client = _client_details(record, by_client_id, by_client_name)
         name = record.get("product_name") or record.get("name") or "Subscription"
@@ -243,13 +247,16 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
         })
 
     # Pax8 live quantities.
-    pax8_links = await db.pax8_customer_links.find({}, {"_id": 0}).to_list(2000)
+    pax8_links = await db.pax8_customer_links.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
     pax8_clients = {
         str(link.get("pax8_company_id") or link.get("company_id") or link.get("companyId")): link
         for link in pax8_links
         if link.get("pax8_company_id") or link.get("company_id") or link.get("companyId")
     }
-    pax8_records = await db.pax8_subscriptions.find({}, {"_id": 0}).to_list(10000)
+    pax8_company_ids = list(pax8_clients)
+    pax8_records = await db.pax8_subscriptions.find(
+        {"$or": [{"company_id": {"$in": pax8_company_ids}}, {"companyId": {"$in": pax8_company_ids}}]}, {"_id": 0}
+    ).to_list(10000) if pax8_company_ids else []
     for record in pax8_records:
         company_id = str(record.get("company_id") or record.get("companyId") or "")
         link = pax8_clients.get(company_id, {})
@@ -295,7 +302,7 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
         })
 
     # Acronis tenant usage.
-    acronis_links = await db.acronis_tenant_links.find({}, {"_id": 0}).to_list(2000)
+    acronis_links = await db.acronis_tenant_links.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
     for link in acronis_links:
         client = _client_details(link, by_client_id, by_client_name)
         usage = await db.acronis_usage.find_one({"tenant_id": link.get("tenant_id")}, {"_id": 0}) or {}
@@ -338,7 +345,7 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
         })
 
     # Yeastar PBX extension quantities.
-    pbxs = await db.yeastar_pbxs.find({}, {"_id": 0, "client_secret": 0}).to_list(2000)
+    pbxs = await db.yeastar_pbxs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0, "client_secret": 0}).to_list(2000)
     for pbx in pbxs:
         client = _client_details(pbx, by_client_id, by_client_name)
         streams = recurring_by_client.get(client["client_id"], [])
@@ -383,10 +390,10 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
     # A device is billable only after the existing Nexus Agent has reported a
     # successful, hash-verified companion installation; a queued deployment is
     # deliberately not counted as usage.
-    elevate_agents = await db.nexus_agents.find({
+    elevate_agents = await db.nexus_agents.find(scoped_query(current_user, {
         "is_active": True,
         "nexus_elevate.state": "active",
-    }, {"_id": 0, "id": 1, "client_id": 1, "last_seen": 1, "nexus_elevate": 1}).to_list(10000)
+    }, site_field=None), {"_id": 0, "id": 1, "client_id": 1, "last_seen": 1, "nexus_elevate": 1}).to_list(10000)
     elevate_by_client = defaultdict(list)
     for agent in elevate_agents:
         if agent.get("client_id"):
