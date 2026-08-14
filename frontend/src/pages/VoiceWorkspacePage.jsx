@@ -110,7 +110,7 @@ export default function VoiceWorkspacePage() {
   useEffect(() => {
     if (tab !== "monitoring" || monitoringPbxId || !workspace?.pbxs?.length) return;
     const permittedPbxs = clientScope ? workspace.pbxs.filter((pbx) => pbx.client_id === clientScope) : workspace.pbxs;
-    const preferredPbx = permittedPbxs.find((pbx) => pbx.has_credentials) || permittedPbxs[0];
+    const preferredPbx = permittedPbxs.find((pbx) => pbx.has_credentials);
     if (preferredPbx?.id) setMonitoringPbxId(preferredPbx.id);
   }, [clientScope, monitoringPbxId, tab, workspace]);
 
@@ -145,6 +145,12 @@ export default function VoiceWorkspacePage() {
 
   const loadMonitoring = async (pbxId = monitoringPbxId, { silent = false } = {}) => {
     if (!pbxId || monitoringInFlight.current) return;
+    if (pbxId !== "all" && !workspace?.pbxs?.some((pbx) => pbx.id === pbxId && pbx.has_credentials)) {
+      setMonitoringPbxId("");
+      setMonitoring(null);
+      if (!silent) toast.error("Enable the PBX direct API before starting live monitoring.");
+      return;
+    }
     monitoringInFlight.current = true;
     setMonitoringPbxId(pbxId);
     if (!silent) setMonitoringBusy(true);
@@ -342,6 +348,7 @@ export default function VoiceWorkspacePage() {
 
   const allPbxs = workspace.pbxs || [];
   const pbxs = clientScope ? allPbxs.filter((pbx) => pbx.client_id === clientScope) : allPbxs;
+  const monitorablePbxs = pbxs.filter((pbx) => pbx.has_credentials);
   const allExtensions = workspace.extensions || [];
   const scopedExtensions = clientScope ? allExtensions.filter((extension) => extension.client_id === clientScope) : allExtensions;
   const visibleExtensions = scopedExtensions.filter((extension) => {
@@ -410,7 +417,7 @@ export default function VoiceWorkspacePage() {
       </TabsContent>
 
       <TabsContent value="monitoring" className="mt-4 space-y-4">
-        <Card className="border-cyan-500/20"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end"><div className="min-w-0 flex-1 space-y-1.5"><Label>PBX to monitor</Label><Select value={monitoringPbxId} onValueChange={setMonitoringPbxId}><SelectTrigger><SelectValue placeholder="Choose a client PBX" /></SelectTrigger><SelectContent>{pbxs.map((pbx) => <SelectItem key={pbx.id} value={pbx.id}>{pbx.client_name} · {pbx.name}</SelectItem>)}</SelectContent></Select></div><Button variant="outline" onClick={() => navigate("/voice/wallboard")}><Radio className="mr-2 h-4 w-4" />Open wallboard</Button><Button onClick={() => loadMonitoring()} disabled={!monitoringPbxId || monitoringBusy} data-testid="voice-run-monitoring"><Activity className={`mr-2 h-4 w-4 ${monitoringBusy ? "animate-pulse" : ""}`} />{monitoringBusy ? "Checking…" : "Run live check"}</Button></CardContent></Card>
+        <Card className="border-cyan-500/20"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end"><div className="min-w-0 flex-1 space-y-1.5"><Label>PBX to monitor</Label><Select value={monitoringPbxId} onValueChange={setMonitoringPbxId} disabled={!monitorablePbxs.length}><SelectTrigger><SelectValue placeholder={monitorablePbxs.length ? "Choose a client PBX" : "No live-enabled PBXs"} /></SelectTrigger><SelectContent>{monitorablePbxs.map((pbx) => <SelectItem key={pbx.id} value={pbx.id}>{pbx.client_name} · {pbx.name}</SelectItem>)}</SelectContent></Select>{!monitorablePbxs.length && <p className="text-xs text-amber-300">Claimed YCM PBXs need their direct OpenAPI credentials before live monitoring can start.</p>}</div><Button variant="outline" onClick={() => navigate("/voice/wallboard")} disabled={!monitorablePbxs.length}><Radio className="mr-2 h-4 w-4" />Open wallboard</Button><Button onClick={() => loadMonitoring()} disabled={!monitoringPbxId || monitoringBusy || !monitorablePbxs.length} data-testid="voice-run-monitoring"><Activity className={`mr-2 h-4 w-4 ${monitoringBusy ? "animate-pulse" : ""}`} />{monitoringBusy ? "Checking…" : "Run live check"}</Button></CardContent></Card>
         {!monitoring ? <Card><CardContent className="py-14 text-center"><Activity className="mx-auto mb-3 h-9 w-9 text-cyan-300/50" /><p className="text-sm font-medium">Choose a PBX to see its live operational state</p><p className="mt-1 text-xs text-muted-foreground">Nexus checks the PBX API, active calls, extension registration and recent call outcomes without exposing credentials.</p></CardContent></Card> : monitoring.scope === "all" ? <VoiceWallboard snapshots={monitoring.pbxs || []} checkedAt={monitoring.checked_at} /> : <>
           <MetricStrip columns={5}><MetricTile label="PBX health" value={monitoring.health === "online" ? "Online" : "Degraded"} accent={monitoring.health === "online" ? "emerald" : "amber"} icon={Cloud} /><MetricTile label="Active calls" value={monitoring.active_calls?.length || 0} accent="cyan" icon={Phone} /><MetricTile label="Registered" value={`${monitoring.extensions?.registered || 0}/${monitoring.extensions?.total || 0}`} accent="emerald" icon={Users} /><MetricTile label="Recent missed" value={monitoring.missed_calls || 0} accent={monitoring.missed_calls ? "amber" : "emerald"} icon={AlertTriangle} /><MetricTile label="API latency" value={`${monitoring.api_latency_ms || 0}ms`} accent="sky" icon={Wifi} /></MetricStrip>
           {monitoring.degraded_reads?.length ? <Card className="border-amber-500/30 bg-amber-500/[0.045]" data-testid="voice-monitor-degraded-reads"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 gap-3"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" /><div><p className="text-sm font-semibold">Some live PBX data is unavailable</p><p className="mt-1 text-xs text-muted-foreground">Nexus kept the monitor available, but these reads did not respond: {monitoring.degraded_reads.join(", ")}.{monitoring.skipped_reads?.length ? ` The PBX baseline was unavailable, so Nexus deferred ${monitoring.skipped_reads.join(", ")} rather than adding load.` : ""}</p><p className="mt-2 text-xs text-amber-100/80">Last recorded connection test: {monitoring.last_connection_test?.at ? compactDate(monitoring.last_connection_test.at) : "Not yet"}{monitoring.last_connection_test?.latency_ms ? ` · ${monitoring.last_connection_test.latency_ms}ms` : ""}.</p></div></div><Button variant="outline" size="sm" className="shrink-0" onClick={() => updateRoute("diagnostics")}><Wifi className="mr-2 h-3.5 w-3.5" />Open diagnostics</Button></CardContent></Card> : null}
