@@ -44,6 +44,7 @@ import {
 } from "@/components/clients/ClientStudioWidgets";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import ConfidenceLens from "@/components/confidence/ConfidenceLens";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -293,6 +294,7 @@ export default function ClientsPage() {
   const headers = { Authorization: `Bearer ${token}` };
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [lifecycleFilter, setLifecycleFilter] = useState("all");
   const [riskFilter, setRiskFilter] = useState("all");
@@ -336,6 +338,7 @@ export default function ClientsPage() {
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await axios.get(`${API}/clients-enriched`, { headers });
       setData(res.data || { summary: null, clients: [] });
@@ -345,7 +348,7 @@ export default function ClientsPage() {
         else if (clientIdFromUrl) openClient(null);
       }
     } catch {
-      toast.error("Failed to load clients");
+      setLoadError("Nexus could not load the client portfolio. No client information has been changed.");
     } finally {
       setLoading(false);
     }
@@ -464,7 +467,8 @@ export default function ClientsPage() {
     }
   };
 
-  if (loading) return <div className="p-8 flex items-center gap-2 text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" />Loading portfolio...</div>;
+  if (loading) return <WorkspaceLoadingState label="Loading client portfolio" />;
+  if (loadError) return <WorkspaceErrorState title="Client portfolio is unavailable" description={loadError} onRetry={fetchData} retryLabel="Retry clients" />;
 
   const s = data.summary || {};
   const attentionClients = (data.clients || [])

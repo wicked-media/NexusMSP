@@ -31,13 +31,13 @@ import LifecycleTimeline from "../components/devices/LifecycleTimeline";
 import AnomalyInbox from "../components/devices/AnomalyInbox";
 import Sparkline from "../components/devices/Sparkline";
 import StatusOrb from "../components/devices/StatusOrb";
-import NexusPageSkeleton from "../components/feedback/NexusPageSkeleton";
 import DeviceThumbnail from "../components/devices/DeviceThumbnail";
 import { toast } from "sonner";
 
 import { API, useAuth } from "../App";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
 const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
@@ -70,6 +70,7 @@ export default function DevicesPage() {
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterType, setFilterType] = useState("all");
@@ -148,6 +149,8 @@ export default function DevicesPage() {
   }, [headers, maintenanceWindowId]);
 
   const fetchData = useCallback(async () => {
+    setLoadError(null);
+    setLoading(true);
     try {
       const [devRes, clientRes] = await Promise.all([
         axios.get(`${API}/devices`, { headers }),
@@ -175,7 +178,10 @@ export default function DevicesPage() {
         const sRes = await axios.get(`${API}/devices/sites-map`, { headers });
         setSiteMap(sRes.data?.sites || []);
       } catch { setSiteMap([]); }
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) {
+      console.error(e);
+      setLoadError("Nexus could not load managed assets. No device records have been changed.");
+    } finally { setLoading(false); }
   }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -322,7 +328,8 @@ export default function DevicesPage() {
     setSelectedDiscovered(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  if (loading) return <NexusPageSkeleton label="Loading managed assets" tiles={6} showSidebar={false} />;
+  if (loading) return <WorkspaceLoadingState label="Loading managed assets" />;
+  if (loadError) return <WorkspaceErrorState title="Managed assets are unavailable" description={loadError} onRetry={fetchData} retryLabel="Retry assets" />;
 
   const formDialog = (
     <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
