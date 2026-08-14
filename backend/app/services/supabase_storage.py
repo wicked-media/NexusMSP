@@ -172,3 +172,47 @@ async def archive_generated_pdf(document_type: str, document_id: str, pdf_bytes:
     except (SupabaseStorageError, ValueError) as exc:
         logger.warning("Nexus PDF archive skipped for %s/%s: %s", safe_type, safe_id, exc)
         return None
+
+
+async def archive_client_artifact(
+    client_id: str,
+    artifact_kind: str,
+    content: bytes,
+    extension: str,
+    content_type: str,
+) -> str | None:
+    """Mirror client-owned data to private storage without changing its live URL."""
+    if not is_configured():
+        return None
+    safe_client = re.sub(r"[^A-Za-z0-9_-]", "-", str(client_id or "client")).strip("-") or "client"
+    safe_kind = re.sub(r"[^A-Za-z0-9_-]", "-", str(artifact_kind or "asset")).strip("-") or "asset"
+    safe_extension = re.sub(r"[^A-Za-z0-9]", "", str(extension or "bin")).lower() or "bin"
+    digest = hashlib.sha256(content).hexdigest()
+    object_path = f"clients/{safe_client}/{safe_kind}/{digest}.{safe_extension}"
+    try:
+        return await upload_artifact(object_path, content, content_type)
+    except (SupabaseStorageError, ValueError) as exc:
+        logger.warning("Client artifact archive skipped for %s/%s: %s", safe_client, safe_kind, exc)
+        return None
+
+
+async def delete_artifact(object_path: str) -> bool:
+    """Remove a private object after Nexus has authorised a source-record delete."""
+    config = _config()
+    if not config:
+        return False
+    url, service_key, bucket = config
+    try:
+        safe_path = _safe_path(object_path)
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.delete(
+                f"{url}/storage/v1/object/{quote(bucket, safe='')}/{quote(safe_path, safe='/')}",
+                headers=_headers(service_key),
+            )
+        if response.status_code in {200, 204, 404} or _bucket_missing(response):
+            return True
+        response.raise_for_status()
+        return True
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Unable to delete Nexus artifact: %s", exc)
+        return False

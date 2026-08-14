@@ -20,6 +20,7 @@ from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
 from app.services.upload_security import safe_upload_extension
+from app.services.supabase_storage import archive_client_artifact, delete_artifact
 
 
 async def _enforce_client_profile_scope(request: Request, current_user: dict = Depends(get_current_user)):
@@ -52,7 +53,7 @@ def _safe_ext(filename: str, allow: set) -> str:
 
 
 async def _ensure_client(client_id: str):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "artifact_storage": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
@@ -86,7 +87,18 @@ async def _store_client_image(client_id: str, client: dict, file: UploadFile, im
     with open(filepath, "wb") as output:
         output.write(content)
     url = f"/api/uploads/clients/{filename}"
-    await db.clients.update_one({"id": client_id}, {"$set": {field_name: url, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    artifact_path = await archive_client_artifact(
+        client_id, image_kind, content, ext, file.content_type or "application/octet-stream"
+    )
+    update = {field_name: url, "updated_at": datetime.now(timezone.utc).isoformat()}
+    if artifact_path:
+        update[f"artifact_storage.{image_kind}"] = {
+            "provider": "supabase",
+            "object_path": artifact_path,
+            "content_type": file.content_type or "application/octet-stream",
+            "mirrored_at": datetime.now(timezone.utc).isoformat(),
+        }
+    await db.clients.update_one({"id": client_id}, {"$set": update})
     await _write_client_audit(current_user, f"client_{image_kind}_updated", client_id, client.get("name") or "Client", {"field": field_name})
     return {field_name: url}
 
@@ -104,7 +116,10 @@ async def delete_profile_picture(client_id: str, current_user: dict = Depends(ge
         old_path = CLIENT_ASSETS_DIR / f"{client_id}-avatar.{old_ext}"
         if old_path.exists():
             old_path.unlink()
-    await db.clients.update_one({"id": client_id}, {"$unset": {"profile_picture_url": ""}})
+    artifact_path = (client.get("artifact_storage") or {}).get("avatar", {}).get("object_path")
+    if artifact_path:
+        await delete_artifact(artifact_path)
+    await db.clients.update_one({"id": client_id}, {"$unset": {"profile_picture_url": "", "artifact_storage.avatar": ""}})
     await _write_client_audit(current_user, "client_avatar_removed", client_id, client.get("name") or "Client")
     return {"message": "Profile picture removed"}
 
@@ -123,7 +138,10 @@ async def delete_client_logo(client_id: str, current_user: dict = Depends(get_cu
         old_path = CLIENT_ASSETS_DIR / f"{client_id}-logo.{old_ext}"
         if old_path.exists():
             old_path.unlink()
-    await db.clients.update_one({"id": client_id}, {"$unset": {"logo_url": ""}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    artifact_path = (client.get("artifact_storage") or {}).get("logo", {}).get("object_path")
+    if artifact_path:
+        await delete_artifact(artifact_path)
+    await db.clients.update_one({"id": client_id}, {"$unset": {"logo_url": "", "artifact_storage.logo": ""}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
     await _write_client_audit(current_user, "client_logo_removed", client_id, client.get("name") or "Client")
     return {"message": "Business logo removed"}
 
@@ -143,19 +161,33 @@ async def upload_cover_image(client_id: str, file: UploadFile = File(...), curre
         raise HTTPException(status_code=413, detail="File too large (max 20MB)")
     with open(filepath, "wb") as f:
         f.write(content)
+    artifact_path = await archive_client_artifact(
+        client_id, "cover", content, ext, file.content_type or "application/octet-stream"
+    )
     url = f"/api/uploads/clients/{filename}"
-    await db.clients.update_one({"id": client_id}, {"$set": {"cover_image_url": url, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    update = {"cover_image_url": url, "updated_at": datetime.now(timezone.utc).isoformat()}
+    if artifact_path:
+        update["artifact_storage.cover"] = {
+            "provider": "supabase",
+            "object_path": artifact_path,
+            "content_type": file.content_type or "application/octet-stream",
+            "mirrored_at": datetime.now(timezone.utc).isoformat(),
+        }
+    await db.clients.update_one({"id": client_id}, {"$set": update})
     return {"cover_image_url": url}
 
 
 @router.delete("/clients/{client_id}/cover-image")
 async def delete_cover_image(client_id: str, current_user: dict = Depends(get_current_user)):
-    await _ensure_client(client_id)
+    client = await _ensure_client(client_id)
     for old_ext in ALLOWED_IMAGE_EXTS:
         old_path = CLIENT_ASSETS_DIR / f"{client_id}-cover.{old_ext}"
         if old_path.exists():
             old_path.unlink()
-    await db.clients.update_one({"id": client_id}, {"$unset": {"cover_image_url": ""}})
+    artifact_path = (client.get("artifact_storage") or {}).get("cover", {}).get("object_path")
+    if artifact_path:
+        await delete_artifact(artifact_path)
+    await db.clients.update_one({"id": client_id}, {"$unset": {"cover_image_url": "", "artifact_storage.cover": ""}})
     return {"message": "Cover image removed"}
 
 
@@ -207,6 +239,9 @@ async def upload_client_document(
     filepath = CLIENT_DOCS_DIR / filename
     with open(filepath, "wb") as f:
         f.write(content)
+    artifact_path = await archive_client_artifact(
+        client_id, f"documents-{doc_id}", content, ext, file.content_type or "application/octet-stream"
+    )
     doc = {
         "id": doc_id,
         "client_id": client_id,
@@ -221,6 +256,13 @@ async def upload_client_document(
         "uploaded_by_name": current_user.get("name"),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if artifact_path:
+        doc["artifact_storage"] = {
+            "provider": "supabase",
+            "object_path": artifact_path,
+            "content_type": file.content_type or "application/octet-stream",
+            "mirrored_at": datetime.now(timezone.utc).isoformat(),
+        }
     await db.client_documents.insert_one({**doc})
     return doc
 
@@ -268,6 +310,9 @@ async def delete_client_document(client_id: str, doc_id: str, current_user: dict
                 filepath.unlink()
         except Exception:
             pass
+    artifact_path = (doc.get("artifact_storage") or {}).get("object_path")
+    if artifact_path:
+        await delete_artifact(artifact_path)
     await db.client_documents.delete_one({"id": doc_id})
     return {"message": "Document deleted"}
 
