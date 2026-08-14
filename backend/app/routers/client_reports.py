@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Body
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
 from datetime import datetime, timezone
 import uuid
 
@@ -8,6 +9,7 @@ router = APIRouter(prefix="/client-reports", tags=["Automated Client Reports"])
 
 @router.get("/templates")
 async def get_report_templates(user=Depends(get_current_user)):
+    await assert_global_scope(user, operation="client_report.templates.read")
     templates = await db.report_templates.find({}, {"_id": 0}).to_list(50)
     if not templates:
         defaults = [
@@ -23,6 +25,7 @@ async def get_report_templates(user=Depends(get_current_user)):
 
 @router.get("/generate/{client_id}")
 async def generate_client_report(client_id: str, user=Depends(get_current_user)):
+    await assert_client_scope(user, client_id, operation="client_report.generate", mask_not_found=True)
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         return {"error": "Client not found"}
@@ -72,5 +75,7 @@ async def generate_client_report(client_id: str, user=Depends(get_current_user))
 
 @router.get("/history")
 async def get_report_history(user=Depends(get_current_user)):
-    reports = await db.generated_reports.find({}, {"_id": 0}).sort("generated_at", -1).to_list(100)
+    reports = await db.generated_reports.find(
+        scoped_query(user), {"_id": 0}
+    ).sort("generated_at", -1).to_list(100)
     return reports

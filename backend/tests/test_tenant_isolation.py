@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, purchase_orders, remote, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, purchase_orders, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -1043,3 +1043,67 @@ def test_restricted_technician_cannot_change_a_foreign_estimate(monkeypatch):
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "estimate.access"
+
+
+def test_client_report_history_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Reports:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        client_reports,
+        "db",
+        type("ReportDB", (), {"generated_reports": Reports()})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(client_reports.get_report_history(user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_profitability_heatmap_limits_clients_by_client_identity(monkeypatch):
+    captured = {}
+
+    class Collection:
+        def __init__(self, name):
+            self.name = name
+
+        def find(self, query, _projection):
+            captured[self.name] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        profitability_heatmap,
+        "db",
+        type(
+            "ProfitabilityDB",
+            (),
+            {
+                "clients": Collection("clients"),
+                "contracts": Collection("contracts"),
+                "time_entries": Collection("time_entries"),
+            },
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    response = asyncio.run(profitability_heatmap.get_profitability_heatmap(user))
+
+    assert response["clients"] == []
+    assert captured["clients"] == {"id": {"$in": ["client-a"]}}
+    assert captured["contracts"] == {
+        "$and": [{"status": "active"}, {"client_id": {"$in": ["client-a"]}}]
+    }

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query
 
 router = APIRouter()
 
@@ -9,7 +10,9 @@ router = APIRouter()
 @router.get("/contract-profit/overview")
 async def contract_profitability(current_user: dict = Depends(get_current_user)):
     """Analyze profitability of each client contract."""
-    contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(200)
+    contracts = await db.contracts.find(
+        scoped_query(current_user, {"status": "active"}), {"_id": 0}
+    ).to_list(200)
     results = []
     total_profit = 0
     total_loss = 0
@@ -22,7 +25,10 @@ async def contract_profitability(current_user: dict = Depends(get_current_user))
 
         # Actual hours used this month
         month_start = datetime.now(timezone.utc).replace(day=1).date().isoformat()
-        time_entries = await db.time_entries.find({"client_id": cid, "date": {"$gte": month_start}}, {"_id": 0, "hours": 1}).to_list(200)
+        time_entries = await db.time_entries.find(
+            scoped_query(current_user, {"client_id": cid, "date": {"$gte": month_start}}),
+            {"_id": 0, "hours": 1},
+        ).to_list(200)
         hours_used = sum(e.get("hours", 0) for e in time_entries)
 
         # Ticket count

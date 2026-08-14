@@ -1,15 +1,22 @@
 from fastapi import APIRouter, Depends
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/profitability-heatmap", tags=["Client Profitability Heatmap"])
 
 @router.get("/data")
 async def get_profitability_heatmap(user=Depends(get_current_user)):
-    clients = await db.clients.find({}, {"_id": 0}).to_list(200)
-    contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(500)
-    time_entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
+    clients = await db.clients.find(
+        scoped_query(user, field="id", site_field=None), {"_id": 0}
+    ).to_list(200)
+    contracts = await db.contracts.find(
+        scoped_query(user, {"status": "active"}), {"_id": 0}
+    ).to_list(500)
+    time_entries = await db.time_entries.find(
+        scoped_query(user), {"_id": 0}
+    ).to_list(5000)
     
     # Build revenue and cost per client
     client_mrr = {}
