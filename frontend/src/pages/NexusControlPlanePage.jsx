@@ -13,6 +13,7 @@ import { API, useAuth } from "@/App";
 import CippCommandCenterPage from "@/pages/CippCommandCenterPage";
 import M365CommandCenter from "@/pages/M365CommandCenter";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
 import EventBackbonePanel from "@/components/control-plane/EventBackbonePanel";
 import MicrosoftActionCentre from "@/components/control-plane/MicrosoftActionCentre";
@@ -94,6 +95,7 @@ export default function NexusControlPlanePage() {
   const module = params.get("module") || "overview";
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [foundation, setFoundation] = useState(null);
   const [foundationLoading, setFoundationLoading] = useState(false);
   const [coreRebuilding, setCoreRebuilding] = useState(false);
@@ -123,11 +125,13 @@ export default function NexusControlPlanePage() {
   const loadOverview = useCallback(async () => {
     if (!token) return;
     setLoading(true);
+    setLoadError("");
     try {
       const response = await axios.get(`${API}/control-plane/overview`, { headers });
       setOverview(response.data);
     } catch (error) {
-      toast.error("Nexus Control Plane could not load its provider overview");
+      const message = error.response?.data?.detail || "Nexus Control Plane could not load its provider overview.";
+      setLoadError(`${message} No provider, tenant or billing configuration has been changed.`);
     } finally {
       setLoading(false);
     }
@@ -224,6 +228,8 @@ export default function NexusControlPlanePage() {
     : (stats.open_tickets || 0) > 0 || (stats.open_invoices || 0) > 0
       ? "working"
       : "healthy";
+  if (loading && !overview) return <WorkspaceLoadingState label="Loading Control Plane evidence" />;
+  if (loadError && !overview) return <WorkspaceErrorState title="Control Plane needs attention" description={loadError} onRetry={loadOverview} retryLabel="Retry Control Plane" />;
   return (
     <div className="nx-page-stage space-y-5 p-6" data-testid="nexus-control-plane">
       <OperationalPageHeader

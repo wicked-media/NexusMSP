@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import HeroTile from "@/components/HeroTile";
 import { Badge } from "@/components/ui/badge";
@@ -252,6 +253,8 @@ export default function DeploymentHubPage() {
   const [partners, setPartners] = useState([]);
   const [jumpGateways, setJumpGateways] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [open, setOpen] = useState(false);
   const [jumpLabOpen, setJumpLabOpen] = useState(false);
   const [registeringJumpLab, setRegisteringJumpLab] = useState(false);
@@ -315,6 +318,7 @@ export default function DeploymentHubPage() {
 
   const load = async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const [overview, clientRows] = await Promise.all([
         axios.get(`${API}/deployment-hub/overview`, { headers }),
@@ -334,10 +338,11 @@ export default function DeploymentHubPage() {
       ]);
       setPartners(partnerRows.status === "fulfilled" ? partnerRows.value.data?.tenants || [] : []);
       setJumpGateways(jumpGatewayRows.status === "fulfilled" ? jumpGatewayRows.value.data?.gateways || [] : []);
+      setHasLoaded(true);
     } catch (error) {
-      toast.error(
-        error.response?.data?.detail || "Deployment Hub could not be loaded",
-      );
+      const message = error.response?.data?.detail || "Deployment Hub could not be loaded.";
+      if (hasLoaded) toast.error(message);
+      else setLoadError(`${message} No deployment or activation record has been changed.`);
     } finally {
       setLoading(false);
     }
@@ -541,6 +546,9 @@ export default function DeploymentHubPage() {
       : data.summary?.online
         ? "healthy"
         : "recommendation";
+
+  if (loading && !hasLoaded) return <WorkspaceLoadingState label="Loading deployment estate" />;
+  if (loadError && !hasLoaded) return <WorkspaceErrorState title="Deployment Hub needs attention" description={loadError} onRetry={load} retryLabel="Retry deployment estate" />;
 
   return (
     <div
