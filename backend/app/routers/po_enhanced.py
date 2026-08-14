@@ -17,6 +17,7 @@ from app.services.procurement_integrity import (
     version_filter,
 )
 from app.services.nexus_document_pdf import render_nexus_purchase_order_pdf
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,13 +32,24 @@ async def _po_audit(po_id, action, details, user):
     })
 
 
+async def _po_or_404(po_id: str, current_user: dict) -> dict:
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    await assert_client_scope(
+        current_user,
+        po.get("client_id"),
+        operation="purchase_order.access",
+        mask_not_found=True,
+    )
+    return po
+
+
 # ============== PO PDF GENERATION ==============
 
 @router.get("/purchase-orders/{po_id}/pdf")
 async def generate_po_pdf(po_id: str, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
+    po = await _po_or_404(po_id, current_user)
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
     actor = current_user.get("name") or current_user.get("email") or "NexusMSP"
     pdf_bytes = render_nexus_purchase_order_pdf(
@@ -260,11 +272,13 @@ async def generate_po_pdf(po_id: str, current_user: dict = Depends(get_current_u
 
 @router.get("/settings/po-approval")
 async def get_po_approval_policy(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.approval_policy.read")
     return await get_po_approval_settings(db)
 
 
 @router.put("/settings/po-approval")
 async def update_po_approval_policy(data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.approval_policy.update")
     if not (current_user.get("is_admin") or str(current_user.get("role", "")).lower() in {"admin", "owner"}):
         raise HTTPException(status_code=403, detail="Administrator access is required to change procurement policy")
     try:
@@ -292,9 +306,7 @@ async def update_po_approval_policy(data: dict, current_user: dict = Depends(get
 
 @router.post("/purchase-orders/{po_id}/submit-for-approval")
 async def submit_po_for_approval(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
+    po = await _po_or_404(po_id, current_user)
     if po.get("status") != "draft":
         raise HTTPException(status_code=400, detail="Only draft POs can be submitted for approval")
     approver_id = data.get("approver_id", "")
@@ -345,9 +357,7 @@ async def submit_po_for_approval(po_id: str, data: dict, current_user: dict = De
 
 @router.post("/purchase-orders/{po_id}/approve")
 async def approve_po(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
+    po = await _po_or_404(po_id, current_user)
     if po.get("status") != "pending_approval":
         raise HTTPException(status_code=400, detail="PO is not pending approval")
     await assert_po_decision_allowed(db, po, current_user, action="approve")
@@ -367,9 +377,7 @@ async def approve_po(po_id: str, data: dict, current_user: dict = Depends(get_cu
 
 @router.post("/purchase-orders/{po_id}/reject")
 async def reject_po(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
+    po = await _po_or_404(po_id, current_user)
     await assert_po_decision_allowed(db, po, current_user, action="reject")
     reason = str(data.get("reason", "") or "").strip()
     if len(reason) < 5:
@@ -392,9 +400,7 @@ async def reject_po(po_id: str, data: dict, current_user: dict = Depends(get_cur
 
 @router.post("/purchase-orders/{po_id}/email-vendor")
 async def email_po_to_vendor(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
+    po = await _po_or_404(po_id, current_user)
     if po.get("status") not in {"approved", "submitted", "partial"}:
         raise HTTPException(status_code=409, detail="Approve the purchase order before sending it to the vendor")
     email = data.get("email") or po.get("vendor_email", "")
@@ -450,12 +456,14 @@ async def email_po_to_vendor(po_id: str, data: dict, current_user: dict = Depend
 
 @router.get("/purchase-orders/{po_id}/notes")
 async def get_po_notes(po_id: str, current_user: dict = Depends(get_current_user)):
+    await _po_or_404(po_id, current_user)
     notes = await db.po_notes.find({"po_id": po_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return notes
 
 
 @router.post("/purchase-orders/{po_id}/notes")
 async def add_po_note(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await _po_or_404(po_id, current_user)
     note = {
         "id": str(uuid.uuid4()),
         "po_id": po_id,
@@ -475,9 +483,7 @@ async def add_po_note(po_id: str, data: dict, current_user: dict = Depends(get_c
 
 @router.post("/purchase-orders/{po_id}/duplicate")
 async def duplicate_po(po_id: str, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
+    po = await _po_or_404(po_id, current_user)
     new_po = {**po}
     new_po["id"] = str(uuid.uuid4())
     new_po["po_number"] = await next_po_number(db)
@@ -510,12 +516,14 @@ async def duplicate_po(po_id: str, current_user: dict = Depends(get_current_user
 
 @router.get("/purchase-order-templates")
 async def get_po_templates(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.templates.read")
     templates = await db.po_templates.find({}, {"_id": 0}).sort("name", 1).to_list(100)
     return templates
 
 
 @router.post("/purchase-order-templates")
 async def create_po_template(data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.templates.create")
     template = {
         "id": str(uuid.uuid4()),
         "name": data.get("name", ""),
@@ -536,6 +544,7 @@ async def create_po_template(data: dict, current_user: dict = Depends(get_curren
 
 @router.delete("/purchase-order-templates/{template_id}")
 async def delete_po_template(template_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.templates.delete")
     await db.po_templates.delete_one({"id": template_id})
     return {"message": "Template deleted"}
 
@@ -544,7 +553,9 @@ async def delete_po_template(template_id: str, current_user: dict = Depends(get_
 
 @router.get("/purchase-orders/analytics/spend")
 async def get_po_spend_analytics(current_user: dict = Depends(get_current_user)):
-    all_pos = await db.purchase_orders.find({}, {"_id": 0}).to_list(10000)
+    all_pos = await db.purchase_orders.find(
+        scoped_query(current_user, {}, site_field=None), {"_id": 0}
+    ).to_list(10000)
     vendor_spend = {}
     monthly_spend = {}
     status_counts = {}

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, backup_center, change_management, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, remote, workflow_automation, yeastar
+from app.routers import approval_workflows, backup_center, change_management, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, purchase_orders, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -829,3 +829,57 @@ def test_restricted_technician_cannot_approve_foreign_change(monkeypatch):
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "change_management.access"
+
+
+def test_purchase_order_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class PurchaseOrders:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        purchase_orders,
+        "db",
+        type("PurchaseOrderDB", (), {"purchase_orders": PurchaseOrders()})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(purchase_orders.get_purchase_orders(current_user=user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_download_a_foreign_purchase_order(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        po_enhanced,
+        "db",
+        type(
+            "PurchaseOrderPDFDB",
+            (),
+            {
+                "purchase_orders": _RecordCollection(
+                    {"id": "po-b", "client_id": "client-b", "po_number": "PO-002"}
+                )
+            },
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(po_enhanced.generate_po_pdf("po-b", user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "purchase_order.access"

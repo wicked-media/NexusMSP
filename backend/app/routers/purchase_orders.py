@@ -12,10 +12,24 @@ from app.services.finance_integrity import (
     fail_idempotent_operation,
 )
 from app.services.procurement_integrity import get_po_approval_settings, next_po_number, version_filter
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
 
 router = APIRouter()
 PO_EVIDENCE_DIR = Path(UPLOADS_DIR) / "purchase-orders"
 PO_EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+async def _po_or_404(po_id: str, current_user: dict) -> dict:
+    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
+    if not po:
+        raise HTTPException(status_code=404, detail="PO not found")
+    await assert_client_scope(
+        current_user,
+        po.get("client_id"),
+        operation="purchase_order.access",
+        mask_not_found=True,
+    )
+    return po
 
 
 async def _calculate_po_totals(line_items: list[dict], shipping_value=0) -> tuple[float, float, float, float]:
@@ -60,7 +74,9 @@ async def _calculate_po_totals(line_items: list[dict], shipping_value=0) -> tupl
 
 @router.get("/purchase-orders/stats")
 async def get_po_stats(current_user: dict = Depends(get_current_user)):
-    all_pos = await db.purchase_orders.find({}, {"_id": 0}).to_list(10000)
+    all_pos = await db.purchase_orders.find(
+        scoped_query(current_user, {}, site_field=None), {"_id": 0}
+    ).to_list(10000)
     total = len(all_pos)
     draft = len([p for p in all_pos if p.get("status") == "draft"])
     pending_approval = len([p for p in all_pos if p.get("status") == "pending_approval"])
@@ -97,17 +113,26 @@ async def get_purchase_orders(status: Optional[str] = None, search: Optional[str
             {"po_number": {"$regex": search, "$options": "i"}},
             {"vendor": {"$regex": search, "$options": "i"}},
         ]
-    pos = await db.purchase_orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    pos = await db.purchase_orders.find(
+        scoped_query(current_user, query, site_field=None), {"_id": 0}
+    ).sort("created_at", -1).to_list(5000)
     return pos
 
 @router.post("/purchase-orders")
 async def create_purchase_order(data: dict, current_user: dict = Depends(get_current_user)):
+    client_id = str(data.get("client_id") or "").strip()
+    if client_id:
+        await assert_client_scope(current_user, client_id, operation="purchase_order.create")
+    else:
+        await assert_global_scope(current_user, operation="purchase_order.create.global")
     vendor = str(data.get("vendor", "") or "").strip()
     if not vendor:
         raise HTTPException(status_code=422, detail="Vendor is required")
-    line_items = await _normalise_line_item_destinations(data.get("line_items", []))
+    line_items = await _normalise_line_item_destinations(data.get("line_items", []), current_user)
     if not line_items:
         raise HTTPException(status_code=422, detail="At least one purchase-order line is required")
+    if data.get("ticket_id"):
+        await _ticket_or_422(str(data["ticket_id"]), current_user)
     for li in line_items:
         li["received_qty"] = 0
         li["returned_qty"] = 0
@@ -135,7 +160,7 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
         "notes": data.get("notes", ""),
         "ship_to": data.get("ship_to", ""),
         "expected_delivery": data.get("expected_delivery", ""),
-        "client_id": data.get("client_id", ""),
+        "client_id": client_id,
         "client_name": data.get("client_name", ""),
         "ticket_id": data.get("ticket_id", ""),
         "ticket_number": data.get("ticket_number", ""),
@@ -159,25 +184,30 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
 @router.get("/purchase-orders/by-ticket/{ticket_id}")
 async def get_purchase_orders_for_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     return await db.purchase_orders.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        scoped_query(current_user, {"ticket_id": ticket_id}, site_field=None), {"_id": 0}
     ).sort("created_at", -1).to_list(200)
 
 @router.get("/purchase-orders/{po_id}")
 async def get_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
-    return po
+    return await _po_or_404(po_id, current_user)
 
 @router.put("/purchase-orders/{po_id}")
 async def update_purchase_order(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    old_po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not old_po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    old_po = await _po_or_404(po_id, current_user)
     allowed = {"vendor", "vendor_id", "vendor_contact", "vendor_email", "status", "line_items",
                "subtotal", "tax", "shipping", "total", "notes", "ship_to", "expected_delivery",
                "client_id", "client_name", "ticket_id", "ticket_number", "ticket_title", "assigned_to", "assigned_to_name"}
     update = {k: v for k, v in data.items() if k in allowed}
+    if "client_id" in update:
+        updated_client_id = str(update["client_id"] or "").strip()
+        if updated_client_id:
+            await assert_client_scope(
+                current_user,
+                updated_client_id,
+                operation="purchase_order.update.client",
+            )
+        else:
+            await assert_global_scope(current_user, operation="purchase_order.update.global")
     financial_fields = {"line_items", "subtotal", "tax", "shipping", "total", "vendor", "vendor_id", "client_id", "ticket_id"}
     if old_po.get("status") not in {"draft", "rejected"} and financial_fields.intersection(update):
         raise HTTPException(status_code=409, detail="Ordered purchase orders are financially locked; duplicate or cancel the order to correct it")
@@ -199,7 +229,7 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
             raise HTTPException(status_code=409, detail="A purchase order with received stock cannot be cancelled; record a return instead")
         update["status"] = requested_status
     if "line_items" in update:
-        update["line_items"] = await _normalise_line_item_destinations(update["line_items"])
+        update["line_items"] = await _normalise_line_item_destinations(update["line_items"], current_user)
         for new_line in update["line_items"]:
             new_line.setdefault("received_qty", 0)
             new_line.setdefault("returned_qty", 0)
@@ -212,6 +242,8 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
             update.get("shipping", old_po.get("shipping", 0)),
         )
         update.update({"line_items": source_lines, "subtotal": subtotal, "tax": tax, "shipping": shipping, "total": total})
+    if update.get("ticket_id"):
+        await _ticket_or_422(str(update["ticket_id"]), current_user)
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     result = await db.purchase_orders.update_one(
         {"id": po_id, **version_filter(old_po)},
@@ -228,9 +260,7 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
 @router.post("/purchase-orders/{po_id}/vendor-invoice-match")
 async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Record a supplier invoice against a PO without changing the PO or billing totals."""
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     if po.get("status") not in {"submitted", "partial", "received"}:
         raise HTTPException(status_code=409, detail="Supplier invoices can only be matched after the purchase order has been sent")
     if po.get("supplier_bill_sync", {}).get("status") in {"queued", "synced"}:
@@ -277,9 +307,7 @@ async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict
 
 @router.post("/purchase-orders/{po_id}/vendor-invoice-match/review")
 async def review_vendor_invoice_match(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     match = po.get("vendor_invoice_match")
     if not match:
         raise HTTPException(status_code=400, detail="Record a supplier invoice before reviewing it")
@@ -322,9 +350,7 @@ async def review_vendor_invoice_match(po_id: str, data: dict, current_user: dict
 
 @router.delete("/purchase-orders/{po_id}")
 async def delete_purchase_order(po_id: str, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     if po.get("status") not in {"draft", "rejected"} or any(int(item.get("received_qty", 0) or 0) > 0 for item in po.get("line_items", [])):
         raise HTTPException(status_code=409, detail="Only unreceived draft or rejected purchase orders can be deleted")
     await _log_po_audit(po_id, "deleted", f"Purchase order {po.get('po_number', po_id)} deleted", current_user)
@@ -336,9 +362,7 @@ async def delete_purchase_order(po_id: str, current_user: dict = Depends(get_cur
 
 @router.post("/purchase-orders/{po_id}/receive")
 async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     if po["status"] not in ("submitted", "partial"):
         raise HTTPException(status_code=400, detail="Only submitted or partial POs can receive stock")
     received_items = data.get("items", [])
@@ -606,9 +630,7 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
 
 @router.post("/purchase-orders/{po_id}/returns")
 async def return_po_items(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     if po.get("status") not in {"partial", "received"}:
         raise HTTPException(status_code=409, detail="Only received purchase-order items can be returned")
     reason = str(data.get("reason", "") or "").strip()
@@ -769,9 +791,7 @@ async def upload_po_attachment(
     note: str = Form(""),
     current_user: dict = Depends(get_current_user),
 ):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     extension = Path(file.filename or "").suffix.lower()
     if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx"}:
         raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Word, or Excel evidence file")
@@ -804,9 +824,7 @@ async def upload_po_attachment(
 
 @router.post("/purchase-orders/{po_id}/supplier-bill/sync")
 async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="Purchase order not found")
+    po = await _po_or_404(po_id, current_user)
     match = po.get("vendor_invoice_match") or {}
     if not match:
         raise HTTPException(status_code=409, detail="Match the supplier invoice before creating its Xero bill")
@@ -840,6 +858,7 @@ async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depen
         "id": (existing or {}).get("id") or str(uuid.uuid4()),
         "po_id": po_id,
         "po_number": po.get("po_number", ""),
+        "client_id": po.get("client_id", ""),
         "type": "ACCPAY",
         "vendor_id": po.get("vendor_id", ""),
         "vendor_name": po.get("vendor", ""),
@@ -882,13 +901,16 @@ async def queue_supplier_bill(po_id: str, data: dict, current_user: dict = Depen
 
 @router.get("/xero/supplier-bills")
 async def list_supplier_bills(current_user: dict = Depends(get_current_user)):
-    return await db.xero_supplier_bills.find({}, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    return await db.xero_supplier_bills.find(
+        scoped_query(current_user, {}, site_field=None), {"_id": 0}
+    ).sort("updated_at", -1).to_list(1000)
 
 
 # ============== PO AUDIT LOG ==============
 
 @router.get("/purchase-orders/{po_id}/audit-log")
 async def get_po_audit_log(po_id: str, current_user: dict = Depends(get_current_user)):
+    await _po_or_404(po_id, current_user)
     logs = await db.po_audit_log.find({"po_id": po_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return logs
 
@@ -896,6 +918,7 @@ async def get_po_audit_log(po_id: str, current_user: dict = Depends(get_current_
 
 @router.get("/settings/po-ping")
 async def get_po_ping_settings(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.ping_settings.read")
     settings = await db.settings.find_one({"type": "po_ping"}, {"_id": 0})
     return settings or {
         "type": "po_ping",
@@ -910,6 +933,7 @@ async def get_po_ping_settings(current_user: dict = Depends(get_current_user)):
 
 @router.put("/settings/po-ping")
 async def update_po_ping_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.ping_settings.update")
     data["type"] = "po_ping"
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one({"type": "po_ping"}, {"$set": data}, upsert=True)
@@ -917,6 +941,7 @@ async def update_po_ping_settings(data: dict, current_user: dict = Depends(get_c
 
 @router.post("/purchase-orders/check-escalations")
 async def check_po_escalations(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="purchase_order.escalations.run")
     settings = await db.settings.find_one({"type": "po_ping"}, {"_id": 0})
     if not settings or not settings.get("enabled", True):
         return {"message": "PO ping disabled", "pings_sent": 0, "escalations": 0}
@@ -971,7 +996,10 @@ async def check_po_escalations(current_user: dict = Depends(get_current_user)):
 @router.get("/purchase-orders/overdue/list")
 async def get_overdue_pos(current_user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
-    open_pos = await db.purchase_orders.find({"status": {"$in": ["submitted", "partial"]}}, {"_id": 0}).to_list(5000)
+    open_pos = await db.purchase_orders.find(
+        scoped_query(current_user, {"status": {"$in": ["submitted", "partial"]}}, site_field=None),
+        {"_id": 0},
+    ).to_list(5000)
     overdue = []
     for po in open_pos:
         if po.get("expected_delivery"):
@@ -997,7 +1025,20 @@ async def _log_po_audit(po_id: str, action: str, details: str, user: dict):
     await db.po_audit_log.insert_one(log)
 
 
-async def _normalise_line_item_destinations(line_items: list[dict]) -> list[dict]:
+async def _ticket_or_422(ticket_id: str, current_user: dict) -> dict:
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=422, detail="The selected ticket could not be found")
+    await assert_client_scope(
+        current_user,
+        ticket.get("client_id"),
+        operation="purchase_order.ticket_link",
+        mask_not_found=True,
+    )
+    return ticket
+
+
+async def _normalise_line_item_destinations(line_items: list[dict], current_user: dict) -> list[dict]:
     """Validate and enrich each fulfilment destination before persisting a PO."""
     normalised = []
     for raw_line in line_items or []:
@@ -1010,9 +1051,7 @@ async def _normalise_line_item_destinations(line_items: list[dict]) -> list[dict
             ticket_id = str(line.get("destination_ticket_id") or "").strip()
             if not ticket_id:
                 raise HTTPException(status_code=422, detail="Choose a ticket for each ticket-linked line item")
-            ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-            if not ticket:
-                raise HTTPException(status_code=422, detail="The selected ticket for a line item could not be found")
+            ticket = await _ticket_or_422(ticket_id, current_user)
             line.update({
                 "destination_type": "ticket",
                 "destination_ticket_id": ticket_id,
