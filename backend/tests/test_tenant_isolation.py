@@ -27,6 +27,17 @@ class _RecordCollection:
         return None
 
 
+class _ListCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def sort(self, *_args):
+        return self
+
+    async def to_list(self, _limit):
+        return list(self.rows)
+
+
 def test_missing_scope_configuration_fails_closed():
     scope = scope_permissions.effective_scope({"id": "tech-1", "role": "technician"})
 
@@ -271,6 +282,50 @@ def test_restricted_technician_cannot_access_ycm_fleet_controls(monkeypatch):
         "voice.ycm.connection.test",
         "voice.ycm.discovery.run",
         "voice.ycm.discovery.claim",
+    }
+
+
+def test_voice_pbx_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class PBXs:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(yeastar, "db", type("VoiceDB", (), {"yeastar_pbxs": PBXs()})())
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(yeastar.list_yeastar_pbxs(user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_read_or_change_legacy_voice_credentials(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    for protected_call in [
+        lambda: yeastar.get_yeastar_settings(user),
+        lambda: yeastar.save_yeastar_settings({}, user),
+    ]:
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(protected_call())
+        assert exc.value.status_code == 403
+
+    assert {entry["operation"] for entry in denials.rows} == {
+        "voice.legacy_settings.read",
+        "voice.legacy_settings.update",
     }
 
 

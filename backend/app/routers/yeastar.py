@@ -24,13 +24,14 @@ logger = logging.getLogger(__name__)
 @router.get("/yeastar/status")
 async def get_yeastar_status(current_user: dict = Depends(get_current_user)):
     configured = await db.yeastar_pbxs.find_one(
-        {"enabled": {"$ne": False}, "pbx_url": {"$nin": ["", None]}, "client_api_id": {"$nin": ["", None]}, "client_secret": {"$nin": ["", None]}},
+        {**scope_query(current_user), "enabled": {"$ne": False}, "pbx_url": {"$nin": ["", None]}, "client_api_id": {"$nin": ["", None]}, "client_secret": {"$nin": ["", None]}},
         {"_id": 1},
     )
     return {"configured": bool(configured), "mode": "client_pbx"}
 
 @router.post("/yeastar/settings")
 async def save_yeastar_settings(settings: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="voice.legacy_settings.update")
     existing = await db.settings.find_one({"type": "yeastar"}, {"_id": 0}) or {}
     await db.settings.update_one(
         {"type": "yeastar"},
@@ -60,6 +61,7 @@ async def save_yeastar_settings(settings: dict, current_user: dict = Depends(get
 
 @router.get("/yeastar/settings")
 async def get_yeastar_settings(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="voice.legacy_settings.read")
     settings = await db.settings.find_one({"type": "yeastar"}, {"_id": 0})
     if settings:
         settings.pop("client_secret", None)
@@ -73,6 +75,7 @@ async def test_yeastar_connection(pbx_id: Optional[str] = None, current_user: di
     settings = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
     if not settings:
         raise HTTPException(status_code=404, detail="PBX not found")
+    await assert_client_scope(current_user, settings.get("client_id"), operation="voice.pbx.connection.test", mask_not_found=True)
     if not settings or not _has_pbx_credentials(settings):
         return {"success": False, "message": "This PBX needs its base URL, Client ID, and Client Secret before it can be tested."}
     try:
@@ -991,7 +994,7 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
 
 @router.get("/yeastar/pbxs")
 async def list_yeastar_pbxs(current_user: dict = Depends(get_current_user)):
-    return await db.yeastar_pbxs.find({}, {"_id": 0, "client_secret": 0}).sort("created_at", -1).to_list(500)
+    return await db.yeastar_pbxs.find(scope_query(current_user), {"_id": 0, "client_secret": 0}).sort("created_at", -1).to_list(500)
 
 
 @router.post("/yeastar/pbxs")
@@ -1004,6 +1007,7 @@ async def create_yeastar_pbx(data: dict, current_user: dict = Depends(get_curren
         raise HTTPException(status_code=400, detail="Client, PBX name, and PBX URL are required")
     if not client_api_id or not client_secret:
         raise HTTPException(status_code=400, detail="Client ID and Client Secret from Integrations > API on the PBX are required")
+    await assert_client_scope(current_user, client_id, operation="voice.pbx.create", mask_not_found=True)
     try:
         pbx_url = _normalise_pbx_url(data.get("pbx_url"))
     except ValueError as exc:
@@ -1081,8 +1085,10 @@ async def update_yeastar_pbx(pbx_id: str, data: dict, current_user: dict = Depen
     existing = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="PBX not found")
+    await assert_client_scope(current_user, existing.get("client_id"), operation="voice.pbx.update", mask_not_found=True)
 
     client_id = data.get("client_id", existing.get("client_id", ""))
+    await assert_client_scope(current_user, client_id, operation="voice.pbx.update", mask_not_found=True)
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1}) if client_id else None
     if client_id and not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -1154,7 +1160,7 @@ async def update_yeastar_pbx(pbx_id: str, data: dict, current_user: dict = Depen
 async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     """Synchronise one selected PBX or every enabled PBX with its own credentials."""
     requested_pbx_id = str(data.get("pbx_id") or "")
-    pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    pbx_records = await db.yeastar_pbxs.find(scope_query(current_user), {"_id": 0}).sort("created_at", -1).to_list(500)
     if requested_pbx_id:
         pbx_records = [pbx for pbx in pbx_records if str(pbx.get("id")) == requested_pbx_id]
         if not pbx_records:
