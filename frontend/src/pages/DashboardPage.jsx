@@ -123,13 +123,15 @@ export default function DashboardPage() {
         axios.get(`${API}/alerts?status=active`, { headers }),
         axios.get(`${API}/tickets?status=open`, { headers }),
         axios.get(`${API}/dashboard/activity-feed?limit=15`, { headers }),
-        axios.get(`${API}/dashboard/enhanced-stats`, { headers }),
+        // Enhanced financial widgets must never prevent the core operational
+        // dashboard from loading when an imported record is incomplete.
+        axios.get(`${API}/dashboard/enhanced-stats`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/devices`, { headers }),
         axios.get(`${API}/mission-control/overview`, { headers }).catch(() => ({ data: null })),
         axios.get(`${API}/mission-control/brain`, { headers }).catch(() => ({ data: null })),
       ]);
       setStats(statsRes.data);
-      setEnhancedStats(enhancedRes.data);
+      setEnhancedStats(enhancedRes.data || null);
       setTicketTrends(trendsRes.data);
       const liveAgentAlerts = (devicesRes.data || [])
         .filter(device => device.security_assessed_at)

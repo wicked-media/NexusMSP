@@ -1157,14 +1157,20 @@ async def update_stripe_settings(data: dict, current_user: dict = Depends(get_cu
 
 @router.get("/dashboard/enhanced-stats")
 async def get_enhanced_dashboard(current_user: dict = Depends(get_current_user)):
+    def _money(value: Any) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
     open_tickets = await db.tickets.count_documents({"status": {"$in": ["open", "in_progress"]}})
     total_devices = await db.devices.count_documents({})
     online_devices = await db.devices.count_documents({"status": "online"})
     total_clients = await db.clients.count_documents({})
 
     all_inv = await db.invoices.find({}, {"_id": 0, "total": 1, "amount_paid": 1, "payment_status": 1, "due_date": 1}).to_list(10000)
-    total_revenue = sum(i.get("total", 0) for i in all_inv)
-    total_collected = sum(i.get("amount_paid", 0) for i in all_inv)
+    total_revenue = sum(_money(i.get("total")) for i in all_inv)
+    total_collected = sum(_money(i.get("amount_paid")) for i in all_inv)
     unpaid_inv = [i for i in all_inv if i.get("payment_status") in ("unpaid", None)]
     overdue_inv = 0
     for i in unpaid_inv:
