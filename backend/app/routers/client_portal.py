@@ -17,6 +17,29 @@ async def _client_identity(client_id: str) -> dict:
     }
 
 
+def _portal_token_is_active(token_entry: dict | None) -> bool:
+    """Validate a legacy secure portal link consistently and fail closed."""
+    if not token_entry or not token_entry.get("active", False):
+        return False
+    expires_at = token_entry.get("expires_at")
+    if not expires_at:
+        return False
+    try:
+        return datetime.fromisoformat(str(expires_at).replace("Z", "+00:00")) > datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return False
+
+
+async def _active_portal_config_for_token(token: str) -> tuple[dict, dict]:
+    """Return only an enabled portal with one active, unexpired matching link."""
+    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
+    token_entry = next((item for item in (config or {}).get("access_tokens", []) if item.get("token") == token), None)
+    if not config or not _portal_token_is_active(token_entry):
+        # Keep invalid, revoked and expired link responses indistinguishable.
+        raise HTTPException(status_code=404, detail="Portal not found")
+    return config, token_entry
+
+
 def _require_portal_audit_access(current_user: dict) -> None:
     if current_user.get("role") not in {"admin", "owner", "super_admin"} and not current_user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access is required to view portal audit history")
@@ -197,13 +220,7 @@ async def revoke_portal_token(client_id: str, token_id: str, current_user: dict 
 
 @router.get("/portal-api/{token}/info")
 async def portal_get_info(token: str):
-    config = await db.portal_configs.find_one({"access_tokens.token": token}, {"_id": 0})
-    if not config or not config.get("enabled"):
-        raise HTTPException(status_code=404, detail="Portal not found or disabled")
-    
-    token_entry = next((t for t in config.get("access_tokens", []) if t["token"] == token and t.get("active")), None)
-    if not token_entry:
-        raise HTTPException(status_code=403, detail="Token expired or revoked")
+    config, token_entry = await _active_portal_config_for_token(token)
     
     await db.portal_configs.update_one(
         {"client_id": config["client_id"], "access_tokens.token": token},
@@ -219,9 +236,7 @@ async def portal_get_info(token: str):
 
 @router.get("/portal-api/{token}/tickets")
 async def portal_get_tickets(token: str):
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, _ = await _active_portal_config_for_token(token)
     
     tickets = await db.tickets.find(
         {"client_id": config["client_id"]},
@@ -231,13 +246,10 @@ async def portal_get_tickets(token: str):
 
 @router.post("/portal-api/{token}/tickets")
 async def portal_create_ticket(token: str, data: dict):
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, token_entry = await _active_portal_config_for_token(token)
     if not config.get("features", {}).get("can_create_tickets"):
         raise HTTPException(status_code=403, detail="Ticket creation disabled")
     
-    token_entry = next((t for t in config.get("access_tokens", []) if t["token"] == token), None)
     ticket = {
         "id": str(uuid.uuid4()),
         "ticket_number": f"PT-{datetime.now(timezone.utc).strftime('%m%d%H%M')}",
@@ -259,9 +271,7 @@ async def portal_create_ticket(token: str, data: dict):
 
 @router.get("/portal-api/{token}/devices")
 async def portal_get_devices(token: str):
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, _ = await _active_portal_config_for_token(token)
     if not config.get("features", {}).get("can_view_devices"):
         raise HTTPException(status_code=403, detail="Device view disabled")
     

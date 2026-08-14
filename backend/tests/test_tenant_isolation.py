@@ -1,11 +1,12 @@
 """Fail-closed client and object ownership contract tests."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
 
-from app.routers import backup_center, mega_features, mission_control, workflow_automation, yeastar
+from app.routers import backup_center, client_portal, mega_features, mission_control, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -366,6 +367,16 @@ def test_restricted_technician_cannot_request_a_foreign_restore_verification(mon
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "backup.verification.request"
+
+
+def test_legacy_portal_links_fail_closed_when_revoked_or_expired():
+    future = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+
+    assert client_portal._portal_token_is_active({"active": True, "expires_at": future})
+    assert not client_portal._portal_token_is_active({"active": False, "expires_at": future})
+    assert not client_portal._portal_token_is_active({"active": True, "expires_at": past})
+    assert not client_portal._portal_token_is_active({"active": True, "expires_at": "invalid"})
 
 
 def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkeypatch):
