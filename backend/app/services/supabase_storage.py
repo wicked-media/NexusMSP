@@ -196,6 +196,28 @@ async def archive_client_artifact(
         return None
 
 
+async def archive_record_artifact(
+    record_type: str,
+    record_id: str,
+    content: bytes,
+    extension: str,
+    content_type: str,
+) -> str | None:
+    """Store an immutable attachment for a Nexus record without changing its URL."""
+    if not is_configured():
+        return None
+    safe_type = re.sub(r"[^A-Za-z0-9_-]", "-", str(record_type or "records")).strip("-") or "records"
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "-", str(record_id or "record")).strip("-") or "record"
+    safe_extension = re.sub(r"[^A-Za-z0-9]", "", str(extension or "bin")).lower() or "bin"
+    digest = hashlib.sha256(content).hexdigest()
+    object_path = f"records/{safe_type}/{safe_id}/{digest}.{safe_extension}"
+    try:
+        return await upload_artifact(object_path, content, content_type)
+    except (SupabaseStorageError, ValueError) as exc:
+        logger.warning("Record artifact archive skipped for %s/%s: %s", safe_type, safe_id, exc)
+        return None
+
+
 async def delete_artifact(object_path: str) -> bool:
     """Remove a private object after Nexus has authorised a source-record delete."""
     config = _config()

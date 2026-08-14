@@ -7,6 +7,7 @@ from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
 from app.services.upload_security import ATTACHMENT_EXTENSIONS, safe_original_filename, safe_upload_extension
+from app.services.supabase_storage import archive_record_artifact, delete_artifact
 
 
 async def _enforce_ticket_scope(request: Request, current_user: dict = Depends(get_current_user)):
@@ -46,12 +47,17 @@ async def upload_ticket_attachment(ticket_id: str, file: UploadFile = File(...),
 
     ext = safe_upload_extension(file.filename, allowed=ATTACHMENT_EXTENSIONS, default="bin")
     filename = f"{ticket_id[:8]}_{uuid.uuid4().hex[:8]}.{ext}"
+    attachment_id = str(uuid.uuid4())
     filepath = UPLOAD_DIR / filename
     with open(filepath, "wb") as f:
         f.write(content)
 
+    artifact_path = await archive_record_artifact(
+        "ticket-attachments", attachment_id, content, ext, file.content_type or "application/octet-stream"
+    )
+
     attachment = {
-        "id": str(uuid.uuid4()),
+        "id": attachment_id,
         "ticket_id": ticket_id,
         "filename": safe_original_filename(file.filename),
         "stored_filename": filename,
@@ -62,6 +68,12 @@ async def upload_ticket_attachment(ticket_id: str, file: UploadFile = File(...),
         "uploaded_by_name": current_user["name"],
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if artifact_path:
+        attachment["artifact_storage"] = {
+            "provider": "supabase",
+            "object_path": artifact_path,
+            "mirrored_at": datetime.now(timezone.utc).isoformat(),
+        }
     await db.ticket_attachments.insert_one(attachment)
     attachment.pop("_id", None)
     return attachment
@@ -78,6 +90,10 @@ async def delete_ticket_attachment(ticket_id: str, attachment_id: str, current_u
     filepath = UPLOAD_DIR / safe_original_filename(att.get("stored_filename"), default="missing")
     if os.path.isfile(filepath):
         os.remove(filepath)
+
+    artifact_path = (att.get("artifact_storage") or {}).get("object_path")
+    if artifact_path:
+        await delete_artifact(artifact_path)
 
     await db.ticket_attachments.delete_one({"id": attachment_id})
     return {"message": "Attachment deleted"}
