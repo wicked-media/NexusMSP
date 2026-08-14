@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, workflow_automation, yeastar
+from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -565,3 +565,74 @@ def test_control_plane_search_scopes_client_bearing_results(monkeypatch):
     assert captured["clients"]["$and"][1] == {"id": {"$in": ["client-a"]}}
     for name in ("tickets", "devices", "m365_users", "invoices", "voice", "backups", "knowledge"):
         assert captured[name]["$and"][1] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_generic_approval_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Approvals:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        approval_workflows,
+        "db",
+        type("ApprovalDB", (), {"approvals": Approvals()})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(approval_workflows.get_approvals(user)) == []
+    assert captured["query"] == {
+        "$and": [
+            {"status": "pending"},
+            {"client_id": {"$in": ["client-a"]}},
+        ]
+    }
+
+
+def test_restricted_technician_cannot_decide_another_clients_approval(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        approval_workflows,
+        "db",
+        type(
+            "ApprovalDB",
+            (),
+            {
+                "approvals": _RecordCollection(
+                    {
+                        "id": "approval-b",
+                        "client_id": "client-b",
+                        "status": "pending",
+                        "approver_role": "admin",
+                    }
+                )
+            },
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(approval_workflows.approve_request("approval-b", {}, user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "approval.decision"
+
+
+def test_approval_requester_cannot_approve_their_own_request():
+    approval = {"requested_by_id": "admin-1", "approver_role": "admin"}
+    administrator = {"id": "admin-1", "role": "admin"}
+
+    assert not approval_workflows._may_decide(approval, administrator)
