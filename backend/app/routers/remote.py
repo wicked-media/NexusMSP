@@ -5,7 +5,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, scope_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import (
@@ -179,8 +179,15 @@ async def get_remote_status(current_user: dict = Depends(get_current_user)):
     settings = await _rustdesk_config()
     return {"configured": bool(settings.get("server_url"))}
 
-@router.post("/remote/settings")
+@router.post(
+    "/remote/settings",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
 async def save_remote_settings(settings: RustDeskSettings, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="remote.settings.update")
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not user or (user.get("role") != "admin" and not user.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
     legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
     legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
     shared = {
@@ -213,6 +220,7 @@ async def save_remote_settings(settings: RustDeskSettings, current_user: dict = 
 
 @router.get("/remote/settings")
 async def get_remote_settings(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="remote.settings.read")
     settings = await _rustdesk_config()
     if not settings or not settings.get("server_url"):
         return {"configured": False}
@@ -486,9 +494,15 @@ async def get_device_chat(device_id: str, limit: int = 100, current_user: dict =
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.chat.read",
+        mask_not_found=True,
+    )
     messages = await db.device_chat.find(
-        {"device_id": device_id},
+        {"device_id": device_id, "client_id": device.get("client_id")},
         {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
     
@@ -500,7 +514,13 @@ async def send_device_chat_message(device_id: str, message_data: DeviceChatMessa
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.chat.send",
+        mask_not_found=True,
+    )
     chat_message = DeviceChatMessage(
         device_id=device_id,
         device_name=device.get('name'),
@@ -518,13 +538,22 @@ async def send_device_chat_message(device_id: str, message_data: DeviceChatMessa
     
     return chat_message
 
-@router.post("/devices/{device_id}/chat/command")
+@router.post(
+    "/devices/{device_id}/chat/command",
+    dependencies=[Depends(require_action("device.command.execute"))],
+)
 async def send_device_command(device_id: str, command: str, current_user: dict = Depends(get_current_user)):
     """Send a remote command to a device"""
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.command.execute",
+        mask_not_found=True,
+    )
     # Create command message
     chat_message = DeviceChatMessage(
         device_id=device_id,
@@ -567,7 +596,13 @@ async def send_device_file(device_id: str, filename: str, file_url: str, current
     device = await db.devices.find_one({"id": device_id}, {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.chat.file.send",
+        mask_not_found=True,
+    )
     chat_message = DeviceChatMessage(
         device_id=device_id,
         device_name=device.get('name'),
@@ -589,6 +624,18 @@ async def send_device_file(device_id: str, filename: str, file_url: str, current
 @router.delete("/devices/{device_id}/chat")
 async def clear_device_chat(device_id: str, current_user: dict = Depends(get_current_user)):
     """Clear chat history for a device"""
-    result = await db.device_chat.delete_many({"device_id": device_id})
+    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    await assert_client_scope(
+        current_user,
+        device.get("client_id"),
+        site_id=device.get("site_id"),
+        operation="device.chat.clear",
+        mask_not_found=True,
+    )
+    result = await db.device_chat.delete_many(
+        {"device_id": device_id, "client_id": device.get("client_id")}
+    )
     return {"message": f"Cleared {result.deleted_count} messages"}
 

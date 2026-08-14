@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, workflow_automation, yeastar
+from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -740,3 +740,34 @@ def test_nexus_verify_requires_an_independent_authorised_approver():
     assert not nexus_verify._may_approve_sensitive_request(record, requester)
     assert not nexus_verify._may_approve_sensitive_request(record, verifier)
     assert nexus_verify._may_approve_sensitive_request(record, independent_manager)
+
+
+def test_restricted_technician_cannot_send_a_remote_command_to_foreign_device(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        remote,
+        "db",
+        type(
+            "RemoteDB",
+            (),
+            {
+                "devices": _RecordCollection(
+                    {"id": "device-b", "client_id": "client-b", "name": "Foreign server"}
+                )
+            },
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "name": "Restricted Tech",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(remote.send_device_command("device-b", "whoami", user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "device.command.execute"
