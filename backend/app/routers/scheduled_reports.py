@@ -9,6 +9,7 @@ from app.database import JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.routers.financial_reports import build_accounts_receivable_aging
 from app.services.nexus_document_pdf import render_nexus_document_pdf
+from app.services.supabase_storage import archive_generated_pdf
 
 router = APIRouter()
 
@@ -231,7 +232,26 @@ async def download_generated_report_pdf(output_id: str, current_user: dict = Dep
         branding=branding,
     )
     safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in (history.get("name") or "nexusmsp-report")).strip("-")
-    return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'})
+    artifact_path = await archive_generated_pdf("scheduled-reports", output_id, pdf_bytes)
+    if artifact_path:
+        await db.scheduled_report_outputs.update_one(
+            {"id": output_id},
+            {"$set": {
+                "artifact_storage.latest_pdf": {
+                    "provider": "supabase",
+                    "object_path": artifact_path,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            }},
+        )
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.pdf"',
+            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
+        },
+    )
 
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_RIGHT
