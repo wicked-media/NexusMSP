@@ -18,6 +18,7 @@ import asyncio
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -58,6 +59,15 @@ async def _ai_chat(session_id: str, system_msg: str):
     return chat
 
 
+async def _scoped_invoice(invoice_id: str, current_user: dict, operation: str) -> dict:
+    """Load an invoice and prove the actor may operate on its client first."""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    await assert_client_scope(current_user, invoice.get("client_id"), operation=operation, mask_not_found=True)
+    return invoice
+
+
 # Ã¢â€¢â€Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢â€”
 # Ã¢â€¢â€˜   1) AI DRAFT INVOICE Ã¢â‚¬â€ from tickets / time entries / contracts  Ã¢â€¢â€˜
 # Ã¢â€¢Å¡Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
@@ -76,6 +86,7 @@ async def ai_draft_invoice(data: dict, current_user: dict = Depends(get_current_
     client_id = data.get("client_id")
     if not client_id:
         raise HTTPException(400, "client_id required")
+    await assert_client_scope(current_user, client_id, operation="billing.invoice.ai_draft", mask_not_found=True)
     client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client_doc:
         raise HTTPException(404, "Client not found")
@@ -194,9 +205,7 @@ async def ai_draft_invoice(data: dict, current_user: dict = Depends(get_current_
 @router.post("/invoices/{invoice_id}/payment-plan")
 async def create_payment_plan(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Split an invoice into N installments with auto-due-date schedule."""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(404, "Invoice not found")
+    invoice = await _scoped_invoice(invoice_id, current_user, "billing.invoice.payment_plan.create")
     n = int(data.get("installments", 3))
     if n < 2 or n > 12:
         raise HTTPException(400, "installments must be 2-12")
@@ -238,6 +247,7 @@ async def create_payment_plan(invoice_id: str, data: dict, current_user: dict = 
 
 @router.get("/invoices/{invoice_id}/payment-plan")
 async def get_payment_plan(invoice_id: str, current_user: dict = Depends(get_current_user)):
+    await _scoped_invoice(invoice_id, current_user, "billing.invoice.payment_plan.read")
     plan = await db.invoice_payment_plans.find_one({"invoice_id": invoice_id, "status": "active"}, {"_id": 0})
     if not plan:
         return None
@@ -249,6 +259,7 @@ async def mark_installment_paid(plan_id: str, installment_id: str, current_user:
     plan = await db.invoice_payment_plans.find_one({"id": plan_id}, {"_id": 0})
     if not plan:
         raise HTTPException(404, "Plan not found")
+    await _scoped_invoice(str(plan.get("invoice_id") or ""), current_user, "billing.invoice.payment_plan.mark_paid")
     updated = False
     for ins in plan["schedule"]:
         if ins["id"] == installment_id and ins["status"] != "paid":
@@ -268,9 +279,7 @@ async def mark_installment_paid(plan_id: str, installment_id: str, current_user:
 
 @router.post("/invoices/{invoice_id}/apply-late-fee")
 async def apply_late_fee(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(404, "Invoice not found")
+    invoice = await _scoped_invoice(invoice_id, current_user, "billing.invoice.late_fee.apply")
     fee_type = data.get("type", "percent")  # 'percent' or 'flat'
     value = float(data.get("value", 5))
     cur_total = float(invoice.get("total") or 0)
@@ -305,9 +314,7 @@ REMINDER_TONES = {
 @router.post("/invoices/{invoice_id}/smart-reminder")
 async def smart_reminder(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Generate AI-drafted reminder copy based on age & history; optionally send."""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(404, "Invoice not found")
+    invoice = await _scoped_invoice(invoice_id, current_user, "billing.invoice.reminder.send")
     due = _parse_date(invoice.get("due_date", ""))
     age = (datetime.now(timezone.utc) - (due or datetime.now(timezone.utc))).days if due else 0
     history = await db.invoice_emails.find({"invoice_id": invoice_id, "kind": "reminder"}, {"_id": 0}).to_list(20)
@@ -352,9 +359,7 @@ async def smart_reminder(invoice_id: str, data: dict, current_user: dict = Depen
 
 @router.post("/invoices/{invoice_id}/reissue")
 async def reissue_invoice(invoice_id: str, data: dict | None = None, current_user: dict = Depends(get_current_user)):
-    original = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not original:
-        raise HTTPException(404, "Invoice not found")
+    original = await _scoped_invoice(invoice_id, current_user, "billing.invoice.reissue")
     # Generate next invoice number
     last = await db.invoices.find({}, {"_id": 0, "invoice_number": 1}).sort("created_at", -1).limit(1).to_list(1)
     last_num = 0
@@ -400,6 +405,7 @@ async def bulk_invoice_action(action: str, data: dict, current_user: dict = Depe
             results["failed"] += 1
             continue
         try:
+            await assert_client_scope(current_user, inv.get("client_id"), operation=f"billing.invoice.bulk.{action}", mask_not_found=True)
             if action == "void":
                 if inv.get("payment_status") in {"paid", "partial"} or inv.get("status") in {"cancelled", "voided"}:
                     raise ValueError("Paid, partially paid, or already voided invoices cannot be bulk voided")
@@ -470,6 +476,7 @@ async def bulk_invoice_action(action: str, data: dict, current_user: dict = Depe
 @router.get("/invoices/customer-statement/{client_id}")
 async def customer_statement(client_id: str, current_user: dict = Depends(get_current_user)):
     """Return a rollup of unpaid invoices + aged bucket data (JSON)."""
+    await assert_client_scope(current_user, client_id, operation="billing.customer_statement.read", mask_not_found=True)
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(404, "Client not found")
@@ -518,7 +525,10 @@ async def customer_statement(client_id: str, current_user: dict = Depends(get_cu
 @router.get("/invoices/aged-ar-insights")
 async def aged_ar_insights(current_user: dict = Depends(get_current_user)):
     """Aged AR rollup + AI-written insights."""
-    invoices = await db.invoices.find({"payment_status": {"$ne": "paid"}, "status": {"$ne": "cancelled"}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(
+        scoped_query(current_user, {"payment_status": {"$ne": "paid"}, "status": {"$ne": "cancelled"}}, site_field=None),
+        {"_id": 0},
+    ).to_list(5000)
     now = datetime.now(timezone.utc)
     by_client = {}
     total_overdue = 0
@@ -571,9 +581,7 @@ async def aged_ar_insights(current_user: dict = Depends(get_current_user)):
 @router.post("/invoices/{invoice_id}/pay-now-link")
 async def generate_pay_now_link(invoice_id: str, current_user: dict = Depends(get_current_user)):
     """Generate a Stripe checkout URL for this invoice's balance and persist on invoice."""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(404, "Invoice not found")
+    invoice = await _scoped_invoice(invoice_id, current_user, "billing.invoice.payment_link.create")
     stripe_key = os.environ.get("STRIPE_API_KEY") or os.environ.get("STRIPE_SECRET_KEY")
     if not stripe_key:
         raise HTTPException(500, "Stripe not configured")
