@@ -99,3 +99,10 @@ Production-ready means all critical and high risks are closed, every golden work
 ## 9. Architecture and data ownership gate
 
 Before enabling multi-MSP/channel production, review [DATA ownership](DATA_OWNERSHIP.md) and the [architecture plan](NEXUS_ARCHITECTURE_PLAN.md). Confirm environment-level controls that source review cannot prove: authenticated tenant-isolation tests, MongoDB indexes/retention/restore evidence, Supabase RLS and private Storage policy, and server-only service-role credential handling. No cross-store migration is permitted without its own approved migration and rollback plan.
+
+Run the non-mutating local metadata check before a release and retain its output with the release evidence:
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe scripts\audit_data_stores.py
+```

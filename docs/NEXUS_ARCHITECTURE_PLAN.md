@@ -15,6 +15,7 @@ This plan follows the audit-first rule. It does not authorise database migration
 2. Introduce repository/data-access boundaries only while touching high-risk domains (Identity, Client, Ticket, Billing, Agent, Security); do not mass-refactor routers.
 3. Define the universal action envelope: actor, tenant, target, permission, policy/risk, approval, idempotency, audit, correlation, timeout, verification and compensation.
 4. Version the event backbone schema and document retry, failure and replay semantics.
+5. Inventory production query patterns and add only evidence-backed compound indexes. The first metadata check found 183 collections with no non-`_id` index; index changes require query evidence, rollout monitoring and rollback.
 
 ## P2 — reliability and operations
 
