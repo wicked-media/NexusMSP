@@ -292,6 +292,8 @@ export default function BackupCenterPage() {
   const [simulationRequest, setSimulationRequest] = useState(null);
   const [simulationSaving, setSimulationSaving] = useState(false);
   const [simulationResult, setSimulationResult] = useState(null);
+  const [dismissAlertTarget, setDismissAlertTarget] = useState(null);
+  const [dismissingAlert, setDismissingAlert] = useState(false);
 
   useEffect(() => {
     if (requestedTab && BACKUP_TABS.has(requestedTab)) setTab(requestedTab);
@@ -479,12 +481,16 @@ export default function BackupCenterPage() {
     } finally { setAssuranceLoading(false); }
   };
 
-  const handleDismissAlert = async (alertId) => {
+  const confirmDismissAlert = async () => {
+    if (!dismissAlertTarget?.id) return;
+    setDismissingAlert(true);
     try {
-      await axios.post(`${API}/acronis/alerts/${alertId}/dismiss`, {}, { headers });
-      setAcronisAlerts(prev => prev.filter(a => a.id !== alertId));
+      await axios.post(`${API}/acronis/alerts/${dismissAlertTarget.id}/dismiss`, {}, { headers });
+      setAcronisAlerts(prev => prev.filter(a => a.id !== dismissAlertTarget.id));
+      setDismissAlertTarget(null);
       toast.success("Alert dismissed");
     } catch (e) { toast.error(e.response?.data?.detail || "Dismiss failed"); }
+    finally { setDismissingAlert(false); }
   };
 
   const handleOpenAcronis = async (resourceId, alertId) => {
@@ -1050,7 +1056,7 @@ export default function BackupCenterPage() {
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => handleOpenAcronis(null, alert.id)} title="Open in Acronis">
                               <ArrowUpRight className="w-3 h-3" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-emerald-500/10" onClick={() => handleDismissAlert(alert.id)} title="Dismiss" data-testid={`dismiss-alert-${alert.id}`}>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-emerald-500/10" onClick={() => setDismissAlertTarget(alert)} title="Dismiss with acknowledgement" data-testid={`dismiss-alert-${alert.id}`}>
                               <CheckCircle className="w-3 h-3" />
                             </Button>
                           </div>
@@ -1559,6 +1565,23 @@ export default function BackupCenterPage() {
           </div>}
           <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setVerificationCompletion(null)}>Cancel</Button><Button onClick={completeVerification} disabled={verificationSaving || !verificationCompletion?.restore_time_minutes}>{verificationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save verification</Button></DialogFooter>
         </DialogContent>
+      </Dialog>
+      <Dialog open={!!dismissAlertTarget} onOpenChange={(open) => { if (!open && !dismissingAlert) setDismissAlertTarget(null); }}>
+        <NexusWorkflowDialog
+          eyebrow="Backup provider health"
+          title="Dismiss backup alert?"
+          description="Dismissal removes this alert from the active Nexus queue. It does not repair the underlying provider condition."
+          icon={Bell}
+          tone="amber"
+          className="max-w-lg"
+          data-testid="dismiss-backup-alert-workflow"
+          footer={<><Button variant="outline" onClick={() => setDismissAlertTarget(null)} disabled={dismissingAlert}>Keep alert open</Button><Button variant="success" onClick={confirmDismissAlert} disabled={dismissingAlert}>{dismissingAlert && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Acknowledge & dismiss</Button></>}
+        >
+          <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.05] p-3">
+            <div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium">{dismissAlertTarget?.type || dismissAlertTarget?.name || "Provider alert"}</p><Badge variant="outline" className="text-[10px] capitalize">{dismissAlertTarget?.severity || "info"}</Badge></div>
+            <p className="mt-2 text-xs text-muted-foreground">{dismissAlertTarget?.message || dismissAlertTarget?.description || "No provider message was supplied."}</p>
+          </div>
+        </NexusWorkflowDialog>
       </Dialog>
       <ChangePlanDialog
         open={planDialogOpen}
