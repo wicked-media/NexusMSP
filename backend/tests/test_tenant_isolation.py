@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, workflow_automation, yeastar
+from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, permission_elevation, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -636,3 +636,91 @@ def test_approval_requester_cannot_approve_their_own_request():
     administrator = {"id": "admin-1", "role": "admin"}
 
     assert not approval_workflows._may_decide(approval, administrator)
+
+
+def test_nexus_elevate_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = []
+    caller = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+        "permissions": {"agent_commands": {"execute": True}},
+    }
+
+    class Users:
+        async def find_one(self, *_args):
+            return dict(caller)
+
+    class Requests:
+        def find(self, query, _projection):
+            captured.append(query)
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        permission_elevation,
+        "db",
+        type(
+            "ElevateDB",
+            (),
+            {"users": Users(), "nexus_elevate_requests": Requests()},
+        )(),
+    )
+
+    result = asyncio.run(
+        permission_elevation.list_nexus_elevate_requests(
+            status=None,
+            client_id=None,
+            device_id=None,
+            limit=150,
+            current_user=caller,
+        )
+    )
+
+    assert result == {"requests": []}
+    assert captured[-1] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_nexus_elevate_foreign_request_cannot_be_approved(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    caller = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+        "permissions": {"agent_commands": {"execute": True}},
+    }
+
+    class Users:
+        async def find_one(self, *_args):
+            return dict(caller)
+
+    monkeypatch.setattr(
+        permission_elevation,
+        "db",
+        type(
+            "ElevateDB",
+            (),
+            {
+                "users": Users(),
+                "nexus_elevate_requests": _RecordCollection(
+                    {
+                        "id": "elevation-b",
+                        "client_id": "client-b",
+                        "status": "pending",
+                    }
+                ),
+            },
+        )(),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            permission_elevation.approve_nexus_elevate_request(
+                "elevation-b", {"reason": "Approved after a full review"}, caller
+            )
+        )
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "nexus_elevate.request.approve"

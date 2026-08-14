@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from app.database import db
 from app.auth import get_current_user
 from app.routers.tech_intel import _log_audit
+from app.services.scope_permissions import assert_client_scope, effective_scope, scoped_query
 
 router = APIRouter()
 
@@ -214,6 +215,19 @@ async def _request_view(request: dict) -> dict:
         item["asset_id"] = device.get("id")
         item["asset_name"] = device.get("name") or item.get("hostname") or "Managed asset"
     return item
+
+
+def _policy_visible_to_caller(policy: dict, caller: dict) -> bool:
+    """Return whether a policy is global or applies to an allowed client."""
+    scope = effective_scope(caller)
+    if scope["mode"] == "all":
+        return True
+    client_ids = {
+        str(client_id)
+        for client_id in ((policy.get("match") or {}).get("client_ids") or [])
+        if client_id
+    }
+    return not client_ids or bool(client_ids.intersection(scope["client_ids"]))
 
 
 # ---------------------------------------------------------------------------
@@ -490,8 +504,14 @@ async def list_nexus_elevate_policies(current_user: dict = Depends(get_current_u
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
     policies = await db.nexus_elevate_policies.find({"archived_at": {"$in": [None, ""]}}, {"_id": 0}).sort("priority", -1).to_list(500)
-    clients = await db.clients.find({}, {"_id": 0, "id": 1, "name": 1}).sort("name", 1).to_list(500)
-    agents = await db.nexus_agents.find({"is_active": True}, {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "last_seen": 1}).sort("hostname", 1).to_list(1000)
+    policies = [policy for policy in policies if _policy_visible_to_caller(policy, caller)]
+    clients = await db.clients.find(
+        scoped_query(caller, {}, field="id", site_field=None), {"_id": 0, "id": 1, "name": 1}
+    ).sort("name", 1).to_list(500)
+    agents = await db.nexus_agents.find(
+        scoped_query(caller, {"is_active": True}, site_field=None),
+        {"_id": 0, "id": 1, "hostname": 1, "client_id": 1, "last_seen": 1},
+    ).sort("hostname", 1).to_list(1000)
     return {
         "policies": [_policy_view(policy) for policy in policies],
         "catalog": {"clients": clients, "agents": agents},
@@ -571,6 +591,8 @@ async def simulate_nexus_elevate_policy(data: dict, current_user: dict = Depends
     if device_id and not client_id:
         agent = await db.nexus_agents.find_one({"id": device_id}, {"_id": 0, "client_id": 1}) or {}
         client_id = str(agent.get("client_id") or "")
+    if client_id:
+        await assert_client_scope(caller, client_id, operation="nexus_elevate.policy.simulate")
     request = {
         "device_id": device_id,
         "client_id": client_id,
@@ -808,27 +830,29 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
     await _expire_stale_native_approvals()
     now = datetime.now(timezone.utc)
     settings = await _native_settings()
-    requests = await db.nexus_elevate_requests.find({}, {"_id": 0}).sort("requested_at", -1).to_list(250)
-    active_agents = await db.nexus_agents.count_documents({"is_active": True})
+    requests = await db.nexus_elevate_requests.find(
+        scoped_query(caller, {}, site_field=None), {"_id": 0}
+    ).sort("requested_at", -1).to_list(250)
+    active_agents = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True}, site_field=None))
     online_cutoff = (now - timedelta(minutes=3)).isoformat()
-    online_agents = await db.nexus_agents.count_documents({"is_active": True, "last_seen": {"$gte": online_cutoff}})
-    companion_agents = await db.nexus_agents.count_documents({
+    online_agents = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "last_seen": {"$gte": online_cutoff}}, site_field=None))
+    companion_agents = await db.nexus_agents.count_documents(scoped_query(caller, {
         "is_active": True,
         "client_companion_installed_at": {"$exists": True, "$ne": None},
-    })
-    companion_agents_online = await db.nexus_agents.count_documents({
+    }, site_field=None))
+    companion_agents_online = await db.nexus_agents.count_documents(scoped_query(caller, {
         "is_active": True,
         "last_seen": {"$gte": online_cutoff},
         "client_companion_installed_at": {"$exists": True, "$ne": None},
-    })
-    elevate_active = await db.nexus_agents.count_documents({"is_active": True, "nexus_elevate.state": "active"})
-    elevate_deploying = await db.nexus_agents.count_documents({"is_active": True, "nexus_elevate.state": "deploying"})
+    }, site_field=None))
+    elevate_active = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "nexus_elevate.state": "active"}, site_field=None))
+    elevate_deploying = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "nexus_elevate.state": "deploying"}, site_field=None))
     pending = [row for row in requests if row.get("status") == "pending"]
     expiring = [row for row in requests if row.get("status") == "approved" and row.get("approved_until") and row["approved_until"] <= (now + timedelta(minutes=10)).isoformat()]
     failed = [row for row in requests if row.get("status") in {"failed", "expired"}]
     recent = [await _request_view(row) for row in requests[:8]]
-    active_policies = await db.nexus_elevate_policies.count_documents({"enabled": True, "archived_at": {"$in": [None, ""]}})
-    enforced_policies = await db.nexus_elevate_policies.count_documents({"enabled": True, "mode": "enforce", "archived_at": {"$in": [None, ""]}})
+    active_policies = sum(1 for policy in await db.nexus_elevate_policies.find({"enabled": True, "archived_at": {"$in": [None, ""]}}, {"_id": 0, "match": 1}).to_list(500) if _policy_visible_to_caller(policy, caller))
+    enforced_policies = sum(1 for policy in await db.nexus_elevate_policies.find({"enabled": True, "mode": "enforce", "archived_at": {"$in": [None, ""]}}, {"_id": 0, "match": 1}).to_list(500) if _policy_visible_to_caller(policy, caller))
     return {
         "settings": settings,
         "summary": {
@@ -868,7 +892,9 @@ async def list_nexus_elevate_requests(
         query["client_id"] = client_id
     if device_id:
         query["device_id"] = device_id
-    rows = await db.nexus_elevate_requests.find(query, {"_id": 0}).sort("requested_at", -1).to_list(limit)
+    rows = await db.nexus_elevate_requests.find(
+        scoped_query(caller, query, site_field=None), {"_id": 0}
+    ).sort("requested_at", -1).to_list(limit)
     return {"requests": [await _request_view(row) for row in rows]}
 
 
@@ -880,6 +906,7 @@ async def get_nexus_elevate_request(request_id: str, current_user: dict = Depend
     request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
+    await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.read", mask_not_found=True)
     events = await db.nexus_elevate_audit.find({"request_id": request_id}, {"_id": 0}).sort("at", -1).to_list(100)
     return {"request": await _request_view(request), "audit": events}
 
@@ -891,6 +918,7 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
     request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
+    await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.approve", mask_not_found=True)
     if request.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Only pending elevation requests can be approved")
     settings = await _native_settings()
@@ -979,6 +1007,7 @@ async def deny_nexus_elevate_request(request_id: str, data: dict, current_user: 
     request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
+    await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.deny", mask_not_found=True)
     if request.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Only pending elevation requests can be denied")
     reason = str(data.get("reason") or "").strip()
