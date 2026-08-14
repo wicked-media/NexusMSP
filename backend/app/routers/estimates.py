@@ -4,8 +4,29 @@ from datetime import datetime, timezone
 import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 
 router = APIRouter()
+
+
+async def _estimate_or_404(estimate_id: str, current_user: dict) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.estimates,
+        estimate_id,
+        operation="estimate.access",
+        resource_name="Estimate",
+    )
+
+
+async def _ticket_or_404(ticket_id: str, current_user: dict) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.worksheet.access",
+        resource_name="Ticket",
+    )
 
 # ============== ESTIMATES ==============
 
@@ -14,12 +35,12 @@ async def get_estimates(status: Optional[str] = None, current_user: dict = Depen
     query = {}
     if status:
         query["status"] = status
-    estimates = await db.estimates.find(query, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    estimates = await db.estimates.find(scoped_query(current_user, query), {"_id": 0}).sort("created_at", -1).to_list(5000)
     return estimates
 
 @router.get("/estimates/stats/summary")
 async def get_estimate_stats(current_user: dict = Depends(get_current_user)):
-    ests = await db.estimates.find({}, {"_id": 0}).to_list(10000)
+    ests = await db.estimates.find(scoped_query(current_user), {"_id": 0}).to_list(10000)
     by_status = {}
     for e in ests:
         s = e.get("status", "draft")
@@ -33,15 +54,22 @@ async def get_estimate_stats(current_user: dict = Depends(get_current_user)):
     }
 
 @router.get("/estimates/client/{client_id}")
-async def get_client_estimates(client_id: str):
-    ests = await db.estimates.find({
+async def get_client_estimates(client_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="estimate.client_list")
+    ests = await db.estimates.find(scoped_query(current_user, {
         "client_id": client_id,
         "status": {"$in": ["published", "sent", "approved", "declined"]}
-    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    }), {"_id": 0}).sort("created_at", -1).to_list(100)
     return ests
 
 @router.post("/estimates")
 async def create_estimate(data: dict, current_user: dict = Depends(get_current_user)):
+    client_id = str(data.get("client_id") or "").strip()
+    await assert_client_scope(current_user, client_id, operation="estimate.create")
+    if data.get("ticket_id"):
+        ticket = await _ticket_or_404(str(data["ticket_id"]), current_user)
+        if ticket.get("client_id") != client_id:
+            raise HTTPException(status_code=422, detail="Estimate ticket must belong to the estimate client")
     count = await db.estimates.count_documents({})
     line_items = data.get("line_items", [])
     subtotal = sum(float(li.get("quantity", 1)) * float(li.get("unit_price", 0)) for li in line_items)
@@ -50,7 +78,7 @@ async def create_estimate(data: dict, current_user: dict = Depends(get_current_u
     estimate = {
         "id": str(uuid.uuid4()),
         "estimate_number": f"EST-{count + 1001:04d}",
-        "client_id": data.get("client_id", ""),
+        "client_id": client_id,
         "client_name": data.get("client_name", ""),
         "client_email": data.get("client_email", ""),
         "ticket_id": data.get("ticket_id", ""),
@@ -84,17 +112,22 @@ async def create_estimate(data: dict, current_user: dict = Depends(get_current_u
 
 @router.get("/estimates/{estimate_id}")
 async def get_estimate(estimate_id: str, current_user: dict = Depends(get_current_user)):
-    est = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not est:
-        raise HTTPException(status_code=404, detail="Estimate not found")
-    return est
+    return await _estimate_or_404(estimate_id, current_user)
 
 @router.put("/estimates/{estimate_id}")
 async def update_estimate(estimate_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    existing = await _estimate_or_404(estimate_id, current_user)
     allowed = {"title", "description", "line_items", "subtotal", "tax_rate", "tax_amount",
                "total", "discount", "valid_until", "notes", "terms", "client_id", "client_name",
                "client_email", "ticket_id"}
     update = {k: v for k, v in data.items() if k in allowed}
+    if "client_id" in update and update["client_id"] != existing.get("client_id"):
+        await assert_client_scope(current_user, update["client_id"], operation="estimate.reassign")
+    if update.get("ticket_id"):
+        ticket = await _ticket_or_404(str(update["ticket_id"]), current_user)
+        target_client_id = update.get("client_id", existing.get("client_id"))
+        if ticket.get("client_id") != target_client_id:
+            raise HTTPException(status_code=422, detail="Estimate ticket must belong to the estimate client")
     if "line_items" in update:
         li = update["line_items"]
         sub = sum(float(i.get("quantity", 1)) * float(i.get("unit_price", 0)) for i in li)
@@ -110,9 +143,7 @@ async def update_estimate(estimate_id: str, data: dict, current_user: dict = Dep
 
 @router.put("/estimates/{estimate_id}/status")
 async def update_estimate_status(estimate_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    est = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not est:
-        raise HTTPException(status_code=404, detail="Estimate not found")
+    est = await _estimate_or_404(estimate_id, current_user)
     new_status = data.get("status")
     valid = {"draft", "published", "sent", "approved", "declined", "expired", "converted"}
     if new_status not in valid:
@@ -133,9 +164,7 @@ async def update_estimate_status(estimate_id: str, data: dict, current_user: dic
 
 @router.post("/estimates/{estimate_id}/convert-to-invoice")
 async def convert_estimate_to_invoice(estimate_id: str, current_user: dict = Depends(get_current_user)):
-    est = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not est:
-        raise HTTPException(status_code=404, detail="Estimate not found")
+    est = await _estimate_or_404(estimate_id, current_user)
     inv_count = await db.invoices.count_documents({})
     invoice = {
         "id": str(uuid.uuid4()),
@@ -167,12 +196,14 @@ async def convert_estimate_to_invoice(estimate_id: str, current_user: dict = Dep
 
 @router.delete("/estimates/{estimate_id}")
 async def delete_estimate(estimate_id: str, current_user: dict = Depends(get_current_user)):
+    await _estimate_or_404(estimate_id, current_user)
     await db.estimates.delete_one({"id": estimate_id})
     await db.estimate_audit.delete_many({"estimate_id": estimate_id})
     return {"message": "Estimate deleted"}
 
 @router.get("/estimates/{estimate_id}/audit-log")
 async def get_estimate_audit(estimate_id: str, current_user: dict = Depends(get_current_user)):
+    await _estimate_or_404(estimate_id, current_user)
     logs = await db.estimate_audit.find({"estimate_id": estimate_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
     return logs
 
@@ -188,6 +219,7 @@ async def _log_estimate_audit(estimate_id: str, action: str, details: str, user:
 
 @router.get("/tickets/{ticket_id}/worksheet")
 async def get_ticket_worksheet(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    await _ticket_or_404(ticket_id, current_user)
     ws = await db.ticket_worksheets.find_one({"ticket_id": ticket_id}, {"_id": 0})
     if not ws:
         return []
@@ -195,6 +227,7 @@ async def get_ticket_worksheet(ticket_id: str, current_user: dict = Depends(get_
 
 @router.post("/tickets/{ticket_id}/worksheet")
 async def add_worksheet_item(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await _ticket_or_404(ticket_id, current_user)
     item_text = data.get("item", "").strip()
     if not item_text:
         raise HTTPException(status_code=400, detail="Item text required")
@@ -222,6 +255,7 @@ async def add_worksheet_item(ticket_id: str, data: dict, current_user: dict = De
 
 @router.put("/tickets/{ticket_id}/worksheet")
 async def update_ticket_worksheet(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await _ticket_or_404(ticket_id, current_user)
     items = data.get("items", [])
     completed = sum(1 for i in items if i.get("checked"))
     ws = {
@@ -235,6 +269,7 @@ async def update_ticket_worksheet(ticket_id: str, data: dict, current_user: dict
 
 @router.post("/tickets/{ticket_id}/worksheet/check")
 async def check_worksheet_item(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await _ticket_or_404(ticket_id, current_user)
     ws = await db.ticket_worksheets.find_one({"ticket_id": ticket_id}, {"_id": 0})
     if not ws:
         raise HTTPException(status_code=404, detail="Worksheet not found")

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, contracts, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, purchase_orders, remote, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, purchase_orders, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -993,3 +993,53 @@ def test_restricted_technician_cannot_read_foreign_contract_price_history(monkey
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "contract.access"
+
+
+def test_estimate_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Estimates:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        estimates,
+        "db",
+        type("EstimateDB", (), {"estimates": Estimates()})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(estimates.get_estimates(current_user=user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_change_a_foreign_estimate(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        estimates,
+        "db",
+        type(
+            "EstimateDB",
+            (),
+            {"estimates": _RecordCollection({"id": "estimate-b", "client_id": "client-b"})},
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(estimates.update_estimate_status("estimate-b", {"status": "approved"}, user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "estimate.access"
