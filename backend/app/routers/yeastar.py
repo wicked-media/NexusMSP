@@ -923,7 +923,7 @@ async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)
     sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
     billing_history = await db.yeastar_billing_snapshots.find({}, {"_id": 0}).sort("created_at", -1).to_list(24)
     activity = await db.activity_logs.find(
-        {"entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing"]}},
+        {"entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing", "voice_provider"]}},
         {"_id": 0},
     ).sort("created_at", -1).to_list(50)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
