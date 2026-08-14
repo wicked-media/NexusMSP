@@ -379,6 +379,38 @@ def test_legacy_portal_links_fail_closed_when_revoked_or_expired():
     assert not client_portal._portal_token_is_active({"active": True, "expires_at": "invalid"})
 
 
+def test_restricted_technician_cannot_administer_another_clients_portal(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    protected_calls = [
+        lambda: client_portal.get_portal_config("client-b", user),
+        lambda: client_portal.update_portal_config("client-b", {}, user),
+        lambda: client_portal.generate_portal_token("client-b", {}, user),
+        lambda: client_portal.get_portal_users("client-b", user),
+        lambda: client_portal.create_portal_user("client-b", {"email": "person@example.com"}, user),
+    ]
+
+    for protected_call in protected_calls:
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(protected_call())
+        assert exc.value.status_code == 404
+
+    assert {entry["operation"] for entry in denials.rows} == {
+        "portal.configuration.read",
+        "portal.configuration.update",
+        "portal.link.create",
+        "portal.user.read",
+        "portal.user.create",
+    }
+
+
 def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkeypatch):
     denials = _InsertCollection()
     monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)

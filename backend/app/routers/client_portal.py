@@ -6,6 +6,7 @@ from app.database import db
 from app.auth import get_current_user
 from app.routers.email_utils import send_email, is_microsoft365_configured
 from app.services.portal_audit import record_portal_event
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 router = APIRouter()
 
@@ -117,6 +118,8 @@ async def get_portal_access_logs(
 ):
     """Return persisted portal authentication and administration evidence."""
     _require_portal_audit_access(current_user)
+    if client_id:
+        await assert_client_scope(current_user, client_id, operation="portal.audit.read", mask_not_found=True)
     query = {"timestamp": {"$gte": (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()}}
     if client_id:
         query["client_id"] = client_id
@@ -127,6 +130,7 @@ async def get_portal_access_logs(
 
 @router.get("/client-portal/config/{client_id}")
 async def get_portal_config(client_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="portal.configuration.read", mask_not_found=True)
     config = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0})
     if not config:
         client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
@@ -140,6 +144,7 @@ async def get_portal_config(client_id: str, current_user: dict = Depends(get_cur
 
 @router.put("/client-portal/config/{client_id}")
 async def update_portal_config(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="portal.configuration.update", mask_not_found=True)
     client = await _client_identity(client_id)
     previous = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0}) or {}
     data["client_id"] = client_id
@@ -165,6 +170,7 @@ async def update_portal_config(client_id: str, data: dict, current_user: dict = 
 
 @router.post("/client-portal/generate-token/{client_id}")
 async def generate_portal_token(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="portal.link.create", mask_not_found=True)
     client = await _client_identity(client_id)
     token_value = secrets.token_urlsafe(32)
     token_entry = {
@@ -196,6 +202,7 @@ async def generate_portal_token(client_id: str, data: dict, current_user: dict =
 
 @router.delete("/client-portal/tokens/{client_id}/{token_id}")
 async def revoke_portal_token(client_id: str, token_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, client_id, operation="portal.link.revoke", mask_not_found=True)
     client = await _client_identity(client_id)
     config = await db.portal_configs.find_one(
         {"client_id": client_id, "access_tokens.id": token_id},
@@ -283,7 +290,7 @@ async def portal_get_devices(token: str):
 
 @router.get("/client-portal/all")
 async def get_all_portal_configs(current_user: dict = Depends(get_current_user)):
-    configs = await db.portal_configs.find({}, {"_id": 0}).to_list(100)
+    configs = await db.portal_configs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(100)
     return configs
 
 
@@ -293,6 +300,7 @@ async def get_all_portal_configs(current_user: dict = Depends(get_current_user))
 @router.get("/client-portal/users/{client_id}")
 async def get_portal_users(client_id: str, current_user: dict = Depends(get_current_user)):
     """Get all portal users for a client."""
+    await assert_client_scope(current_user, client_id, operation="portal.user.read", mask_not_found=True)
     users = await db.portal_users.find({"client_id": client_id}, {"_id": 0, "password_hash": 0, "totp_secret": 0}).sort("created_at", -1).to_list(100)
     return users
 
@@ -301,6 +309,8 @@ async def get_portal_users(client_id: str, current_user: dict = Depends(get_curr
 async def create_portal_user(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Create a new portal user for a client (admin action)."""
     from app.auth import hash_password
+
+    await assert_client_scope(current_user, client_id, operation="portal.user.create", mask_not_found=True)
 
     email = (data.get("email") or "").lower().strip()
     name = data.get("name", "")
@@ -380,6 +390,8 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
     """Update a portal user's permissions and details."""
     from app.auth import hash_password
 
+    await assert_client_scope(current_user, client_id, operation="portal.user.update", mask_not_found=True)
+
     user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Portal user not found")
@@ -412,6 +424,7 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
 @router.delete("/client-portal/users/{client_id}/{user_id}")
 async def delete_portal_user(client_id: str, user_id: str, current_user: dict = Depends(get_current_user)):
     """Delete a portal user."""
+    await assert_client_scope(current_user, client_id, operation="portal.user.delete", mask_not_found=True)
     user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0})
     result = await db.portal_users.delete_one({"id": user_id, "client_id": client_id})
     if result.deleted_count == 0:
@@ -432,6 +445,8 @@ async def reset_portal_user_password(client_id: str, user_id: str, data: dict = 
     """Reset a portal user's password to a random one and optionally send email."""
     from app.auth import hash_password
     data = data or {}
+
+    await assert_client_scope(current_user, client_id, operation="portal.user.password_reset", mask_not_found=True)
 
     user = await db.portal_users.find_one(
         {"id": user_id, "client_id": client_id},
@@ -473,9 +488,7 @@ async def reset_portal_user_password(client_id: str, user_id: str, data: dict = 
 @router.get("/portal-api/{token}/invoices")
 async def portal_get_invoices(token: str):
     """Client portal: View invoices for this client."""
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, _ = await _active_portal_config_for_token(token)
     invoices = await db.invoices.find(
         {"client_id": config["client_id"]},
         {"_id": 0, "id": 1, "invoice_number": 1, "description": 1, "total": 1, "amount_due": 1,
@@ -487,9 +500,7 @@ async def portal_get_invoices(token: str):
 @router.get("/portal-api/{token}/invoices/{invoice_id}")
 async def portal_get_invoice_detail(token: str, invoice_id: str):
     """Client portal: View invoice detail."""
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, _ = await _active_portal_config_for_token(token)
     invoice = await db.invoices.find_one(
         {"id": invoice_id, "client_id": config["client_id"]}, {"_id": 0}
     )
@@ -501,9 +512,7 @@ async def portal_get_invoice_detail(token: str, invoice_id: str):
 @router.get("/portal-api/{token}/devices/health")
 async def portal_get_device_health(token: str):
     """Client portal: View device health summary."""
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, _ = await _active_portal_config_for_token(token)
     devices = await db.devices.find(
         {"client_id": config["client_id"]},
         {"_id": 0, "id": 1, "name": 1, "device_type": 1, "os": 1, "status": 1,
@@ -519,9 +528,7 @@ async def portal_get_device_health(token: str):
 @router.get("/portal-api/{token}/summary")
 async def portal_get_summary(token: str):
     """Client portal: Get full client summary (devices, tickets, invoices, health)."""
-    config = await db.portal_configs.find_one({"access_tokens.token": token, "enabled": True}, {"_id": 0})
-    if not config:
-        raise HTTPException(status_code=404, detail="Portal not found")
+    config, _ = await _active_portal_config_for_token(token)
     cid = config["client_id"]
     client = await db.clients.find_one({"id": cid}, {"_id": 0, "id": 1, "name": 1, "email": 1, "mrr": 1})
     devices = await db.devices.find({"client_id": cid}, {"_id": 0, "status": 1}).to_list(500)
