@@ -95,6 +95,7 @@ const SETTINGS_INDEX = [
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
   { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
+  { tab: "integrations", anchor: "supabase-storage-card", label: "Nexus Artifact Storage", keywords: "supabase storage private files pdf attachments reports retention" },
   { tab: "integrations", anchor: "cipp-settings-card", label: "Nexus Control Plane (Microsoft 365)", keywords: "control plane cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
   { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
   { tab: "integrations", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", keywords: "nexus agent rmm in-house windows agent patches scripts splashtop" },
@@ -211,8 +212,28 @@ export default function SettingsPage() {
   const [calendarSaving, setCalendarSaving] = useState(false);
   const [nexusElevate, setNexusElevate] = useState({ native_enabled: true, auto_deploy_companion: true, max_duration_minutes: 15, require_justification: true, keeper_bridge_enabled: false, keeper_connector_reference: "", keeper_sync_interval_minutes: 15 });
   const [nexusElevateSaving, setNexusElevateSaving] = useState(false);
+  const [artifactStorage, setArtifactStorage] = useState({ configured: false, ready: false, detail: "Checking artifact storage…" });
+  const [artifactStorageBusy, setArtifactStorageBusy] = useState(false);
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  const refreshArtifactStorage = async () => {
+    setArtifactStorageBusy(true);
+    try {
+      const response = await axios.get(`${API}/supabase/artifacts/status`, { headers });
+      setArtifactStorage(response.data || { configured: false, ready: false, detail: "Artifact storage status is unavailable." });
+    } catch {
+      setArtifactStorage({ configured: false, ready: false, detail: "Artifact storage status is unavailable." });
+    } finally {
+      setArtifactStorageBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "integrations" && token) refreshArtifactStorage();
+    // refresh is intentionally activated when this workspace is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, token]);
 
   const openaiErrorMessage = (error, fallback) => {
     const detail = error?.response?.data?.detail;
@@ -1405,6 +1426,11 @@ export default function SettingsPage() {
       {activeTab === "integrations" && (<>
 
       <SetupGuideCallout title="Connect integrations safely" source="Every provider has its own credential source and permission model. Use the setup guidance shown in each connection dialog, save only the required credentials, then run its connection test before enabling sync or billing automation." steps={["Create a dedicated service account or API key where the provider supports it.", "Use the minimum permissions needed for the NexusMSP workflow.", "Record the owner and renewal/expiry date in your credential process, then test the connection."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />
+
+      <Card id="supabase-storage-card" className="border-cyan-500/20 bg-[linear-gradient(120deg,rgba(6,182,212,0.08),transparent_55%)]" data-testid="supabase-storage-card">
+        <CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2"><Cloud className="h-5 w-5 text-cyan-300" /><div><CardTitle>Private Artifact Storage</CardTitle><CardDescription className="mt-1">Nexus retains generated documents, customer files and ticket evidence privately through Supabase Storage.</CardDescription></div></div><Badge variant="outline" className={artifactStorage.ready ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}>{artifactStorage.ready ? "Ready" : artifactStorage.configured ? "Needs attention" : "Not configured"}</Badge></div></CardHeader>
+        <CardContent className="space-y-4"><div className="grid gap-2 text-sm sm:grid-cols-2"><div className="rounded-lg border border-white/[0.08] bg-black/[0.12] p-3"><p className="text-xs text-muted-foreground">Storage bucket</p><p className="mt-1 font-mono text-cyan-100">{artifactStorage.bucket || "Not connected"}</p></div><div className="rounded-lg border border-white/[0.08] bg-black/[0.12] p-3"><p className="text-xs text-muted-foreground">Protection</p><p className="mt-1 text-emerald-200">Private, authenticated retrieval</p></div></div><p className="text-sm text-muted-foreground">{artifactStorage.detail}</p><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Protected flows: invoices, purchase orders, reports, client documents and ticket attachments.</p><Button size="sm" variant="outline" onClick={refreshArtifactStorage} disabled={artifactStorageBusy}>{artifactStorageBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Check storage</Button></div></CardContent>
+      </Card>
 
       {/* Xero Integration */}
       <Card id="xero-settings-card" data-testid="xero-settings-card">
