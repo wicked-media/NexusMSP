@@ -26,6 +26,7 @@ import BackupStatusTab from "@/components/backups/BackupStatusTab";
 import BillingTab from "@/components/backups/BillingTab";
 import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Responsive, WidthProvider } from "react-grid-layout";
@@ -269,6 +270,7 @@ export default function BackupCenterPage() {
   const [orphans, setOrphans] = useState(null);
   const [liveActivities, setLiveActivities] = useState({ running: [], recent: [], stats: {} });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [scanning, setScanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState(() => BACKUP_STATUS_FILTERS.has(requestedStatusFilter) ? requestedStatusFilter : "all");
   const [search, setSearch] = useState("");
@@ -347,6 +349,7 @@ export default function BackupCenterPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const [dash, comp, verify, assurance, usage, agents, alerts, clientList, config] = await Promise.allSettled([
         axios.get(`${API}/backup-dashboard/overview`, { headers }),
@@ -373,7 +376,12 @@ export default function BackupCenterPage() {
       if (clientList.status === "fulfilled") setClients(clientList.value.data || []);
       if (config.status === "fulfilled") setAcronisConfig(config.value.data || {});
       else setAcronisConfig({ configured: false, error: "Unable to load Acronis connection status" });
-    } catch { toast.error("Failed to load backup data"); }
+      if (![dash, comp, verify, assurance, usage, agents, alerts, clientList, config].some(result => result.status === "fulfilled")) {
+        setLoadError("Nexus could not reach the backup evidence services. No recovery or billing actions have been changed.");
+      }
+    } catch {
+      setLoadError("Nexus could not load backup evidence. No recovery or billing actions have been changed.");
+    }
     finally { setLoading(false); }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -616,7 +624,8 @@ export default function BackupCenterPage() {
     finally { setCleaning(false); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading backup assurance" />;
+  if (loadError) return <WorkspaceErrorState title="Backup Centre needs attention" description={loadError} onRetry={fetchData} retryLabel="Retry backup evidence" />;
 
   const ds = dashData?.summary || {};
   const cs = compData?.stats || {};

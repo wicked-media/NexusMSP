@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
 import { EndpointSecurityPanel } from "@/pages/EndpointSecurityPage";
 import { NexusCanaryPanel } from "@/pages/RansomwareCanaryPage";
@@ -66,6 +67,7 @@ export default function NexusShieldPage() {
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [data, setData] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [savingPolicies, setSavingPolicies] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [policyBaseline, setPolicyBaseline] = useState([]);
@@ -98,13 +100,16 @@ export default function NexusShieldPage() {
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
+    if (!quiet) setLoadError("");
     try {
       const response = await axios.get(`${API}/nexus-shield/overview`, { headers });
       const next = { ...EMPTY, ...(response.data || {}) };
       setData(current => tab === "xdr" ? { ...next, xdr: current.xdr } : next);
       setPolicyBaseline(next.policies || []);
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Nexus Shield could not load its verified endpoint evidence.");
+      const message = error.response?.data?.detail || "Nexus Shield could not load its verified endpoint evidence.";
+      if (quiet) toast.error(message);
+      else setLoadError(`${message} No endpoint policy or response action has been changed.`);
     } finally {
       setLoading(false);
     }
@@ -401,6 +406,9 @@ export default function NexusShieldPage() {
     if (!query) return true;
     return `${client.name || ""} ${client.email || ""}`.toLowerCase().includes(query);
   });
+
+  if (loading) return <WorkspaceLoadingState label="Loading endpoint protection evidence" />;
+  if (loadError) return <WorkspaceErrorState title="Nexus Shield needs attention" description={loadError} onRetry={() => load()} retryLabel="Retry security evidence" />;
 
   return (
     <div className="nx-page-stage space-y-5" data-testid="nexus-shield">

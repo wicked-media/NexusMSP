@@ -28,6 +28,7 @@ import {
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 function formatBytes(bytes) {
   if (!bytes) return "0 B";
@@ -215,6 +216,7 @@ export default function NetworkingPage() {
   const [siteDevices, setSiteDevices] = useState([]);
   const [siteClients, setSiteClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState("devices");
   const [search, setSearch] = useState("");
   const [deviceFilter, setDeviceFilter] = useState("all");
@@ -231,6 +233,7 @@ export default function NetworkingPage() {
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError("");
     try {
       const [sitesRes, statsRes, clientsRes] = await Promise.all([
         axios.get(`${API}/networking/sites`, { headers }),
@@ -240,7 +243,9 @@ export default function NetworkingPage() {
       setSites(sitesRes.data);
       setStats(statsRes.data);
       setClients(clientsRes.data);
-    } catch { toast.error("Failed to load networking data"); }
+    } catch {
+      setLoadError("Nexus could not load site, controller and customer context. No network changes have been made.");
+    }
     finally { setLoading(false); }
   };
 
@@ -377,7 +382,8 @@ export default function NetworkingPage() {
 
   useEffect(() => { if (!selectedSite) fetchDashboard(); }, [selectedSite]);
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading network operations" />;
+  if (loadError) return <WorkspaceErrorState title="Networking needs attention" description={loadError} onRetry={fetchData} retryLabel="Retry network data" />;
 
   // ===== SITE FORM DIALOG =====
   const siteFormDialog = (
