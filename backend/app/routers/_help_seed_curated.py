@@ -7,7 +7,7 @@ can stay useful in the moment of work rather than becoming an implementation
 archive.
 """
 
-HELP_CATALOG_VERSION = "2026-08-12-guide-system-v19-platform-operations"
+HELP_CATALOG_VERSION = "2026-08-14-guide-system-v20-voice-fleet"
 
 
 _WORKSPACE_VISUALS = {
@@ -28,6 +28,7 @@ _GUIDE_VISUALS = {
     "backup-operations": [{"url": "/uploads/help/guides/backups-workspace.png", "caption": "Backups workspace — health, verification, compliance, and billing views."}],
     "voice-yeastar": [{"url": "/uploads/help/guides/voice-workspace.png", "caption": "Voice workspace — PBX health, client mappings, extension counts, and sync history."}],
     "voice-yeastar-pbx-onboarding": [{"url": "/uploads/help/guides/voice-workspace.png", "caption": "Voice workspace — add and validate a client PBX connection here."}],
+    "voice-ycm-fleet": [{"url": "/uploads/help/guides/voice-workspace.png", "caption": "Voice workspace — connect a Yeastar Central Management fleet, claim Cloud PBXs, then enable direct live monitoring only where needed."}],
     "nexus-shield-and-canary": [{"url": "/uploads/help/guides/nexus-shield-workspace.png", "caption": "Nexus Shield — endpoint protection, canary status, and response controls."}],
     "nexus-shield-canary": [{"url": "/uploads/help/guides/nexus-shield-workspace.png", "caption": "Nexus Shield — choose the target endpoint and verify canary coverage."}],
 }
@@ -327,6 +328,18 @@ Read the newest entry before a shift. If an item changes a procedure, follow its
         "1. Open **Voice** and choose **Add PBX**.\n2. Search for and select the client.\n3. Enter the PBX base address without an OpenAPI path, then enter the Client ID and Client Secret from **Integrations > API** on that PBX.\n4. Choose the billing policy, agreement mapping, product mapping, and approval threshold.\n5. Choose **Test & link PBX**. NexusMSP verifies the live P-Series system endpoint and discovers extensions before it saves the connection.\n6. Confirm the PBX shows online, then review the Extensions and Billing tabs; exclude non-billable items with a reason.\n7. Enable automated billing only after the first billable count is approved.",
         "The PBX shows online, a successful sync time, the extension list is current, and the linked client profile shows the Voice service indicator.",
         "Connection tests, initial discovery, syncs, exclusions, billing changes, and manual recalculations are retained in Voice activity and history. Duplicate links for the same client and PBX URL are rejected.",
+    ),
+    _guide(
+        "voice-ycm-fleet", "Connect a Yeastar Central Management fleet", "Platform setup", "☁️", 43,
+        "Discover Yeastar Cloud PBXs from one protected fleet connection, claim each PBX into the right Nexus client, and enable direct OpenAPI only where live telemetry is required.",
+        "YCM is connected without copying its fleet credential into customer records; every discovered PBX is reviewed and linked to the correct Nexus client before it is operated or billed.",
+        "Create a least-privilege YCM API application first. Have its Client ID, Client Secret, approved API address, and the required application User-Agent. Confirm the intended technician is authorised to map each discovered PBX to a client. Do not put either secret in a ticket, chat, or client note.",
+        "1. Open **Voice** and choose **YCM fleet**.\n2. Enter the YCM address, API Client ID, Client Secret, and the approved application User-Agent. Save the fleet connection.\n3. Select **Test YCM**. Stop if Nexus cannot authenticate or list the fleet.\n4. Select **Discover Cloud PBXs**, then review each name, supplied YCM customer, and address.\n5. For each approved result, choose the correct Nexus client and select **Link client**. Do not claim a PBX when the ownership is uncertain.\n6. Open the linked PBX from the **PBXs** tab. It is ready for client, service, and billing mapping, but it is not yet a live monitoring connection.\n7. Where live calls, extension presence, wallboard data, or local/on-premises control is required, choose **Enable live API** and enter that PBX's own OpenAPI Client ID and Client Secret. Test and save it.\n8. Review Extensions and Billing before activating unattended billing.",
+        "The YCM card shows a tested fleet connection, each claimed PBX appears under the intended client, and direct-live PBXs show a successful connection test before Monitor, Sync, or wallboard actions are used.",
+        "- **Discovery returns no PBXs:** Verify the YCM API application, its permissions, User-Agent, and the YCM address before retrying.\n- **A PBX is claimed to the wrong client:** Stop billing or monitoring work, correct the client link under an approved change, and record the reason.\n- **Live monitoring is unavailable:** This is expected until that individual PBX has its own API access enabled and direct credentials have been saved. YCM discovery alone is not a substitute for live PBX telemetry.",
+        "Disable the YCM connection or remove the incorrect client association before making any bulk change. For a direct PBX credential issue, remove or rotate only the direct API credential for that PBX; do not rotate the central YCM credential unless the fleet application itself is compromised.",
+        "Retain the connection test, discovery timestamp, PBX-to-client decision, direct API test, product mapping, and any exception in Voice activity. The YCM secret remains fleet-scoped and is never copied into a client PBX record.",
+        "[Onboard a direct Yeastar PBX](/help/voice-yeastar-pbx-onboarding) and [Operate Voice services](/voice?tab=pbxs).",
     ),
     _guide(
         "integrations-safely", "Set up an integration safely", "Platform setup", "🧩", 43,
