@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from fastapi.responses import Response
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -7,7 +8,7 @@ from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
 from app.services.upload_security import ATTACHMENT_EXTENSIONS, safe_original_filename, safe_upload_extension
-from app.services.supabase_storage import archive_record_artifact, delete_artifact
+from app.services.supabase_storage import archive_record_artifact, delete_artifact, read_artifact
 
 
 async def _enforce_ticket_scope(request: Request, current_user: dict = Depends(get_current_user)):
@@ -77,6 +78,27 @@ async def upload_ticket_attachment(ticket_id: str, file: UploadFile = File(...),
     await db.ticket_attachments.insert_one(attachment)
     attachment.pop("_id", None)
     return attachment
+
+
+@router.get("/tickets/{ticket_id}/attachments/{attachment_id}/download")
+async def download_ticket_attachment(ticket_id: str, attachment_id: str, current_user: dict = Depends(get_current_user)):
+    """Serve a retained attachment only after ticket scope has been enforced."""
+    attachment = await db.ticket_attachments.find_one({"id": attachment_id, "ticket_id": ticket_id}, {"_id": 0})
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    object_path = (attachment.get("artifact_storage") or {}).get("object_path")
+    if not object_path:
+        raise HTTPException(status_code=404, detail="Attachment has not been migrated to private storage")
+    artifact = await read_artifact(object_path)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Retained attachment is unavailable")
+    content, content_type = artifact
+    filename = safe_original_filename(attachment.get("filename"), default="attachment")
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "private, no-store"},
+    )
 
 
 @router.delete("/tickets/{ticket_id}/attachments/{attachment_id}")

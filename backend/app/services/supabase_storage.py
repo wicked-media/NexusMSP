@@ -238,3 +238,25 @@ async def delete_artifact(object_path: str) -> bool:
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Unable to delete Nexus artifact: %s", exc)
         return False
+
+
+async def read_artifact(object_path: str) -> tuple[bytes, str] | None:
+    """Read one private object for an already-authorised Nexus record request."""
+    config = _config()
+    if not config:
+        return None
+    url, service_key, bucket = config
+    try:
+        safe_path = _safe_path(object_path)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{url}/storage/v1/object/authenticated/{quote(bucket, safe='')}/{quote(safe_path, safe='/')}",
+                headers=_headers(service_key),
+            )
+        if response.status_code == 404 or _bucket_missing(response):
+            return None
+        response.raise_for_status()
+        return response.content, response.headers.get("content-type", "application/octet-stream")
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Unable to read Nexus artifact: %s", exc)
+        return None
