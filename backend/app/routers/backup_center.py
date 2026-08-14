@@ -7,7 +7,7 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.integrations import acronis_service
 from app.services.backup_assurance import build_backup_confidence, simulate_recovery
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, effective_scope, scoped_query
 from datetime import datetime, timezone
 import uuid
 
@@ -94,8 +94,11 @@ async def _build_overview_from_acronis():
 # ---------------------------------------------------------------------------
 @router.get("/backup-dashboard/overview")
 async def get_backup_overview(current_user: dict = Depends(get_current_user)):
-    data = await db.backup_jobs.find({}, {"_id": 0}).to_list(500)
-    if not data:
+    data = await db.backup_jobs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(500)
+    # Acronis fallback data is not yet proven to map its tenant IDs to the
+    # Nexus client scope. Returning it to a restricted technician would turn a
+    # temporary local-data gap into a cross-client disclosure.
+    if not data and effective_scope(current_user)["mode"] == "all":
         data = await _build_overview_from_acronis()
     total = len(data)
     success = sum(1 for d in data if d.get("status") == "success")
@@ -117,7 +120,7 @@ async def get_backup_overview(current_user: dict = Depends(get_current_user)):
 
 @router.get("/backup-dashboard/clients")
 async def get_backup_by_client(current_user: dict = Depends(get_current_user)):
-    pipeline = [{"$group": {
+    pipeline = [{"$match": scoped_query(current_user, {}, site_field=None)}, {"$group": {
         "_id": "$client_name",
         "total": {"$sum": 1},
         "success": {"$sum": {"$cond": [{"$eq": ["$status", "success"]}, 1, 0]}},
@@ -135,7 +138,7 @@ async def get_backup_by_client(current_user: dict = Depends(get_current_user)):
             "success_rate": round(r["success"] / r["total"] * 100, 1) if r["total"] else 0,
         } for r in results]
 
-    jobs = await _build_overview_from_acronis()
+    jobs = await _build_overview_from_acronis() if effective_scope(current_user)["mode"] == "all" else []
     by_tenant = {}
     for j in jobs:
         tn = j.get("client_name") or "Unknown"
@@ -158,8 +161,9 @@ async def get_backup_by_client(current_user: dict = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 @router.get("/backup-compliance/dashboard")
 async def get_backup_compliance(user=Depends(get_current_user)):
-    devices = await db.devices.find({}, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1, "device_type": 1, "status": 1}).to_list(500)
-    backup_records = await db.backup_records.find({}, {"_id": 0}).to_list(1000)
+    scope = scoped_query(user, {}, site_field=None)
+    devices = await db.devices.find(scope, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1, "device_type": 1, "status": 1}).to_list(500)
+    backup_records = await db.backup_records.find(scope, {"_id": 0}).to_list(1000)
 
     device_backup = {}
     for br in backup_records:
@@ -232,7 +236,7 @@ async def get_backup_compliance(user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 @router.get("/backup-verify/overview")
 async def backup_verify_overview(current_user: dict = Depends(get_current_user)):
-    tests = await db.backup_verifications.find({}, {"_id": 0}).sort("tested_at", -1).to_list(100)
+    tests = await db.backup_verifications.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("tested_at", -1).to_list(100)
     passed = len([t for t in tests if t.get("result") == "pass"])
     failed = len([t for t in tests if t.get("result") in {"fail", "failed"}])
     pending = len([t for t in tests if t.get("result") in {"pending", "scheduled"}])
@@ -261,6 +265,7 @@ async def run_verification(data: dict, current_user: dict = Depends(get_current_
     client_id = str(data.get("client_id") or "")
     if not client_id:
         raise HTTPException(status_code=400, detail="Choose the customer whose recovery evidence is being tested")
+    await assert_client_scope(current_user, client_id, operation="backup.verification.request", mask_not_found=True)
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "company_name": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Selected client was not found")
@@ -301,6 +306,7 @@ async def complete_verification(test_id: str, data: dict, current_user: dict = D
     existing = await db.backup_verifications.find_one({"id": test_id}, {"_id": 0})
     if not existing:
         return {"status": "not_found", "message": "Verification request not found"}
+    await assert_client_scope(current_user, existing.get("client_id"), operation="backup.verification.complete", mask_not_found=True)
     result = str(data.get("result") or "").lower()
     if result not in {"pass", "fail"}:
         return {"status": "invalid", "message": "Result must be pass or fail"}

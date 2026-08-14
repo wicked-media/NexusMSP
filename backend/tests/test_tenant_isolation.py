@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from app.routers import mega_features, mission_control, workflow_automation, yeastar
+from app.routers import backup_center, mega_features, mission_control, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -327,6 +327,45 @@ def test_restricted_technician_cannot_read_or_change_legacy_voice_credentials(mo
         "voice.legacy_settings.read",
         "voice.legacy_settings.update",
     }
+
+
+def test_backup_verification_overview_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Verifications:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(backup_center, "db", type("BackupDB", (), {"backup_verifications": Verifications()})())
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    result = asyncio.run(backup_center.backup_verify_overview(user))
+
+    assert result["tests"] == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_request_a_foreign_restore_verification(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(backup_center.run_verification({"client_id": "client-b"}, user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "backup.verification.request"
 
 
 def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkeypatch):
