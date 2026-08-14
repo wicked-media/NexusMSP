@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, backup_center, change_management, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, purchase_orders, remote, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, purchase_orders, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -883,3 +883,63 @@ def test_restricted_technician_cannot_download_a_foreign_purchase_order(monkeypa
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "purchase_order.access"
+
+
+def test_alert_list_and_asset_depreciation_are_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Collection:
+        def __init__(self, name):
+            self.name = name
+
+        def find(self, query, _projection):
+            captured[self.name] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        assets,
+        "db",
+        type("AlertDB", (), {"alerts": Collection("alerts")})(),
+    )
+    monkeypatch.setattr(
+        asset_depreciation,
+        "db",
+        type("AssetDB", (), {"assets": Collection("assets")})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(assets.get_alerts(current_user=user)) == []
+    assert asyncio.run(asset_depreciation.asset_depreciation(user))["assets"] == []
+    assert captured["alerts"] == {"client_id": {"$in": ["client-a"]}}
+    assert captured["assets"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_update_a_foreign_alert(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        assets,
+        "db",
+        type(
+            "AlertDB",
+            (),
+            {"alerts": _RecordCollection({"id": "alert-b", "client_id": "client-b"})},
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(assets.update_alert("alert-b", {"status": "resolved"}, user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "alert.update"

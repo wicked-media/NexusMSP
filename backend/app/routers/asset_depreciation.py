@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query
 
 
 router = APIRouter()
@@ -27,7 +28,7 @@ def _parse_date(value: str | None):
 @router.get("/asset-depreciation")
 async def asset_depreciation(current_user: dict = Depends(get_current_user)):
     """Calculate refresh timing from recorded inventory acquisition and value data."""
-    assets = await db.assets.find({}, {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(scoped_query(current_user), {"_id": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
     results = []
 
