@@ -6,6 +6,7 @@ import jwt
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.services.nexus_document_pdf import render_nexus_estimate_pdf, render_nexus_invoice_pdf, render_nexus_purchase_order_pdf
+from app.services.supabase_storage import archive_generated_pdf
 
 router = APIRouter()
 
@@ -528,11 +529,15 @@ async def get_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_from_t
     theme_config, _ = await _get_active_theme_config()
     pdf_bytes = generate_invoice_pdf(invoice, branding, theme_config, user.get("name") or user.get("email"))
     inv_num = invoice.get("invoice_number", "invoice")
+    artifact_path = await archive_generated_pdf("invoices", invoice.get("id") or invoice_id, bytes(pdf_bytes))
 
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{inv_num}.pdf"'}
+        headers={
+            "Content-Disposition": f'inline; filename="{inv_num}.pdf"',
+            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
+        }
     )
 
 
@@ -549,11 +554,15 @@ async def download_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_f
     theme_config, _ = await _get_active_theme_config()
     pdf_bytes = generate_invoice_pdf(invoice, branding, theme_config, user.get("name") or user.get("email"))
     inv_num = invoice.get("invoice_number", "invoice")
+    artifact_path = await archive_generated_pdf("invoices", invoice.get("id") or invoice_id, bytes(pdf_bytes))
 
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{inv_num}.pdf"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{inv_num}.pdf"',
+            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
+        }
     )
 
 
@@ -1146,11 +1155,15 @@ async def preview_po_pdf(po_id: str, download: bool = Query(False), user: dict =
         branding=branding,
         generated_by=actor,
     )
+    artifact_path = await archive_generated_pdf("purchase-orders", po.get("id") or po_id, pdf_bytes)
     disposition = "attachment" if download else "inline"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'{disposition}; filename="PO_{po.get("po_number", po_id)}.pdf"'},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="PO_{po.get("po_number", po_id)}.pdf"',
+            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
+        },
     )
 
     # Retained temporarily while deployments transition to the shared renderer.

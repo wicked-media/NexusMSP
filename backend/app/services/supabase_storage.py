@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import hashlib
 from typing import Any
 from urllib.parse import quote
 
@@ -147,8 +148,27 @@ async def upload_artifact(object_path: str, content: bytes, content_type: str) -
                 headers=headers,
                 content=content,
             )
+        # Content-addressed artifacts are immutable. A concurrent preview may
+        # already have persisted this exact file, which is a successful result.
+        if response.status_code == 409:
+            return safe_path
         response.raise_for_status()
         return safe_path
     except httpx.HTTPError as exc:
         logger.error("Unable to upload Nexus artifact: %s", exc)
         raise SupabaseStorageError("Unable to store Nexus artifact") from exc
+
+
+async def archive_generated_pdf(document_type: str, document_id: str, pdf_bytes: bytes) -> str | None:
+    """Best-effort, immutable PDF retention that never interrupts a preview."""
+    if not is_configured():
+        return None
+    safe_type = re.sub(r"[^A-Za-z0-9_-]", "-", str(document_type or "document")).strip("-") or "document"
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "-", str(document_id or "record")).strip("-") or "record"
+    digest = hashlib.sha256(pdf_bytes).hexdigest()
+    object_path = f"generated/{safe_type}/{safe_id}/{digest}.pdf"
+    try:
+        return await upload_artifact(object_path, pdf_bytes, "application/pdf")
+    except (SupabaseStorageError, ValueError) as exc:
+        logger.warning("Nexus PDF archive skipped for %s/%s: %s", safe_type, safe_id, exc)
+        return None
