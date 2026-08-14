@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 
-from app.routers import mega_features, mission_control, workflow_automation
+from app.routers import mega_features, mission_control, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -240,6 +240,38 @@ def test_restricted_technician_cannot_run_a_global_operation(monkeypatch):
 
     assert exc.value.status_code == 403
     assert denials.rows[0]["operation"] == "billing.global_reconcile"
+
+
+def test_restricted_technician_cannot_access_ycm_fleet_controls(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    protected_calls = [
+        lambda: yeastar.get_ycm_overview(user),
+        lambda: yeastar.save_ycm_settings({"base_url": "https://ycm.yeastar.com"}, user),
+        lambda: yeastar.test_ycm_connection(user),
+        lambda: yeastar.discover_ycm_cloud_pbxs(user),
+        lambda: yeastar.claim_ycm_discovery("ycm:pbx-1", {"client_id": "client-b"}, user),
+    ]
+
+    for protected_call in protected_calls:
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(protected_call())
+        assert exc.value.status_code == 403
+
+    assert {entry["operation"] for entry in denials.rows} == {
+        "voice.ycm.overview",
+        "voice.ycm.settings.update",
+        "voice.ycm.connection.test",
+        "voice.ycm.discovery.run",
+        "voice.ycm.discovery.claim",
+    }
 
 
 def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkeypatch):

@@ -33,6 +33,7 @@ Status: initial static repository audit, 2026-08-14. No data was migrated and no
 - Supabase Storage: the configured `nexus-artifacts` bucket responded successfully and reported `public: false`. This verifies the private artifact bucket only; it does **not** prove Postgres RLS, Auth, Realtime, or Storage object policies.
 - Browser configuration: no local `REACT_APP_SUPABASE_*` values were configured, so the current local UI cannot bypass the Nexus API through a browser Supabase client.
 - MongoDB: the configured database responded to a metadata-only ping and reported 205 collections. Only 22 had at least one non-`_id` index, while 183 had none. This is a scale/readiness risk to inventory and remediate by actual query pattern; it is not permission to bulk-create indexes blindly.
+- Voice/YCM fleet administration: YCM credentials, fleet discovery and Cloud PBX claim operations are now global-scope actions. Restricted technicians are denied and audited before any integration data or client mapping is read or changed; assigned PBXs remain available through the client-scoped Voice workflows.
 
 ## Immediate recommendations
 

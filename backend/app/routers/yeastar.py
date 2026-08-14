@@ -13,7 +13,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
-from app.services.scope_permissions import assert_client_scope, scope_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
 from app.models import *
 
 router = APIRouter()
@@ -237,6 +237,10 @@ def _safe_ycm_settings(record: dict | None) -> dict:
 
 @router.get("/yeastar/ycm/overview")
 async def get_ycm_overview(current_user: dict = Depends(get_current_user)):
+    # YCM credentials and unclaimed fleet discoveries are platform-wide integration
+    # data. A client-scoped technician must use the PBXs already assigned to their
+    # permitted clients, never this fleet administration surface.
+    await assert_global_scope(current_user, operation="voice.ycm.overview")
     settings = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
     discoveries = await db.yeastar_ycm_discoveries.find({}, {"_id": 0}).sort("last_seen_at", -1).to_list(500)
     return {"connection": _safe_ycm_settings(settings), "discoveries": discoveries}
@@ -244,6 +248,7 @@ async def get_ycm_overview(current_user: dict = Depends(get_current_user)):
 
 @router.post("/yeastar/ycm/settings")
 async def save_ycm_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="voice.ycm.settings.update")
     existing = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
     try:
         base_url = _normalise_ycm_url(data.get("base_url") or existing.get("base_url") or "")
@@ -264,6 +269,7 @@ async def save_ycm_settings(data: dict, current_user: dict = Depends(get_current
 
 @router.post("/yeastar/ycm/test")
 async def test_ycm_connection(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="voice.ycm.connection.test")
     settings = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
     try:
         payload = await _ycm_api_get("v2/cloud_pbx/instances", settings)
@@ -280,6 +286,7 @@ async def test_ycm_connection(current_user: dict = Depends(get_current_user)):
 
 @router.post("/yeastar/ycm/discover")
 async def discover_ycm_cloud_pbxs(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="voice.ycm.discovery.run")
     settings = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
     try:
         payload = await _ycm_api_get("v2/cloud_pbx/instances", settings)
@@ -305,6 +312,7 @@ async def claim_ycm_discovery(discovery_id: str, data: dict, current_user: dict 
     client_id = str(data.get("client_id") or "").strip()
     if not client_id:
         raise HTTPException(status_code=400, detail="Choose the Nexus client that owns this Cloud PBX")
+    await assert_global_scope(current_user, operation="voice.ycm.discovery.claim")
     discovery = await db.yeastar_ycm_discoveries.find_one({"id": discovery_id}, {"_id": 0})
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
     if not discovery:
