@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import {
   Users, Monitor, Ticket, AlertTriangle, Clock,
-  RefreshCw, MessageSquare, Activity, AlertCircle, CheckCircle,
+  MessageSquare, Activity, AlertCircle, CheckCircle,
   Shield, HardDrive, ExternalLink, Plus,
   ChevronDown, ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, Sparkles,
   Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, Mail
@@ -42,6 +42,7 @@ import MissionControlOverview from "@/components/dashboard/MissionControlOvervie
 import NexusBrainBriefing from "@/components/dashboard/NexusBrainBriefing";
 import NexusDaily from "@/components/dashboard/NexusDaily";
 import DailyNocReviewDialog from "@/components/dashboard/DailyNocReviewDialog";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -230,26 +231,11 @@ export default function DashboardPage() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="space-y-6" data-testid="dashboard-loading">
-        <div className="h-32 rounded-2xl bg-gradient-to-br from-emerald-500/5 via-transparent to-blue-500/5 animate-pulse" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map(i => <Card key={`k-${i}`}><CardContent className="p-6"><div className="h-16 rounded bg-muted animate-pulse" /></CardContent></Card>)}
-        </div>
-      </div>
-    );
+    return <WorkspaceLoadingState label="Loading your operational view" className="space-y-6" />;
   }
 
   if (dashboardError || !stats) {
-    return (
-      <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]" data-testid="dashboard-load-error">
-        <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-          <AlertTriangle className="h-10 w-10 text-rose-300" />
-          <div><h1 className="text-lg font-semibold">Dashboard data is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{dashboardError || "The dashboard did not return the information needed to render this workspace."}</p></div>
-          <Button onClick={fetchDashboardData} data-testid="retry-dashboard-load"><RefreshCw className="mr-2 h-4 w-4" />Retry dashboard</Button>
-        </CardContent>
-      </Card>
-    );
+    return <WorkspaceErrorState title="Dashboard data is unavailable" description={dashboardError || "The dashboard did not return the information needed to render this workspace."} onRetry={fetchDashboardData} retryLabel="Retry dashboard" />;
   }
 
   const onlineDevices = devices.filter(d => d.status === "online");
