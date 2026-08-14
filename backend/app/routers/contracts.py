@@ -5,6 +5,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -21,14 +22,36 @@ async def _ensure_contract_types():
         now = datetime.now(timezone.utc).isoformat()
         await db.contract_types.insert_many([{**row, "id": str(uuid.uuid4()), "created_at": now, "updated_at": now} for row in DEFAULT_CONTRACT_TYPES])
 
+
+async def _contract_or_404(contract_id: str, current_user: dict) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.contracts,
+        contract_id,
+        operation="contract.access",
+        resource_name="Contract",
+    )
+
+
+async def _line_item_or_404(item_id: str, current_user: dict) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.line_items,
+        item_id,
+        operation="contract.line_item.access",
+        resource_name="Line item",
+    )
+
 @router.get("/contract-types")
 async def list_contract_types(include_inactive: bool = False, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="contract.type.read")
     await _ensure_contract_types()
     query = {} if include_inactive else {"is_active": True}
     return await db.contract_types.find(query, {"_id": 0}).sort("name", 1).to_list(200)
 
 @router.post("/contract-types")
 async def create_contract_type(data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="contract.type.create")
     name = str(data.get("name") or "").strip()
     code = str(data.get("code") or name.lower().replace(" ", "_")).strip().lower()
     if not name or not code:
@@ -43,6 +66,7 @@ async def create_contract_type(data: dict, current_user: dict = Depends(get_curr
 
 @router.put("/contract-types/{type_id}")
 async def update_contract_type(type_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="contract.type.update")
     current = await db.contract_types.find_one({"id": type_id}, {"_id": 0})
     if not current:
         raise HTTPException(status_code=404, detail="Contract type not found")
@@ -86,11 +110,12 @@ async def get_contracts(
 ):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="contract.list")
         query["client_id"] = client_id
     if status:
         query["status"] = status
     
-    contracts = await db.contracts.find(query, {"_id": 0}).to_list(1000)
+    contracts = await db.contracts.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     for c in contracts:
         if isinstance(c.get('created_at'), str):
             c['created_at'] = datetime.fromisoformat(c['created_at'])
@@ -103,10 +128,10 @@ async def get_renewal_alerts(current_user: dict = Depends(get_current_user)):
     alerts = []
     for days, urgency in [(30, "critical"), (60, "warning"), (90, "info")]:
         cutoff = (now + timedelta(days=days)).isoformat()
-        contracts = await db.contracts.find({
+        contracts = await db.contracts.find(scoped_query(current_user, {
             "status": "active",
             "end_date": {"$lte": cutoff, "$gte": now.isoformat()}
-        }, {"_id": 0}).to_list(100)
+        }), {"_id": 0}).to_list(100)
         for c in contracts:
             end = c.get("end_date", "")
             if end:
@@ -137,7 +162,7 @@ async def get_renewal_alerts(current_user: dict = Depends(get_current_user)):
 async def get_contracts_summary(current_user: dict = Depends(get_current_user)):
     """Get contracts summary with value and SLA tier breakdown"""
     now = datetime.now(timezone.utc)
-    active = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(1000)
+    active = await db.contracts.find(scoped_query(current_user, {"status": "active"}), {"_id": 0}).to_list(1000)
     total_value = sum(c.get("value", 0) for c in active)
     expiring_30 = sum(1 for c in active if c.get("end_date") and c["end_date"] <= (now + timedelta(days=30)).isoformat() and c["end_date"] >= now.isoformat())
     expiring_60 = sum(1 for c in active if c.get("end_date") and c["end_date"] <= (now + timedelta(days=60)).isoformat() and c["end_date"] >= now.isoformat())
@@ -162,10 +187,10 @@ async def get_auto_renewal_proposals(current_user: dict = Depends(get_current_us
     now = datetime.now(timezone.utc)
     cutoff = (now + timedelta(days=60)).strftime("%Y-%m-%d")
     
-    contracts = await db.contracts.find({
+    contracts = await db.contracts.find(scoped_query(current_user, {
         "status": "active",
         "end_date": {"$lte": cutoff, "$ne": "", "$exists": True},
-    }, {"_id": 0}).to_list(100)
+    }), {"_id": 0}).to_list(100)
     
     proposals = []
     for c in contracts:
@@ -225,13 +250,11 @@ async def get_auto_renewal_proposals(current_user: dict = Depends(get_current_us
 
 @router.get("/contracts/{contract_id}")
 async def get_contract(contract_id: str, current_user: dict = Depends(get_current_user)):
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
-    return contract
+    return await _contract_or_404(contract_id, current_user)
 
 @router.post("/contracts", response_model=Contract)
 async def create_contract(contract_data: ContractCreate, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, contract_data.client_id, operation="contract.create")
     client = await db.clients.find_one({"id": contract_data.client_id}, {"_id": 0})
     client_name = client['name'] if client else None
     
@@ -243,6 +266,9 @@ async def create_contract(contract_data: ContractCreate, current_user: dict = De
 
 @router.put("/contracts/{contract_id}")
 async def update_contract(contract_id: str, contract_data: dict, current_user: dict = Depends(get_current_user)):
+    existing = await _contract_or_404(contract_id, current_user)
+    if "client_id" in contract_data and contract_data["client_id"] != existing.get("client_id"):
+        await assert_client_scope(current_user, contract_data["client_id"], operation="contract.reassign")
     result = await db.contracts.update_one({"id": contract_id}, {"$set": contract_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -250,6 +276,7 @@ async def update_contract(contract_id: str, contract_data: dict, current_user: d
 
 @router.delete("/contracts/{contract_id}")
 async def delete_contract(contract_id: str, current_user: dict = Depends(get_current_user)):
+    await _contract_or_404(contract_id, current_user)
     result = await db.contracts.delete_one({"id": contract_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -265,11 +292,13 @@ async def get_line_items(
 ):
     query = {}
     if contract_id:
+        await _contract_or_404(contract_id, current_user)
         query["contract_id"] = contract_id
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="contract.line_item.list")
         query["client_id"] = client_id
     
-    items = await db.line_items.find(query, {"_id": 0}).to_list(1000)
+    items = await db.line_items.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     for i in items:
         if isinstance(i.get('created_at'), str):
             i['created_at'] = datetime.fromisoformat(i['created_at'])
@@ -279,6 +308,10 @@ async def get_line_items(
 
 @router.post("/line-items", response_model=LineItem)
 async def create_line_item(item_data: LineItemCreate, current_user: dict = Depends(get_current_user)):
+    await assert_client_scope(current_user, item_data.client_id, operation="contract.line_item.create")
+    contract = await _contract_or_404(item_data.contract_id, current_user)
+    if contract.get("client_id") != item_data.client_id:
+        raise HTTPException(status_code=422, detail="Contract line item must belong to the contract client")
     client = await db.clients.find_one({"id": item_data.client_id}, {"_id": 0})
     client_name = client['name'] if client else None
     
@@ -289,6 +322,12 @@ async def create_line_item(item_data: LineItemCreate, current_user: dict = Depen
         asset = await db.assets.find_one({"id": item_data.asset_id}, {"_id": 0})
         if not asset:
             raise HTTPException(status_code=404, detail="Asset not found")
+        await assert_client_scope(
+            current_user,
+            asset.get("client_id"),
+            operation="contract.line_item.asset_link",
+            mask_not_found=True,
+        )
         if item_data.client_id and asset.get("client_id") and asset.get("client_id") != item_data.client_id:
             raise HTTPException(status_code=400, detail="The asset belongs to a different client")
         existing = await db.line_items.find_one({"asset_id": item_data.asset_id, "asset_status": "active"}, {"_id": 0, "id": 1})
@@ -327,9 +366,7 @@ async def create_line_item(item_data: LineItemCreate, current_user: dict = Depen
 
 @router.put("/line-items/{item_id}")
 async def update_line_item(item_id: str, item_data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await db.line_items.find_one({"id": item_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Line item not found")
+    existing = await _line_item_or_404(item_id, current_user)
     protected = {"asset_id", "asset_name", "asset_serial_number", "asset_imei", "asset_status", "billing_lock", "asset_history"}
     if protected.intersection(item_data) and existing.get("line_type") == "asset_backed":
         raise HTTPException(status_code=400, detail="Use Replace asset or Return asset to change a locked asset")
@@ -342,9 +379,7 @@ async def update_line_item(item_id: str, item_data: dict, current_user: dict = D
 
 @router.delete("/line-items/{item_id}")
 async def delete_line_item(item_id: str, current_user: dict = Depends(get_current_user)):
-    item = await db.line_items.find_one({"id": item_id}, {"_id": 0})
-    if not item:
-        raise HTTPException(status_code=404, detail="Line item not found")
+    item = await _line_item_or_404(item_id, current_user)
     if item.get("line_type") == "asset_backed" and item.get("asset_status") == "active":
         raise HTTPException(status_code=400, detail="Return or replace the locked asset before removing this line")
     result = await db.line_items.delete_one({"id": item_id})
@@ -355,6 +390,7 @@ async def delete_line_item(item_id: str, current_user: dict = Depends(get_curren
 @router.get("/contracts/{contract_id}/billing-inclusions")
 async def get_contract_billing_inclusions(contract_id: str, current_user: dict = Depends(get_current_user)):
     """Contract inclusions plus their immutable asset lifecycle audit trail."""
+    await _contract_or_404(contract_id, current_user)
     items = await db.line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(500)
     audits = await db.activity_logs.find({"entity_type": "contract_line_item", "metadata.contract_id": contract_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return {"items": items, "audit": audits}
@@ -362,9 +398,7 @@ async def get_contract_billing_inclusions(contract_id: str, current_user: dict =
 @router.get("/contracts/{contract_id}/billing-sources")
 async def get_contract_billing_sources(contract_id: str, current_user: dict = Depends(get_current_user)):
     """Candidates and live indicators for source-driven contract inclusions."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _contract_or_404(contract_id, current_user)
     client_id = contract.get("client_id")
     asset_types = await db.assets.distinct("asset_type", {"client_id": client_id, "status": "active"})
     asset_counts = [{"asset_type": t or "hardware", "quantity": await db.assets.count_documents({"client_id": client_id, "status": "active", "asset_type": t})} for t in asset_types]
@@ -388,9 +422,7 @@ async def get_contract_billing_sources(contract_id: str, current_user: dict = De
 @router.get("/contracts/{contract_id}/billing-health")
 async def get_contract_billing_health(contract_id: str, current_user: dict = Depends(get_current_user)):
     """Pre-billing controls: source connectivity, quantity and duplicate-charge risk."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _contract_or_404(contract_id, current_user)
     items = await db.line_items.find({"contract_id": contract_id, "$or": [{"asset_status": {"$exists": False}}, {"asset_status": "active"}]}, {"_id": 0}).to_list(500)
     ri = await db.recurring_invoices.find_one({"id": contract.get("recurring_invoice_id")}, {"_id": 0}) if contract.get("recurring_invoice_id") else None
     checks = []
@@ -414,8 +446,8 @@ async def get_contract_billing_health(contract_id: str, current_user: dict = Dep
 
 @router.post("/line-items/{item_id}/replace-asset")
 async def replace_line_item_asset(item_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    item = await db.line_items.find_one({"id": item_id}, {"_id": 0})
-    if not item or item.get("line_type") != "asset_backed":
+    item = await _line_item_or_404(item_id, current_user)
+    if item.get("line_type") != "asset_backed":
         raise HTTPException(status_code=404, detail="Asset-backed line item not found")
     if item.get("asset_status") != "active":
         raise HTTPException(status_code=400, detail="Only an active asset-backed line can be replaced")
@@ -423,6 +455,7 @@ async def replace_line_item_asset(item_id: str, data: dict, current_user: dict =
     new_asset = await db.assets.find_one({"id": new_asset_id}, {"_id": 0})
     if not new_asset:
         raise HTTPException(status_code=404, detail="Replacement asset not found")
+    await assert_client_scope(current_user, new_asset.get("client_id"), operation="contract.line_item.replace_asset", mask_not_found=True)
     if new_asset.get("client_id") and new_asset.get("client_id") != item.get("client_id"):
         raise HTTPException(status_code=400, detail="The replacement asset belongs to a different client")
     locked = await db.line_items.find_one({"asset_id": new_asset_id, "asset_status": "active", "id": {"$ne": item_id}}, {"_id": 0, "id": 1})
@@ -440,8 +473,8 @@ async def replace_line_item_asset(item_id: str, data: dict, current_user: dict =
 
 @router.post("/line-items/{item_id}/return-asset")
 async def return_line_item_asset(item_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    item = await db.line_items.find_one({"id": item_id}, {"_id": 0})
-    if not item or item.get("line_type") != "asset_backed":
+    item = await _line_item_or_404(item_id, current_user)
+    if item.get("line_type") != "asset_backed":
         raise HTTPException(status_code=404, detail="Asset-backed line item not found")
     if item.get("asset_status") != "active":
         raise HTTPException(status_code=400, detail="This asset is already closed")
@@ -459,14 +492,15 @@ async def return_line_item_asset(item_id: str, data: dict, current_user: dict = 
 @router.post("/contracts/{contract_id}/link-recurring")
 async def link_contract_to_recurring(contract_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Link a contract to an existing or new recurring invoice."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _contract_or_404(contract_id, current_user)
     ri_id = data.get("recurring_invoice_id")
     if ri_id:
         ri = await db.recurring_invoices.find_one({"id": ri_id})
         if not ri:
             raise HTTPException(status_code=404, detail="Recurring invoice not found")
+        await assert_client_scope(current_user, ri.get("client_id"), operation="contract.link_recurring", mask_not_found=True)
+        if ri.get("client_id") != contract.get("client_id"):
+            raise HTTPException(status_code=422, detail="Recurring invoice must belong to the contract client")
         await db.recurring_invoices.update_one({"id": ri_id}, {"$set": {"contract_id": contract_id}})
         await db.contracts.update_one({"id": contract_id}, {"$set": {"recurring_invoice_id": ri_id}})
         return {"message": "Contract linked to recurring invoice", "recurring_invoice_id": ri_id}
@@ -476,16 +510,17 @@ async def link_contract_to_recurring(contract_id: str, data: dict, current_user:
 @router.get("/contracts/{contract_id}/recurring-invoices")
 async def get_contract_recurring_invoices(contract_id: str, current_user: dict = Depends(get_current_user)):
     """Get all recurring invoices linked to a contract."""
-    ris = await db.recurring_invoices.find({"contract_id": contract_id}, {"_id": 0}).to_list(50)
+    await _contract_or_404(contract_id, current_user)
+    ris = await db.recurring_invoices.find(
+        scoped_query(current_user, {"contract_id": contract_id}), {"_id": 0}
+    ).to_list(50)
     return ris
 
 
 @router.post("/contracts/{contract_id}/apply-price-increase")
 async def apply_price_increase(contract_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Apply a price increase to a contract and its linked recurring invoices."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _contract_or_404(contract_id, current_user)
 
     increase_pct = float(data.get("increase_percent", 0))
     increase_flat = float(data.get("increase_flat", 0))
@@ -558,9 +593,7 @@ async def convert_contract_to_recurring(contract_id: str, data: dict = None, cur
     Automatically links the contract ↔ recurring invoice.
     Body (optional): {frequency, tax_rate, payment_terms, auto_send, include_acronis_usage}"""
     data = data or {}
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _contract_or_404(contract_id, current_user)
 
     # Gather line items for this contract
     items = await db.line_items.find({"contract_id": contract_id, "$or": [{"asset_status": {"$exists": False}}, {"asset_status": "active"}]}, {"_id": 0}).to_list(500)
@@ -653,7 +686,7 @@ async def convert_contract_to_recurring(contract_id: str, data: dict = None, cur
 @router.post("/contracts/{contract_id}/sync-recurring")
 async def sync_contract_recurring(contract_id: str, current_user: dict = Depends(get_current_user)):
     """Refresh contract-owned invoice lines without touching vendor-usage additions."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
+    contract = await _contract_or_404(contract_id, current_user)
     if not contract or not contract.get("recurring_invoice_id"):
         raise HTTPException(status_code=404, detail="No linked recurring invoice found")
     ri = await db.recurring_invoices.find_one({"id": contract["recurring_invoice_id"]}, {"_id": 0})
@@ -673,8 +706,6 @@ async def sync_contract_recurring(contract_id: str, current_user: dict = Depends
 
 @router.get("/contracts/{contract_id}/price-history")
 async def get_price_history(contract_id: str, current_user: dict = Depends(get_current_user)):
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    contract = await _contract_or_404(contract_id, current_user)
     return contract.get("price_history", [])
 
