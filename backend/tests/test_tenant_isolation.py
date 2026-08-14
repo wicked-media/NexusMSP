@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, purchase_orders, remote, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -1107,3 +1107,53 @@ def test_profitability_heatmap_limits_clients_by_client_identity(monkeypatch):
     assert captured["contracts"] == {
         "$and": [{"status": "active"}, {"client_id": {"$in": ["client-a"]}}]
     }
+
+
+def test_project_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Projects:
+        def aggregate(self, pipeline):
+            captured["pipeline"] = pipeline
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        projects,
+        "db",
+        type("ProjectDB", (), {"projects": Projects()})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(projects.get_projects(current_user=user)) == []
+    assert captured["pipeline"][0] == {"$match": {"client_id": {"$in": ["client-a"]}}}
+
+
+def test_restricted_technician_cannot_read_a_foreign_project(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        projects,
+        "db",
+        type(
+            "ProjectDB",
+            (),
+            {"projects": _RecordCollection({"id": "project-b", "client_id": "client-b"})},
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(projects.get_project("project-b", user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "project.access"

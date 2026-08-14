@@ -5,6 +5,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -33,12 +34,28 @@ async def _task_assignee_details(user_id: Optional[str]):
     return user["id"], user.get("name")
 
 
-async def _ticket_details(ticket_id: Optional[str], project: dict):
+async def _project_or_404(project_id: str, current_user: dict) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.projects,
+        project_id,
+        operation="project.access",
+        resource_name="Project",
+    )
+
+
+async def _ticket_details(ticket_id: Optional[str], project: dict, current_user: dict):
     if not ticket_id:
         return None, None, None
     ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_id": 1})
     if not ticket:
         raise HTTPException(status_code=404, detail="Related ticket not found")
+    await assert_client_scope(
+        current_user,
+        ticket.get("client_id"),
+        operation="project.ticket_link",
+        mask_not_found=True,
+    )
     if project.get("client_id") and ticket.get("client_id") != project.get("client_id"):
         raise HTTPException(status_code=400, detail="The related ticket must belong to the project client")
     return ticket["id"], ticket.get("ticket_number"), ticket.get("title")
@@ -53,12 +70,13 @@ async def get_projects(
 ):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="project.list")
         query["client_id"] = client_id
     if status:
         query["status"] = status
     
     projects = await db.projects.aggregate([
-        {"$match": query},
+        {"$match": scoped_query(current_user, query)},
         {"$lookup": {"from": "project_tasks", "localField": "id", "foreignField": "project_id", "as": "_tasks"}},
         {"$addFields": {
             "task_count": {"$size": "$_tasks"},
@@ -71,9 +89,7 @@ async def get_projects(
 
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await _project_or_404(project_id, current_user)
     
     tasks = await db.project_tasks.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(1000)
     project['tasks'] = tasks
@@ -88,7 +104,9 @@ async def create_project(project_data: dict, current_user: dict = Depends(get_cu
     priority = project_data.get("priority", "medium")
     if status not in PROJECT_STATUSES or priority not in PRIORITIES:
         raise HTTPException(status_code=400, detail="Invalid project status or priority")
-    client = await db.clients.find_one({"id": project_data.get('client_id')}, {"_id": 0})
+    client_id = str(project_data.get("client_id") or "").strip()
+    await assert_client_scope(current_user, client_id, operation="project.create")
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     project_manager, pm_name = await _project_manager_details(project_data.get("project_manager"))
@@ -117,9 +135,7 @@ async def create_project(project_data: dict, current_user: dict = Depends(get_cu
 
 @router.put("/projects/{project_id}")
 async def update_project(project_id: str, project_data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Project not found")
+    existing = await _project_or_404(project_id, current_user)
     allowed = {"name", "description", "client_id", "status", "priority", "start_date", "target_end_date", "budget_hours", "project_manager", "team_members", "tags"}
     updates = {key: value for key, value in project_data.items() if key in allowed}
     if "name" in updates:
@@ -131,6 +147,7 @@ async def update_project(project_id: str, project_data: dict, current_user: dict
     if updates.get("priority") and updates["priority"] not in PRIORITIES:
         raise HTTPException(status_code=400, detail="Invalid project priority")
     if "client_id" in updates:
+        await assert_client_scope(current_user, updates["client_id"], operation="project.reassign")
         client = await db.clients.find_one({"id": updates["client_id"]}, {"_id": 0, "id": 1, "name": 1})
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
@@ -152,9 +169,7 @@ async def update_project(project_id: str, project_data: dict, current_user: dict
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await _project_or_404(project_id, current_user)
     await db.projects.delete_one({"id": project_id})
     
     # Also delete tasks
@@ -166,14 +181,13 @@ async def delete_project(project_id: str, current_user: dict = Depends(get_curre
 
 @router.get("/projects/{project_id}/tasks")
 async def get_project_tasks(project_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_404(project_id, current_user)
     tasks = await db.project_tasks.find({"project_id": project_id}, {"_id": 0}).sort("order", 1).to_list(1000)
     return tasks
 
 @router.post("/projects/{project_id}/tasks")
 async def create_project_task(project_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await _project_or_404(project_id, current_user)
     
     title = str(task_data.get("title") or "").strip()
     if len(title) < 3:
@@ -183,7 +197,7 @@ async def create_project_task(project_id: str, task_data: dict, current_user: di
     if status not in TASK_STATUSES or priority not in PRIORITIES:
         raise HTTPException(status_code=400, detail="Invalid task status or priority")
     assigned_to, assigned_name = await _task_assignee_details(task_data.get("assigned_to"))
-    ticket_id, ticket_number, ticket_title = await _ticket_details(task_data.get("ticket_id"), project)
+    ticket_id, ticket_number, ticket_title = await _ticket_details(task_data.get("ticket_id"), project, current_user)
     
     task = ProjectTask(
         project_id=project_id,
@@ -212,9 +226,9 @@ async def create_project_task(project_id: str, task_data: dict, current_user: di
 
 @router.put("/projects/{project_id}/tasks/{task_id}")
 async def update_project_task(project_id: str, task_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    project = await _project_or_404(project_id, current_user)
     task = await db.project_tasks.find_one({"id": task_id, "project_id": project_id}, {"_id": 0})
-    if not project or not task:
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     allowed = {"title", "description", "status", "priority", "assigned_to", "estimated_hours", "actual_hours", "due_date", "ticket_id", "order"}
     updates = {key: value for key, value in task_data.items() if key in allowed}
@@ -229,7 +243,7 @@ async def update_project_task(project_id: str, task_id: str, task_data: dict, cu
     if "assigned_to" in updates:
         updates["assigned_to"], updates["assigned_name"] = await _task_assignee_details(updates["assigned_to"])
     if "ticket_id" in updates:
-        updates["ticket_id"], updates["ticket_number"], updates["ticket_title"] = await _ticket_details(updates["ticket_id"], project)
+        updates["ticket_id"], updates["ticket_number"], updates["ticket_title"] = await _ticket_details(updates["ticket_id"], project, current_user)
     if updates.get("status") == "completed":
         updates["completed_at"] = datetime.now(timezone.utc).isoformat()
     elif updates.get("status"):
@@ -243,20 +257,18 @@ async def update_project_task(project_id: str, task_id: str, task_data: dict, cu
 
 @router.delete("/projects/{project_id}/tasks/{task_id}")
 async def delete_project_task(project_id: str, task_id: str, current_user: dict = Depends(get_current_user)):
+    project = await _project_or_404(project_id, current_user)
     task = await db.project_tasks.find_one({"id": task_id, "project_id": project_id}, {"_id": 0})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     await db.project_tasks.delete_one({"id": task_id, "project_id": project_id})
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0, "client_id": 1})
     await log_activity(current_user, "project_task_deleted", "project_task", task_id, task.get("title", "Task"), "Deleted task", metadata={"project_id": project_id, "client_id": (project or {}).get("client_id")})
     return {"message": "Task deleted"}
 
 
 @router.get("/projects/{project_id}/activity")
 async def get_project_activity(project_id: str, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0, "id": 1})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _project_or_404(project_id, current_user)
     return await db.activity_logs.find(
         {"$or": [
             {"entity_type": "project", "entity_id": project_id},
@@ -269,14 +281,13 @@ async def get_project_activity(project_id: str, current_user: dict = Depends(get
 
 @router.get("/projects/{project_id}/milestones")
 async def get_milestones(project_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_404(project_id, current_user)
     milestones = await db.project_milestones.find({"project_id": project_id}, {"_id": 0}).sort("due_date", 1).to_list(100)
     return milestones
 
 @router.post("/projects/{project_id}/milestones")
 async def create_milestone(project_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _project_or_404(project_id, current_user)
     milestone = {
         "id": str(uuid.uuid4()),
         "project_id": project_id,
@@ -292,6 +303,7 @@ async def create_milestone(project_id: str, data: dict, current_user: dict = Dep
 
 @router.put("/projects/{project_id}/milestones/{milestone_id}")
 async def update_milestone(project_id: str, milestone_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    await _project_or_404(project_id, current_user)
     if data.get("status") == "completed":
         data["completed_at"] = datetime.now(timezone.utc).isoformat()
     result = await db.project_milestones.update_one({"id": milestone_id, "project_id": project_id}, {"$set": data})
@@ -301,15 +313,14 @@ async def update_milestone(project_id: str, milestone_id: str, data: dict, curre
 
 @router.delete("/projects/{project_id}/milestones/{milestone_id}")
 async def delete_milestone(project_id: str, milestone_id: str, current_user: dict = Depends(get_current_user)):
+    await _project_or_404(project_id, current_user)
     await db.project_milestones.delete_one({"id": milestone_id, "project_id": project_id})
     return {"message": "Milestone deleted"}
 
 @router.get("/projects/{project_id}/time-summary")
 async def get_project_time_summary(project_id: str, current_user: dict = Depends(get_current_user)):
     """Get actual vs budgeted time for a project"""
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = await _project_or_404(project_id, current_user)
     
     tasks = await db.project_tasks.find({"project_id": project_id}, {"_id": 0}).to_list(100)
     total_estimated = sum(t.get("estimated_hours", 0) or 0 for t in tasks)
