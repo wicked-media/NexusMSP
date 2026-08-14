@@ -7,7 +7,7 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, scoped_query
 from app.services.finance_integrity import (
     begin_idempotent_operation,
     complete_idempotent_operation,
@@ -89,7 +89,7 @@ async def get_invoices(
     if status:
         query["status"] = status
     
-    invoices = await db.invoices.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    invoices = await db.invoices.find(scoped_query(current_user, query, site_field=None), {"_id": 0}).sort("created_at", -1).to_list(1000)
     for index, invoice in enumerate(invoices):
         i = normalise_invoice_document(invoice)
         if isinstance(i.get('created_at'), str):
@@ -99,7 +99,10 @@ async def get_invoices(
 
 @router.get("/invoices/stats/summary")
 async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
-    all_inv = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(10000)
+    all_inv = await db.invoices.find(
+        scoped_query(current_user, {"is_split_parent": {"$ne": True}}, site_field=None),
+        {"_id": 0},
+    ).to_list(10000)
     total = len(all_inv)
     paid = len([i for i in all_inv if i.get("payment_status") == "paid"])
     unpaid = len([i for i in all_inv if i.get("payment_status") in ("unpaid", None)])
@@ -126,6 +129,7 @@ async def get_invoice(invoice_id: str, current_user: dict = Depends(get_current_
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(current_user, invoice.get("client_id"), operation="billing.invoice.read", mask_not_found=True)
     return normalise_invoice_document(invoice)
 
 @router.get("/invoices/{invoice_id}/activity-log")
@@ -134,6 +138,10 @@ async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0, "client_id": 1})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(current_user, invoice.get("client_id"), operation="billing.invoice.audit.read", mask_not_found=True)
     logs = await db.activity_logs.find({"entity_type": "invoice", "entity_id": invoice_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
     return logs
 

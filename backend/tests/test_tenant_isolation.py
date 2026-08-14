@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import backup_center, client_portal, mega_features, mission_control, workflow_automation, yeastar
+from app.routers import backup_center, client_portal, invoices, mega_features, mission_control, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -409,6 +409,26 @@ def test_restricted_technician_cannot_administer_another_clients_portal(monkeypa
         "portal.user.read",
         "portal.user.create",
     }
+
+
+def test_invoice_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Invoices:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(invoices, "db", type("InvoiceDB", (), {"invoices": Invoices()})())
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(invoices.get_invoices(current_user=user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
 
 
 def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkeypatch):
