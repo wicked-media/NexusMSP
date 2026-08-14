@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.auth import get_current_user
 from app.database import db
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
 
 router = APIRouter(prefix="/change-management", tags=["Change Management"])
 
@@ -16,15 +17,35 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _get_change(change_id: str) -> dict:
+async def _get_change(change_id: str, user: dict) -> dict:
     change = await db.change_requests.find_one({"id": change_id}, {"_id": 0})
     if not change:
         raise HTTPException(404, "Change request not found")
+    await assert_client_scope(
+        user,
+        change.get("client_id"),
+        operation="change_management.access",
+        mask_not_found=True,
+    )
     return change
 
 
 def _recorded_actor(user: dict) -> str:
     return user.get("name") or user.get("email") or user.get("id") or "Unknown technician"
+
+
+def _may_decide_change(change: dict, user: dict) -> bool:
+    if change.get("requested_by_id") and str(change.get("requested_by_id")) == str(
+        user.get("id")
+    ):
+        return False
+    if user.get("is_admin") or str(user.get("role") or "").lower() in {
+        "admin",
+        "service_desk_manager",
+    }:
+        return True
+    permissions = user.get("permissions") if isinstance(user.get("permissions"), dict) else {}
+    return bool((permissions.get("change_management") or {}).get("approve"))
 
 
 def _optional_date(value: object) -> str:
@@ -79,12 +100,16 @@ def _event(user: dict, action: str, note: str = "") -> dict:
 
 @router.get("")
 async def list_changes(user=Depends(get_current_user)):
-    return await db.change_requests.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return await db.change_requests.find(
+        scoped_query(user, {}, site_field=None), {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
 
 
 @router.get("/stats")
 async def get_change_stats(user=Depends(get_current_user)):
-    all_changes = await db.change_requests.find({}, {"_id": 0}).to_list(500)
+    all_changes = await db.change_requests.find(
+        scoped_query(user, {}, site_field=None), {"_id": 0}
+    ).to_list(500)
     return {
         "total": len(all_changes),
         "pending_review": sum(change.get("status") == "pending_review" for change in all_changes),
@@ -100,7 +125,7 @@ async def get_change_stats(user=Depends(get_current_user)):
 
 @router.get("/{change_id}")
 async def get_change(change_id: str, user=Depends(get_current_user)):
-    return await _get_change(change_id)
+    return await _get_change(change_id, user)
 
 
 @router.post("")
@@ -125,6 +150,10 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
         raise HTTPException(400, "Record a rollback plan for medium and high-risk changes")
 
     client_id = str(payload.get("client_id") or "").strip()
+    if client_id:
+        await assert_client_scope(user, client_id, operation="change_management.create")
+    else:
+        await assert_global_scope(user, operation="change_management.create.global")
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1}) if client_id else None
     if client_id and not client:
         raise HTTPException(404, "Selected client was not found")
@@ -157,14 +186,14 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
 
 @router.post("/{change_id}/approve")
 async def approve_change(change_id: str, payload: dict = Body(default={}), user=Depends(get_current_user)):
-    change = await _get_change(change_id)
+    change = await _get_change(change_id, user)
     if change.get("status") != "pending_review":
         raise HTTPException(409, "Only changes awaiting review can be approved")
     note = str(payload.get("note") or "").strip()
     if len(note) < 8:
         raise HTTPException(400, "Record the approval rationale or CAB reference (at least 8 characters)")
-    if change.get("requested_by_id") and change.get("requested_by_id") == user.get("id"):
-        raise HTTPException(403, "The requesting technician cannot approve their own change")
+    if not _may_decide_change(change, user):
+        raise HTTPException(403, "An independent change approver is required")
     now = _now()
     approval = {"user": _recorded_actor(user), "user_id": user.get("id"), "action": "approved", "note": note, "at": now}
     await _transition_change(change, "pending_review", {"$set": {"status": "approved", "approved_at": now, "approved_by": user.get("id"), "approved_by_name": _recorded_actor(user), "updated_at": now}, "$push": {"approvals": approval, "activity": _event(user, "approved", note)}})
@@ -179,14 +208,14 @@ async def approve_change(change_id: str, payload: dict = Body(default={}), user=
 
 @router.post("/{change_id}/reject")
 async def reject_change(change_id: str, payload: dict = Body(default={}), user=Depends(get_current_user)):
-    change = await _get_change(change_id)
+    change = await _get_change(change_id, user)
     if change.get("status") != "pending_review":
         raise HTTPException(409, "Only changes awaiting review can be rejected")
     reason = str(payload.get("reason") or "").strip()
     if len(reason) < 8:
         raise HTTPException(400, "Record a rejection reason of at least 8 characters")
-    if change.get("requested_by_id") and change.get("requested_by_id") == user.get("id"):
-        raise HTTPException(403, "The requesting technician cannot reject their own change")
+    if not _may_decide_change(change, user):
+        raise HTTPException(403, "An independent change approver is required")
     now = _now()
     await _transition_change(change, "pending_review", {"$set": {"status": "rejected", "rejection_reason": reason, "rejected_at": now, "rejected_by": user.get("id"), "rejected_by_name": _recorded_actor(user), "updated_at": now}, "$push": {"approvals": {"user": _recorded_actor(user), "user_id": user.get("id"), "action": "rejected", "note": reason, "at": now}, "activity": _event(user, "rejected", reason)}})
     if change.get("workflow_id"):
@@ -200,7 +229,7 @@ async def reject_change(change_id: str, payload: dict = Body(default={}), user=D
 
 @router.post("/{change_id}/implement")
 async def start_implementation(change_id: str, payload: dict = Body(default={}), user=Depends(get_current_user)):
-    change = await _get_change(change_id)
+    change = await _get_change(change_id, user)
     if change.get("status") != "approved":
         raise HTTPException(409, "Only approved changes can enter implementation")
     note = str(payload.get("note") or "").strip()
@@ -214,7 +243,7 @@ async def start_implementation(change_id: str, payload: dict = Body(default={}),
 
 @router.post("/{change_id}/complete")
 async def complete_change(change_id: str, payload: dict = Body(default={}), user=Depends(get_current_user)):
-    change = await _get_change(change_id)
+    change = await _get_change(change_id, user)
     if change.get("status") != "implementing":
         raise HTTPException(409, "Only an implementing change can be completed")
     notes = str(payload.get("notes") or "").strip()
@@ -228,7 +257,7 @@ async def complete_change(change_id: str, payload: dict = Body(default={}), user
 
 @router.post("/{change_id}/rollback")
 async def rollback_change(change_id: str, payload: dict = Body(default={}), user=Depends(get_current_user)):
-    change = await _get_change(change_id)
+    change = await _get_change(change_id, user)
     if change.get("status") != "implementing":
         raise HTTPException(409, "Only an implementing change can be rolled back")
     notes = str(payload.get("notes") or "").strip()

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, remote, workflow_automation, yeastar
+from app.routers import approval_workflows, backup_center, change_management, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, remote, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -771,3 +771,61 @@ def test_restricted_technician_cannot_send_a_remote_command_to_foreign_device(mo
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "device.command.execute"
+
+
+def test_change_management_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Changes:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(
+        change_management,
+        "db",
+        type("ChangeDB", (), {"change_requests": Changes()})(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    assert asyncio.run(change_management.list_changes(user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_approve_foreign_change(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        change_management,
+        "db",
+        type(
+            "ChangeDB",
+            (),
+            {
+                "change_requests": _RecordCollection(
+                    {"id": "change-b", "client_id": "client-b", "status": "pending_review"}
+                )
+            },
+        )(),
+    )
+    user = {
+        "id": "manager-1",
+        "role": "service_desk_manager",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            change_management.approve_change(
+                "change-b", {"note": "Approved by change review board"}, user
+            )
+        )
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "change_management.access"
