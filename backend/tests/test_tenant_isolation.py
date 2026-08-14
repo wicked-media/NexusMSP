@@ -196,6 +196,52 @@ def test_allowed_record_returns_owned_document(monkeypatch):
     assert record["name"] == "Reception"
 
 
+def test_allowed_client_with_foreign_site_is_denied_and_audited(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+        "site_scope_ids": ["site-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(scope_permissions.assert_client_scope(
+            user,
+            "client-a",
+            site_id="site-b",
+            operation="device.read",
+            mask_not_found=True,
+        ))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["client_id"] == "client-a"
+    assert denials.rows[0]["site_id"] == "site-b"
+    assert denials.rows[0]["operation"] == "device.read"
+
+
+def test_restricted_technician_cannot_run_a_global_operation(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(scope_permissions.assert_global_scope(
+            user,
+            operation="billing.global_reconcile",
+        ))
+
+    assert exc.value.status_code == 403
+    assert denials.rows[0]["operation"] == "billing.global_reconcile"
+
+
 def test_foreign_automation_run_is_masked_before_approval_or_compensation(monkeypatch):
     denials = _InsertCollection()
     monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
