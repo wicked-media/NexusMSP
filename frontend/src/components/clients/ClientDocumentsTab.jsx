@@ -13,14 +13,6 @@ import { FileText, Upload, BookOpen, Trash2, Download, Loader2, Pin, Save, X } f
 import { format } from "date-fns";
 import { toast } from "sonner";
 
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
-
-function resolveUrl(url) {
-  if (!url) return "";
-  if (url.startsWith("http")) return url;
-  return `${BACKEND}${url}`;
-}
-
 function fmtBytes(b) {
   if (!b) return "—";
   const u = ["B", "KB", "MB", "GB"];
@@ -93,6 +85,30 @@ export default function ClientDocumentsTab({ client }) {
       await fetchDocs();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Delete failed");
+    }
+  };
+
+  const handleDownload = async (doc) => {
+    if (!doc?.id) return;
+    if (!doc.artifact_storage?.object_path) {
+      window.open(`${API}${doc.url}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    try {
+      const response = await axios.get(`${API}/clients/${client.id}/documents/${doc.id}/download`, {
+        headers,
+        responseType: "blob",
+      });
+      const objectUrl = window.URL.createObjectURL(new Blob([response.data], { type: response.headers["content-type"] }));
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = doc.original_filename || doc.title || "client-document";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Protected document is unavailable");
     }
   };
 
@@ -211,9 +227,9 @@ export default function ClientDocumentsTab({ client }) {
                     </Button>
                   )}
                   {doc.kind === "file" && doc.url && (
-                    <a href={resolveUrl(doc.url)} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center h-6 w-6 rounded hover:bg-white/5" data-testid={`doc-download-${doc.id}`}>
+                    <button type="button" onClick={() => handleDownload(doc)} className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-white/5" data-testid={`doc-download-${doc.id}`} aria-label={`Download ${doc.title}`}>
                       <Download className="w-3 h-3 text-zinc-400" />
-                    </a>
+                    </button>
                   )}
                   <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-rose-400 hover:text-rose-300" onClick={() => handleDelete(doc)} data-testid={`doc-delete-${doc.id}`}>
                     <Trash2 className="w-3 h-3" />

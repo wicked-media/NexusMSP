@@ -13,14 +13,15 @@ Endpoints:
   DELETE /api/clients/{client_id}/documents/{doc_id} — delete a document/runbook
 """
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
+from fastapi.responses import Response
 from datetime import datetime, timezone
 from typing import Optional
 import uuid
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
-from app.services.upload_security import safe_upload_extension
-from app.services.supabase_storage import archive_client_artifact, delete_artifact
+from app.services.upload_security import safe_original_filename, safe_upload_extension
+from app.services.supabase_storage import archive_client_artifact, delete_artifact, read_artifact
 
 
 async def _enforce_client_profile_scope(request: Request, current_user: dict = Depends(get_current_user)):
@@ -265,6 +266,28 @@ async def upload_client_document(
         }
     await db.client_documents.insert_one({**doc})
     return doc
+
+
+@router.get("/clients/{client_id}/documents/{doc_id}/download")
+async def download_client_document(client_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
+    """Return a retained client document only after client scope has been enforced."""
+    del current_user
+    doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id, "kind": "file"}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Client document not found")
+    object_path = (doc.get("artifact_storage") or {}).get("object_path")
+    if not object_path:
+        raise HTTPException(status_code=404, detail="Client document has not been migrated to private storage")
+    artifact = await read_artifact(object_path)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Retained client document is unavailable")
+    content, content_type = artifact
+    filename = safe_original_filename(doc.get("original_filename") or doc.get("title"), default="client-document")
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "private, no-store"},
+    )
 
 
 @router.post("/clients/{client_id}/runbooks")
