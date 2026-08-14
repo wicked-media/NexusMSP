@@ -26,6 +26,7 @@ import AICopilotStrip from "@/components/tickets/AICopilotStrip";
 import NexusVerifiedSequence from "@/components/NexusVerifiedSequence";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import HeroTile from "@/components/HeroTile";
+import WorkspaceControlBar from "@/components/WorkspaceControlBar";
 import {
   EmailDialog,
   ChildTicketDialog,
@@ -3884,7 +3885,7 @@ export default function TicketsPage() {
 
       {/* Filters */}
       <div key="filters" className="min-w-0">
-        <div className="flex items-center gap-3 flex-wrap rounded-xl border border-white/[0.08] bg-black/[0.12] px-3 py-2.5 h-full">
+        <WorkspaceControlBar className="h-full">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input className="h-9 border-white/[0.08] bg-white/[0.03] pl-9" placeholder="Search tickets, clients, numbers..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} data-testid="search-input" />
@@ -3901,7 +3902,7 @@ export default function TicketsPage() {
             <Button variant="ghost" size="sm" onClick={() => applyQueueFilter({})} className="text-xs text-muted-foreground"><X className="w-3 h-3 mr-1" />Clear Filters</Button>
           )}
           <p className="ml-auto rounded-lg bg-white/[0.04] px-2.5 py-1 text-xs text-zinc-500">{attentionLabel && (typeFilter === "all" || typeFilter === "sla") ? `${attentionLabel} queue: ` : ""}{queueCountLabel}</p>
-        </div>
+        </WorkspaceControlBar>
       </div>
 
       {/* Saved Views · Density · Group By toolbar */}

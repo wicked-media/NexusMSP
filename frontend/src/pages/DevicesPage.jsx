@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { API, useAuth } from "../App";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import WorkspaceControlBar from "@/components/WorkspaceControlBar";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
@@ -561,7 +562,7 @@ export default function DevicesPage() {
           </CardContent>
         </Card>
       )}
-      <div className="flex items-center gap-3 flex-wrap">
+      <WorkspaceControlBar data-testid="devices-directory-controls">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
@@ -653,7 +654,7 @@ export default function DevicesPage() {
           <Button variant={viewMode === "table" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("table")} data-testid="view-table"><List className="w-4 h-4" /></Button>
           <Button variant={viewMode === "grid" ? "default" : "outline"} size="icon" className="h-9 w-9" onClick={() => setViewMode("grid")} data-testid="view-grid"><LayoutGrid className="w-4 h-4" /></Button>
         </div>
-      </div>
+      </WorkspaceControlBar>
 
       <DevicesSmartBar
         selectedIds={selectedDevices}
