@@ -1064,6 +1064,30 @@ export default function TicketsPage() {
     } catch { toast.error("Failed"); }
   };
 
+  const handleDownloadAttachment = async (attachment) => {
+    if (!attachment?.id) return;
+    if (!attachment.artifact_storage?.object_path) {
+      window.open(`${API}${attachment.url}`, "_blank", "noopener,noreferrer");
+      return;
+    }
+    try {
+      const response = await axios.get(
+        `${API}/tickets/${viewingTicket.id}/attachments/${attachment.id}/download`,
+        { headers, responseType: "blob" },
+      );
+      const objectUrl = window.URL.createObjectURL(new Blob([response.data], { type: response.headers["content-type"] }));
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = attachment.filename || "attachment";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch {
+      toast.error("Protected attachment is unavailable");
+    }
+  };
+
   const handleSaveFjVerification = async () => {
     if (!viewFjJob?.id) return;
     setFjVerificationSaving(true);
@@ -2289,6 +2313,7 @@ export default function TicketsPage() {
                   attachmentUploading={attachmentUploading}
                   handleAttachmentUpload={handleAttachmentUpload}
                   handleDeleteAttachment={handleDeleteAttachment}
+                  handleDownloadAttachment={handleDownloadAttachment}
                 />
               </TabsContent>
 

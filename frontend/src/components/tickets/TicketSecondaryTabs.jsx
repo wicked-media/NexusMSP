@@ -88,7 +88,7 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
 }
 
 /* ============== Attachments Tab ============== */
-export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, handleAttachmentUpload, handleDeleteAttachment }) {
+export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, handleAttachmentUpload, handleDeleteAttachment, handleDownloadAttachment }) {
   return (
     <>
       <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(120deg,rgba(59,130,246,0.08),transparent_48%)]">
@@ -117,7 +117,7 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
               </div>
             </div>
             <div className="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-sky-300 hover:bg-sky-500/[0.10] hover:text-sky-100" onClick={() => window.open(`${API}${att.url}`, "_blank")}><Download className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-sky-300 hover:bg-sky-500/[0.10] hover:text-sky-100" onClick={() => handleDownloadAttachment(att)}><Download className="w-3.5 h-3.5" /></Button>
               <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-zinc-500 hover:bg-rose-500/[0.10] hover:text-rose-300" onClick={() => handleDeleteAttachment(att.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
             </div>
           </div>
