@@ -54,6 +54,31 @@ def _policy(action_type: str) -> dict[str, Any]:
     return policy
 
 
+def _may_approve_sensitive_request(record: dict[str, Any], user: dict[str, Any]) -> bool:
+    """Require an independent, explicitly authorised high-risk approver."""
+    user_id = str(user.get("id") or "")
+    user_identity = str(user.get("name") or user.get("email") or "")
+    verification = record.get("verification") or {}
+    if user_id and user_id in {
+        str(record.get("created_by_id") or ""),
+        str(verification.get("verified_by_id") or ""),
+    }:
+        return False
+    if user_identity and user_identity in {
+        str(record.get("created_by") or ""),
+        str(verification.get("verified_by") or ""),
+    }:
+        return False
+
+    if user.get("is_admin") or str(user.get("role") or "").lower() in {
+        "admin",
+        "service_desk_manager",
+    }:
+        return True
+    permissions = user.get("permissions") if isinstance(user.get("permissions"), dict) else {}
+    return bool((permissions.get("nexus_verify") or {}).get("approve"))
+
+
 async def _request_or_404(request_id: str, user: dict[str, Any]) -> dict[str, Any]:
     record = await db.nexus_verify_requests.find_one({"id": request_id}, {"_id": 0})
     if not record:
@@ -102,7 +127,7 @@ async def create_request(data: dict[str, Any], current_user: dict = Depends(get_
         "risk": policy["risk"], "required_factors": policy["factors"], "approval_required": policy["approval"],
         "status": "awaiting_verification", "verification": None, "approval": None,
         "justification": str(data.get("justification") or "").strip(),
-        "created_by": current_user.get("name") or current_user.get("email"), "created_at": _now().isoformat(), "updated_at": _now().isoformat(),
+        "created_by": current_user.get("name") or current_user.get("email"), "created_by_id": current_user.get("id"), "created_at": _now().isoformat(), "updated_at": _now().isoformat(),
     }
     await db.nexus_verify_requests.insert_one(record.copy())
     await _audit(record, "request_created", current_user, f"{policy['label']} requires {policy['factors']} verified factor(s).")
@@ -132,7 +157,7 @@ async def confirm_identity(request_id: str, data: dict[str, Any], current_user: 
     if method not in METHODS or not evidence_ref:
         raise HTTPException(status_code=400, detail="Trusted method and verification evidence reference are required")
     expires = (_now() + timedelta(minutes=30)).isoformat()
-    verification = {"status": "verified", "method": method, "method_label": METHODS[method], "verified_at": _now().isoformat(), "expires_at": expires, "verified_by": current_user.get("name") or current_user.get("email"), "evidence_ref": evidence_ref}
+    verification = {"status": "verified", "method": method, "method_label": METHODS[method], "verified_at": _now().isoformat(), "expires_at": expires, "verified_by": current_user.get("name") or current_user.get("email"), "verified_by_id": current_user.get("id"), "evidence_ref": evidence_ref}
     next_status = "awaiting_approval" if record.get("approval_required") else "ready_to_execute"
     await db.nexus_verify_requests.update_one({"id": request_id}, {"$set": {"status": next_status, "verification": verification, "updated_at": _now().isoformat()}})
     await _audit(record, "identity_verified", current_user, f"Verified through {METHODS[method]}; evidence {evidence_ref}.")
@@ -144,11 +169,21 @@ async def approve_request(request_id: str, data: dict[str, Any], current_user: d
     record = await _request_or_404(request_id, current_user)
     if record.get("status") != "awaiting_approval":
         raise HTTPException(status_code=409, detail="Identity verification must complete before approval")
+    if not _may_approve_sensitive_request(record, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail="An independent Nexus Verify approver is required for this sensitive action",
+        )
     rationale = str(data.get("rationale") or "").strip()
     if len(rationale) < 8:
         raise HTTPException(status_code=400, detail="Record an approval rationale")
-    approval = {"status": "approved", "approved_at": _now().isoformat(), "approved_by": current_user.get("name") or current_user.get("email"), "rationale": rationale}
-    await db.nexus_verify_requests.update_one({"id": request_id}, {"$set": {"status": "ready_to_execute", "approval": approval, "updated_at": _now().isoformat()}})
+    approval = {"status": "approved", "approved_at": _now().isoformat(), "approved_by": current_user.get("name") or current_user.get("email"), "approved_by_id": current_user.get("id"), "rationale": rationale}
+    result = await db.nexus_verify_requests.update_one(
+        {"id": request_id, "status": "awaiting_approval"},
+        {"$set": {"status": "ready_to_execute", "approval": approval, "updated_at": _now().isoformat()}},
+    )
+    if not getattr(result, "matched_count", 1):
+        raise HTTPException(status_code=409, detail="This sensitive request was already decided")
     await _audit(record, "request_approved", current_user, rationale)
     return {"status": "ready_to_execute", "approval": approval}
 

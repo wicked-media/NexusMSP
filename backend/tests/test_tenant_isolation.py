@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, permission_elevation, workflow_automation, yeastar
+from app.routers import approval_workflows, backup_center, client_portal, control_plane, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -724,3 +724,19 @@ def test_nexus_elevate_foreign_request_cannot_be_approved(monkeypatch):
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "nexus_elevate.request.approve"
+
+
+def test_nexus_verify_requires_an_independent_authorised_approver():
+    record = {
+        "created_by_id": "tech-1",
+        "verification": {"verified_by_id": "tech-2"},
+    }
+    standard_technician = {"id": "tech-3", "role": "technician"}
+    requester = {"id": "tech-1", "role": "admin"}
+    verifier = {"id": "tech-2", "role": "service_desk_manager"}
+    independent_manager = {"id": "tech-4", "role": "service_desk_manager"}
+
+    assert not nexus_verify._may_approve_sensitive_request(record, standard_technician)
+    assert not nexus_verify._may_approve_sensitive_request(record, requester)
+    assert not nexus_verify._may_approve_sensitive_request(record, verifier)
+    assert nexus_verify._may_approve_sensitive_request(record, independent_manager)
