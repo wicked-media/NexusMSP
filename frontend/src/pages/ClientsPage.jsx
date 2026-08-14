@@ -45,6 +45,7 @@ import {
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import ConfidenceLens from "@/components/confidence/ConfidenceLens";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
+import WorkspaceControlBar from "@/components/WorkspaceControlBar";
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -522,7 +523,7 @@ export default function ClientsPage() {
         <div className="flex min-h-0 flex-1">
           {/* Master list */}
           {!selectedClient && <aside className="flex w-full flex-col border-r border-zinc-800 bg-zinc-950 md:w-[42%] lg:w-[420px] lg:max-w-[44%]">
-            <div className="border-b border-zinc-800 px-3 py-2 space-y-2">
+            <WorkspaceControlBar className="block space-y-2 rounded-none border-x-0 border-t-0 border-zinc-800 px-3 py-2 shadow-none" data-testid="clients-directory-controls">
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-zinc-500 shrink-0" />
                 <Input
@@ -592,7 +593,7 @@ export default function ClientsPage() {
                 <span>{filtered.length} of {data.clients?.length || 0}</span>
                 <span>press j/k to navigate · / search · ⌘N new</span>
               </div>
-            </div>
+            </WorkspaceControlBar>
             <div className="flex-1 overflow-y-auto">
               {!search && lifecycleFilter === "all" && riskFilter === "all" && integrationFilter === "all" && tierFilter === "all" && attentionClients.length > 0 && (
                 <div className="p-3 border-b border-amber-500/20 bg-amber-500/[0.04]">
