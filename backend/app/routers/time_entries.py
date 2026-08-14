@@ -6,10 +6,20 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
+
+
+async def _time_entry_or_404(entry_id: str, current_user: dict) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.time_entries,
+        entry_id,
+        operation="time_entry.access",
+        resource_name="Time entry",
+    )
 
 # ============== TIME ENTRIES ENDPOINTS ==============
 
@@ -27,11 +37,14 @@ async def get_time_entries(
     if user_id:
         query["user_id"] = user_id
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="time_entry.list")
         query["client_id"] = client_id
     if billable is not None:
         query["billable"] = billable
     
-    entries = await db.time_entries.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    entries = await db.time_entries.find(
+        scoped_query(current_user, query), {"_id": 0}
+    ).sort("created_at", -1).to_list(1000)
     for e in entries:
         if isinstance(e.get('created_at'), str):
             e['created_at'] = datetime.fromisoformat(e['created_at'])
@@ -40,6 +53,14 @@ async def get_time_entries(
 @router.post("/time-entries", response_model=TimeEntry)
 async def create_time_entry(entry_data: TimeEntryCreate, current_user: dict = Depends(get_current_user)):
     ticket = await db.tickets.find_one({"id": entry_data.ticket_id}, {"_id": 0})
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    await assert_client_scope(
+        current_user,
+        ticket.get("client_id"),
+        operation="time_entry.create",
+        mask_not_found=True,
+    )
     user = await db.users.find_one({"id": entry_data.user_id}, {"_id": 0})
     
     hourly_rate = user.get('hourly_rate', 75.0) if user else 75.0
@@ -69,19 +90,47 @@ async def create_time_entry(entry_data: TimeEntryCreate, current_user: dict = De
 
 @router.put("/time-entries/{entry_id}")
 async def update_time_entry(entry_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.time_entries.update_one({"id": entry_id}, {"$set": entry_data})
+    existing = await _time_entry_or_404(entry_id, current_user)
+    if existing.get("invoiced"):
+        raise HTTPException(status_code=409, detail="Invoiced time cannot be edited; issue an adjustment entry instead")
+    allowed = {"minutes", "description", "billable", "date", "category"}
+    update = {key: value for key, value in entry_data.items() if key in allowed}
+    if not update:
+        raise HTTPException(status_code=422, detail="No editable time-entry fields were provided")
+    if "minutes" in update:
+        try:
+            update["minutes"] = int(update["minutes"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Minutes must be a whole number")
+        if update["minutes"] < 1:
+            raise HTTPException(status_code=422, detail="Minutes must be at least one")
+    if "minutes" in update or "billable" in update:
+        minutes = update.get("minutes", existing.get("minutes", 0))
+        billable = update.get("billable", existing.get("billable", False))
+        update["total_amount"] = round(
+            (float(minutes) / 60) * float(existing.get("hourly_rate") or 75)
+            if billable else 0,
+            2,
+        )
+    result = await db.time_entries.update_one({"id": entry_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
+    if "minutes" in update:
+        minute_delta = update["minutes"] - int(existing.get("minutes", 0) or 0)
+        if minute_delta:
+            await db.tickets.update_one(
+                {"id": existing.get("ticket_id")},
+                {"$inc": {"total_time_minutes": minute_delta}},
+            )
     return {"message": "Time entry updated"}
 
 @router.delete("/time-entries/{entry_id}")
 async def delete_time_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
-    entry = await db.time_entries.find_one({"id": entry_id}, {"_id": 0})
-    if entry:
-        await db.tickets.update_one(
-            {"id": entry['ticket_id']},
-            {"$inc": {"total_time_minutes": -entry['minutes']}}
-        )
+    entry = await _time_entry_or_404(entry_id, current_user)
+    await db.tickets.update_one(
+        {"id": entry['ticket_id']},
+        {"$inc": {"total_time_minutes": -entry['minutes']}}
+    )
     result = await db.time_entries.delete_one({"id": entry_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
@@ -93,7 +142,10 @@ async def delete_time_entry(entry_id: str, current_user: dict = Depends(get_curr
 async def get_weekly_time_summary(current_user: dict = Depends(get_current_user)):
     week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = week_start - timedelta(days=week_start.weekday())
-    entries = await db.time_entries.find({"date": {"$gte": week_start.strftime('%Y-%m-%d')}}, {"_id": 0}).to_list(10000)
+    entries = await db.time_entries.find(
+        scoped_query(current_user, {"date": {"$gte": week_start.strftime('%Y-%m-%d')}}),
+        {"_id": 0},
+    ).to_list(10000)
     by_user = {}
     for e in entries:
         uid = e.get("user_id", "unknown")
@@ -253,14 +305,24 @@ async def bulk_create_time_entries(data: dict, current_user: dict = Depends(get_
         raise HTTPException(status_code=400, detail="No entries provided")
     created = []
     for ed in entries_data:
+        ticket_id = str(ed.get("ticket_id") or "").strip()
+        ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0}) if ticket_id else None
+        if not ticket:
+            raise HTTPException(status_code=422, detail="Each bulk time entry must reference an existing ticket")
+        await assert_client_scope(
+            current_user,
+            ticket.get("client_id"),
+            operation="time_entry.bulk_create",
+            mask_not_found=True,
+        )
         entry = {
             "id": f"TE-{uuid.uuid4().hex[:8]}",
-            "ticket_id": ed.get("ticket_id", ""),
-            "ticket_title": ed.get("ticket_title", ""),
+            "ticket_id": ticket_id,
+            "ticket_title": ticket.get("title", ""),
             "user_id": ed.get("user_id", current_user.get("id", "")),
             "user_name": ed.get("user_name", current_user.get("name", "")),
-            "client_id": ed.get("client_id", ""),
-            "client_name": ed.get("client_name", ""),
+            "client_id": ticket.get("client_id", ""),
+            "client_name": ticket.get("client_name", ""),
             "minutes": ed.get("minutes", 0),
             "description": ed.get("description", ""),
             "billable": ed.get("billable", True),
