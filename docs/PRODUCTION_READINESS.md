@@ -95,3 +95,7 @@ Fail the release if an action reports success without a durable record, audit en
 ## 8. Release decision
 
 Production-ready means all critical and high risks are closed, every golden workflow has current evidence, recovery has been demonstrated, monitoring has an owner, and rollback has been rehearsed. Unimplemented provider actions must be labelled as simulations or pending integrations; they must never present a false success state.
+
+## 9. Architecture and data ownership gate
+
+Before enabling multi-MSP/channel production, review [DATA ownership](DATA_OWNERSHIP.md) and the [architecture plan](NEXUS_ARCHITECTURE_PLAN.md). Confirm environment-level controls that source review cannot prove: authenticated tenant-isolation tests, MongoDB indexes/retention/restore evidence, Supabase RLS and private Storage policy, and server-only service-role credential handling. No cross-store migration is permitted without its own approved migration and rollback plan.
