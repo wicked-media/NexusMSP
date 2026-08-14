@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, clients_contacts, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -1207,3 +1207,29 @@ def test_restricted_technician_cannot_delete_a_foreign_time_entry(monkeypatch):
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "time_entry.access"
+
+
+def test_restricted_technician_cannot_read_foreign_client_contacts(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        clients_contacts,
+        "db",
+        type(
+            "ClientContactDB",
+            (),
+            {"clients": _RecordCollection({"id": "client-b", "contacts": []})},
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(clients_contacts.get_client_contacts("client-b", user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "client.contact.access"

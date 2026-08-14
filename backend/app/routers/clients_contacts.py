@@ -5,24 +5,34 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import assert_client_scope
 from app.models import *
 
 router = APIRouter()
+
+
+async def _client_or_404(client_id: str, current_user: dict, projection: dict | None = None) -> dict:
+    client = await db.clients.find_one({"id": client_id}, projection or {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await assert_client_scope(
+        current_user,
+        client.get("id"),
+        operation="client.contact.access",
+        mask_not_found=True,
+    )
+    return client
 
 # ============== CLIENT CONTACTS ==============
 
 @router.get("/clients/{client_id}/contacts")
 async def get_client_contacts(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = await _client_or_404(client_id, current_user)
     return client.get("contacts", [])
 
 @router.post("/clients/{client_id}/contacts")
 async def add_client_contact(client_id: str, contact_data: dict, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "contacts": 1})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = await _client_or_404(client_id, current_user, {"_id": 0, "id": 1, "contacts": 1})
     name = str(contact_data.get("name", "")).strip()
     if not name:
         raise HTTPException(status_code=422, detail="Contact name is required")
@@ -42,9 +52,7 @@ async def add_client_contact(client_id: str, contact_data: dict, current_user: d
 
 @router.put("/clients/{client_id}/contacts/{contact_id}")
 async def update_client_contact(client_id: str, contact_id: str, contact_data: dict, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = await _client_or_404(client_id, current_user)
     contacts = client.get("contacts", [])
     found = False
     for c in contacts:
@@ -69,9 +77,7 @@ async def update_client_contact(client_id: str, contact_id: str, contact_data: d
 
 @router.delete("/clients/{client_id}/contacts/{contact_id}")
 async def delete_client_contact(client_id: str, contact_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "contacts": 1})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = await _client_or_404(client_id, current_user, {"_id": 0, "id": 1, "contacts": 1})
     contacts = client.get("contacts", [])
     if not any(contact.get("id") == contact_id for contact in contacts):
         raise HTTPException(status_code=404, detail="Contact not found")
@@ -80,9 +86,7 @@ async def delete_client_contact(client_id: str, contact_id: str, current_user: d
 
 @router.get("/clients/{client_id}/detail")
 async def get_client_detail(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+    client = await _client_or_404(client_id, current_user)
     tickets = await db.tickets.find({"client_id": client_id}, {"_id": 0}).to_list(500)
     devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(500)
     contracts = await db.contracts.find({"client_id": client_id}, {"_id": 0}).to_list(100)
