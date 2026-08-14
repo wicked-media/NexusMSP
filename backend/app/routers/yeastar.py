@@ -126,12 +126,202 @@ async def test_yeastar_connection(pbx_id: Optional[str] = None, current_user: di
 
 _yeastar_token_lock = asyncio.Lock()
 _yeastar_token_cache: dict[str, dict[str, Any]] = {}
+_ycm_token_lock = asyncio.Lock()
+_ycm_token_cache: dict[str, dict[str, Any]] = {}
 
 
 class YeastarConnectionError(RuntimeError):
     def __init__(self, message: str, kind: str = "connection"):
         super().__init__(message)
         self.kind = kind
+
+
+def _normalise_ycm_url(value: str) -> str:
+    raw = str(value or "https://ycm.yeastar.com").strip()
+    if "://" not in raw:
+        raw = f"https://{raw}"
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() != "https" or not parsed.netloc:
+        raise ValueError("Enter a valid HTTPS YCM address, for example https://ycm.yeastar.com")
+    return urlunsplit(("https", parsed.netloc, parsed.path.rstrip("/"), "", ""))
+
+
+def _ycm_items(payload: Any) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data", payload.get("items", payload.get("instances", [])))
+    if isinstance(data, dict):
+        data = data.get("items", data.get("list", data.get("instances", [])))
+    return [item for item in (data or []) if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+async def _ycm_get_token(settings: dict, *, strict: bool = False) -> str | None:
+    client_id = str(settings.get("client_id") or "").strip()
+    client_secret = str(settings.get("client_secret") or "")
+    if not client_id or not client_secret:
+        if strict:
+            raise YeastarConnectionError("YCM Client ID and Client Secret are required.", "configuration")
+        return None
+    base_url = _normalise_ycm_url(settings.get("base_url") or "")
+    cache_key = f"{base_url}|{client_id}"
+    now = time.time()
+    async with _ycm_token_lock:
+        cached = _ycm_token_cache.get(cache_key) or {}
+        if cached.get("token") and cached.get("expires_at", 0) > now + 30:
+            return cached["token"]
+        headers = {"User-Agent": settings.get("user_agent") or "NexusMSP/1.0"}
+        try:
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                response = await client.post(
+                    f"{base_url}/dm/open_api/oauth/token",
+                    data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
+                    headers=headers,
+                )
+            payload = response.json() if response.content else {}
+            if response.status_code >= 400:
+                raise YeastarConnectionError("YCM rejected the Client ID or Client Secret. Check the YCM API application and permitted IP settings.", "authentication")
+            token = payload.get("access_token") or (payload.get("data") or {}).get("access_token")
+            if not token:
+                raise YeastarConnectionError("YCM returned no access token. Confirm the API application has been enabled.", "authentication")
+            expires_in = int(payload.get("expires_in") or (payload.get("data") or {}).get("expires_in") or 600)
+            _ycm_token_cache[cache_key] = {"token": token, "expires_at": now + max(60, expires_in)}
+            return token
+        except YeastarConnectionError:
+            raise
+        except httpx.TimeoutException as exc:
+            error = YeastarConnectionError("YCM did not respond in time. Check internet access and the configured YCM address.", "timeout")
+            if strict:
+                raise error from exc
+            return None
+        except httpx.HTTPError as exc:
+            error = YeastarConnectionError("Nexus could not reach YCM. Check the configured address and outbound firewall policy.", "connection")
+            if strict:
+                raise error from exc
+            return None
+
+
+async def _ycm_api_get(path: str, settings: dict) -> dict:
+    token = await _ycm_get_token(settings, strict=True)
+    base_url = _normalise_ycm_url(settings.get("base_url") or "")
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": settings.get("user_agent") or "NexusMSP/1.0"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(f"{base_url}/dm/open_api/{path.lstrip('/')}", headers=headers)
+        payload = response.json() if response.content else {}
+        if response.status_code >= 400:
+            raise YeastarConnectionError(f"YCM fleet request failed with HTTP {response.status_code}.", "http")
+        return payload if isinstance(payload, dict) else {"data": payload}
+    except YeastarConnectionError:
+        raise
+    except httpx.TimeoutException as exc:
+        raise YeastarConnectionError("YCM fleet discovery timed out.", "timeout") from exc
+    except httpx.HTTPError as exc:
+        raise YeastarConnectionError("YCM fleet discovery could not reach the management service.", "connection") from exc
+
+
+def _safe_ycm_settings(record: dict | None) -> dict:
+    record = record or {}
+    return {
+        "configured": bool(record.get("client_id") and record.get("client_secret")),
+        "base_url": record.get("base_url") or "https://ycm.yeastar.com",
+        "client_id": record.get("client_id") or "",
+        "user_agent": record.get("user_agent") or "NexusMSP/1.0",
+        "last_test_at": record.get("last_test_at") or "",
+        "last_test_status": record.get("last_test_status") or "not_tested",
+        "last_test_error": record.get("last_test_error") or "",
+        "last_discovery_at": record.get("last_discovery_at") or "",
+    }
+
+
+@router.get("/yeastar/ycm/overview")
+async def get_ycm_overview(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
+    discoveries = await db.yeastar_ycm_discoveries.find({}, {"_id": 0}).sort("last_seen_at", -1).to_list(500)
+    return {"connection": _safe_ycm_settings(settings), "discoveries": discoveries}
+
+
+@router.post("/yeastar/ycm/settings")
+async def save_ycm_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    existing = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
+    try:
+        base_url = _normalise_ycm_url(data.get("base_url") or existing.get("base_url") or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    client_id = str(data.get("client_id") or existing.get("client_id") or "").strip()
+    client_secret = str(data.get("client_secret") or existing.get("client_secret") or "")
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=400, detail="YCM Client ID and Client Secret are required the first time this connection is saved")
+    await db.settings.update_one(
+        {"type": "yeastar_ycm"},
+        {"$set": {"type": "yeastar_ycm", "base_url": base_url, "client_id": client_id, "client_secret": client_secret, "user_agent": str(data.get("user_agent") or existing.get("user_agent") or "NexusMSP/1.0").strip(), "updated_at": datetime.now(timezone.utc).isoformat(), "updated_by": current_user.get("email", "system")}},
+        upsert=True,
+    )
+    _ycm_token_cache.clear()
+    return {"message": "YCM fleet connection saved", "connection": _safe_ycm_settings(await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}))}
+
+
+@router.post("/yeastar/ycm/test")
+async def test_ycm_connection(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
+    try:
+        payload = await _ycm_api_get("v2/cloud_pbx/instances", settings)
+        count = len(_ycm_items(payload))
+        now = datetime.now(timezone.utc).isoformat()
+        await db.settings.update_one({"type": "yeastar_ycm"}, {"$set": {"last_test_at": now, "last_test_status": "verified", "last_test_error": ""}})
+        await log_activity(current_user, "voice_ycm_connection_verified", "voice_provider", "yeastar_ycm", "Yeastar Central Management", f"Verified YCM access and found {count} Cloud PBX record{'s' if count != 1 else ''}.")
+        return {"success": True, "message": f"YCM connection verified. {count} Cloud PBX record{'s' if count != 1 else ''} available.", "cloud_pbx_count": count}
+    except YeastarConnectionError as exc:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.settings.update_one({"type": "yeastar_ycm"}, {"$set": {"last_test_at": now, "last_test_status": "failed", "last_test_error": str(exc)}})
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/yeastar/ycm/discover")
+async def discover_ycm_cloud_pbxs(current_user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "yeastar_ycm"}, {"_id": 0}) or {}
+    try:
+        payload = await _ycm_api_get("v2/cloud_pbx/instances", settings)
+    except YeastarConnectionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    now = datetime.now(timezone.utc).isoformat()
+    discoveries = []
+    for item in _ycm_items(payload):
+        external_id = str(item.get("id") or item.get("cloudPbxId") or item.get("sn") or item.get("serialNumber") or item.get("url") or uuid.uuid4())
+        discovery_id = f"ycm:{external_id}"
+        name = item.get("name") or item.get("instanceName") or item.get("pbxName") or item.get("sn") or "Yeastar Cloud PBX"
+        url = item.get("url") or item.get("domain") or item.get("fqdn") or ""
+        record = {"id": discovery_id, "provider": "yeastar_ycm", "external_id": external_id, "name": name, "pbx_url": url, "status": item.get("status") or item.get("state") or "discovered", "customer_name": item.get("customerName") or item.get("customer") or "", "raw": item, "last_seen_at": now, "updated_at": now}
+        await db.yeastar_ycm_discoveries.update_one({"id": discovery_id}, {"$set": record, "$setOnInsert": {"created_at": now, "claimed_pbx_id": ""}}, upsert=True)
+        discoveries.append(record)
+    await db.settings.update_one({"type": "yeastar_ycm"}, {"$set": {"last_discovery_at": now, "last_test_status": "verified", "last_test_error": ""}})
+    await log_activity(current_user, "voice_ycm_discovery_completed", "voice_provider", "yeastar_ycm", "Yeastar Central Management", f"Discovered {len(discoveries)} Cloud PBX record{'s' if len(discoveries) != 1 else ''}." )
+    return {"discovered": len(discoveries), "items": discoveries}
+
+
+@router.post("/yeastar/ycm/discoveries/{discovery_id}/claim")
+async def claim_ycm_discovery(discovery_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    client_id = str(data.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Choose the Nexus client that owns this Cloud PBX")
+    discovery = await db.yeastar_ycm_discoveries.find_one({"id": discovery_id}, {"_id": 0})
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
+    if not discovery:
+        raise HTTPException(status_code=404, detail="YCM discovery record not found. Run discovery again.")
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    existing = await db.yeastar_pbxs.find_one({"ycm_discovery_id": discovery_id}, {"_id": 0})
+    if existing:
+        if existing.get("client_id") != client_id:
+            raise HTTPException(status_code=409, detail=f"This Cloud PBX is already linked to {existing.get('client_name') or 'another client'}.")
+        return {key: value for key, value in existing.items() if key != "client_secret"}
+    now = datetime.now(timezone.utc).isoformat()
+    record = {"id": str(uuid.uuid4()), "provider": "yeastar", "connection_mode": "ycm_discovered", "ycm_discovery_id": discovery_id, "ycm_external_id": discovery.get("external_id"), "client_id": client_id, "client_name": client.get("name", "Client"), "name": discovery.get("name") or "Yeastar Cloud PBX", "pbx_url": discovery.get("pbx_url") or "", "enabled": True, "status": "ycm_managed", "created_at": now, "updated_at": now, "created_by": current_user.get("email", "system"), "discovery_source": "ycm", "direct_api_configured": False}
+    await db.yeastar_pbxs.insert_one(dict(record))
+    await db.yeastar_ycm_discoveries.update_one({"id": discovery_id}, {"$set": {"claimed_pbx_id": record["id"], "claimed_client_id": client_id, "claimed_at": now}})
+    await log_activity(current_user, "voice_ycm_cloud_pbx_claimed", "voice_pbx", record["id"], record["name"], f"Linked YCM-discovered Cloud PBX to {record['client_name']}. Direct PBX API access remains optional until live telemetry is enabled.", metadata={"client_id": client_id, "ycm_discovery_id": discovery_id})
+    return {key: value for key, value in record.items() if key != "client_secret"}
 
 
 def _normalise_pbx_url(value: str) -> str:

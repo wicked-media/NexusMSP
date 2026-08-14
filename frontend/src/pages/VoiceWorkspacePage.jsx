@@ -47,6 +47,10 @@ export default function VoiceWorkspacePage() {
   const [busy, setBusy] = useState("");
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
+  const [ycm, setYcm] = useState({ connection: {}, discoveries: [] });
+  const [ycmOpen, setYcmOpen] = useState(false);
+  const [ycmForm, setYcmForm] = useState({ base_url: "https://ycm.yeastar.com", client_id: "", client_secret: "", user_agent: "NexusMSP/1.0" });
+  const [ycmClaims, setYcmClaims] = useState({});
   const [showAddPbx, setShowAddPbx] = useState(false);
   const [editingPbx, setEditingPbx] = useState(null);
   const [extensionChange, setExtensionChange] = useState(null);
@@ -82,14 +86,17 @@ export default function VoiceWorkspacePage() {
     setBusy("load");
     setLoadError(false);
     try {
-      const [{ data: voice }, { data: clientRows }, { data: productRows }] = await Promise.all([
+      const [{ data: voice }, { data: clientRows }, { data: productRows }, { data: ycmOverview }] = await Promise.all([
         axios.get(`${API}/yeastar/voice-workspace`, { headers, timeout: 8000 }),
         axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/products`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/yeastar/ycm/overview`, { headers }).catch(() => ({ data: { connection: {}, discoveries: [] } })),
       ]);
       setWorkspace(voice);
       setClients(clientRows || []);
       setProducts(productRows || []);
+      setYcm(ycmOverview || { connection: {}, discoveries: [] });
+      setYcmForm(current => ({ ...current, base_url: ycmOverview?.connection?.base_url || current.base_url, client_id: ycmOverview?.connection?.client_id || current.client_id, user_agent: ycmOverview?.connection?.user_agent || current.user_agent }));
     } catch {
       setLoadError(true);
       toast.error("Could not load Voice services");
@@ -194,6 +201,53 @@ export default function VoiceWorkspacePage() {
     } finally {
       setBusy("");
     }
+  };
+
+  const saveYcm = async () => {
+    setBusy("ycm-save");
+    try {
+      await axios.post(`${API}/yeastar/ycm/settings`, ycmForm, { headers });
+      setYcmForm(current => ({ ...current, client_secret: "" }));
+      toast.success("YCM fleet connection saved");
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "YCM connection could not be saved");
+    } finally { setBusy(""); }
+  };
+
+  const testYcm = async () => {
+    setBusy("ycm-test");
+    try {
+      const { data } = await axios.post(`${API}/yeastar/ycm/test`, {}, { headers });
+      toast.success(data.message || "YCM connection verified");
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "YCM connection test failed");
+    } finally { setBusy(""); }
+  };
+
+  const discoverYcm = async () => {
+    setBusy("ycm-discover");
+    try {
+      const { data } = await axios.post(`${API}/yeastar/ycm/discover`, {}, { headers });
+      toast.success(`${data.discovered || 0} Cloud PBX record${data.discovered === 1 ? "" : "s"} discovered`);
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "YCM discovery failed");
+    } finally { setBusy(""); }
+  };
+
+  const claimYcmPbx = async (discoveryId) => {
+    const clientId = ycmClaims[discoveryId];
+    if (!clientId) { toast.error("Choose the Nexus client that owns this Cloud PBX"); return; }
+    setBusy(`ycm-claim-${discoveryId}`);
+    try {
+      await axios.post(`${API}/yeastar/ycm/discoveries/${encodeURIComponent(discoveryId)}/claim`, { client_id: clientId }, { headers });
+      toast.success("Cloud PBX linked to the client. Add direct API credentials later for live wallboard data.");
+      await load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Cloud PBX could not be linked");
+    } finally { setBusy(""); }
   };
 
   const enableRecurringBilling = async (row) => {
@@ -311,6 +365,7 @@ export default function VoiceWorkspacePage() {
       tone="sky"
       actions={<>
         <Button variant="outline" size="sm" onClick={() => navigate("/help/voice-yeastar-pbx-onboarding")} disabled={!!busy} data-testid="voice-open-setup-guide"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Setup guide</Button>
+        <Button variant="outline" size="sm" onClick={() => setYcmOpen(true)} disabled={!!busy} data-testid="voice-open-ycm"><Cloud className="mr-1.5 h-3.5 w-3.5" />YCM fleet</Button>
         <Button variant="outline" size="sm" onClick={() => testScopedPbxs(pbxs)} disabled={!!busy} data-testid="voice-test-connection"><Wifi className="mr-1.5 h-3.5 w-3.5" />Test PBXs</Button>
         <Button variant="outline" size="sm" onClick={() => runSync()} disabled={!!busy} data-testid="voice-sync"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy === "sync" ? "animate-spin" : ""}`} />Sync now</Button>
         <Button size="sm" onClick={openAddPbx} disabled={!!busy} data-testid="voice-add-pbx"><Plus className="mr-1.5 h-3.5 w-3.5" />Add PBX</Button>
@@ -330,6 +385,13 @@ export default function VoiceWorkspacePage() {
       <CardContent className="grid gap-4 p-4 lg:grid-cols-[1.2fr_repeat(3,minmax(0,1fr))] lg:items-center">
         <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Client-to-billing workflow</p><p className="mt-1 text-sm text-muted-foreground">Every P-Series PBX connects directly to its client record. Credentials, extension quantities, product mapping, and billing audit stay isolated to that account.</p></div>
         {[['1', 'Enable PBX API', 'Copy the Client ID and Secret from Integrations > API on the PBX.'], ['2', 'Test & link', 'Nexus verifies the live PBX before saving a single client record.'], ['3', 'Approve billing', 'Review discovered extensions, product mapping, and recurring billing.']].map(([number, title, copy]) => <div className="flex gap-3" key={number}><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-cyan-400/30 bg-cyan-400/10 text-xs font-semibold text-cyan-200">{number}</span><div><p className="text-sm font-medium">{title}</p><p className="mt-0.5 text-xs text-muted-foreground">{copy}</p></div></div>)}
+      </CardContent>
+    </Card>
+
+    <Card className={`overflow-hidden border ${ycm.connection?.configured ? "border-violet-500/25 bg-violet-500/[0.045]" : "border-amber-500/25 bg-amber-500/[0.04]"}`} data-testid="voice-ycm-fleet-card">
+      <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-semibold">Yeastar Central Management fleet</p><Badge variant="outline" className={ycm.connection?.configured ? (ycm.connection?.last_test_status === "verified" ? "border-emerald-500/30 text-emerald-300" : "border-violet-500/30 text-violet-300") : "border-amber-500/30 text-amber-300"}>{ycm.connection?.configured ? (ycm.connection?.last_test_status === "verified" ? "Verified" : "Configured") : "Not connected"}</Badge></div><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Discover YCM-managed Cloud PBXs once, then claim each into the correct Nexus client. Direct PBX API credentials stay separate and are only needed for live calls, presence and on-premises PBXs.</p><p className="mt-2 text-[11px] text-muted-foreground">{ycm.connection?.last_discovery_at ? `Last fleet discovery: ${compactDate(ycm.connection.last_discovery_at)}` : "No YCM fleet discovery has been recorded."}</p></div>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={() => setYcmOpen(true)}><Cloud className="mr-1.5 h-3.5 w-3.5" />{ycm.connection?.configured ? "Manage YCM fleet" : "Connect YCM"}</Button>
       </CardContent>
     </Card>
 
@@ -370,6 +432,31 @@ export default function VoiceWorkspacePage() {
 
     </Tabs>
 
+    <Dialog open={ycmOpen} onOpenChange={setYcmOpen}>
+      <NexusWorkflowDialog
+        eyebrow="Voice fleet connection"
+        title="Connect Yeastar Central Management"
+        description="Discover Cloud PBXs centrally, then claim each one into the correct Nexus client. Direct PBX API credentials remain separate for live monitoring."
+        icon={Cloud}
+        tone="violet"
+        className="max-w-4xl"
+        footer={<><Button variant="outline" onClick={() => setYcmOpen(false)} disabled={busy.startsWith("ycm-")}>Close</Button><Button variant="outline" onClick={testYcm} disabled={busy.startsWith("ycm-") || !ycm.connection?.configured}>{busy === "ycm-test" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Test YCM</Button><Button onClick={saveYcm} disabled={busy.startsWith("ycm-")}>{busy === "ycm-save" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save fleet connection</Button></>}
+      >
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5"><Label>YCM address</Label><Input value={ycmForm.base_url} onChange={(event) => setYcmForm({ ...ycmForm, base_url: event.target.value })} placeholder="https://ycm.yeastar.com" /></div>
+            <div className="space-y-1.5"><Label>YCM API Client ID</Label><Input value={ycmForm.client_id} onChange={(event) => setYcmForm({ ...ycmForm, client_id: event.target.value })} placeholder="From the YCM API application" autoComplete="off" /></div>
+            <div className="space-y-1.5"><Label>YCM API Client Secret</Label><Input type="password" value={ycmForm.client_secret} onChange={(event) => setYcmForm({ ...ycmForm, client_secret: event.target.value })} placeholder={ycm.connection?.configured ? "Leave blank to retain the stored secret" : "From the YCM API application"} autoComplete="new-password" /></div>
+            <div className="space-y-1.5"><Label>Application User-Agent</Label><Input value={ycmForm.user_agent} onChange={(event) => setYcmForm({ ...ycmForm, user_agent: event.target.value })} placeholder="NexusMSP/1.0" /></div>
+          </div>
+          <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] p-3 text-xs text-muted-foreground">YCM credentials remain a single fleet connection. Nexus never copies them into customer PBX records. Configure direct OpenAPI only when live calls, presence, local/on-premises control, or PBX-specific telemetry is required.</div>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold">Cloud PBX discovery</p><p className="mt-1 text-xs text-muted-foreground">Review each discovered PBX before creating its client-linked service record.</p></div><Button size="sm" onClick={discoverYcm} disabled={busy.startsWith("ycm-") || !ycm.connection?.configured}>{busy === "ycm-discover" && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}Discover Cloud PBXs</Button></div>
+          <div className="space-y-2">
+            {(ycm.discoveries || []).length ? ycm.discoveries.map((item) => <div key={item.id} className="grid gap-3 rounded-xl border border-border/70 bg-background/45 p-3 md:grid-cols-[1fr_220px_auto] md:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold">{item.name}</p><p className="mt-0.5 truncate text-xs text-muted-foreground">{item.customer_name || "YCM customer not supplied"}{item.pbx_url ? ` · ${item.pbx_url}` : ""}</p><p className="mt-1 text-[11px] text-muted-foreground">{item.claimed_pbx_id ? "Linked to Nexus client" : "Awaiting client claim"} · {readable(item.status)}</p></div><Select value={ycmClaims[item.id] || ""} onValueChange={(value) => setYcmClaims({ ...ycmClaims, [item.id]: value })} disabled={!!item.claimed_pbx_id}><SelectTrigger><SelectValue placeholder="Choose Nexus client" /></SelectTrigger><SelectContent>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}</SelectContent></Select><Button size="sm" variant={item.claimed_pbx_id ? "outline" : "default"} onClick={() => claimYcmPbx(item.id)} disabled={!!item.claimed_pbx_id || busy.startsWith("ycm-")}>{item.claimed_pbx_id ? "Linked" : busy === `ycm-claim-${item.id}` ? "Linking…" : "Link client"}</Button></div>) : <div className="rounded-xl border border-dashed border-border/70 p-5 text-center text-sm text-muted-foreground">No YCM Cloud PBXs discovered yet. Save and test the fleet connection, then run discovery.</div>}
+          </div>
+        </div>
+      </NexusWorkflowDialog>
+    </Dialog>
     <Dialog open={!!editingPbx} onOpenChange={(open) => { if (!open) setEditingPbx(null); }}><NexusWorkflowDialog eyebrow="Voice services" title="PBX configuration" description="Maintain one customer connection, billing mapping and safeguards. Leave Client Secret blank to retain its securely stored value." icon={Settings} tone="cyan" className="max-w-2xl" footer={<><Button variant="outline" onClick={() => setEditingPbx(null)}>Cancel</Button><Button onClick={savePbxSettings} disabled={busy === "save-pbx"}>{busy === "save-pbx" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{busy === "save-pbx" ? "Testing connection…" : "Test & save configuration"}</Button></>}><div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3"><p className="text-sm font-medium text-cyan-100">Connection-safe editing</p><p className="mt-1 text-xs text-muted-foreground">NexusMSP tests the effective URL, API identity, stored or rotated secret, and TLS policy before edited configuration is committed.</p></div>{editingPbx && <PbxForm form={editingPbx} setForm={setEditingPbx} clients={clients} products={products} editing />}</NexusWorkflowDialog></Dialog>
     <Dialog open={showAddPbx} onOpenChange={setShowAddPbx}><NexusWorkflowDialog eyebrow="Voice onboarding" title="Test and link a Yeastar PBX" description="Choose the client first. Nexus verifies the live P-Series API, discovers extensions and saves one client-scoped connection only after the test succeeds." icon={Phone} tone="cyan" className="max-w-2xl" footer={<><Button variant="outline" onClick={() => setShowAddPbx(false)} disabled={busy === "add-pbx"}>Cancel</Button><Button onClick={addPbx} disabled={busy === "add-pbx"}>{busy === "add-pbx" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{busy === "add-pbx" ? "Testing PBX…" : "Test & link PBX"}</Button></>}><SetupGuideCallout title="Where do these credentials come from?" source="In the customer’s Yeastar P-Series PBX portal, enable Integrations → API, then copy the Client ID and Client Secret. Enter the base PBX URL only—NexusMSP adds the OpenAPI path." securityNote="Store the Client Secret only in NexusMSP; never put it in a ticket, client note, or chat." helpSlug="voice-yeastar-pbx-onboarding" /><PbxForm form={pbxForm} setForm={setPbxForm} clients={clients} products={products} /></NexusWorkflowDialog></Dialog>
     <Dialog open={!!extensionChange} onOpenChange={(open) => { if (!open) setExtensionChange(null); }}><NexusWorkflowDialog eyebrow="Voice governance" title="Extension override" description="Review the operational and billing impact, then retain why this manual change is required." icon={Settings} tone="amber" className="max-w-lg" footer={<><Button variant="outline" onClick={() => setExtensionChange(null)} disabled={busy.startsWith("extension-")}>Cancel</Button><Button onClick={applyExtensionChange} disabled={busy.startsWith("extension-") || !extensionChange?.reason?.trim()}>{busy.startsWith("extension-") && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Apply governed override</Button></>}>{extensionChange && <div className="space-y-4"><div className="rounded-xl border border-border/60 bg-background/40 p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold">Extension {extensionChange.extension.number} · {extensionChange.extension.name}</p><p className="mt-1 text-xs text-muted-foreground">{extensionChange.extension.client_name || "Client"} · {extensionChange.extension.pbx_name || "Yeastar PBX"}</p></div><Badge variant="outline" className="border-cyan-500/30 text-cyan-200">{extensionChange.kind === "billing" ? "Billing override" : "Service override"}</Badge></div><div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3"><p className="text-xs font-medium text-amber-200">Proposed change</p><p className="mt-1 text-sm">{extensionChange.kind === "billing" ? (extensionChange.nextValue ? "Return this extension to billable quantity." : "Exclude this extension from live recurring-billing quantity.") : (extensionChange.nextValue ? "Enable this extension in NexusMSP Voice operations." : "Disable this extension from Voice operations and billable quantity.")}</p></div></div><div className="space-y-1.5"><Label htmlFor="voice-extension-change-reason">Technician justification</Label><Input id="voice-extension-change-reason" value={extensionChange.reason} onChange={(event) => setExtensionChange({ ...extensionChange, reason: event.target.value })} placeholder="Example: Test extension approved as non-billable" autoFocus /><p className="text-[11px] text-muted-foreground">The signed-in technician, previous state, new state, and this reason are written to the audit ledger.</p></div></div>}</NexusWorkflowDialog></Dialog>
