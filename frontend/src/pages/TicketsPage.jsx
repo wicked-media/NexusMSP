@@ -60,6 +60,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag,
@@ -119,6 +120,7 @@ export default function TicketsPage() {
   const [users, setUsers] = useState([]);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
@@ -406,6 +408,7 @@ export default function TicketsPage() {
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [tRes, cRes, uRes, crRes, ncRes, dRes, pRes, wsRes, fjRes, svcRes] = await Promise.all([
         axios.get(`${API}/tickets`, { headers }),
@@ -434,7 +437,9 @@ export default function TicketsPage() {
         const vRes = await axios.get(`${API}/tickets/active-viewers`, { headers });
         setTicketViewers(vRes.data);
       } catch { setTicketViewers({}); }
-    } catch { toast.error("Failed to fetch tickets"); }
+    } catch {
+      setLoadError("Nexus could not load the service queue. Existing ticket work has not been changed.");
+    }
     finally { setLoading(false); }
   }, [headers]);
 
@@ -1753,7 +1758,8 @@ export default function TicketsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldJobs, loading, searchParams, viewFjJob, viewWsJob, workshopJobs]);
 
-  if (loading) return <PageShell><div className="flex items-center justify-center h-64 text-zinc-500"><Loader2 className="w-8 h-8 animate-spin" /></div></PageShell>;
+  if (loading) return <PageShell><WorkspaceLoadingState label="Loading service queue" /></PageShell>;
+  if (loadError) return <PageShell><WorkspaceErrorState title="Service queue is unavailable" description={loadError} onRetry={fetchTickets} retryLabel="Retry queue" /></PageShell>;
 
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
