@@ -721,12 +721,14 @@ export default function SettingsPage() {
                 <Label>Login experience</Label>
                 <p className="mt-1 text-xs text-muted-foreground">Choose the immersive entrance shown to every technician. The sign-in and security workflow stays identical.</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="login-experience-picker">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-testid="login-experience-picker">
                 {[
                   { id: "classic", name: "Classic Nexus", description: "The current clean command-centre layout." },
                   { id: "constellation", name: "Constellation", description: "Connected operations above a living horizon." },
                   { id: "theatre", name: "Operations Theatre", description: "A cinematic global operations view." },
                   { id: "calm", name: "Calm Command", description: "Quiet depth with a focused assurance path." },
+                  { id: "hero-monogram", name: "Hero Monogram", description: "A bold Nexus mark suspended above the operational globe." },
+                  { id: "orbital-signature", name: "Orbital Signature", description: "A refined orbital identity with the autonomous MSP message." },
                 ].map(option => {
                   const selected = (branding.login_experience || "classic") === option.id;
                   return (

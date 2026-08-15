@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Response
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -10,7 +10,7 @@ from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
 
 router = APIRouter()
 
-LOGIN_EXPERIENCES = {"classic", "constellation", "theatre", "calm"}
+LOGIN_EXPERIENCES = {"classic", "constellation", "theatre", "calm", "hero-monogram", "orbital-signature"}
 
 UPLOAD_DIR = UPLOADS_DIR / "branding"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,8 +44,11 @@ def _validate_logo_url(url):
 
 
 @router.get("/settings/branding/public")
-async def get_branding_public():
+async def get_branding_public(response: Response):
     """Public endpoint for login page and sidebar branding (no auth)."""
+    # Login branding changes should be visible immediately.  Browser/CDN caching
+    # previously allowed an older experience to survive after Settings was saved.
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
     b = branding or _default_branding()
     return {

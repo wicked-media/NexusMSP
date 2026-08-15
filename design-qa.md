@@ -49,6 +49,41 @@ No actionable P0, P1 or P2 findings remain in the tested desktop state.
 5. The globe visual was expanded and masked into the page background; the legacy green particle field was removed entirely so no competing animation remains.
 6. Final browser capture, form visibility check and console check passed.
 
+## Premium experience QA â€” Hero Monogram and Orbital Signature
+
+### Comparison target
+
+- **Source visual truth:** `frontend/public/login-experiences/hero-monogram.png` and `frontend/public/login-experiences/orbital-signature.png` â€” the dedicated generated brand-stage artwork derived from the user-selected directions.
+- **Implementation captures:** `C:\Users\aaron\Documents\Codex\NexusMSP\login-hero-implementation.png` and `C:\Users\aaron\Documents\Codex\NexusMSP\login-orbital-implementation.png` â€” browser-rendered at 1200 Ã— 720 CSS pixels, device scale factor 1.
+- **State:** desktop, default NexusMSP identity, login preview active, idle authentication state.
+
+### Full-view and focused comparison
+
+- **Hero Monogram:** The full brushed-metal N, cyan orbit and NEXUS MSP lock-up remain visible within the left stage. The independent login panel is only on the right; the earlier mock-panel duplication has been removed. The lightweight changing “Live Nexus identity” line uses existing product motion rather than obscuring the lock-up.
+- **Orbital Signature:** The globe, fine orbital paths, full lock-up and built-in “Welcome to the autonomous MSP.” message remain a single coherent visual, with no duplicate caption over the artwork.
+- **Authentication:** Both experiences retain the same live sign-in controls, validation and password-visibility workflow. Cyan is the premium accent; security green remains a secondary assurance signal.
+
+### Required fidelity surfaces
+
+- **Fonts and typography:** The generated display lock-up remains inside the dedicated identity art; right-side authentication typography continues to use the established product hierarchy with readable labels and body copy.
+- **Spacing and layout rhythm:** A stable left identity stage and right authentication stage retain a clear split at desktop width. The sign-in card maintains generous internal spacing and one primary action.
+- **Colors and visual tokens:** Deep navy/graphite, cyan and cobalt define both selected experiences. No legacy green particle field remains.
+- **Image quality and asset fidelity:** Both use dedicated, full-resolution left-stage artwork rather than full-screen mockups. Each asset contains no embedded authentication UI, avoiding duplicate fields and preserving legibility.
+- **Copy and content:** Hero Monogram supports the rotating Nexus statement. Orbital Signature contains the selected autonomous-MSP statement within the approved artwork.
+
+### Findings and iteration history
+
+1. **[P1 â€” fixed]** The initial selected mockups contained their own rendered login panels, which appeared behind the actual sign-in card. Dedicated stage-only images were generated and substituted.
+2. **[P1 â€” fixed]** Earlier source art cropped the NEXUS MSP lock-up at the desktop stage ratio. Dedicated 2:3 left-stage assets were generated and verified in the browser.
+3. No actionable P0, P1 or P2 findings remain in the tested desktop states. A P3 future enhancement is to replace the image-based lock-up with an approved production vector brand kit when one is available.
+
+### Interaction and runtime checks
+
+- Preview selector exposes Hero Monogram and Orbital Signature alongside existing experiences.
+- Email, password, password visibility, local account helper and sign-in action are present in both captures.
+- The selected stage motion is restrained and `prefers-reduced-motion` disables it.
+- Console errors: none observed during browser captures.
+
 ## Implementation checklist
 
 - [x] Rebuild the login composition around the selected direction.

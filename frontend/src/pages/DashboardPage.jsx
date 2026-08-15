@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -99,7 +99,7 @@ export default function DashboardPage() {
   const layoutStorageKey = `${LAYOUT_STORAGE_KEY}:${dashboardStorageSuffix}`;
   const hiddenStorageKey = `${HIDDEN_STORAGE_KEY}:${dashboardStorageSuffix}`;
   const [stats, setStats] = useState(null);
-  const [enhancedStats, setEnhancedStats] = useState(null);
+  const [_enhancedStats, setEnhancedStats] = useState(null);
   const [ticketTrends, setTicketTrends] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [tickets, setTickets] = useState([]);
@@ -113,28 +113,35 @@ export default function DashboardPage() {
   const [dailyReviewOpen, setDailyReviewOpen] = useState(false);
   const autoRefreshRef = useRef(null);
 
-  const headers = { Authorization: `Bearer ${token}` };
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     setDashboardError(null);
+    // The dashboard is an operational landing page, not a single all-or-nothing
+    // API request. A slow activity feed or an optional module must not leave a
+    // technician staring at an endless loader while the core queue is available.
+    const headers = { Authorization: `Bearer ${token}` };
+    const dashboardGet = (path, fallback) => axios
+      .get(`${API}${path}`, { headers, timeout: 8000 })
+      .then(response => response.data)
+      .catch(() => fallback);
     try {
-      const [statsRes, trendsRes, alertsRes, ticketsRes, activityRes, enhancedRes, devicesRes, missionRes, brainRes] = await Promise.all([
-        axios.get(`${API}/dashboard/stats`, { headers }),
-        axios.get(`${API}/dashboard/ticket-trends`, { headers }),
-        axios.get(`${API}/alerts?status=active`, { headers }),
-        axios.get(`${API}/tickets?status=open`, { headers }),
-        axios.get(`${API}/dashboard/activity-feed?limit=15`, { headers }),
+      const [statsData, trendsData, alertsData, ticketsData, activityData, enhancedData, devicesData, missionData, brainData] = await Promise.all([
+        dashboardGet("/dashboard/stats", { open_tickets: 0 }),
+        dashboardGet("/dashboard/ticket-trends", []),
+        dashboardGet("/alerts?status=active", []),
+        dashboardGet("/tickets?status=open", []),
+        dashboardGet("/dashboard/activity-feed?limit=15", []),
         // Enhanced financial widgets must never prevent the core operational
         // dashboard from loading when an imported record is incomplete.
-        axios.get(`${API}/dashboard/enhanced-stats`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/devices`, { headers }),
-        axios.get(`${API}/mission-control/overview`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/mission-control/brain`, { headers }).catch(() => ({ data: null })),
+        dashboardGet("/dashboard/enhanced-stats", null),
+        dashboardGet("/devices", []),
+        dashboardGet("/mission-control/overview", null),
+        dashboardGet("/mission-control/brain", null),
       ]);
-      setStats(statsRes.data);
-      setEnhancedStats(enhancedRes.data || null);
-      setTicketTrends(trendsRes.data);
-      const liveAgentAlerts = (devicesRes.data || [])
+      setStats(statsData || { open_tickets: 0 });
+      setEnhancedStats(enhancedData || null);
+      setTicketTrends(Array.isArray(trendsData) ? trendsData : []);
+      const resolvedDevices = Array.isArray(devicesData) ? devicesData : [];
+      const liveAgentAlerts = resolvedDevices
         .filter(device => device.security_assessed_at)
         .flatMap(device => {
           const pending = Number(device.pending_patches || 0);
@@ -143,23 +150,23 @@ export default function DashboardPage() {
           if (pending > 0) items.push({ id: `agent-patches-${device.id}`, device_id: device.id, device_name: device.name, severity: pending > 10 ? "critical" : "warning", title: "Pending Windows updates", message: `${device.name}: ${pending} pending update${pending === 1 ? "" : "s"}`, source: "nexus-agent" });
           return items;
         });
-      setAlerts([...(alertsRes.data || []), ...liveAgentAlerts]);
-      setTickets(ticketsRes.data.slice(0, 8));
-      setActivityFeed(activityRes.data);
-      setDevices(devicesRes.data);
-      setMissionControl(missionRes.data);
-      setNexusBrain(brainRes.data);
+      setAlerts([...(Array.isArray(alertsData) ? alertsData : []), ...liveAgentAlerts]);
+      setTickets((Array.isArray(ticketsData) ? ticketsData : []).slice(0, 8));
+      setActivityFeed(Array.isArray(activityData) ? activityData : []);
+      setDevices(resolvedDevices);
+      setMissionControl(missionData);
+      setNexusBrain(brainData);
 
-      const [backupRes, predRes, compFwRes] = await Promise.all([
-        axios.get(`${API}/backup-dashboard/overview`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/predictive-failure/overview`, { headers }).catch(() => ({ data: null })),
-        axios.get(`${API}/compliance-frameworks/overview`, { headers }).catch(() => ({ data: null })),
+      const [backupData, predictiveData, complianceData] = await Promise.all([
+        dashboardGet("/backup-dashboard/overview", null),
+        dashboardGet("/predictive-failure/overview", null),
+        dashboardGet("/compliance-frameworks/overview", null),
       ]);
       setMspIntel({
-        backup: backupRes.data?.summary,
-        urgentPredictions: (predRes.data?.predictions || []).filter(p => p.days_until_failure <= 7),
-        complianceFw: compFwRes.data?.summary,
-        frameworks: compFwRes.data?.frameworks,
+        backup: backupData?.summary,
+        urgentPredictions: (Array.isArray(predictiveData?.predictions) ? predictiveData.predictions : []).filter(p => p.days_until_failure <= 7),
+        complianceFw: complianceData?.summary,
+        frameworks: complianceData?.frameworks,
       });
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
@@ -167,7 +174,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
   // Dashboard widget layout — persisted per user in localStorage
   const [editMode, setEditMode] = useState(false);
@@ -224,11 +231,11 @@ export default function DashboardPage() {
   })();
   const hiddenList = Object.keys(WIDGET_META).filter(id => hiddenWidgets.has(id));
 
-  useEffect(() => { fetchDashboardData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchDashboardData(); }, [fetchDashboardData]);
   useEffect(() => {
     autoRefreshRef.current = setInterval(fetchDashboardData, 60000);
     return () => clearInterval(autoRefreshRef.current);
-  }, []);
+  }, [fetchDashboardData]);
 
   if (loading) {
     return <WorkspaceLoadingState label="Loading your operational view" className="space-y-6" />;
@@ -734,7 +741,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="p-0 px-3">
             <ScrollArea className="h-[240px]">
-              {activityFeed.length > 0 ? activityFeed.map((item, i) => {
+              {activityFeed.length > 0 ? activityFeed.map((item) => {
                 const iconMap = { ticket_note: MessageSquare, ticket_created: Ticket, ticket_email: Mail, alert: AlertTriangle };
                 const colorMap = { ticket_note: "text-indigo-400", ticket_created: "text-cyan-400", ticket_email: "text-sky-400", alert: "text-amber-400" };
                 const bgMap = { ticket_note: "bg-indigo-500/10", ticket_created: "bg-cyan-500/10", ticket_email: "bg-sky-500/10", alert: "bg-amber-500/10" };
