@@ -11,8 +11,11 @@ from __future__ import annotations
 import os
 import uuid
 import base64
+import ipaddress
+import socket
 from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 import httpx
@@ -168,6 +171,16 @@ def _wordpress_api_url(value: str) -> str:
     clean = value.strip().rstrip("/")
     if not clean.startswith("https://"):
         raise HTTPException(status_code=400, detail="WordPress management connections must use HTTPS")
+    parsed = urlparse(clean)
+    host = parsed.hostname
+    if not host or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise HTTPException(status_code=400, detail="WordPress connection URL must use a public HTTPS host")
+    try:
+        addresses = {item[4][0] for item in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+    except socket.gaierror as exc:
+        raise HTTPException(status_code=400, detail="WordPress connection host could not be resolved") from exc
+    if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
+        raise HTTPException(status_code=400, detail="WordPress management connections cannot target private or reserved network addresses")
     return clean if clean.endswith("/wp-json") else f"{clean}/wp-json"
 
 
