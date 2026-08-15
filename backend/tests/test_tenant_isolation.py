@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, clients_contacts, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, clients_contacts, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_agent, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -1233,3 +1233,25 @@ def test_restricted_technician_cannot_read_foreign_client_contacts(monkeypatch):
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "client.contact.access"
+
+
+def test_expired_agent_installer_capability_is_not_downloadable(monkeypatch):
+    class Installers:
+        async def find_one(self, _query):
+            return {
+                "id": "installer-1",
+                "download_token": "expired-token",
+                "is_deleted": False,
+                "download_expires_at": "2020-01-01T00:00:00+00:00",
+            }
+
+    monkeypatch.setattr(
+        nexus_agent,
+        "db",
+        type("AgentDB", (), {"nexus_agent_installers": Installers()})(),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(nexus_agent.installer_download("expired-token"))
+
+    assert exc.value.status_code == 404

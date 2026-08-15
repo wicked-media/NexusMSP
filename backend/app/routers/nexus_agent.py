@@ -59,6 +59,10 @@ router = APIRouter(tags=["NexusOps Agent"])
 ONLINE_WINDOW_SECONDS = 180
 MAX_FLEET_TARGETS = 200
 COMMAND_AUTHORIZATION_TTL_SECONDS = 300
+INSTALLER_DOWNLOAD_TTL_HOURS = min(
+    max(int(os.environ.get("NEXUS_AGENT_INSTALLER_DOWNLOAD_TTL_HOURS", "24")), 1),
+    24 * 30,
+)
 
 # Where the compiled Windows agent binary lives. Production can set
 # NEXUS_AGENT_BINARY; local development uses the repository's agent/dist.
@@ -295,6 +299,16 @@ def _storage_get(path: str) -> bytes | None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _timestamp_has_expired(value: Any) -> bool:
+    """Fail closed when a capability timestamp is absent or malformed."""
+    if not value:
+        return True
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) <= datetime.now(timezone.utc)
+    except (TypeError, ValueError):
+        return True
 
 
 def _online_cutoff() -> str:
@@ -2143,6 +2157,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "download_token": download_token,
         "size_bytes": len(zip_bytes),
         "created_at": _now(),
+        "download_expires_at": (datetime.now(timezone.utc) + timedelta(hours=INSTALLER_DOWNLOAD_TTL_HOURS)).isoformat(),
         "created_by": user.get("email") or user.get("id"),
         "agent_version": AGENT_VERSION,
         "package_format": "zip",
@@ -2190,6 +2205,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     return {
         "id": manifest["id"],
         "download_url": f"{api_base}/api/nexus-agent/installers/{download_token}/download",
+        "download_expires_at": manifest["download_expires_at"],
         "filename": f"NexusOpsAgent_{client['name'].replace(' ', '_')}.zip",
         "size_bytes": len(zip_bytes),
         "agent_version": AGENT_VERSION,
@@ -2214,6 +2230,11 @@ async def installer_download(token: str):
     manifest = await db.nexus_agent_installers.find_one({"download_token": token, "is_deleted": False})
     if not manifest:
         raise HTTPException(404, "installer not found")
+    if _timestamp_has_expired(manifest.get("download_expires_at")):
+        # Deliberately do not distinguish a stale capability from a bad token.
+        # An administrator can create a fresh package without extending an old
+        # public URL that may have been forwarded or logged elsewhere.
+        raise HTTPException(404, "installer not found")
     # Try storage first, fall back to live-rebuild
     zip_bytes: bytes | None = None
     if manifest.get("storage_path"):
@@ -2234,6 +2255,18 @@ async def installer_download(token: str):
             poll_secs=int(manifest.get("poll_secs") or 10),
         )
     filename = f"NexusOpsAgent_{manifest['client_name'].replace(' ', '_')}.zip"
+    await db.nexus_agent_installers.update_one(
+        {"id": manifest["id"]},
+        {
+            "$set": {"last_downloaded_at": _now()},
+            "$inc": {"download_count": 1},
+        },
+    )
+    await _audit(db, "installer_downloaded", {
+        "installer_id": manifest["id"],
+        "client_id": manifest.get("client_id"),
+        "download_count_increment": 1,
+    })
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=zip_bytes, media_type="application/zip", headers=headers)
 
