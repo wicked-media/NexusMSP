@@ -13,6 +13,7 @@ import uuid
 import base64
 import ipaddress
 import socket
+import time
 from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlparse
@@ -167,7 +168,7 @@ def _open_web_secret(value: str) -> str:
         raise HTTPException(status_code=503, detail="The WordPress connection credential is unavailable") from exc
 
 
-def _wordpress_api_url(value: str) -> str:
+def _public_https_url(value: str, *, wordpress_api: bool = False) -> str:
     clean = value.strip().rstrip("/")
     if not clean.startswith("https://"):
         raise HTTPException(status_code=400, detail="WordPress management connections must use HTTPS")
@@ -181,7 +182,28 @@ def _wordpress_api_url(value: str) -> str:
         raise HTTPException(status_code=400, detail="WordPress connection host could not be resolved") from exc
     if not addresses or any(not ipaddress.ip_address(address).is_global for address in addresses):
         raise HTTPException(status_code=400, detail="WordPress management connections cannot target private or reserved network addresses")
-    return clean if clean.endswith("/wp-json") else f"{clean}/wp-json"
+    if wordpress_api:
+        return clean if clean.endswith("/wp-json") else f"{clean}/wp-json"
+    return clean
+
+
+def _wordpress_api_url(value: str) -> str:
+    return _public_https_url(value, wordpress_api=True)
+
+
+async def _website_health(site: dict) -> dict:
+    base_url = site.get("site_url") or f"https://{site.get('primary_domain') or ''}"
+    target = _public_https_url(base_url)
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+            response = await client.get(target, headers={"User-Agent": "NexusMSP-WebsiteHealth/1.0"})
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        return {"status": "healthy" if 200 <= response.status_code < 400 else "degraded", "http_status": response.status_code,
+                "latency_ms": latency_ms, "checked_at": _now(), "url": target}
+    except httpx.HTTPError as exc:
+        return {"status": "unreachable", "http_status": None, "latency_ms": round((time.perf_counter() - started) * 1000),
+                "checked_at": _now(), "url": target, "error": str(exc.__class__.__name__)}
 
 
 async def _wordpress_inventory(site: dict) -> dict:
@@ -302,6 +324,15 @@ async def connect_wordpress_site(site_id: str, payload: WordPressConnectionInput
     return {"site_id": site_id, "connected": True, "api_url": api_url, "username": connection["username"]}
 
 
+@router.post("/web-studio/sites/{site_id}/health-check")
+async def health_check_web_site(site_id: str, user: dict = Depends(get_current_user)):
+    """Safely record public website availability as Web Studio evidence."""
+    site = await _site_or_404(site_id, user, "web_studio.health_check")
+    health = await _website_health(site)
+    await db.web_sites.update_one({"id": site_id}, {"$set": {"website_health": health, "last_health_check_at": health["checked_at"], "updated_at": _now()}})
+    return health
+
+
 @router.post("/web-studio/sites/{site_id}/wordpress/actions")
 async def request_wordpress_action(site_id: str, payload: WordPressActionInput, user: dict = Depends(require_action("synergy.wholesale.manage"))):
     """Inventory is read-only; all update work is independently approved."""
@@ -337,6 +368,7 @@ async def get_wordpress_management(site_id: str, user: dict = Depends(get_curren
     inventory = site.get("wordpress_inventory") or {}
     actions = await db.web_provider_actions.find(scoped_query(user, {"site_id": site_id, "provider": "wordpress"}), {"_id": 0, "parameters_encrypted": 0}).sort("created_at", -1).to_list(50)
     return {"site_id": site_id, "client_id": site.get("client_id"), "billing": {key: site.get(key) for key in ("service_plan", "agreement_id", "billing_status", "monthly_fee", "renewal_date")},
+            "health": site.get("website_health") or {},
             "connection": {"connected": bool(connection), "api_url": connection.get("api_url"), "username": connection.get("username")}, "inventory": inventory, "actions": actions}
 
 
