@@ -1,27 +1,29 @@
-# Login visual QA
+# Login redesign QA
 
 ## Comparison target
 
-- **Source visual truth:** `C:\Users\aaron\.codex\codex-remote-attachments\019f6520-eee3-7151-8cbe-5092fae9dcae\D64C20B4-63BB-46E2-9F27-31794383C4B2\1-Photo-1.jpg` (the user-supplied Nexus MSP visual direction).
-- **Refined brand artwork:** `frontend/public/brand/nexus-login-beacon.png`, generated from the supplied image to preserve its metallic Nexus monogram, globe and cyan orbital language while removing the source image's white poster background and excess copy.
-- **Implementation capture:** `C:\Users\aaron\Documents\Codex\NexusMSP\design-qa-login.png`, browser-rendered from `http://localhost:3000/login?preview=1&experience=classic` at 1280 × 720 CSS pixels.
-- **State:** desktop, default NexusMSP brand, idle sign-in state with blank inputs.
+- **Source visual truth:** `C:\Users\aaron\.codex\generated_images\019f6520-eee3-7151-8cbe-5092fae9dcae\exec-abdd2f33-646b-4f64-aa96-b7a3574e262d.png` — the selected second login direction.
+- **Implementation capture:** `C:\Users\aaron\Documents\Codex\NexusMSP\login-redesign-option-2.png`, browser-rendered from `http://localhost:3000/login` at 1040 × 912 CSS pixels.
+- **Combined evidence:** `C:\Users\aaron\Documents\Codex\NexusMSP\login-design-comparison.png` — source and implementation shown side by side for review.
+- **State:** desktop, default NexusMSP brand, idle sign-in state.
 
 ## Full-view comparison
 
-The first implementation treated the original square artwork as a left-side hero, but exposed the source image's white canvas. A later single-card version was calm but did not adequately represent the breadth of the Nexus platform. The final implementation uses the clean dark beacon in a dedicated left operational showcase, with live signal indicators and a clear platform message. The right side remains a deliberately quiet sign-in surface.
+The selected direction established a restrained split: a living global network on the left and one calm, focused authentication path on the right. The implementation keeps that hierarchy, deliberately expands the network visual beyond the original framed panel, and uses the dedicated text-free globe artwork so the left side never repeats form content. This is an intentional improvement requested during the implementation review.
 
 ## Focused-region comparison
 
-The left showcase was compared with the supplied artwork's core traits: angular silver/black N, cyan energy trail and globe/network context. The refined asset retains those visual traits with a seamless deep-space background. The sign-in region was checked separately for legible labels, visible input boundaries, primary-action contrast and above-the-fold completion.
+- **Operations visual:** The dedicated globe asset provides the target's dark-earth, cyan-arc language without copied UI or typography. Its slow 30-second roll, saturation shift and pulsing aura make it feel active without interrupting sign-in.
+- **Nexus MSP lock-up:** The existing product mark remains authoritative; its wordmark receives a subtle cyan light sweep and the MSP badge pulses softly. No synthetic logo drawing was introduced.
+- **Authentication:** The existing form hierarchy, field behaviour, password visibility control, validation path and primary action are preserved. It remains fully visible at the tested desktop viewport.
 
 ## Required fidelity surfaces
 
-- **Fonts and typography:** Product typography remains restrained and readable. The brand image carries the expressive identity; operational copy remains calm and easy to scan.
-- **Spacing and layout rhythm:** The left showcase has a dedicated visual band, clear signal chips and a stable message hierarchy. The right card fits fully at the tested 720 px viewport and has one clear sign-in path.
-- **Colours and visual tokens:** Deep navy/near-black, cyan and cobalt are taken directly from the supplied visual. Green remains reserved for positive security status instead of competing with the brand palette.
-- **Image quality and asset fidelity:** The supplied artwork informed the generated dark beacon asset; no white canvas, poster border or improvised logo drawing remains. The visual is a real raster asset rather than CSS-drawn branding.
-- **Copy and content:** The familiar sign-in wording is retained. The left copy makes the platform promise explicit without putting marketing content inside the authentication workflow.
+- **Fonts and typography:** Clear display hierarchy, compact uppercase security signal, readable 14–16 px body/form copy, and a restrained animated treatment for Nexus rather than novelty motion.
+- **Spacing and layout rhythm:** The page uses one visual field and one authentication region. The globe has room to breathe; the sign-in card has one obvious path and no competing action.
+- **Colours and visual tokens:** Deep navy/graphite base, cyan/blue operations lighting, and green reserved for the security affirmation. The visual remains high-contrast without turning the entire page neon.
+- **Image quality and asset fidelity:** A dedicated full-resolution text-free global-network raster asset is used. The prior composite mock was rejected because it duplicated form content in the visual region.
+- **Copy and content:** "Operate with clarity." gives the left side a concise promise. The existing trusted sign-in copy remains unchanged on the right.
 
 ## Findings
 
@@ -29,29 +31,31 @@ No actionable P0, P1 or P2 findings remain in the tested desktop state.
 
 ### P3 follow-up polish
 
-- Produce an approved transparent/vector master of the Nexus monogram before using this new visual in favicons, tray icons or print assets.
+- Confirm the final Nexus wordmark treatment against a future approved vector brand kit before using the animated treatment in external marketing material.
 
 ## Interaction and runtime checks
 
 - Email, password, password-visibility control and sign-in action render visibly.
 - The local-account helper remains available in local development.
 - Browser console errors: none observed.
-- The existing reduced-motion override covers the new beacon animation.
+- The operations globe and wordmark animation are present; `prefers-reduced-motion` disables the new motion safely.
 
 ## Comparison history
 
-1. Initial left-column crop was visually busy and retained the source image's white outer canvas.
-2. A clean dark brand asset was created from the supplied visual direction.
-3. The logo was returned to a detailed left-side operational showcase, with a subtle float animation and live platform signal chips.
-4. The authentication workflow was moved back to a dedicated right-side card.
-5. The final browser render confirmed the full screen is balanced and free of console errors.
+1. The preceding left-side logo showcase was rejected as too busy and insufficiently representative of Nexus.
+2. Three new visual directions were generated; the second was selected.
+3. The first implementation reused a composite mock and exposed duplicated authentication content inside the globe region — a P1 visual defect.
+4. A dedicated text-free operations globe was generated and substituted.
+5. The globe visual was expanded and masked into the page background; the legacy green particle field was removed entirely so no competing animation remains.
+6. Final browser capture, form visibility check and console check passed.
 
 ## Implementation checklist
 
-- [x] Preserve the supplied Nexus logo's central visual language.
-- [x] Create a detailed animated left-side platform showcase.
-- [x] Keep authentication isolated in a clear right-side card.
-- [x] Keep motion subtle and reduced-motion safe.
-- [x] Verify the rendered login and browser console.
+- [x] Rebuild the login composition around the selected direction.
+- [x] Keep authentication on the right and preserve its workflow.
+- [x] Introduce a dedicated animated global operations visual.
+- [x] Add restrained animated Nexus MSP wordmark treatment.
+- [x] Remove duplicate/mock UI from the visual region.
+- [x] Verify desktop render, controls and browser console.
 
 final result: passed
