@@ -125,3 +125,27 @@ No actionable P0, P1 or P2 findings remain in the tested desktop state.
 - [x] Verify desktop render, controls and browser console.
 
 final result: passed
+
+## Login experience template collection — 2026-08-15
+
+### Comparison target
+
+- **Template sources:** `frontend/public/login-experiences/orbital-gallery.png`, `frontend/public/login-experiences/signal-horizon.png`, and `frontend/public/login-experiences/nexus-atelier.png`.
+- **Rendered routes:** `http://localhost:3000/login?preview=1&experience=orbital-gallery`, `http://localhost:3000/login?preview=1&experience=signal-horizon`, and `http://localhost:3000/login?preview=1&experience=nexus-atelier`.
+- **State:** desktop preview, NexusMSP identity and live idle sign-in controls.
+
+### Result
+
+- Added all three selected visual directions to the Settings login-template picker.
+- **Nexus Atelier** is the default template for new and reset branding profiles; a saved tenant choice remains respected.
+- Every template keeps the same real email/password sign-in form, password visibility control, validation, and security messaging. No authentication UI is baked into the artwork.
+- Nexus Atelier uses a centred identity composition, restrained orbital movement and a single sign-in card with clear visual hierarchy.
+- Orbital Gallery and Signal Horizon retain separate left identity stages with a right-side authentication card.
+
+### Runtime checks
+
+- Each preview route reported the expected `data-login-experience` value.
+- Each rendered two login inputs.
+- Browser console errors: none observed for all three template routes.
+
+**final result: passed**

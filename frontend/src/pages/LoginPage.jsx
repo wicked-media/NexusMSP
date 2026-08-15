@@ -8,7 +8,7 @@ import { Eye, EyeOff, ArrowRight, Loader2, ShieldCheck, Moon, Sun, CloudSun, Sun
 import { toast } from "sonner";
 import axios from "axios";
 
-const EXPERIENCE_IDS = ["classic", "constellation", "theatre", "calm", "hero-monogram", "orbital-signature"];
+const EXPERIENCE_IDS = ["classic", "constellation", "theatre", "calm", "hero-monogram", "orbital-signature", "orbital-gallery", "signal-horizon", "nexus-atelier"];
 const TYPED_TEXTS = ["Command Center", "NOC Dashboard", "Service Desk", "Asset Manager", "Security Hub"];
 const NEXUS_LOGIN_STATEMENTS = [
   { lead: "Operate with", accent: "clarity." },
@@ -53,6 +53,24 @@ const EXPERIENCE_CONTENT = {
     title: "Welcome to the",
     accent: "autonomous MSP.",
     supporting: "A calm, secure entry into the work that matters most.",
+  },
+  "orbital-gallery": {
+    eyebrow: "Orbital gallery",
+    title: "Operate with",
+    accent: "clarity.",
+    supporting: "One considered workspace for every technician, signal and customer action.",
+  },
+  "signal-horizon": {
+    eyebrow: "Signal horizon",
+    title: "Your operations,",
+    accent: "in focus.",
+    supporting: "A disciplined entry point for secure, accountable service delivery.",
+  },
+  "nexus-atelier": {
+    eyebrow: "Nexus atelier",
+    title: "Welcome to the",
+    accent: "autonomous MSP.",
+    supporting: "A calm, elegant start to your Nexus operational workspace.",
   },
 };
 
@@ -134,15 +152,16 @@ export default function LoginPage() {
   const [twoFactorRequired, setTwoFactorRequired] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [wallpaper, setWallpaper] = useState(null);
-  const [brand, setBrand] = useState({ company_name: "NexusMSP", login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"], login_experience: "classic", powered_by_visible: true });
+  const [brand, setBrand] = useState({ company_name: "NexusMSP", login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"], login_experience: "nexus-atelier", powered_by_visible: true });
   const isLocalPreview = ["localhost", "127.0.0.1"].includes(window.location.hostname);
   const previewMode = searchParams.get("preview") === "1";
   const requestedExperience = searchParams.get("experience");
-  const savedExperience = EXPERIENCE_IDS.includes(brand.login_experience) ? brand.login_experience : "classic";
+  const savedExperience = EXPERIENCE_IDS.includes(brand.login_experience) ? brand.login_experience : "nexus-atelier";
   const experience = previewMode && EXPERIENCE_IDS.includes(requestedExperience) ? requestedExperience : savedExperience;
   const experienceContent = EXPERIENCE_CONTENT[experience];
   const isNexusBrand = !brand.company_logo_url && (brand.company_name || "NexusMSP").replace(/\s/g, "").toLowerCase() === "nexusmsp";
-  const isPremiumNexusExperience = isNexusBrand && ["hero-monogram", "orbital-signature"].includes(experience);
+  const isPremiumNexusExperience = isNexusBrand && ["hero-monogram", "orbital-signature", "orbital-gallery", "signal-horizon", "nexus-atelier"].includes(experience);
+  const isAtelierExperience = isPremiumNexusExperience && experience === "nexus-atelier";
 
   const typedText = useTypingEffect(TYPED_TEXTS, 90, 2200);
 
@@ -306,13 +325,13 @@ export default function LoginPage() {
       )}
 
       {/* Nexus Operations Stage */}
-      <div className={`login-story-panel nexus-login-stage hidden lg:flex relative z-10 ${experience === "classic" ? "lg:w-[57%]" : isPremiumNexusExperience ? "lg:w-[63%]" : experience === "calm" ? "lg:w-[65%]" : "lg:w-[64%]"}`}>
+      <div className={`login-story-panel nexus-login-stage hidden lg:flex relative z-10 ${isAtelierExperience ? "nexus-atelier-stage lg:absolute lg:inset-0 lg:w-full" : experience === "classic" ? "lg:w-[57%]" : isPremiumNexusExperience ? "lg:w-[63%]" : experience === "calm" ? "lg:w-[65%]" : "lg:w-[64%]"}`}>
         <div className="relative flex w-full flex-col justify-between overflow-hidden p-10 xl:p-14 2xl:p-16">
           {!isPremiumNexusExperience && <BrandMark brand={brand} />}
           {isPremiumNexusExperience && (
             <div className={`nexus-premium-stage nexus-premium-stage-${experience}`} aria-label={`${experience === "hero-monogram" ? "Hero Monogram" : "Orbital Signature"} Nexus MSP login experience`}>
               <img src={`/login-experiences/${experience}.png`} alt="Nexus MSP premium identity with a networked globe, luminous orbital paths and the Nexus mark" className="nexus-premium-art" />
-              <img src={`/login-experiences/${experience}.png`} alt="" aria-hidden="true" className="nexus-premium-monogram-glow" />
+              {["hero-monogram", "orbital-signature"].includes(experience) && <img src={`/login-experiences/${experience}.png`} alt="" aria-hidden="true" className="nexus-premium-monogram-glow" />}
               <div className="nexus-premium-vignette" aria-hidden="true" />
               <p key={`${experience}-${nexusStatementIndex}`} className="nexus-premium-live" aria-live="polite">
                 <span>Live Nexus operations</span>
@@ -425,7 +444,7 @@ export default function LoginPage() {
           {/* Mobile Logo */}
           <div className="lg:hidden mb-10 flex justify-center"><BrandMark brand={brand} compact /></div>
 
-          <div className={`login-auth-panel overflow-hidden rounded-2xl border ${isPremiumNexusExperience ? "border-cyan-300/20 bg-[#050c18]/80" : "border-emerald-400/15 bg-zinc-950/70"} backdrop-blur-xl shadow-2xl shadow-black/30 ${isLoading ? "is-authenticating" : ""} ${experience === "calm" ? "rounded-l-none border-l-emerald-300/50" : ""}`} style={{ animation: "fadeSlideIn 0.7s ease-out 0.1s both" }}>
+          <div className={`login-auth-panel overflow-hidden rounded-2xl border ${isPremiumNexusExperience ? "border-cyan-300/20 bg-[#050c18]/80" : "border-emerald-400/15 bg-zinc-950/70"} backdrop-blur-xl shadow-2xl shadow-black/30 ${isLoading ? "is-authenticating" : ""} ${experience === "calm" ? "rounded-l-none border-l-emerald-300/50" : ""} ${isAtelierExperience ? "nexus-atelier-auth-panel" : ""}`} style={{ animation: "fadeSlideIn 0.7s ease-out 0.1s both" }}>
           <div className={`login-auth-header border-b border-emerald-400/10 bg-gradient-to-br from-emerald-400/[0.08] via-transparent to-cyan-400/[0.04] px-8 ${isNexusBrand ? "py-4" : "py-6"}`}>
               <p className="login-auth-signal text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Secure workspace access</p>
               <h2 className="login-auth-title mt-1 text-2xl font-semibold text-white">Welcome back</h2>
@@ -605,11 +624,23 @@ export default function LoginPage() {
         .nexus-premium-monogram-glow { position:absolute; inset:0; width:100%; height:100%; padding:clamp(.25rem,.9vw,1rem) clamp(1.75rem,4vw,5rem); object-fit:contain; object-position:50% 50%; pointer-events:none; mix-blend-mode:screen; clip-path:inset(19% 23% 39% 23%); opacity:.12; filter:contrast(1.45) saturate(3) brightness(1.8) drop-shadow(0 0 8px rgba(17,205,255,.94)) drop-shadow(0 0 24px rgba(31,134,255,.6)); animation:nexusPremiumNeonDrift 18s cubic-bezier(.45,.05,.55,.95) infinite alternate, nexusPremiumMonogramNeon 4.8s ease-in-out infinite; will-change:transform,opacity,filter; }
         .nexus-premium-stage-hero-monogram .nexus-premium-art { animation-duration:22s; }
         .nexus-premium-stage-hero-monogram .nexus-premium-monogram-glow { animation-duration:22s,5.6s; }
+        .nexus-premium-stage-orbital-gallery .nexus-premium-art,
+        .nexus-premium-stage-signal-horizon .nexus-premium-art { padding:0; object-fit:cover; object-position:center; animation-duration:26s; }
+        .login-experience-orbital-gallery .nexus-premium-live,
+        .login-experience-signal-horizon .nexus-premium-live,
+        .login-experience-nexus-atelier .nexus-premium-live { display:none; }
+        .login-experience-nexus-atelier .nexus-login-stage::after { display:none; }
+        .login-experience-nexus-atelier .nexus-login-stage { transform:none !important; background:transparent; }
+        .login-experience-nexus-atelier .nexus-premium-stage { background:#020611; }
+        .login-experience-nexus-atelier .nexus-premium-art { padding:clamp(1rem,3vw,3rem); object-fit:contain; object-position:50% 0%; animation:nexusAtelierFloat 22s cubic-bezier(.45,.05,.55,.95) infinite alternate; }
+        .login-experience-nexus-atelier .login-auth-stage { position:absolute; z-index:20; inset:43% 0 0; align-items:flex-start; padding-top:1rem; transform:none !important; pointer-events:none; }
+        .login-experience-nexus-atelier .nexus-atelier-auth-panel { width:min(100%,28rem); pointer-events:auto; border-color:rgba(86,207,255,.28); background:linear-gradient(145deg,rgba(3,10,24,.84),rgba(2,5,14,.94)); box-shadow:0 30px 90px rgba(0,0,0,.55),0 0 44px rgba(33,160,255,.08); }
         .nexus-premium-vignette { position:absolute; inset:0; background:linear-gradient(90deg,rgba(2,6,18,.08),transparent 60%,rgba(2,6,18,.74)),linear-gradient(0deg,rgba(2,6,18,.16),transparent 32%); pointer-events:none; }
         .nexus-premium-live { position:absolute; z-index:2; left:clamp(2rem,4vw,4.5rem); top:clamp(2.2rem,5vh,4rem); max-width:17rem; margin:0; color:rgba(241,251,255,.98); font-size:clamp(1.2rem,1.85vw,2rem); font-weight:600; line-height:1.06; letter-spacing:-.045em; text-shadow:0 8px 30px rgba(0,0,0,.58); animation:nexusStatementIn .72s cubic-bezier(.2,.78,.2,1) both; }
         .nexus-premium-live span { display:block; margin-bottom:.55rem; color:rgba(102,220,255,.8); font-size:.58rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; }
         .nexus-premium-live strong { background:linear-gradient(100deg,#59dff5,#d4faff,#4a7eff,#59dff5); background-size:240% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; font-weight:inherit; animation:nexusWordmarkSweep 6.5s ease-in-out infinite; }
         @keyframes nexusPremiumFloat { 0% { transform:scale(1.06) translate3d(-.35%,.22%,0); filter:saturate(.92) brightness(.91); } 52% { transform:scale(1.085) translate3d(.45%,-.34%,0); filter:saturate(1.07) brightness(1.02); } 100% { transform:scale(1.068) translate3d(-.12%,-.12%,0); filter:saturate(.98) brightness(.95); } }
+        @keyframes nexusAtelierFloat { 0% { transform:scale(.88) translate3d(0,-10%,0); filter:saturate(.94) brightness(.94); } 52% { transform:scale(.91) translate3d(.25%,-11.5%,0); filter:saturate(1.08) brightness(1.03); } 100% { transform:scale(.89) translate3d(-.15%,-10.5%,0); filter:saturate(.98) brightness(.97); } }
         @keyframes nexusPremiumNeonDrift { 0% { transform:scale(1.06) translate3d(-.35%,.22%,0); } 52% { transform:scale(1.085) translate3d(.45%,-.34%,0); } 100% { transform:scale(1.068) translate3d(-.12%,-.12%,0); } }
         @keyframes nexusPremiumMonogramNeon { 0%,100% { opacity:.08; filter:contrast(1.2) saturate(1.7) brightness(1.22) drop-shadow(0 0 4px rgba(17,205,255,.42)); } 42% { opacity:.42; filter:contrast(1.55) saturate(3.2) brightness(1.96) drop-shadow(0 0 11px rgba(17,205,255,1)) drop-shadow(0 0 30px rgba(31,134,255,.72)); } 58% { opacity:.26; filter:contrast(1.38) saturate(2.45) brightness(1.58) drop-shadow(0 0 8px rgba(17,205,255,.82)) drop-shadow(0 0 21px rgba(31,134,255,.48)); } }
         @keyframes nexusPremiumSweep { 0%,20% { transform:translateX(-42%) rotate(-8deg); opacity:0; } 36%,62% { opacity:1; } 80%,100% { transform:translateX(42%) rotate(-8deg); opacity:0; } }

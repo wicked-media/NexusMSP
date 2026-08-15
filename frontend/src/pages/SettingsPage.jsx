@@ -136,7 +136,7 @@ export default function SettingsPage() {
     company_name: "NexusMSP", company_logo_url: "", company_icon_url: "",
     primary_color: "#10b981", secondary_color: "#8b5cf6", accent_color: "#06b6d4",
     login_tagline: "", login_features: ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"],
-    login_experience: "classic",
+    login_experience: "nexus-atelier",
     powered_by_visible: true, sidebar_style: "default",
     invoice_logo_url: "", invoice_header_text: "", invoice_footer_text: "",
     email_sender_name: "", email_footer_text: "", favicon_url: "",
@@ -729,8 +729,11 @@ export default function SettingsPage() {
                   { id: "calm", name: "Calm Command", description: "Quiet depth with a focused assurance path." },
                   { id: "hero-monogram", name: "Hero Monogram", description: "A bold Nexus mark suspended above the operational globe." },
                   { id: "orbital-signature", name: "Orbital Signature", description: "A refined orbital identity with the autonomous MSP message." },
+                  { id: "orbital-gallery", name: "Orbital Gallery", description: "A balanced horizon composition with a clear operational headline." },
+                  { id: "signal-horizon", name: "Signal Horizon", description: "A minimal signal ring and editorial sign-in experience." },
+                  { id: "nexus-atelier", name: "Nexus Atelier", description: "The default: a centred, elegant autonomous-MSP entrance." },
                 ].map(option => {
-                  const selected = (branding.login_experience || "classic") === option.id;
+                  const selected = (branding.login_experience || "nexus-atelier") === option.id;
                   return (
                     <div
                       key={option.id}

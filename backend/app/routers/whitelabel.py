@@ -10,7 +10,7 @@ from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
 
 router = APIRouter()
 
-LOGIN_EXPERIENCES = {"classic", "constellation", "theatre", "calm", "hero-monogram", "orbital-signature"}
+LOGIN_EXPERIENCES = {"classic", "constellation", "theatre", "calm", "hero-monogram", "orbital-signature", "orbital-gallery", "signal-horizon", "nexus-atelier"}
 
 UPLOAD_DIR = UPLOADS_DIR / "branding"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -60,7 +60,7 @@ async def get_branding_public(response: Response):
         "accent_color": b.get("accent_color", "#06b6d4"),
         "login_tagline": b.get("login_tagline", ""),
         "login_features": b.get("login_features", []),
-        "login_experience": b.get("login_experience", "classic") if b.get("login_experience", "classic") in LOGIN_EXPERIENCES else "classic",
+        "login_experience": b.get("login_experience", "nexus-atelier") if b.get("login_experience", "nexus-atelier") in LOGIN_EXPERIENCES else "nexus-atelier",
         "powered_by_visible": b.get("powered_by_visible", True),
     }
 
@@ -76,7 +76,7 @@ def _default_branding():
         "accent_color": "#06b6d4",
         "login_tagline": "Unified RMM & PSA platform for modern managed service providers",
         "login_features": ["RMM", "Ticketing", "Invoicing", "Networking", "Assets", "Reporting"],
-        "login_experience": "classic",
+        "login_experience": "nexus-atelier",
         "powered_by_visible": True,
         "sidebar_style": "default",
         "invoice_logo_url": "",
@@ -96,7 +96,7 @@ async def update_branding(data: dict, current_user: dict = Depends(get_current_u
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
-    if data.get("login_experience", "classic") not in LOGIN_EXPERIENCES:
+    if data.get("login_experience", "nexus-atelier") not in LOGIN_EXPERIENCES:
         raise HTTPException(status_code=400, detail="Unknown login experience")
     data["type"] = "branding"
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
