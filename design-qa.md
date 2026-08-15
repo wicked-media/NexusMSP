@@ -84,6 +84,37 @@ No actionable P0, P1 or P2 findings remain in the tested desktop state.
 - The selected stage motion is restrained and `prefers-reduced-motion` disables it.
 - Console errors: none observed during browser captures.
 
+## Premium stage scale refinement â€” 2026-08-15
+
+### Comparison target
+
+- **Source visual truth:** `frontend/public/login-experiences/hero-monogram.png` and `frontend/public/login-experiences/orbital-signature.png`.
+- **Implementation:** Browser-rendered `http://localhost:3000/login?preview=1&experience=hero-monogram` and `http://localhost:3000/login?preview=1&experience=orbital-signature` at 1280 × 720 CSS pixels, desktop, preview state.
+- **State:** idle sign-in form, default NexusMSP branding, motion enabled.
+
+### Findings and fixes
+
+1. **[P1 — fixed] Overscaled premium artwork.** The portrait identity artwork had been rendered with `object-fit: cover`, cutting away its intended breathing room and making the monogram visually dominate the login stage. It now uses a contained, centred composition with responsive stage padding so the N, globe, NEXUS MSP lock-up and autonomous-MSP statement remain proportionate.
+2. **[P2 — fixed] Competing stage copy.** The Hero Monogram variation overlaid a second changing statement on top of a complete brand artwork. The duplicate overlay was removed; the embedded identity lock-up is now the single focal point.
+3. **[P2 — fixed] Motion was too zoom-like.** The image movement now stays within a 2.2% scale range, with a gentle drift, saturation/bloom breathing and a slow light sweep. Reduced-motion settings disable all of it.
+
+### Required fidelity surfaces
+
+- **Fonts and typography:** No duplicate stage typography remains. NEXUS MSP artwork retains its designed lock-up; the auth panel keeps the existing readable product type hierarchy.
+- **Spacing and layout rhythm:** The left premium stage preserves the full identity composition and whitespace; the right sign-in card remains isolated and consistently proportioned.
+- **Colors and visual tokens:** Deep navy, cyan and cobalt remain dominant. The green security signal is limited to the assurance layer.
+- **Image quality and asset fidelity:** Existing purpose-built premium artwork is shown uncropped, without stretching or CSS-drawn replacement art.
+- **Copy and content:** Orbital Signature retains its embedded “Welcome to the autonomous MSP.” message. Hero Monogram has no repeated overlay copy.
+
+### Runtime checks
+
+- Both preview routes rendered with their selected `data-login-experience` values.
+- Login fields, password visibility control and sign-in action remained visible.
+- Browser console errors: none.
+- `LoginPage.jsx` lint: 0 errors, 0 warnings.
+
+**final result: passed**
+
 ## Implementation checklist
 
 - [x] Rebuild the login composition around the selected direction.

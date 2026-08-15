@@ -314,7 +314,6 @@ export default function LoginPage() {
               <img src={`/login-experiences/${experience}.png`} alt="Nexus MSP premium identity with a networked globe, luminous orbital paths and the Nexus mark" className="nexus-premium-art" />
               <div className="nexus-premium-vignette" aria-hidden="true" />
               <div className="nexus-premium-sweep" aria-hidden="true" />
-              {experience === "hero-monogram" && <p className="nexus-premium-live" aria-live="polite"><span>Live Nexus identity</span>{nexusStatement.lead} <strong>{nexusStatement.accent}</strong></p>}
             </div>
           )}
           {isNexusBrand && !isPremiumNexusExperience && (
@@ -597,15 +596,12 @@ export default function LoginPage() {
         .nexus-world-statement { animation:nexusStatementIn .7s cubic-bezier(.2,.78,.2,1) both; }
         .nexus-world-caption strong { background:linear-gradient(100deg,#59dff5,#d4faff,#50d9ff,#59dff5); background-size:240% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; font-weight:inherit; animation:nexusWordmarkSweep 6.5s ease-in-out infinite; }
         .nexus-world-caption span:last-child { display:block; max-width:16rem; margin-top:1rem; color:rgba(190,211,229,.62); font-size:.76rem; line-height:1.55; }
-        .nexus-premium-stage { position:absolute; inset:0; overflow:hidden; background:#030916; }
-        .nexus-premium-art { width:100%; height:100%; object-fit:cover; object-position:center; opacity:.97; animation:nexusPremiumFloat 22s cubic-bezier(.45,.05,.55,.95) infinite alternate; will-change:transform,filter; }
-        .nexus-premium-stage-hero-monogram .nexus-premium-art { object-position:center; animation-duration:26s; }
-        .nexus-premium-vignette { position:absolute; inset:0; background:linear-gradient(90deg,rgba(2,6,18,.05),transparent 63%,rgba(2,6,18,.82)),linear-gradient(0deg,rgba(2,6,18,.32),transparent 37%); pointer-events:none; }
-        .nexus-premium-sweep { position:absolute; inset:-30% -50%; pointer-events:none; background:linear-gradient(104deg,transparent 45%,rgba(126,237,255,.09) 50%,transparent 55%); mix-blend-mode:screen; animation:nexusPremiumSweep 10s ease-in-out infinite; }
-        .nexus-premium-live { position:absolute; left:clamp(2.5rem,5vw,5.5rem); top:clamp(4.8rem,10vh,8rem); max-width:22rem; margin:0; color:rgba(235,249,255,.97); font-size:clamp(1.35rem,2.25vw,2.4rem); font-weight:600; line-height:1.04; letter-spacing:-.05em; text-shadow:0 8px 38px rgba(0,0,0,.5); animation:nexusCaptionReveal .8s cubic-bezier(.2,.8,.2,1) .25s both; }
-        .nexus-premium-live span { display:block; margin-bottom:.7rem; color:rgba(114,223,255,.72); font-size:.61rem; font-weight:700; letter-spacing:.22em; text-transform:uppercase; }
-        .nexus-premium-live strong { background:linear-gradient(100deg,#59dff5,#d4faff,#4a7eff,#59dff5); background-size:240% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; font-weight:inherit; animation:nexusWordmarkSweep 6.5s ease-in-out infinite; }
-        @keyframes nexusPremiumFloat { 0% { transform:scale(1.03) translate3d(-.8%,.3%,0); filter:saturate(.88) brightness(.82); } 52% { transform:scale(1.08) translate3d(1.2%,-.7%,0); filter:saturate(1.12) brightness(1.02); } 100% { transform:scale(1.045) translate3d(-.2%,-.2%,0); filter:saturate(.96) brightness(.9); } }
+        .nexus-premium-stage { position:absolute; inset:0; overflow:hidden; background:radial-gradient(circle at 46% 48%,rgba(7,65,124,.22),transparent 39%),#030916; }
+        .nexus-premium-art { width:100%; height:100%; padding:clamp(.25rem,.9vw,1rem) clamp(1.75rem,4vw,5rem); object-fit:contain; object-position:50% 50%; opacity:.98; animation:nexusPremiumFloat 18s cubic-bezier(.45,.05,.55,.95) infinite alternate; will-change:transform,filter; }
+        .nexus-premium-stage-hero-monogram .nexus-premium-art { animation-duration:22s; }
+        .nexus-premium-vignette { position:absolute; inset:0; background:linear-gradient(90deg,rgba(2,6,18,.08),transparent 60%,rgba(2,6,18,.74)),linear-gradient(0deg,rgba(2,6,18,.16),transparent 32%); pointer-events:none; }
+        .nexus-premium-sweep { position:absolute; inset:-30% -50%; pointer-events:none; background:linear-gradient(104deg,transparent 46%,rgba(126,237,255,.12) 50%,transparent 54%); mix-blend-mode:screen; animation:nexusPremiumSweep 11s ease-in-out infinite; }
+        @keyframes nexusPremiumFloat { 0% { transform:scale(1) translate3d(-.35%,.22%,0); filter:saturate(.92) brightness(.91); } 52% { transform:scale(1.022) translate3d(.45%,-.34%,0); filter:saturate(1.07) brightness(1.02); } 100% { transform:scale(1.008) translate3d(-.12%,-.12%,0); filter:saturate(.98) brightness(.95); } }
         @keyframes nexusPremiumSweep { 0%,20% { transform:translateX(-42%) rotate(-8deg); opacity:0; } 36%,62% { opacity:1; } 80%,100% { transform:translateX(42%) rotate(-8deg); opacity:0; } }
         .nexus-wordmark { background:linear-gradient(105deg,#f8fbff 0%,#f8fbff 38%,#78e9ff 50%,#f8fbff 63%,#f8fbff 100%); background-size:220% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; animation:nexusWordmarkSweep 9s ease-in-out infinite; }
         .nexus-wordmark-badge { animation:nexusBadgeSignal 5s ease-in-out infinite; }
@@ -656,7 +652,7 @@ export default function LoginPage() {
         .ribbon-item:hover .ribbon-live-icon { filter:drop-shadow(0 0 8px rgba(34,211,238,.7)); transform:translateY(-1px); }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after { scroll-behavior:auto !important; }
-          .experience-background, .theatre-world-motion, .login-story-panel, .login-auth-stage, .brand-mark-orbit, .brand-mark-halo, .nexus-world-art, .nexus-world-aura, .nexus-world-caption, .nexus-wordmark, .nexus-wordmark-badge, .nexus-premium-art, .nexus-premium-sweep, .nexus-premium-live, .login-eyebrow, .login-greeting, .login-hero-title, .login-hero-accent, .login-summary, .login-supporting, .login-trust-stat, .login-auth-panel, .login-auth-panel.is-authenticating, .login-auth-signal, .login-auth-title, .login-auth-copy, .login-form-step, .login-primary-action, .login-audit-assurance, .login-assurance-icon, .login-field-shell, .login-caps-warning, .login-auth-error, .constellation-service, .calm-assurance, .theatre-ribbon::before, .ribbon-live-label, .ribbon-item, .ribbon-live-dot, [style*="floatBounce"], [style*="fadeSlideIn"] { animation:none !important; opacity:1; transform:none; filter:none; clip-path:none; }
+          .experience-background, .theatre-world-motion, .login-story-panel, .login-auth-stage, .brand-mark-orbit, .brand-mark-halo, .nexus-world-art, .nexus-world-aura, .nexus-world-caption, .nexus-wordmark, .nexus-wordmark-badge, .nexus-premium-art, .nexus-premium-sweep, .login-eyebrow, .login-greeting, .login-hero-title, .login-hero-accent, .login-summary, .login-supporting, .login-trust-stat, .login-auth-panel, .login-auth-panel.is-authenticating, .login-auth-signal, .login-auth-title, .login-auth-copy, .login-form-step, .login-primary-action, .login-audit-assurance, .login-assurance-icon, .login-field-shell, .login-caps-warning, .login-auth-error, .constellation-service, .calm-assurance, .theatre-ribbon::before, .ribbon-live-label, .ribbon-item, .ribbon-live-dot, [style*="floatBounce"], [style*="fadeSlideIn"] { animation:none !important; opacity:1; transform:none; filter:none; clip-path:none; }
         }
       `}</style>
     </div>
