@@ -5,6 +5,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -147,16 +148,22 @@ async def delete_license(license_id: str, current_user: dict = Depends(get_curre
 async def get_domains(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="domain.read")
         query["client_id"] = client_id
-    domains = await db.domains.find(query, {"_id": 0}).sort("expiry_date", 1).to_list(1000)
+    domains = await db.domains.find(scoped_query(current_user, query), {"_id": 0}).sort("expiry_date", 1).to_list(1000)
     return domains
 
 @router.post("/domains")
 async def create_domain(domain_data: dict, current_user: dict = Depends(get_current_user)):
     client_name = None
     if domain_data.get('client_id'):
+        await assert_client_scope(current_user, domain_data['client_id'], operation="domain.create")
         client = await db.clients.find_one({"id": domain_data['client_id']}, {"_id": 0})
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
         client_name = client['name'] if client else None
+    else:
+        await assert_client_scope(current_user, None, operation="domain.create")
     
     domain = DomainEntry(client_name=client_name, **domain_data)
     doc = domain.model_dump()
@@ -166,6 +173,7 @@ async def create_domain(domain_data: dict, current_user: dict = Depends(get_curr
 
 @router.delete("/domains/{domain_id}")
 async def delete_domain(domain_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(current_user, db.domains, domain_id, operation="domain.delete", resource_name="Domain")
     await db.domains.delete_one({"id": domain_id})
     return {"message": "Domain deleted"}
 
@@ -173,16 +181,22 @@ async def delete_domain(domain_id: str, current_user: dict = Depends(get_current
 async def get_ssl_certificates(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     query = {}
     if client_id:
+        await assert_client_scope(current_user, client_id, operation="ssl_certificate.read")
         query["client_id"] = client_id
-    certs = await db.ssl_certificates.find(query, {"_id": 0}).sort("expiry_date", 1).to_list(1000)
+    certs = await db.ssl_certificates.find(scoped_query(current_user, query), {"_id": 0}).sort("expiry_date", 1).to_list(1000)
     return certs
 
 @router.post("/ssl-certificates")
 async def create_ssl_certificate(cert_data: dict, current_user: dict = Depends(get_current_user)):
     client_name = None
     if cert_data.get('client_id'):
+        await assert_client_scope(current_user, cert_data['client_id'], operation="ssl_certificate.create")
         client = await db.clients.find_one({"id": cert_data['client_id']}, {"_id": 0})
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
         client_name = client['name'] if client else None
+    else:
+        await assert_client_scope(current_user, None, operation="ssl_certificate.create")
     
     cert = SSLCertificate(client_name=client_name, **cert_data)
     doc = cert.model_dump()
@@ -192,6 +206,7 @@ async def create_ssl_certificate(cert_data: dict, current_user: dict = Depends(g
 
 @router.delete("/ssl-certificates/{cert_id}")
 async def delete_ssl_certificate(cert_id: str, current_user: dict = Depends(get_current_user)):
+    await assert_record_scope(current_user, db.ssl_certificates, cert_id, operation="ssl_certificate.delete", resource_name="SSL certificate")
     await db.ssl_certificates.delete_one({"id": cert_id})
     return {"message": "Certificate deleted"}
 

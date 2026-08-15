@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, clients_contacts, contract_profit, contracts, control_plane, estimates, invoice_smart, invoices, mega_features, mission_control, nexus_agent, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, web_studio, workflow_automation, yeastar
+from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, clients_contacts, contract_profit, contracts, control_plane, estimates, infrastructure, invoice_smart, invoices, mega_features, mission_control, nexus_agent, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, web_studio, workflow_automation, yeastar
 from app.services import scope_permissions
 
 
@@ -1285,3 +1285,31 @@ def test_restricted_technician_cannot_update_foreign_web_site(monkeypatch):
 
     assert exc.value.status_code == 404
     assert denials.rows[0]["operation"] == "web_studio.update"
+
+
+def test_domain_list_is_limited_to_the_technicians_clients(monkeypatch):
+    captured = {}
+
+    class Domains:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(infrastructure, "db", type("InfrastructureDB", (), {"domains": Domains()})())
+    user = {"id": "tech-1", "role": "technician", "client_scope_mode": "restricted", "client_scope_ids": ["client-a"]}
+
+    assert asyncio.run(infrastructure.get_domains(current_user=user)) == []
+    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+
+
+def test_restricted_technician_cannot_delete_foreign_ssl_certificate(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(infrastructure, "db", type("InfrastructureDB", (), {"ssl_certificates": _RecordCollection({"id": "cert-b", "client_id": "client-b"})})())
+    user = {"id": "tech-1", "role": "technician", "client_scope_mode": "restricted", "client_scope_ids": ["client-a"]}
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(infrastructure.delete_ssl_certificate("cert-b", user))
+
+    assert exc.value.status_code == 404
+    assert denials.rows[0]["operation"] == "ssl_certificate.delete"
