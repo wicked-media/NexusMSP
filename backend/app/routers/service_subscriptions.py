@@ -246,6 +246,54 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
             "attention_reasons": reasons,
         })
 
+    # Web Studio is a first-class managed service.  A website may be included
+    # in an agreement (zero direct fee) or explicitly billable; both states are
+    # commercial evidence, while an unlinked live site is a billing-assurance
+    # finding rather than silently assumed revenue.
+    web_sites = await db.web_sites.find(
+        scoped_query(current_user, {"archived_at": {"$exists": False}}, site_field=None),
+        {"_id": 0},
+    ).to_list(5000)
+    for site in web_sites:
+        client = _client_details(site, by_client_id, by_client_name)
+        billing_state = str(site.get("billing_status") or "not_linked")
+        active = site.get("stage") in {"live", "maintenance"} and billing_state != "suspended"
+        billing_linked = billing_state in {"included", "billable"} or bool(site.get("agreement_id"))
+        reasons = _attention(
+            "Client is not linked" if not client["client_id"] else "",
+            "Managed website is not linked to a service plan or agreement" if active and not billing_linked else "",
+            "Live website has no recorded renewal date" if active and not site.get("renewal_date") else "",
+        )
+        items.append({
+            "id": f"web-studio:{site.get('id')}",
+            **client,
+            "name": site.get("service_plan") or f"Managed website: {site.get('name') or site.get('primary_domain') or 'Unnamed'}",
+            "category": "managed_service",
+            "record_kind": "provider_usage",
+            "source": "web_studio",
+            "source_label": "Nexus Web Studio",
+            "provider": site.get("hosting_provider") or "NexusMSP",
+            "quantity": 1,
+            "used_quantity": 1 if active else 0,
+            "unit_cost": None,
+            "monthly_cost": None,
+            "unit_price": _number(site.get("monthly_fee")),
+            "monthly_revenue": _number(site.get("monthly_fee")) if billing_state == "billable" else 0,
+            "billing_cycle": "monthly",
+            "renewal_date": site.get("renewal_date") or "",
+            "status": "active" if active else _normalise_status(billing_state, enabled=billing_state != "suspended"),
+            "billing_linked": billing_linked,
+            "billing_state": "linked" if billing_linked else "unmapped",
+            "contract_id": site.get("agreement_id") or "",
+            "recurring_invoice_id": "",
+            "quantity_source": "client_web_record",
+            "evidence_state": "web_studio_record",
+            "last_synced": site.get("last_wordpress_sync_at") or site.get("updated_at") or site.get("created_at"),
+            "source_route": "/web-studio",
+            "editable": False,
+            "attention_reasons": reasons,
+        })
+
     # Pax8 live quantities.
     pax8_links = await db.pax8_customer_links.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
     pax8_clients = {
