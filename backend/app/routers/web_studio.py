@@ -37,11 +37,32 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _integration_status() -> dict:
+async def _synergy_credentials() -> dict:
+    """Load the encrypted Settings configuration, falling back to deployment env."""
+    settings = getattr(db, "settings", None)
+    if settings is None:
+        return {}
+    setting = await settings.find_one({"key": "synergy_wholesale_config"}, {"_id": 0}) or {}
+    value = setting.get("value") or {}
+    if not value.get("api_key_encrypted"):
+        return {}
+    return {
+        "reseller_id": value.get("reseller_id", ""),
+        "wsdl": value.get("wsdl", ""),
+        "api_key": _open_synergy_api_key(value["api_key_encrypted"]),
+    }
+
+
+def _open_synergy_api_key(value: str) -> str:
+    return str(unseal_action_parameters(value).get("api_key") or "")
+
+
+async def _integration_status() -> dict:
     """Return configuration evidence only - never expose a credential."""
-    has_reseller_id = bool(os.environ.get("SYNERGY_WHOLESALE_RESELLER_ID"))
-    has_api_key = bool(os.environ.get("SYNERGY_WHOLESALE_API_KEY"))
-    connector = connector_status()
+    credentials = await _synergy_credentials()
+    has_reseller_id = bool(credentials.get("reseller_id") or os.environ.get("SYNERGY_WHOLESALE_RESELLER_ID"))
+    has_api_key = bool(credentials.get("api_key") or os.environ.get("SYNERGY_WHOLESALE_API_KEY"))
+    connector = connector_status(credentials)
     return {
         "provider": "synergy_wholesale",
         "display_name": "Synergy Wholesale",
@@ -115,6 +136,12 @@ class SynergyActionRequest(BaseModel):
     client_id: str = Field(min_length=1, max_length=200)
     parameters: dict = Field(default_factory=dict)
     reason: str = Field(min_length=8, max_length=1000)
+
+
+class SynergyIntegrationInput(BaseModel):
+    reseller_id: str = Field(min_length=1, max_length=200)
+    api_key: str = Field(min_length=8, max_length=1000)
+    wsdl: str = Field(min_length=10, max_length=2048)
 
 
 class WordPressConnectionInput(BaseModel):
@@ -249,7 +276,7 @@ async def get_web_studio_overview(client_id: str | None = None, user: dict = Dep
         "sites": sites,
         "summary": {"total": len(sites), "live": counts["live"], "in_delivery": sum(counts[s] for s in ("design", "build", "review", "launch")), "maintenance": counts["maintenance"]},
         "stages": counts,
-        "synergy": _integration_status(),
+        "synergy": await _integration_status(),
     }
 
 
@@ -300,12 +327,12 @@ async def request_provider_action(site_id: str, payload: ProviderAction, user: d
         "provider": "synergy_wholesale",
         "action": payload.action,
         "reason": payload.reason.strip(),
-        "status": "pending_connector" if not _integration_status()["configured"] else "pending_approval",
+        "status": "pending_connector" if not (await _integration_status())["configured"] else "pending_approval",
         "created_at": _now(),
         "requested_by": user.get("email") or user.get("id"),
     }
     await db.web_provider_actions.insert_one(action)
-    return {"action": {key: value for key, value in action.items() if key != "_id"}, "connector": _integration_status()}
+    return {"action": {key: value for key, value in action.items() if key != "_id"}, "connector": await _integration_status()}
 
 
 @router.post("/web-studio/sites/{site_id}/wordpress/connect")
@@ -375,14 +402,49 @@ async def get_wordpress_management(site_id: str, user: dict = Depends(get_curren
 @router.get("/web-studio/integrations/synergy-wholesale")
 async def get_synergy_status(user: dict = Depends(get_current_user)):
     await assert_global_scope(user, operation="web_studio.integration.read")
-    return _integration_status()
+    return await _integration_status()
+
+
+@router.get("/settings/synergy-wholesale")
+async def get_synergy_settings(user: dict = Depends(get_current_user)):
+    await assert_global_scope(user, operation="synergy.settings.read")
+    setting = await db.settings.find_one({"key": "synergy_wholesale_config"}, {"_id": 0}) or {}
+    value = setting.get("value") or {}
+    status = await _integration_status()
+    return {
+        "reseller_id": value.get("reseller_id", ""), "wsdl": value.get("wsdl", ""),
+        "api_key_set": bool(value.get("api_key_encrypted")), "configured": status["configured"],
+        "readiness": status["readiness"], "updated_at": value.get("updated_at"), "updated_by": value.get("updated_by"),
+    }
+
+
+@router.put("/settings/synergy-wholesale")
+async def save_synergy_settings(payload: SynergyIntegrationInput, user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    await assert_global_scope(user, operation="synergy.settings.write")
+    # Keep the credential as an encrypted one-field payload using the existing
+    # deployment-managed Fernet key; the plaintext is never written to Mongo.
+    encrypted = seal_action_parameters({"api_key": payload.api_key.strip()})
+    value = {
+        "reseller_id": payload.reseller_id.strip(), "wsdl": payload.wsdl.strip(), "api_key_encrypted": encrypted,
+        "updated_at": _now(), "updated_by": user.get("email") or user.get("id"),
+    }
+    await db.settings.update_one({"key": "synergy_wholesale_config"}, {"$set": {"key": "synergy_wholesale_config", "value": value}}, upsert=True)
+    status = await _integration_status()
+    return {"saved": True, "configured": status["configured"], "readiness": status["readiness"], "api_key_set": True}
+
+
+@router.post("/settings/synergy-wholesale/test")
+async def test_synergy_settings(user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    await assert_global_scope(user, operation="synergy.settings.test")
+    result = execute_synergy("account.balance", {}, await _synergy_credentials())
+    return {"success": True, "message": "Synergy Wholesale SOAP connection succeeded", "result": _redact_provider_value(result)}
 
 
 @router.get("/web-studio/integrations/synergy-wholesale/catalogue")
 async def get_synergy_catalogue(user: dict = Depends(get_current_user)):
     """Expose the fixed v3.17 Nexus capability map, never raw SOAP methods."""
     await assert_global_scope(user, operation="web_studio.integration.read")
-    return {"provider": "synergy_wholesale", "operations": public_catalogue(), "connector": _integration_status()}
+    return {"provider": "synergy_wholesale", "operations": public_catalogue(), "connector": await _integration_status()}
 
 
 @router.post("/web-studio/integrations/synergy-wholesale/actions")
@@ -416,7 +478,7 @@ async def create_synergy_action(payload: SynergyActionRequest, user: dict = Depe
         await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"approval_id": approval["id"]}})
         action["approval_id"] = approval["id"]
         return {"action": action, "approval": approval, "message": "Provider change is awaiting independent approval"}
-    result = execute_synergy(payload.operation_id, parameters)
+    result = execute_synergy(payload.operation_id, parameters, await _synergy_credentials())
     safe_result = _redact_provider_value(result)
     await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"status": "completed", "completed_at": _now(), "result": safe_result}})
     return {"action": {**action, "status": "completed"}, "result": safe_result}
@@ -434,7 +496,7 @@ async def execute_approved_synergy_action(action_id: str, user: dict = Depends(r
         raise HTTPException(status_code=409, detail="An independent approval is required before Synergy executes this action")
     await db.web_provider_actions.update_one({"id": action_id, "status": "pending_approval"}, {"$set": {"status": "executing", "execution_started_at": _now(), "executed_by": user.get("email") or user.get("id")}})
     try:
-        result = execute_synergy(action["operation_id"], unseal_action_parameters(action.get("parameters_encrypted", "")))
+        result = execute_synergy(action["operation_id"], unseal_action_parameters(action.get("parameters_encrypted", "")), await _synergy_credentials())
     except HTTPException:
         await db.web_provider_actions.update_one({"id": action_id}, {"$set": {"status": "approved_execution_failed", "failed_at": _now()}})
         raise

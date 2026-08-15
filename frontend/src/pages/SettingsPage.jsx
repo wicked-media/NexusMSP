@@ -88,6 +88,7 @@ const SETTINGS_INDEX = [
   { tab: "weather", anchor: "weather-clock-settings-card", label: "Weather & Local Clock", keywords: "weather forecast temperature local time clock office location timezone celsius fahrenheit" },
   // Integrations
   { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
+  { tab: "integrations", anchor: "synergy-wholesale-settings-card", label: "Synergy Wholesale", keywords: "synergy wholesale domains dns hosting cpanel wordpress ssl certificate renewal register transfer" },
   { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
   { tab: "integrations", anchor: "microsoft365-delivery-card", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications" },
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
@@ -214,6 +215,8 @@ export default function SettingsPage() {
   const [nexusElevateSaving, setNexusElevateSaving] = useState(false);
   const [artifactStorage, setArtifactStorage] = useState({ configured: false, ready: false, detail: "Checking artifact storage…" });
   const [artifactStorageBusy, setArtifactStorageBusy] = useState(false);
+  const [synergy, setSynergy] = useState({ reseller_id: "", api_key: "", api_key_set: false, wsdl: "", configured: false, readiness: "not_configured" });
+  const [synergyBusy, setSynergyBusy] = useState("");
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -293,7 +296,7 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes] = await Promise.all([
+      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
           axios.get(`${API}/users`, { headers }),
           axios.get(`${API}/settings/no-notes-threshold`, { headers }),
           axios.get(`${API}/settings/xero`, { headers }),
@@ -318,6 +321,7 @@ export default function SettingsPage() {
           axios.get(`${API}/trmm/notifications/settings`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/scheduling/calendar-connection`, { headers }).catch(() => ({ data: null })),
           axios.get(`${API}/nexus-elevate/settings`, { headers }).catch(() => ({ data: null })),
+          axios.get(`${API}/settings/synergy-wholesale`, { headers }).catch(() => ({ data: null })),
         ]);
         setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
         setThreshold(prev => ({ ...prev, ...(thresholdRes.data || {}) }));
@@ -333,6 +337,7 @@ export default function SettingsPage() {
         if (trmmNotifRes?.data) setTrmmNotif(prev => ({ ...prev, ...trmmNotifRes.data }));
         if (calendarRes?.data) setCalendarConnection(prev => ({ ...prev, ...calendarRes.data }));
         if (nexusElevateRes?.data) setNexusElevate(prev => ({ ...prev, ...nexusElevateRes.data }));
+        if (synergyRes?.data) setSynergy(prev => ({ ...prev, ...synergyRes.data, api_key: "" }));
         setSuped(prev => ({ ...prev, ...(supedRes.data || {}), api_key: supedRes.data?.api_key || "" }));
         setSplynx(prev => ({ ...prev, ...(splynxRes.data || {}), url: splynxRes.data?.url || "", api_key: splynxRes.data?.api_key || "", api_secret: splynxRes.data?.api_secret || "" }));
         setHudu(prev => ({ ...prev, ...(huduRes.data || {}), url: huduRes.data?.url || "", api_key: huduRes.data?.api_key || "" }));
@@ -1430,6 +1435,11 @@ export default function SettingsPage() {
       <Card id="supabase-storage-card" className="border-cyan-500/20 bg-[linear-gradient(120deg,rgba(6,182,212,0.08),transparent_55%)]" data-testid="supabase-storage-card">
         <CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2"><Cloud className="h-5 w-5 text-cyan-300" /><div><CardTitle>Private Artifact Storage</CardTitle><CardDescription className="mt-1">Nexus retains generated documents, customer files and ticket evidence privately through Supabase Storage.</CardDescription></div></div><Badge variant="outline" className={artifactStorage.ready ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}>{artifactStorage.ready ? "Ready" : artifactStorage.configured ? "Needs attention" : "Not configured"}</Badge></div></CardHeader>
         <CardContent className="space-y-4"><div className="grid gap-2 text-sm sm:grid-cols-2"><div className="rounded-lg border border-white/[0.08] bg-black/[0.12] p-3"><p className="text-xs text-muted-foreground">Storage bucket</p><p className="mt-1 font-mono text-cyan-100">{artifactStorage.bucket || "Not connected"}</p></div><div className="rounded-lg border border-white/[0.08] bg-black/[0.12] p-3"><p className="text-xs text-muted-foreground">Protection</p><p className="mt-1 text-emerald-200">Private, authenticated retrieval</p></div></div><p className="text-sm text-muted-foreground">{artifactStorage.detail}</p><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Protected flows: invoices, purchase orders, reports, client documents and ticket attachments.</p><Button size="sm" variant="outline" onClick={refreshArtifactStorage} disabled={artifactStorageBusy}>{artifactStorageBusy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}Check storage</Button></div></CardContent>
+      </Card>
+
+      <Card id="synergy-wholesale-settings-card" className="border-cyan-500/20 bg-[linear-gradient(120deg,rgba(6,182,212,0.08),transparent_55%)]" data-testid="synergy-wholesale-settings-card">
+        <CardHeader><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2"><Globe className="h-5 w-5 text-cyan-300" /><div><CardTitle>Synergy Wholesale</CardTitle><CardDescription>Domains, DNS, cPanel hosting, SSL certificates and Microsoft 365 lifecycle through governed Nexus workflows.</CardDescription></div></div><Badge variant="outline" className={synergy.configured ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}>{synergy.configured ? "Configured" : "Not configured"}</Badge></div></CardHeader>
+        <CardContent className="space-y-4"><SetupGuideCallout title="Connect Synergy securely" source="Create or retrieve the reseller API credential in Synergy Wholesale, allowlist the public IP of your Nexus server, then enter the SOAP/WSDL endpoint supplied to your reseller account." steps={["Use a dedicated Synergy API key owned by the MSP.", "Add the Nexus server public IP to Synergy's API allowlist.", "Save the encrypted credential and run Test connection before approving any commercial action."]} securityNote="The API key is encrypted server-side and never returned to the browser. Do not put it in tickets, chat or client notes." /><div className="grid gap-3 md:grid-cols-2"><div className="space-y-2"><Label>Reseller ID</Label><Input value={synergy.reseller_id} onChange={event => setSynergy({ ...synergy, reseller_id: event.target.value })} placeholder="Synergy reseller ID" /></div><div className="space-y-2"><Label>SOAP WSDL URL</Label><Input value={synergy.wsdl} onChange={event => setSynergy({ ...synergy, wsdl: event.target.value })} placeholder="https://…/service.wsdl" /></div><div className="space-y-2 md:col-span-2"><Label>API key</Label><Input type="password" value={synergy.api_key} onChange={event => setSynergy({ ...synergy, api_key: event.target.value })} placeholder={synergy.api_key_set ? "Encrypted key stored — enter a replacement only" : "Enter Synergy API key"} /></div></div><div className="flex flex-wrap gap-2"><Button onClick={async () => { if (!synergy.reseller_id.trim() || !synergy.wsdl.trim() || !synergy.api_key.trim()) return toast.error("Reseller ID, SOAP WSDL URL and API key are required"); setSynergyBusy("save"); try { const response = await axios.put(`${API}/settings/synergy-wholesale`, { reseller_id: synergy.reseller_id, wsdl: synergy.wsdl, api_key: synergy.api_key }, { headers }); setSynergy(prev => ({ ...prev, ...response.data, api_key: "", api_key_set: true })); toast.success("Synergy Wholesale settings saved securely"); } catch (error) { toast.error(error.response?.data?.detail || "Unable to save Synergy settings"); } finally { setSynergyBusy(""); } }} disabled={synergyBusy !== ""}>{synergyBusy === "save" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save secure settings</Button><Button variant="outline" onClick={async () => { setSynergyBusy("test"); try { await axios.post(`${API}/settings/synergy-wholesale/test`, {}, { headers, timeout: 30000 }); toast.success("Synergy Wholesale connection verified"); } catch (error) { toast.error(error.response?.data?.detail || "Synergy connection test failed"); } finally { setSynergyBusy(""); } }} disabled={synergyBusy !== "" || !synergy.configured}>{synergyBusy === "test" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}Test connection</Button></div><p className="text-xs text-muted-foreground">Readiness: {String(synergy.readiness || "not configured").replaceAll("_", " ")}. Live purchases, renewals and DNS/certificate changes still require Nexus approval.</p></CardContent>
       </Card>
 
       {/* Xero Integration */}

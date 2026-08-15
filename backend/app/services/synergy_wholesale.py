@@ -68,9 +68,12 @@ SYNERGY_OPERATIONS = _catalogue(
 _CREDENTIAL_KEYS = frozenset({"resellerid", "apikey", "reseller_id", "api_key"})
 
 
-def connector_status() -> dict[str, Any]:
-    configured = bool(os.environ.get("SYNERGY_WHOLESALE_RESELLER_ID")) and bool(os.environ.get("SYNERGY_WHOLESALE_API_KEY"))
-    wsdl = os.environ.get("SYNERGY_WHOLESALE_WSDL", "").strip()
+def connector_status(credentials: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    credentials = credentials or {}
+    reseller_id = str(credentials.get("reseller_id") or os.environ.get("SYNERGY_WHOLESALE_RESELLER_ID") or "").strip()
+    api_key = str(credentials.get("api_key") or os.environ.get("SYNERGY_WHOLESALE_API_KEY") or "").strip()
+    wsdl = str(credentials.get("wsdl") or os.environ.get("SYNERGY_WHOLESALE_WSDL") or "").strip()
+    configured = bool(reseller_id and api_key)
     try:
         import zeep  # noqa: F401
         library_ready = True
@@ -115,11 +118,15 @@ def unseal_action_parameters(ciphertext: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="The encrypted Synergy action input could not be decrypted") from exc
 
 
-def execute(operation_id: str, parameters: Mapping[str, Any]) -> Any:
+def execute(operation_id: str, parameters: Mapping[str, Any], credentials: Mapping[str, Any] | None = None) -> Any:
     operation = SYNERGY_OPERATIONS.get(operation_id)
     if not operation:
         raise HTTPException(status_code=404, detail="Unknown Synergy Wholesale operation")
-    status = connector_status()
+    credentials = credentials or {}
+    reseller_id = str(credentials.get("reseller_id") or os.environ.get("SYNERGY_WHOLESALE_RESELLER_ID") or "").strip()
+    api_key = str(credentials.get("api_key") or os.environ.get("SYNERGY_WHOLESALE_API_KEY") or "").strip()
+    wsdl = str(credentials.get("wsdl") or os.environ.get("SYNERGY_WHOLESALE_WSDL") or "").strip()
+    status = connector_status({"reseller_id": reseller_id, "api_key": api_key, "wsdl": wsdl})
     if not status["ready"]:
         raise HTTPException(status_code=503, detail="Synergy connector requires server credentials, source-IP allowlisting, WSDL configuration and the SOAP client dependency")
     try:
@@ -127,10 +134,10 @@ def execute(operation_id: str, parameters: Mapping[str, Any]) -> Any:
         from zeep.helpers import serialize_object
     except ImportError as exc:  # defensive: status check can race deployment
         raise HTTPException(status_code=503, detail="Synergy SOAP client is not installed") from exc
-    client = Client(os.environ["SYNERGY_WHOLESALE_WSDL"])
+    client = Client(wsdl)
     method = getattr(client.service, operation["command"], None)
     if method is None:
         raise HTTPException(status_code=503, detail="Configured Synergy WSDL does not expose this documented operation")
     payload = validate_parameters(parameters)
-    payload.update({"resellerID": os.environ["SYNERGY_WHOLESALE_RESELLER_ID"], "apiKey": os.environ["SYNERGY_WHOLESALE_API_KEY"]})
+    payload.update({"resellerID": reseller_id, "apiKey": api_key})
     return serialize_object(method(**payload))
