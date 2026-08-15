@@ -115,6 +115,28 @@ No actionable P0, P1 or P2 findings remain in the tested desktop state.
 
 **final result: passed**
 
+## Nexus Atelier fidelity correction — 2026-08-15
+
+### Reference and correction
+
+- **Reference:** `C:\\Users\\aaron\\.codex\\generated_images\\019f6520-eee3-7151-8cbe-5092fae9dcae\\exec-f5f3dc6b-ba34-40e4-a10a-9fb6a1d32138.png`.
+- **Issue fixed:** The first implementation used an adapted split/card layout rather than the selected centred composition.
+- **Implementation:** The Atelier route now places the real Nexus identity, autonomous-MSP heading, live sign-in form and low earth horizon in the same vertical sequence as the selected design. The right-side card and preview switcher are absent from this experience.
+
+### Fidelity surfaces
+
+- Centre-aligned metallic N, orbital ring and Nexus MSP lock-up.
+- Heading sits above the form, with the blue autonomous-MSP emphasis retained.
+- Live email, password, visibility, MFA, SSO and error controls replace the mock controls in the source image.
+- Dark atmospheric background and low luminous horizon mirror the reference without introducing competing decorative elements.
+- Motion is restrained to the supplied identity and horizon; reduced-motion disables it.
+
+### Runtime check
+
+- Browser rendering contains two active inputs and no console errors.
+
+**final result: passed**
+
 ## Implementation checklist
 
 - [x] Rebuild the login composition around the selected direction.
