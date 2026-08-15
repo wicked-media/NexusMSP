@@ -10,7 +10,7 @@ import axios from "axios";
 
 const EXPERIENCE_IDS = ["classic", "constellation", "theatre", "calm"];
 const TYPED_TEXTS = ["Command Center", "NOC Dashboard", "Service Desk", "Asset Manager", "Security Hub"];
-const NEXUS_LOGIN_HERO_ART = "/brand/nexus-login-hero.jpg";
+const NEXUS_LOGIN_HERO_ART = "/brand/nexus-login-beacon.png";
 const EXPERIENCE_CONTENT = {
   classic: {
     eyebrow: "Platform Active",
@@ -73,19 +73,12 @@ function BrandMark({ brand, compact = false }) {
   );
 }
 
-function NexusHeroArt({ visible }) {
+function NexusBrandBeacon({ visible }) {
   if (!visible) return null;
 
   return (
-    <div className="nexus-hero-art" aria-hidden="true">
-      <div className="nexus-hero-art-aura" />
-      <div className="nexus-hero-art-orbit nexus-hero-art-orbit-one" />
-      <div className="nexus-hero-art-orbit nexus-hero-art-orbit-two" />
-      <div className="nexus-hero-art-frame">
-        <img src={NEXUS_LOGIN_HERO_ART} alt="" className="nexus-hero-art-image" />
-      </div>
-      <div className="nexus-hero-art-signal nexus-hero-art-signal-one" />
-      <div className="nexus-hero-art-signal nexus-hero-art-signal-two" />
+    <div className="nexus-brand-beacon">
+      <img src={NEXUS_LOGIN_HERO_ART} alt="Nexus MSP" className="nexus-brand-beacon-image" />
     </div>
   );
 }
@@ -395,14 +388,13 @@ export default function LoginPage() {
       )}
 
       {/* Left Panel */}
-      <div className={`login-story-panel hidden lg:flex relative z-10 ${experience === "classic" ? "lg:w-[55%]" : experience === "calm" ? "lg:w-[65%]" : "lg:w-[64%]"}`}>
+      <div className={`login-story-panel ${isNexusBrand ? "hidden" : "hidden lg:flex"} relative z-10 ${experience === "classic" ? "lg:w-[55%]" : experience === "calm" ? "lg:w-[65%]" : "lg:w-[64%]"}`}>
         <div className="flex w-full flex-col justify-between p-10 xl:p-14 2xl:p-16">
           {/* Logo */}
           <BrandMark brand={brand} />
 
           {/* Hero with animated typing */}
           <div className={`space-y-6 2xl:space-y-8 ${experience === "classic" ? "max-w-lg" : "max-w-xl"}`}>
-            <NexusHeroArt visible={isNexusBrand} />
             <div className="space-y-4">
               <div className="login-eyebrow inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-300/20 bg-cyan-400/[0.06] text-cyan-200 text-xs font-medium backdrop-blur-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse" />
@@ -492,13 +484,14 @@ export default function LoginPage() {
           <div className="lg:hidden mb-10 flex justify-center"><BrandMark brand={brand} compact /></div>
 
           <div className={`login-auth-panel overflow-hidden rounded-2xl border border-emerald-400/15 bg-zinc-950/70 backdrop-blur-xl shadow-2xl shadow-black/30 ${isLoading ? "is-authenticating" : ""} ${experience === "calm" ? "rounded-l-none border-l-emerald-300/50" : ""}`} style={{ animation: "fadeSlideIn 0.7s ease-out 0.1s both" }}>
-            <div className="login-auth-header border-b border-emerald-400/10 bg-gradient-to-br from-emerald-400/[0.08] via-transparent to-cyan-400/[0.04] px-8 py-6">
+          {isNexusBrand && <NexusBrandBeacon visible />}
+          <div className={`login-auth-header border-b border-emerald-400/10 bg-gradient-to-br from-emerald-400/[0.08] via-transparent to-cyan-400/[0.04] px-8 ${isNexusBrand ? "py-4" : "py-6"}`}>
               <p className="login-auth-signal text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Secure workspace access</p>
               <h2 className="login-auth-title mt-1 text-2xl font-semibold text-white">Welcome back</h2>
               <p className="login-auth-copy mt-2 text-sm leading-relaxed text-zinc-400">Sign in with your technician account. New team members are invited by a NexusMSP administrator.</p>
             </div>
-            <div className="p-8">
-              <form onSubmit={handleLogin} className="login-form space-y-5" aria-busy={isLoading}>
+            <div className={isNexusBrand ? "p-6" : "p-8"}>
+              <form onSubmit={handleLogin} className={`login-form ${isNexusBrand ? "space-y-4" : "space-y-5"}`} aria-busy={isLoading}>
                   {authError && (
                     <div className="login-auth-error flex items-start gap-2.5 rounded-lg border border-rose-400/25 bg-rose-500/[0.08] px-3 py-2.5 text-xs leading-relaxed text-rose-200" role="alert" data-testid="login-inline-error">
                       <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
@@ -648,24 +641,11 @@ export default function LoginPage() {
         @keyframes liveLabel { 0%,100% { opacity:.76; } 50% { opacity:1; text-shadow:0 0 13px rgba(52,211,153,.28); } }
         @keyframes signalRise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
         @keyframes edgeBreathe { 0%,100% { box-shadow:0 26px 90px rgba(0,0,0,.42), 0 0 0 1px rgba(52,211,153,.04); } 50% { box-shadow:0 28px 100px rgba(0,0,0,.5), 0 0 36px rgba(34,211,238,.08); } }
-        @keyframes nexusHeroEnter { from { opacity:0; transform:translate3d(-18px,16px,0) scale(.96); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
-        @keyframes nexusHeroHover { 0%,100% { transform:translate3d(0,0,0) scale(1); filter:drop-shadow(0 30px 38px rgba(0,0,0,.42)); } 50% { transform:translate3d(0,-7px,0) scale(1.012); filter:drop-shadow(0 34px 46px rgba(0,132,255,.24)); } }
-        @keyframes nexusOrbitOne { from { transform:rotate(-13deg) scale(1); opacity:.34; } 50% { opacity:.86; } to { transform:rotate(347deg) scale(1.04); opacity:.34; } }
-        @keyframes nexusOrbitTwo { from { transform:rotate(40deg) scale(1.08); opacity:.18; } 50% { opacity:.7; } to { transform:rotate(-320deg) scale(1); opacity:.18; } }
-        @keyframes nexusAura { 0%,100% { opacity:.56; transform:scale(.9); } 50% { opacity:1; transform:scale(1.1); } }
-        @keyframes nexusSignal { 0%,100% { opacity:.18; transform:scaleX(.62); } 50% { opacity:.9; transform:scaleX(1); } }
-        .nexus-signin::before { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(112deg,rgba(2,6,17,.18) 0%,rgba(2,6,17,.56) 52%,rgba(2,6,17,.94) 100%); z-index:1; }
-        .nexus-signin .login-story-panel { background:linear-gradient(90deg,rgba(2,6,17,.12),rgba(2,6,17,.26) 74%,rgba(2,6,17,.48)); }
-        .nexus-hero-art { position:relative; width:min(30rem,100%); height:clamp(13rem,25vh,19rem); margin:-1.6rem 0 -.85rem -1.2rem; isolation:isolate; opacity:0; animation:nexusHeroEnter .8s cubic-bezier(.16,.78,.25,1) .1s forwards; }
-        .nexus-hero-art-frame { position:absolute; inset:2% 22% 2% 0; z-index:2; display:flex; align-items:center; justify-content:flex-start; overflow:hidden; border-radius:48%; box-shadow:inset 0 0 34px rgba(1,6,18,.56); animation:nexusHeroHover 8s ease-in-out 1s infinite; }
-        .nexus-hero-art-image { width:100%; height:100%; object-fit:cover; object-position:50% 34%; transform:scale(1.76); filter:contrast(1.11) saturate(1.22) brightness(.88); }
-        .nexus-hero-art-aura { position:absolute; inset:13% 16%; z-index:0; border-radius:999px; background:radial-gradient(circle,rgba(0,220,255,.28),rgba(21,119,255,.12) 36%,transparent 70%); filter:blur(28px); animation:nexusAura 5.8s ease-in-out infinite; }
-        .nexus-hero-art-orbit { position:absolute; z-index:1; left:8%; top:19%; width:74%; height:59%; border:1px solid rgba(68,210,255,.36); border-radius:50%; box-shadow:0 0 20px rgba(0,171,255,.15),inset 0 0 14px rgba(34,211,238,.08); pointer-events:none; }
-        .nexus-hero-art-orbit-one { animation:nexusOrbitOne 18s linear infinite; }
-        .nexus-hero-art-orbit-two { left:17%; top:17%; width:59%; height:67%; border-color:rgba(89,125,255,.32); animation:nexusOrbitTwo 23s linear infinite; }
-        .nexus-hero-art-signal { position:absolute; z-index:3; height:1px; width:42%; background:linear-gradient(90deg,transparent,rgba(140,239,255,.95),transparent); filter:drop-shadow(0 0 6px rgba(34,211,238,.8)); animation:nexusSignal 4.6s ease-in-out infinite; }
-        .nexus-hero-art-signal-one { left:3%; bottom:17%; transform-origin:left; }
-        .nexus-hero-art-signal-two { right:5%; top:23%; transform-origin:right; animation-delay:-2.2s; }
+        @keyframes nexusBeaconEnter { from { opacity:0; transform:translateY(12px) scale(.96); } to { opacity:1; transform:translateY(0) scale(1); } }
+        @keyframes nexusBeaconFloat { 0%,100% { transform:translateY(0) scale(1); filter:brightness(.92) saturate(1.08); } 50% { transform:translateY(-5px) scale(1.012); filter:brightness(1.04) saturate(1.22) drop-shadow(0 0 20px rgba(29,207,255,.25)); } }
+        .nexus-signin::before { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at 50% 32%,rgba(6,94,168,.16),transparent 33%),linear-gradient(180deg,rgba(2,7,18,.05),rgba(2,6,17,.84)); z-index:1; }
+        .nexus-brand-beacon { display:flex; height:8rem; align-items:center; justify-content:center; overflow:hidden; background:#020611; opacity:0; animation:nexusBeaconEnter .7s cubic-bezier(.2,.78,.2,1) .08s forwards; }
+        .nexus-brand-beacon-image { height:100%; width:100%; object-fit:contain; object-position:center; animation:nexusBeaconFloat 7s ease-in-out 1s infinite; }
         .experience-background { animation:atmosphereDrift 24s ease-in-out infinite; will-change:transform; }
         .login-experience-theatre .theatre-world-motion {
           animation:worldOrbit 30s cubic-bezier(.45,.05,.55,.95) infinite alternate;
@@ -699,7 +679,7 @@ export default function LoginPage() {
         .login-auth-panel.is-authenticating { animation:authenticatingPanel 1.8s ease-in-out infinite !important; }
         .login-experience-theatre .login-auth-panel,
         .login-experience-constellation .login-auth-panel { animation:fadeSlideIn .7s ease-out .1s both, edgeBreathe 7s ease-in-out 1s infinite !important; }
-        .nexus-signin .login-auth-panel { border-color:rgba(80,208,255,.22); background:linear-gradient(145deg,rgba(7,17,35,.93),rgba(2,7,17,.9)); box-shadow:0 32px 95px rgba(0,0,0,.52),0 0 0 1px rgba(88,205,255,.05),0 0 56px rgba(0,126,255,.08); }
+        .nexus-signin .login-auth-panel { border-color:rgba(80,208,255,.22); background:linear-gradient(145deg,rgba(7,17,35,.95),rgba(2,7,17,.93)); box-shadow:0 32px 95px rgba(0,0,0,.52),0 0 0 1px rgba(88,205,255,.05),0 0 56px rgba(0,126,255,.08); }
         .nexus-signin .login-auth-header { border-bottom-color:rgba(87,207,255,.14); background:linear-gradient(135deg,rgba(30,144,255,.12),rgba(4,25,58,.03) 54%,rgba(0,214,255,.08)); }
         .nexus-signin .login-auth-signal { color:rgb(165,243,252); }
         .nexus-signin .login-primary-action { background-image:linear-gradient(100deg,#0877c9,#00b8e6,#4a76ff,#0877c9); box-shadow:0 15px 38px -18px rgba(0,174,255,.68); }
@@ -713,7 +693,7 @@ export default function LoginPage() {
         .ribbon-item:hover .ribbon-live-icon { filter:drop-shadow(0 0 8px rgba(34,211,238,.7)); transform:translateY(-1px); }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after { scroll-behavior:auto !important; }
-          .experience-background, .theatre-world-motion, .login-story-panel, .login-auth-stage, .brand-mark-orbit, .brand-mark-halo, .nexus-hero-art, .nexus-hero-art-frame, .nexus-hero-art-aura, .nexus-hero-art-orbit, .nexus-hero-art-signal, .login-eyebrow, .login-greeting, .login-hero-title, .login-hero-accent, .login-summary, .login-supporting, .login-trust-stat, .login-auth-panel, .login-auth-panel.is-authenticating, .login-auth-signal, .login-auth-title, .login-auth-copy, .login-form-step, .login-primary-action, .login-audit-assurance, .login-assurance-icon, .login-field-shell, .login-caps-warning, .login-auth-error, .constellation-service, .calm-assurance, .theatre-ribbon::before, .ribbon-live-label, .ribbon-item, .ribbon-live-dot, [style*="floatBounce"], [style*="fadeSlideIn"] { animation:none !important; opacity:1; transform:none; filter:none; clip-path:none; }
+          .experience-background, .theatre-world-motion, .login-story-panel, .login-auth-stage, .brand-mark-orbit, .brand-mark-halo, .nexus-brand-beacon, .nexus-brand-beacon-image, .login-eyebrow, .login-greeting, .login-hero-title, .login-hero-accent, .login-summary, .login-supporting, .login-trust-stat, .login-auth-panel, .login-auth-panel.is-authenticating, .login-auth-signal, .login-auth-title, .login-auth-copy, .login-form-step, .login-primary-action, .login-audit-assurance, .login-assurance-icon, .login-field-shell, .login-caps-warning, .login-auth-error, .constellation-service, .calm-assurance, .theatre-ribbon::before, .ribbon-live-label, .ribbon-item, .ribbon-live-dot, [style*="floatBounce"], [style*="fadeSlideIn"] { animation:none !important; opacity:1; transform:none; filter:none; clip-path:none; }
         }
       `}</style>
     </div>

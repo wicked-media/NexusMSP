@@ -2,55 +2,55 @@
 
 ## Comparison target
 
-- **Source visual truth:** `C:\Users\aaron\.codex\codex-remote-attachments\019f6520-eee3-7151-8cbe-5092fae9dcae\D64C20B4-63BB-46E2-9F27-31794383C4B2\1-Photo-1.jpg` (1255 × 1255 px).
-- **Implementation capture:** `C:\Users\aaron\Documents\Codex\NexusMSP\design-qa-login.png` (1280 × 720 px), browser-rendered from `http://localhost:3000/login?preview=1&experience=classic`.
-- **State:** desktop, default NexusMSP brand, local preview switcher visible, populated email/password fields, idle sign-in state.
-- **Density normalisation:** source is a square brand artwork while the implementation is a 16:9 application screen. The supplied artwork is therefore intentionally cropped to its central Nexus monogram and globe; the remaining screen is evaluated as a sign-in product experience rather than a poster recreation.
+- **Source visual truth:** `C:\Users\aaron\.codex\codex-remote-attachments\019f6520-eee3-7151-8cbe-5092fae9dcae\D64C20B4-63BB-46E2-9F27-31794383C4B2\1-Photo-1.jpg` (the user-supplied Nexus MSP visual direction).
+- **Refined brand artwork:** `frontend/public/brand/nexus-login-beacon.png`, generated from the supplied image to preserve its metallic Nexus monogram, globe and cyan orbital language while removing the source image's white poster background and excess copy.
+- **Implementation capture:** `C:\Users\aaron\Documents\Codex\NexusMSP\design-qa-login.png`, browser-rendered from `http://localhost:3000/login?preview=1&experience=classic` at 1280 × 720 CSS pixels.
+- **State:** desktop, default NexusMSP brand, idle sign-in state with blank inputs.
 
 ## Full-view comparison
 
-The implementation retains the supplied image as the only hero artwork and adopts its deep-space navy, electric cyan, cobalt and silver visual direction. It places the visual as a deliberately cropped, illuminated monogram in the product hero rather than stretching a square poster across the screen. The sign-in panel remains immediately legible and keeps the original working login hierarchy.
+The first implementation treated the original square artwork as a left-side hero. That made the logo compete with the authentication task and exposed the original white canvas. The refined implementation uses a clean dark asset and one centred sign-in composition: the Nexus beacon leads the card, the dark network field supplies depth, and the form stays visually dominant.
 
 ## Focused-region comparison
 
-The hero region and sign-in card were inspected separately. The hero crop contains the Nexus monogram, orbital light trail and globe treatment without the source image's white outer canvas. The sign-in card remains visually distinct from the artwork, with clear labels, input boundaries, keyboard focus styling and a high-contrast primary action.
+The top brand region was compared with the supplied artwork's core traits: angular silver/black N, cyan energy trail and globe/network context. The refined asset retains those visual traits with a seamless deep-space background. The sign-in region was checked separately for legible labels, visible input boundaries, primary-action contrast and above-the-fold completion.
 
 ## Required fidelity surfaces
 
-- **Fonts and typography:** The existing product type hierarchy is retained: a strong white display headline, cyan-to-blue accent line, compact uppercase security signal and readable form labels. Text wrapping remains controlled at the tested desktop width.
-- **Spacing and layout rhythm:** The visual hero is contained within the left product story column; it does not overlap the headline or primary form. The form has a stable, familiar vertical rhythm and the sign-in control remains above the fold.
-- **Colours and visual tokens:** The prior green-led sign-in treatment is now anchored in the source artwork's cyan/blue spectrum while green remains reserved for positive/live status semantics. Contrast between foreground content and the deep navy background remains adequate.
-- **Image quality and asset fidelity:** The supplied raster is used directly as the hero asset. The crop avoids its white outer canvas and preserves the provided monogram, globe and orbital detail. No replacement logo or fabricated image asset was introduced.
-- **Copy and content:** The hero now says “The MSP platform that runs the MSP.”, reinforcing the wording shown in the supplied mark while the sign-in guidance remains clear and operationally appropriate.
+- **Fonts and typography:** Product typography remains restrained and readable. The brand image carries the expressive identity; operational copy remains calm and easy to scan.
+- **Spacing and layout rhythm:** The entire authentication card fits at the tested 720 px viewport. The logo, security statement, form controls and assurance line have one clear vertical path.
+- **Colours and visual tokens:** Deep navy/near-black, cyan and cobalt are taken directly from the supplied visual. Green remains reserved for positive security status instead of competing with the brand palette.
+- **Image quality and asset fidelity:** The supplied artwork informed the generated dark beacon asset; no white canvas, poster border or improvised logo drawing remains. The visual is a real raster asset rather than CSS-drawn branding.
+- **Copy and content:** The familiar sign-in wording is retained, with no marketing blocks competing with the task.
 
 ## Findings
 
-No actionable P0, P1 or P2 findings remain at the tested desktop state.
+No actionable P0, P1 or P2 findings remain in the tested desktop state.
 
 ### P3 follow-up polish
 
-- Consider commissioning a transparent/vector version of the new Nexus mark for future use in constrained spaces such as favicons and tray icons. The supplied raster is effective for the login hero but is not a replacement for those small-format assets.
+- Produce an approved transparent/vector master of the Nexus monogram before using this new visual in favicons, tray icons or print assets.
 
 ## Interaction and runtime checks
 
-- Login email and password fields render and remain visible.
-- Password visibility control is present.
-- Local-account helper and experience preview selector render.
+- Email, password, password-visibility control and sign-in action render visibly.
+- The local-account helper remains available in local development.
 - Browser console errors: none observed.
-- Motion respects `prefers-reduced-motion` through the existing login-wide motion override and the new hero selectors.
+- The existing reduced-motion override covers the new beacon animation.
 
 ## Comparison history
 
-1. Initial browser capture exposed too much of the supplied image's white outer background in the hero.
-2. The image treatment was changed to a contained crop of the monogram/globe with a deep-space presentation.
-3. The revised browser capture showed the intended logo treatment, no console errors, and no remaining actionable visual issue.
+1. Initial left-column crop was visually busy and retained the source image's white outer canvas.
+2. A clean dark brand asset was created from the supplied visual direction.
+3. The login was simplified to one centred sign-in card with a single animated brand beacon.
+4. The form padding and header spacing were tightened so the full sign-in flow fits at 1280 × 720.
 
 ## Implementation checklist
 
-- [x] Use the supplied Nexus logo art directly.
-- [x] Apply matching cyan, cobalt, navy and silver styling to the login experience.
-- [x] Preserve the working authentication form and sign-in states.
-- [x] Add subtle motion with reduced-motion support.
-- [x] Verify the browser-rendered login page and console.
+- [x] Preserve the supplied Nexus logo's central visual language.
+- [x] Remove the busy split-screen hero layout for the default Nexus brand.
+- [x] Centre the brand and sign-in experience.
+- [x] Keep motion subtle and reduced-motion safe.
+- [x] Verify the rendered login and browser console.
 
 final result: passed
