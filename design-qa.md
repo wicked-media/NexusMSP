@@ -1,53 +1,56 @@
-# Nexus Channel cockpit — design QA
+# Login visual QA
 
 ## Comparison target
 
-- Source visual truth: `C:\Users\aaron\.codex\generated_images\019f6520-eee3-7151-8cbe-5092fae9dcae\exec-ff6ca677-cecd-468e-803d-91d7961bb82e.png`
-- Intended implementation route: `/channel-mode`
-- Intended viewport: desktop web application, 1440 × 1024 target
-- State: selected MSP partner cockpit
+- **Source visual truth:** `C:\Users\aaron\.codex\codex-remote-attachments\019f6520-eee3-7151-8cbe-5092fae9dcae\D64C20B4-63BB-46E2-9F27-31794383C4B2\1-Photo-1.jpg` (1255 × 1255 px).
+- **Implementation capture:** `C:\Users\aaron\Documents\Codex\NexusMSP\design-qa-login.png` (1280 × 720 px), browser-rendered from `http://localhost:3000/login?preview=1&experience=classic`.
+- **State:** desktop, default NexusMSP brand, local preview switcher visible, populated email/password fields, idle sign-in state.
+- **Density normalisation:** source is a square brand artwork while the implementation is a 16:9 application screen. The supplied artwork is therefore intentionally cropped to its central Nexus monogram and globe; the remaining screen is evaluated as a sign-in product experience rather than a poster recreation.
 
-## Evidence captured
+## Full-view comparison
 
-- Existing Channel capture before redesign: `.codex-audits/channel-mode-2026-08-07.png`
-- Implementation capture attempt: `.codex-audits/channel-mode-cockpit-implementation.png`
-- The implementation capture is the Nexus sign-in screen after the authenticated browser session expired during reload. It does not show the cockpit and therefore is not valid comparison evidence.
-- Responsive implementation capture: `.codex-audits/channel-mode-2026-08-07/02-responsive-cockpit.png`
-  - Implementation pixels: 1025 x 899 at the active desktop browser viewport.
-  - Source pixels: 1487 x 1058. The viewport and composition differ, so this is responsive verification rather than a final 1:1 source comparison.
+The implementation retains the supplied image as the only hero artwork and adopts its deep-space navy, electric cyan, cobalt and silver visual direction. It places the visual as a deliberately cropped, illuminated monogram in the product hero rather than stretching a square poster across the screen. The sign-in panel remains immediately legible and keeps the original working login hierarchy.
 
-## Primary interaction coverage
+## Focused-region comparison
 
-- Partner selection: the selector is visible at the active desktop viewport; changing the selection remains untested in this capture-only pass.
-- Lifecycle and primary Deployment Hub action: visible in the selected-partner cockpit.
-- Not visually tested: create-partner dialog and Deployment Hub hand-off.
-- Browser console check: not available through the in-app browser capture surface.
-
-## Findings
-
-- [P1] Fixed responsive cockpit visibility.
-  - Earlier evidence: the first 1025px capture placed the full partner portfolio above the selected-partner cockpit.
-  - Fix: the selected cockpit now orders first below the control bar below the xl breakpoint, and a compact partner selector remains directly above it.
-  - Post-fix evidence: `.codex-audits/channel-mode-2026-08-07/02-responsive-cockpit.png` shows the selected partner, Core state, lifecycle and actions above the fold.
-- [P1] Full source-fidelity comparison remains blocked by the missing 1487 x 1058 implementation capture.
-  - Evidence: the source option uses a 1487 x 1058 cockpit composition while the available live implementation capture is 1025 x 899.
-  - Impact: the three-column desktop composition, right rail proportions and dense-detail alignment cannot be judged at like-for-like scale.
-  - Fix: capture the Channel Mode page at the source desktop viewport and compare the selected-partner state alongside the source mock.
+The hero region and sign-in card were inspected separately. The hero crop contains the Nexus monogram, orbital light trail and globe treatment without the source image's white outer canvas. The sign-in card remains visually distinct from the artwork, with clear labels, input boundaries, keyboard focus styling and a high-contrast primary action.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: blocked.
-- Spacing and layout rhythm: blocked.
-- Colors and visual tokens: code uses existing Nexus tokens; visual validation blocked.
-- Image quality and asset fidelity: no new raster production assets are used; iconography uses the existing application icon set.
-- Copy and app-specific text: implemented but visual validation blocked.
+- **Fonts and typography:** The existing product type hierarchy is retained: a strong white display headline, cyan-to-blue accent line, compact uppercase security signal and readable form labels. Text wrapping remains controlled at the tested desktop width.
+- **Spacing and layout rhythm:** The visual hero is contained within the left product story column; it does not overlap the headline or primary form. The form has a stable, familiar vertical rhythm and the sign-in control remains above the fold.
+- **Colours and visual tokens:** The prior green-led sign-in treatment is now anchored in the source artwork's cyan/blue spectrum while green remains reserved for positive/live status semantics. Contrast between foreground content and the deep navy background remains adequate.
+- **Image quality and asset fidelity:** The supplied raster is used directly as the hero asset. The crop avoids its white outer canvas and preserves the provided monogram, globe and orbital detail. No replacement logo or fabricated image asset was introduced.
+- **Copy and content:** The hero now says “The MSP platform that runs the MSP.”, reinforcing the wording shown in the supplied mark while the sign-in guidance remains clear and operationally appropriate.
+
+## Findings
+
+No actionable P0, P1 or P2 findings remain at the tested desktop state.
+
+### P3 follow-up polish
+
+- Consider commissioning a transparent/vector version of the new Nexus mark for future use in constrained spaces such as favicons and tray icons. The supplied raster is effective for the login hero but is not a replacement for those small-format assets.
+
+## Interaction and runtime checks
+
+- Login email and password fields render and remain visible.
+- Password visibility control is present.
+- Local-account helper and experience preview selector render.
+- Browser console errors: none observed.
+- Motion respects `prefers-reduced-motion` through the existing login-wide motion override and the new hero selectors.
 
 ## Comparison history
 
-1. Source selected: Option 2 partner cockpit mockup.
-2. Implementation rebuilt on the existing Nexus Channel route.
-3. Implementation capture attempted; redirected to sign-in after reload.
-4. Signed-in session restored. Responsive capture revealed the portfolio list obscured the selected cockpit at 1025px.
-5. Reordered the responsive layout and added an immediate partner switcher. Post-fix responsive evidence captured.
+1. Initial browser capture exposed too much of the supplied image's white outer background in the hero.
+2. The image treatment was changed to a contained crop of the monogram/globe with a deep-space presentation.
+3. The revised browser capture showed the intended logo treatment, no console errors, and no remaining actionable visual issue.
 
-final result: blocked
+## Implementation checklist
+
+- [x] Use the supplied Nexus logo art directly.
+- [x] Apply matching cyan, cobalt, navy and silver styling to the login experience.
+- [x] Preserve the working authentication form and sign-in states.
+- [x] Add subtle motion with reduced-motion support.
+- [x] Verify the browser-rendered login page and console.
+
+final result: passed

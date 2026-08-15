@@ -10,6 +10,7 @@ import axios from "axios";
 
 const EXPERIENCE_IDS = ["classic", "constellation", "theatre", "calm"];
 const TYPED_TEXTS = ["Command Center", "NOC Dashboard", "Service Desk", "Asset Manager", "Security Hub"];
+const NEXUS_LOGIN_HERO_ART = "/brand/nexus-login-hero.jpg";
 const EXPERIENCE_CONTENT = {
   classic: {
     eyebrow: "Platform Active",
@@ -68,6 +69,23 @@ function BrandMark({ brand, compact = false }) {
       ) : (
         <span className={`${compact ? "text-lg" : "text-xl"} font-semibold tracking-[-0.025em] text-white`}>{brand.company_name}</span>
       )}
+    </div>
+  );
+}
+
+function NexusHeroArt({ visible }) {
+  if (!visible) return null;
+
+  return (
+    <div className="nexus-hero-art" aria-hidden="true">
+      <div className="nexus-hero-art-aura" />
+      <div className="nexus-hero-art-orbit nexus-hero-art-orbit-one" />
+      <div className="nexus-hero-art-orbit nexus-hero-art-orbit-two" />
+      <div className="nexus-hero-art-frame">
+        <img src={NEXUS_LOGIN_HERO_ART} alt="" className="nexus-hero-art-image" />
+      </div>
+      <div className="nexus-hero-art-signal nexus-hero-art-signal-one" />
+      <div className="nexus-hero-art-signal nexus-hero-art-signal-two" />
     </div>
   );
 }
@@ -226,6 +244,7 @@ export default function LoginPage() {
   const savedExperience = EXPERIENCE_IDS.includes(brand.login_experience) ? brand.login_experience : "classic";
   const experience = previewMode && EXPERIENCE_IDS.includes(requestedExperience) ? requestedExperience : savedExperience;
   const experienceContent = EXPERIENCE_CONTENT[experience];
+  const isNexusBrand = !brand.company_logo_url && (brand.company_name || "NexusMSP").replace(/\s/g, "").toLowerCase() === "nexusmsp";
 
   const typedText = useTypingEffect(TYPED_TEXTS, 90, 2200);
 
@@ -332,7 +351,7 @@ export default function LoginPage() {
   const GreetingIcon = hour < 6 ? Moon : hour < 12 ? Sun : hour < 17 ? CloudSun : hour < 21 ? Sunset : Moon;
 
   return (
-    <div ref={loginRootRef} className={`login-experience login-experience-${experience} relative flex min-h-[100svh] overflow-x-hidden bg-[#05080d] lg:h-[100svh] lg:min-h-[680px] lg:overflow-hidden`} data-testid="login-page" data-login-experience={experience}>
+    <div ref={loginRootRef} className={`login-experience nexus-signin login-experience-${experience} relative flex min-h-[100svh] overflow-x-hidden bg-[#020611] lg:h-[100svh] lg:min-h-[680px] lg:overflow-hidden`} data-testid="login-page" data-login-experience={experience}>
       {/* Background Layer */}
       <div className="absolute inset-0">
         {wallpaper?.url && experience === "classic" ? (
@@ -350,11 +369,11 @@ export default function LoginPage() {
             <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,7,12,0.08)_0%,rgba(3,7,12,0.12)_52%,rgba(3,7,12,0.7)_100%)]" />
           </>
         ) : (
-          <div className="absolute inset-0 bg-[#0a0a0f]">
+          <div className="absolute inset-0 bg-[#020611]">
             <div className="absolute inset-0" style={{
-              backgroundImage: `radial-gradient(circle at 25% 25%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
-                               radial-gradient(circle at 75% 75%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
-                               radial-gradient(circle at 50% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%)`,
+              backgroundImage: `radial-gradient(circle at 22% 22%, rgba(0, 184, 255, 0.16) 0%, transparent 34%),
+                               radial-gradient(circle at 74% 76%, rgba(27, 100, 255, 0.11) 0%, transparent 38%),
+                               radial-gradient(circle at 48% 48%, rgba(114, 88, 255, 0.06) 0%, transparent 52%)`,
             }} />
           </div>
         )}
@@ -383,23 +402,24 @@ export default function LoginPage() {
 
           {/* Hero with animated typing */}
           <div className={`space-y-6 2xl:space-y-8 ${experience === "classic" ? "max-w-lg" : "max-w-xl"}`}>
+            <NexusHeroArt visible={isNexusBrand} />
             <div className="space-y-4">
-              <div className="login-eyebrow inline-flex items-center gap-2 px-3 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-xs font-medium backdrop-blur-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <div className="login-eyebrow inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-300/20 bg-cyan-400/[0.06] text-cyan-200 text-xs font-medium backdrop-blur-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse" />
                 {experienceContent.eyebrow}
               </div>
 
               {/* Animated time greeting */}
               <div className="login-greeting flex items-center gap-3 mb-2" data-testid="time-greeting">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07]" style={{ animation: "floatBounce 3s ease-in-out infinite" }}><GreetingIcon className="h-5 w-5 text-emerald-300" /></span>
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-300/25 bg-cyan-400/[0.07]" style={{ animation: "floatBounce 3s ease-in-out infinite" }}><GreetingIcon className="h-5 w-5 text-cyan-200" /></span>
                 <span className="text-lg text-zinc-400 font-medium">{timeGreeting}</span>
               </div>
 
               {experience === "classic" ? (
                 <h1 className="text-5xl font-bold tracking-tight leading-[1.1] text-white" aria-label="Your IT operations command centre">
-                  Your IT<br />
-                  <span aria-hidden="true" className="bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent">{typedText}</span>
-                  <span aria-hidden="true" className="inline-block w-0.5 h-10 bg-emerald-400 ml-1 align-middle" style={{ animation: "blink 1s step-end infinite" }} />
+                  {isNexusBrand ? "The MSP platform" : "Your IT"}<br />
+                  <span aria-hidden="true" className="bg-gradient-to-r from-cyan-200 via-cyan-400 to-blue-500 bg-clip-text text-transparent">{isNexusBrand ? "that runs the MSP." : typedText}</span>
+                  {!isNexusBrand && <span aria-hidden="true" className="inline-block w-0.5 h-10 bg-cyan-300 ml-1 align-middle" style={{ animation: "blink 1s step-end infinite" }} />}
                 </h1>
               ) : (
                 <h1 className={`login-hero-title ${experience === "calm" ? "text-6xl xl:text-7xl" : "text-5xl xl:text-6xl"} max-w-2xl font-semibold tracking-[-0.045em] leading-[0.98] text-white`}>
@@ -628,6 +648,24 @@ export default function LoginPage() {
         @keyframes liveLabel { 0%,100% { opacity:.76; } 50% { opacity:1; text-shadow:0 0 13px rgba(52,211,153,.28); } }
         @keyframes signalRise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
         @keyframes edgeBreathe { 0%,100% { box-shadow:0 26px 90px rgba(0,0,0,.42), 0 0 0 1px rgba(52,211,153,.04); } 50% { box-shadow:0 28px 100px rgba(0,0,0,.5), 0 0 36px rgba(34,211,238,.08); } }
+        @keyframes nexusHeroEnter { from { opacity:0; transform:translate3d(-18px,16px,0) scale(.96); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
+        @keyframes nexusHeroHover { 0%,100% { transform:translate3d(0,0,0) scale(1); filter:drop-shadow(0 30px 38px rgba(0,0,0,.42)); } 50% { transform:translate3d(0,-7px,0) scale(1.012); filter:drop-shadow(0 34px 46px rgba(0,132,255,.24)); } }
+        @keyframes nexusOrbitOne { from { transform:rotate(-13deg) scale(1); opacity:.34; } 50% { opacity:.86; } to { transform:rotate(347deg) scale(1.04); opacity:.34; } }
+        @keyframes nexusOrbitTwo { from { transform:rotate(40deg) scale(1.08); opacity:.18; } 50% { opacity:.7; } to { transform:rotate(-320deg) scale(1); opacity:.18; } }
+        @keyframes nexusAura { 0%,100% { opacity:.56; transform:scale(.9); } 50% { opacity:1; transform:scale(1.1); } }
+        @keyframes nexusSignal { 0%,100% { opacity:.18; transform:scaleX(.62); } 50% { opacity:.9; transform:scaleX(1); } }
+        .nexus-signin::before { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(112deg,rgba(2,6,17,.18) 0%,rgba(2,6,17,.56) 52%,rgba(2,6,17,.94) 100%); z-index:1; }
+        .nexus-signin .login-story-panel { background:linear-gradient(90deg,rgba(2,6,17,.12),rgba(2,6,17,.26) 74%,rgba(2,6,17,.48)); }
+        .nexus-hero-art { position:relative; width:min(30rem,100%); height:clamp(13rem,25vh,19rem); margin:-1.6rem 0 -.85rem -1.2rem; isolation:isolate; opacity:0; animation:nexusHeroEnter .8s cubic-bezier(.16,.78,.25,1) .1s forwards; }
+        .nexus-hero-art-frame { position:absolute; inset:2% 22% 2% 0; z-index:2; display:flex; align-items:center; justify-content:flex-start; overflow:hidden; border-radius:48%; box-shadow:inset 0 0 34px rgba(1,6,18,.56); animation:nexusHeroHover 8s ease-in-out 1s infinite; }
+        .nexus-hero-art-image { width:100%; height:100%; object-fit:cover; object-position:50% 34%; transform:scale(1.76); filter:contrast(1.11) saturate(1.22) brightness(.88); }
+        .nexus-hero-art-aura { position:absolute; inset:13% 16%; z-index:0; border-radius:999px; background:radial-gradient(circle,rgba(0,220,255,.28),rgba(21,119,255,.12) 36%,transparent 70%); filter:blur(28px); animation:nexusAura 5.8s ease-in-out infinite; }
+        .nexus-hero-art-orbit { position:absolute; z-index:1; left:8%; top:19%; width:74%; height:59%; border:1px solid rgba(68,210,255,.36); border-radius:50%; box-shadow:0 0 20px rgba(0,171,255,.15),inset 0 0 14px rgba(34,211,238,.08); pointer-events:none; }
+        .nexus-hero-art-orbit-one { animation:nexusOrbitOne 18s linear infinite; }
+        .nexus-hero-art-orbit-two { left:17%; top:17%; width:59%; height:67%; border-color:rgba(89,125,255,.32); animation:nexusOrbitTwo 23s linear infinite; }
+        .nexus-hero-art-signal { position:absolute; z-index:3; height:1px; width:42%; background:linear-gradient(90deg,transparent,rgba(140,239,255,.95),transparent); filter:drop-shadow(0 0 6px rgba(34,211,238,.8)); animation:nexusSignal 4.6s ease-in-out infinite; }
+        .nexus-hero-art-signal-one { left:3%; bottom:17%; transform-origin:left; }
+        .nexus-hero-art-signal-two { right:5%; top:23%; transform-origin:right; animation-delay:-2.2s; }
         .experience-background { animation:atmosphereDrift 24s ease-in-out infinite; will-change:transform; }
         .login-experience-theatre .theatre-world-motion {
           animation:worldOrbit 30s cubic-bezier(.45,.05,.55,.95) infinite alternate;
@@ -661,6 +699,11 @@ export default function LoginPage() {
         .login-auth-panel.is-authenticating { animation:authenticatingPanel 1.8s ease-in-out infinite !important; }
         .login-experience-theatre .login-auth-panel,
         .login-experience-constellation .login-auth-panel { animation:fadeSlideIn .7s ease-out .1s both, edgeBreathe 7s ease-in-out 1s infinite !important; }
+        .nexus-signin .login-auth-panel { border-color:rgba(80,208,255,.22); background:linear-gradient(145deg,rgba(7,17,35,.93),rgba(2,7,17,.9)); box-shadow:0 32px 95px rgba(0,0,0,.52),0 0 0 1px rgba(88,205,255,.05),0 0 56px rgba(0,126,255,.08); }
+        .nexus-signin .login-auth-header { border-bottom-color:rgba(87,207,255,.14); background:linear-gradient(135deg,rgba(30,144,255,.12),rgba(4,25,58,.03) 54%,rgba(0,214,255,.08)); }
+        .nexus-signin .login-auth-signal { color:rgb(165,243,252); }
+        .nexus-signin .login-primary-action { background-image:linear-gradient(100deg,#0877c9,#00b8e6,#4a76ff,#0877c9); box-shadow:0 15px 38px -18px rgba(0,174,255,.68); }
+        .nexus-signin .login-field-shell:focus-within { animation:fieldFocusGlow 2.2s ease-in-out infinite; }
         .constellation-service, .calm-assurance { opacity:0; animation:signalRise .55s ease-out forwards; }
         .theatre-ribbon::before { content:""; position:absolute; left:0; right:0; top:-1px; height:1px; background:linear-gradient(90deg,transparent,rgba(52,211,153,.18),rgba(34,211,238,.9),rgba(96,165,250,.18),transparent); animation:ribbonScan 9s ease-in-out infinite; }
         .ribbon-live-label { animation:liveLabel 4s ease-in-out infinite; }
@@ -670,7 +713,7 @@ export default function LoginPage() {
         .ribbon-item:hover .ribbon-live-icon { filter:drop-shadow(0 0 8px rgba(34,211,238,.7)); transform:translateY(-1px); }
         @media (prefers-reduced-motion: reduce) {
           *, *::before, *::after { scroll-behavior:auto !important; }
-          .experience-background, .theatre-world-motion, .login-story-panel, .login-auth-stage, .brand-mark-orbit, .brand-mark-halo, .login-eyebrow, .login-greeting, .login-hero-title, .login-hero-accent, .login-summary, .login-supporting, .login-trust-stat, .login-auth-panel, .login-auth-panel.is-authenticating, .login-auth-signal, .login-auth-title, .login-auth-copy, .login-form-step, .login-primary-action, .login-audit-assurance, .login-assurance-icon, .login-field-shell, .login-caps-warning, .login-auth-error, .constellation-service, .calm-assurance, .theatre-ribbon::before, .ribbon-live-label, .ribbon-item, .ribbon-live-dot, [style*="floatBounce"], [style*="fadeSlideIn"] { animation:none !important; opacity:1; transform:none; filter:none; clip-path:none; }
+          .experience-background, .theatre-world-motion, .login-story-panel, .login-auth-stage, .brand-mark-orbit, .brand-mark-halo, .nexus-hero-art, .nexus-hero-art-frame, .nexus-hero-art-aura, .nexus-hero-art-orbit, .nexus-hero-art-signal, .login-eyebrow, .login-greeting, .login-hero-title, .login-hero-accent, .login-summary, .login-supporting, .login-trust-stat, .login-auth-panel, .login-auth-panel.is-authenticating, .login-auth-signal, .login-auth-title, .login-auth-copy, .login-form-step, .login-primary-action, .login-audit-assurance, .login-assurance-icon, .login-field-shell, .login-caps-warning, .login-auth-error, .constellation-service, .calm-assurance, .theatre-ribbon::before, .ribbon-live-label, .ribbon-item, .ribbon-live-dot, [style*="floatBounce"], [style*="fadeSlideIn"] { animation:none !important; opacity:1; transform:none; filter:none; clip-path:none; }
         }
       `}</style>
     </div>
