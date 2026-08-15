@@ -111,6 +111,7 @@ export const routeConfig = [
   { path: "/topology", component: page("TopologyPage"), auth: true, layout: true },
   { path: "/networking", component: page("NetworkingPage"), auth: true, layout: true },
   { path: "/dmarc-compliance", component: page("DmarcCompliancePage"), auth: true, layout: true },
+  { path: "/web-studio", component: page("WebStudioPage"), auth: true, layout: true },
   { path: "/qr-assets", component: page("QrAssetsPage"), auth: true, layout: true },
   { path: "/asset-lifecycle", component: page("AssetLifecyclePage"), auth: true, layout: true },
   { path: "/asset-depreciation", component: page("AssetDepreciationPage"), auth: true, layout: true },

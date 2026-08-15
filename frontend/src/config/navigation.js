@@ -78,13 +78,14 @@ export const navGroups = [
       {
         path: "/networking", icon: Wifi, label: "Network",
         workspacePaths: [
-          "/topology", "/dns-monitor", "/bandwidth-monitor", "/dmarc-compliance", "/splynx-dashboard",
+          "/topology", "/dns-monitor", "/bandwidth-monitor", "/dmarc-compliance", "/splynx-dashboard", "/web-studio",
         ],
         children: [
           { path: "/topology", label: "Topology" },
           { path: "/dns-monitor", label: "DNS intelligence" },
           { path: "/bandwidth-monitor", label: "Bandwidth" },
           { path: "/dmarc-compliance", label: "DMARC" },
+          { path: "/web-studio", label: "Web Studio" },
           { path: "/splynx-dashboard", label: "ISP operations" },
         ],
       },
