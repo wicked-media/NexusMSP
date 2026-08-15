@@ -77,7 +77,7 @@ function NexusBrandBeacon({ visible }) {
   if (!visible) return null;
 
   return (
-    <div className="nexus-brand-beacon">
+    <div className="nexus-brand-beacon" aria-hidden="true">
       <img src={NEXUS_LOGIN_HERO_ART} alt="Nexus MSP" className="nexus-brand-beacon-image" />
     </div>
   );
@@ -388,13 +388,23 @@ export default function LoginPage() {
       )}
 
       {/* Left Panel */}
-      <div className={`login-story-panel ${isNexusBrand ? "hidden" : "hidden lg:flex"} relative z-10 ${experience === "classic" ? "lg:w-[55%]" : experience === "calm" ? "lg:w-[65%]" : "lg:w-[64%]"}`}>
+      <div className={`login-story-panel hidden lg:flex relative z-10 ${experience === "classic" ? "lg:w-[56%]" : experience === "calm" ? "lg:w-[65%]" : "lg:w-[64%]"}`}>
         <div className="flex w-full flex-col justify-between p-10 xl:p-14 2xl:p-16">
           {/* Logo */}
           <BrandMark brand={brand} />
 
           {/* Hero with animated typing */}
           <div className={`space-y-6 2xl:space-y-8 ${experience === "classic" ? "max-w-lg" : "max-w-xl"}`}>
+            {isNexusBrand && (
+              <div className="nexus-operations-showcase">
+                <NexusBrandBeacon visible />
+                <div className="nexus-operations-signals" aria-label="Nexus platform signals">
+                  <span><Activity className="h-3.5 w-3.5" />Signals connected</span>
+                  <span><ShieldCheck className="h-3.5 w-3.5" />Security ready</span>
+                  <span><Network className="h-3.5 w-3.5" />One control plane</span>
+                </div>
+              </div>
+            )}
             <div className="space-y-4">
               <div className="login-eyebrow inline-flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-300/20 bg-cyan-400/[0.06] text-cyan-200 text-xs font-medium backdrop-blur-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse" />
@@ -484,7 +494,6 @@ export default function LoginPage() {
           <div className="lg:hidden mb-10 flex justify-center"><BrandMark brand={brand} compact /></div>
 
           <div className={`login-auth-panel overflow-hidden rounded-2xl border border-emerald-400/15 bg-zinc-950/70 backdrop-blur-xl shadow-2xl shadow-black/30 ${isLoading ? "is-authenticating" : ""} ${experience === "calm" ? "rounded-l-none border-l-emerald-300/50" : ""}`} style={{ animation: "fadeSlideIn 0.7s ease-out 0.1s both" }}>
-          {isNexusBrand && <NexusBrandBeacon visible />}
           <div className={`login-auth-header border-b border-emerald-400/10 bg-gradient-to-br from-emerald-400/[0.08] via-transparent to-cyan-400/[0.04] px-8 ${isNexusBrand ? "py-4" : "py-6"}`}>
               <p className="login-auth-signal text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Secure workspace access</p>
               <h2 className="login-auth-title mt-1 text-2xl font-semibold text-white">Welcome back</h2>
@@ -643,9 +652,13 @@ export default function LoginPage() {
         @keyframes edgeBreathe { 0%,100% { box-shadow:0 26px 90px rgba(0,0,0,.42), 0 0 0 1px rgba(52,211,153,.04); } 50% { box-shadow:0 28px 100px rgba(0,0,0,.5), 0 0 36px rgba(34,211,238,.08); } }
         @keyframes nexusBeaconEnter { from { opacity:0; transform:translateY(12px) scale(.96); } to { opacity:1; transform:translateY(0) scale(1); } }
         @keyframes nexusBeaconFloat { 0%,100% { transform:translateY(0) scale(1); filter:brightness(.92) saturate(1.08); } 50% { transform:translateY(-5px) scale(1.012); filter:brightness(1.04) saturate(1.22) drop-shadow(0 0 20px rgba(29,207,255,.25)); } }
-        .nexus-signin::before { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at 50% 32%,rgba(6,94,168,.16),transparent 33%),linear-gradient(180deg,rgba(2,7,18,.05),rgba(2,6,17,.84)); z-index:1; }
-        .nexus-brand-beacon { display:flex; height:8rem; align-items:center; justify-content:center; overflow:hidden; background:#020611; opacity:0; animation:nexusBeaconEnter .7s cubic-bezier(.2,.78,.2,1) .08s forwards; }
-        .nexus-brand-beacon-image { height:100%; width:100%; object-fit:contain; object-position:center; animation:nexusBeaconFloat 7s ease-in-out 1s infinite; }
+        .nexus-signin::before { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(ellipse at 30% 34%,rgba(6,94,168,.2),transparent 31%),radial-gradient(ellipse at 78% 60%,rgba(8,98,193,.09),transparent 28%),linear-gradient(180deg,rgba(2,7,18,.03),rgba(2,6,17,.84)); z-index:1; }
+        .nexus-signin .login-story-panel { background:linear-gradient(90deg,rgba(2,6,17,.12),rgba(2,9,22,.24) 72%,rgba(2,6,17,.52)); }
+        .nexus-operations-showcase { position:relative; max-width:31rem; }
+        .nexus-brand-beacon { display:flex; height:clamp(11rem,23vh,15rem); align-items:center; justify-content:center; overflow:hidden; border-radius:1.15rem; background:#020611; border:1px solid rgba(75,198,255,.12); box-shadow:inset 0 0 0 1px rgba(83,199,255,.03),0 28px 65px -36px rgba(0,163,255,.56); opacity:0; animation:nexusBeaconEnter .7s cubic-bezier(.2,.78,.2,1) .08s forwards; }
+        .nexus-brand-beacon-image { height:100%; width:100%; object-fit:cover; object-position:center; animation:nexusBeaconFloat 7s ease-in-out 1s infinite; }
+        .nexus-operations-signals { position:relative; z-index:2; display:flex; flex-wrap:wrap; gap:.55rem; margin-top:-1.2rem; padding-left:1.15rem; }
+        .nexus-operations-signals span { display:inline-flex; align-items:center; gap:.42rem; border:1px solid rgba(99,220,255,.16); border-radius:999px; background:rgba(3,14,31,.86); padding:.44rem .68rem; color:rgb(165,243,252); font-size:.65rem; font-weight:600; letter-spacing:.045em; box-shadow:0 9px 26px -16px rgba(0,174,255,.54); backdrop-filter:blur(12px); }
         .experience-background { animation:atmosphereDrift 24s ease-in-out infinite; will-change:transform; }
         .login-experience-theatre .theatre-world-motion {
           animation:worldOrbit 30s cubic-bezier(.45,.05,.55,.95) infinite alternate;

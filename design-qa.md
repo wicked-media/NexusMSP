@@ -9,19 +9,19 @@
 
 ## Full-view comparison
 
-The first implementation treated the original square artwork as a left-side hero. That made the logo compete with the authentication task and exposed the original white canvas. The refined implementation uses a clean dark asset and one centred sign-in composition: the Nexus beacon leads the card, the dark network field supplies depth, and the form stays visually dominant.
+The first implementation treated the original square artwork as a left-side hero, but exposed the source image's white canvas. A later single-card version was calm but did not adequately represent the breadth of the Nexus platform. The final implementation uses the clean dark beacon in a dedicated left operational showcase, with live signal indicators and a clear platform message. The right side remains a deliberately quiet sign-in surface.
 
 ## Focused-region comparison
 
-The top brand region was compared with the supplied artwork's core traits: angular silver/black N, cyan energy trail and globe/network context. The refined asset retains those visual traits with a seamless deep-space background. The sign-in region was checked separately for legible labels, visible input boundaries, primary-action contrast and above-the-fold completion.
+The left showcase was compared with the supplied artwork's core traits: angular silver/black N, cyan energy trail and globe/network context. The refined asset retains those visual traits with a seamless deep-space background. The sign-in region was checked separately for legible labels, visible input boundaries, primary-action contrast and above-the-fold completion.
 
 ## Required fidelity surfaces
 
 - **Fonts and typography:** Product typography remains restrained and readable. The brand image carries the expressive identity; operational copy remains calm and easy to scan.
-- **Spacing and layout rhythm:** The entire authentication card fits at the tested 720 px viewport. The logo, security statement, form controls and assurance line have one clear vertical path.
+- **Spacing and layout rhythm:** The left showcase has a dedicated visual band, clear signal chips and a stable message hierarchy. The right card fits fully at the tested 720 px viewport and has one clear sign-in path.
 - **Colours and visual tokens:** Deep navy/near-black, cyan and cobalt are taken directly from the supplied visual. Green remains reserved for positive security status instead of competing with the brand palette.
 - **Image quality and asset fidelity:** The supplied artwork informed the generated dark beacon asset; no white canvas, poster border or improvised logo drawing remains. The visual is a real raster asset rather than CSS-drawn branding.
-- **Copy and content:** The familiar sign-in wording is retained, with no marketing blocks competing with the task.
+- **Copy and content:** The familiar sign-in wording is retained. The left copy makes the platform promise explicit without putting marketing content inside the authentication workflow.
 
 ## Findings
 
@@ -42,14 +42,15 @@ No actionable P0, P1 or P2 findings remain in the tested desktop state.
 
 1. Initial left-column crop was visually busy and retained the source image's white outer canvas.
 2. A clean dark brand asset was created from the supplied visual direction.
-3. The login was simplified to one centred sign-in card with a single animated brand beacon.
-4. The form padding and header spacing were tightened so the full sign-in flow fits at 1280 × 720.
+3. The logo was returned to a detailed left-side operational showcase, with a subtle float animation and live platform signal chips.
+4. The authentication workflow was moved back to a dedicated right-side card.
+5. The final browser render confirmed the full screen is balanced and free of console errors.
 
 ## Implementation checklist
 
 - [x] Preserve the supplied Nexus logo's central visual language.
-- [x] Remove the busy split-screen hero layout for the default Nexus brand.
-- [x] Centre the brand and sign-in experience.
+- [x] Create a detailed animated left-side platform showcase.
+- [x] Keep authentication isolated in a clear right-side card.
 - [x] Keep motion subtle and reduced-motion safe.
 - [x] Verify the rendered login and browser console.
 
