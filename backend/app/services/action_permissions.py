@@ -416,6 +416,15 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("invoices", "edit"),
     },
     {
+        "id": "synergy.wholesale.manage",
+        "category": "Web & domains",
+        "label": "Manage Synergy Wholesale services",
+        "description": "Request governed domain, DNS, hosting, certificate and Microsoft 365 provider actions.",
+        "impact": "high",
+        "approval_required": True,
+        "legacy": ("settings", "edit"),
+    },
+    {
         "id": "security.containment.approve",
         "category": "Security",
         "label": "Approve containment",

@@ -18,7 +18,10 @@ from pydantic import BaseModel, Field
 
 from app.auth import get_current_user
 from app.database import db
+from app.routers.approval_workflows import create_approval
+from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
+from app.services.synergy_wholesale import SYNERGY_OPERATIONS, connector_status, execute as execute_synergy, public_catalogue, seal_action_parameters, unseal_action_parameters, validate_parameters
 
 
 router = APIRouter(tags=["Nexus Web Studio"])
@@ -32,17 +35,19 @@ def _integration_status() -> dict:
     """Return configuration evidence only - never expose a credential."""
     has_reseller_id = bool(os.environ.get("SYNERGY_WHOLESALE_RESELLER_ID"))
     has_api_key = bool(os.environ.get("SYNERGY_WHOLESALE_API_KEY"))
+    connector = connector_status()
     return {
         "provider": "synergy_wholesale",
         "display_name": "Synergy Wholesale",
         "transport": "SOAP/WSDL",
         "endpoint": "https://api.synergywholesale.com",
         "configured": has_reseller_id and has_api_key,
-        "readiness": "ready_for_server_connector" if has_reseller_id and has_api_key else "credentials_and_source_ip_required",
+        "readiness": "ready" if connector["ready"] else "credentials_source_ip_wsdl_and_client_required",
         "required": [
             "Server-side reseller ID",
             "Server-side API key",
             "Synergy API source-IP allowlisting",
+            "Server-side WSDL URL",
         ],
         "capabilities": [
             "Domain inventory, renewal and transfer workflow",
@@ -51,6 +56,7 @@ def _integration_status() -> dict:
             "SSL lifecycle and certificate validation",
             "Microsoft 365 subscription lifecycle",
         ],
+        "catalogue_operations": len(SYNERGY_OPERATIONS),
     }
 
 
@@ -87,6 +93,30 @@ class WebSiteUpdate(BaseModel):
 class ProviderAction(BaseModel):
     action: Literal["sync_inventory", "hosting_login", "temporary_preview", "dns_change_plan", "renewal_plan"]
     reason: str = Field(default="", max_length=500)
+
+
+class SynergyActionRequest(BaseModel):
+    """A governed operation from the documented Synergy Wholesale catalogue."""
+    operation_id: str = Field(min_length=3, max_length=100)
+    client_id: str = Field(min_length=1, max_length=200)
+    parameters: dict = Field(default_factory=dict)
+    reason: str = Field(min_length=8, max_length=1000)
+
+
+def _redacted_parameters(parameters: dict) -> dict:
+    return {
+        key: "[entered securely]" if any(word in key.lower() for word in ("password", "secret", "token")) else value
+        for key, value in parameters.items()
+    }
+
+
+def _redact_provider_value(value):
+    """Persist useful evidence but never expose credential-shaped values."""
+    if isinstance(value, dict):
+        return {key: "[redacted]" if any(word in key.lower() for word in ("key", "secret", "password", "token")) else _redact_provider_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_provider_value(item) for item in value]
+    return value
 
 
 async def _site_or_404(site_id: str, user: dict, operation: str) -> dict:
@@ -166,6 +196,8 @@ async def request_provider_action(site_id: str, payload: ProviderAction, user: d
         "created_at": _now(),
         "requested_by": user.get("email") or user.get("id"),
     }
+    if operation["mutates"]:
+        action["parameters_encrypted"] = seal_action_parameters(parameters)
     await db.web_provider_actions.insert_one(action)
     return {"action": {key: value for key, value in action.items() if key != "_id"}, "connector": _integration_status()}
 
@@ -174,3 +206,66 @@ async def request_provider_action(site_id: str, payload: ProviderAction, user: d
 async def get_synergy_status(user: dict = Depends(get_current_user)):
     await assert_global_scope(user, operation="web_studio.integration.read")
     return _integration_status()
+
+
+@router.get("/web-studio/integrations/synergy-wholesale/catalogue")
+async def get_synergy_catalogue(user: dict = Depends(get_current_user)):
+    """Expose the fixed v3.17 Nexus capability map, never raw SOAP methods."""
+    await assert_global_scope(user, operation="web_studio.integration.read")
+    return {"provider": "synergy_wholesale", "operations": public_catalogue(), "connector": _integration_status()}
+
+
+@router.post("/web-studio/integrations/synergy-wholesale/actions")
+async def create_synergy_action(payload: SynergyActionRequest, user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    """Execute safe reads now; route every provider change through approval."""
+    operation = SYNERGY_OPERATIONS.get(payload.operation_id)
+    if not operation:
+        raise HTTPException(status_code=400, detail="That Synergy Wholesale operation is not in the Nexus capability catalogue")
+    await assert_client_scope(user, payload.client_id, operation="synergy.action.create")
+    client = await db.clients.find_one({"id": payload.client_id}, {"_id": 0, "id": 1, "name": 1})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    parameters = validate_parameters(payload.parameters)
+    now = _now()
+    action = {
+        "id": str(uuid.uuid4()), "provider": "synergy_wholesale", "operation_id": payload.operation_id,
+        "provider_command": operation["command"], "area": operation["area"], "client_id": payload.client_id,
+        "client_name": client.get("name") or "Unnamed client", "parameters": _redacted_parameters(parameters),
+        "reason": payload.reason.strip(), "status": "pending_execution" if not operation["mutates"] else "pending_approval",
+        "created_at": now, "requested_by": user.get("email") or user.get("id"), "requested_by_id": user.get("id"),
+    }
+    await db.web_provider_actions.insert_one(action)
+    if operation["mutates"]:
+        approval = await create_approval({
+            "type": "synergy_wholesale", "title": f"Synergy: {payload.operation_id.replace('.', ' ')}",
+            "description": payload.reason.strip(), "client_id": payload.client_id, "client_name": action["client_name"],
+            "ref_id": action["id"], "ref_type": "web_provider_action", "approver_role": "admin",
+        }, user)
+        await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"approval_id": approval["id"]}})
+        action["approval_id"] = approval["id"]
+        return {"action": action, "approval": approval, "message": "Provider change is awaiting independent approval"}
+    result = execute_synergy(payload.operation_id, parameters)
+    safe_result = _redact_provider_value(result)
+    await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"status": "completed", "completed_at": _now(), "result": safe_result}})
+    return {"action": {**action, "status": "completed"}, "result": safe_result}
+
+
+@router.post("/web-studio/integrations/synergy-wholesale/actions/{action_id}/execute")
+async def execute_approved_synergy_action(action_id: str, user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    """Perform a previously approved commercial/configuration action exactly once."""
+    await assert_global_scope(user, operation="synergy.action.execute")
+    action = await assert_record_scope(user, db.web_provider_actions, action_id, operation="synergy.action.execute", resource_name="Synergy action")
+    if action.get("status") not in {"pending_approval", "approved_execution_failed"}:
+        raise HTTPException(status_code=409, detail="This Synergy action is not awaiting approved execution")
+    approval = await db.approvals.find_one({"id": action.get("approval_id"), "ref_id": action_id, "status": "approved"}, {"_id": 0})
+    if not approval:
+        raise HTTPException(status_code=409, detail="An independent approval is required before Synergy executes this action")
+    await db.web_provider_actions.update_one({"id": action_id, "status": "pending_approval"}, {"$set": {"status": "executing", "execution_started_at": _now(), "executed_by": user.get("email") or user.get("id")}})
+    try:
+        result = execute_synergy(action["operation_id"], unseal_action_parameters(action.get("parameters_encrypted", "")))
+    except HTTPException:
+        await db.web_provider_actions.update_one({"id": action_id}, {"$set": {"status": "approved_execution_failed", "failed_at": _now()}})
+        raise
+    safe_result = _redact_provider_value(result)
+    await db.web_provider_actions.update_one({"id": action_id}, {"$set": {"status": "completed", "completed_at": _now(), "result": safe_result}})
+    return {"id": action_id, "status": "completed", "result": safe_result}

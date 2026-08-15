@@ -1287,6 +1287,19 @@ def test_restricted_technician_cannot_update_foreign_web_site(monkeypatch):
     assert denials.rows[0]["operation"] == "web_studio.update"
 
 
+def test_synergy_catalogue_covers_commercial_domain_and_certificate_lifecycle():
+    """Nexus must not regress to a handful of ungoverned Synergy buttons."""
+    from app.services.synergy_wholesale import SYNERGY_OPERATIONS
+
+    for operation_id in (
+        "domain.register", "domain.renew", "domain.transfer", "dns.record_update",
+        "hosting.purchase", "ssl.purchase", "ssl.renew", "m365.subscription_purchase",
+    ):
+        assert operation_id in SYNERGY_OPERATIONS
+        assert SYNERGY_OPERATIONS[operation_id]["mutates"] is True
+    assert len(SYNERGY_OPERATIONS) >= 60
+
+
 def test_domain_list_is_limited_to_the_technicians_clients(monkeypatch):
     captured = {}
 
