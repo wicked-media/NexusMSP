@@ -286,6 +286,7 @@ export default function LoginPage() {
       <div ref={loginRootRef} className="nexus-atelier-login relative min-h-[100svh] overflow-hidden bg-[#020611] text-white" data-testid="login-page" data-login-experience={experience}>
         <div className="nexus-atelier-atmosphere" aria-hidden="true" />
         <img src="/login-experiences/nexus-atelier-horizon.png" alt="" className="nexus-atelier-horizon" aria-hidden="true" />
+        <img src="/login-experiences/nexus-atelier-horizon.png" alt="" className="nexus-atelier-horizon-glare" aria-hidden="true" />
         <main className="nexus-atelier-main relative z-10 mx-auto flex min-h-[100svh] w-full max-w-xl flex-col items-center px-6 pb-8 pt-[clamp(4rem,9vh,7rem)] text-center">
           <img src="/login-experiences/nexus-atelier-identity.png" alt="Nexus MSP" className="nexus-atelier-identity" />
           <h1 className="nexus-atelier-heading">Welcome to the <span>autonomous MSP.</span></h1>
@@ -309,17 +310,19 @@ export default function LoginPage() {
         </main>
         <style>{`
           @keyframes atelierIdentityFloat { 0%,100% { transform:translate3d(0,0,0) scale(1); filter:brightness(.94) saturate(.95); } 50% { transform:translate3d(0,-7px,0) scale(1.012); filter:brightness(1.08) saturate(1.12) drop-shadow(0 0 18px rgba(25,166,255,.16)); } }
-          @keyframes atelierHorizonDrift { 0%,100% { transform:scale(1.035) translate3d(-.4%,0,0); opacity:.74; } 50% { transform:scale(1.07) translate3d(.5%,-1%,0); opacity:1; } }
+          @keyframes atelierHorizonDrift { 0%,100% { transform:scale(1.035) rotate(-.18deg) translate3d(-.65%,.3%,0); filter:brightness(.86) saturate(.9); opacity:.76; } 50% { transform:scale(1.075) rotate(.18deg) translate3d(.72%,-1.1%,0); filter:brightness(1.08) saturate(1.13); opacity:1; } }
+          @keyframes atelierHorizonGlare { 0%,100% { transform:scale(1.08) translate3d(-1.8%,.6%,0); opacity:.08; filter:brightness(.8) blur(1px); } 52% { transform:scale(1.16) translate3d(2.4%,-2%,0); opacity:.34; filter:brightness(1.55) blur(2px); } }
           @keyframes atelierButtonBreathe { 0%,100% { box-shadow:0 0 0 rgba(24,155,255,0), inset 0 0 0 rgba(20,123,255,0); } 50% { box-shadow:0 0 24px rgba(24,155,255,.2), inset 0 0 18px rgba(20,123,255,.11); } }
           .nexus-atelier-login { background:radial-gradient(ellipse at 50% 90%,rgba(12,68,152,.17),transparent 37%),linear-gradient(180deg,#01050d 0%,#030817 68%,#020714 100%); }
           .nexus-atelier-atmosphere { position:absolute; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 29%,rgba(10,71,156,.10),transparent 22%),radial-gradient(circle at 50% 74%,rgba(14,117,255,.08),transparent 33%); }
           .nexus-atelier-horizon { position:absolute; inset:auto 0 0; width:100%; height:22vh; min-height:9rem; object-fit:cover; object-position:center bottom; opacity:.9; animation:atelierHorizonDrift 22s ease-in-out infinite; mask-image:linear-gradient(180deg,transparent 0%,#000 34%); }
+          .nexus-atelier-horizon-glare { position:absolute; inset:auto 0 0; width:100%; height:22vh; min-height:9rem; object-fit:cover; object-position:center bottom; mix-blend-mode:screen; pointer-events:none; animation:atelierHorizonGlare 16s ease-in-out infinite; mask-image:linear-gradient(180deg,transparent 5%,#000 58%); }
           .nexus-atelier-identity { width:min(100%,31rem); height:auto; margin-top:-1.6rem; mix-blend-mode:screen; animation:atelierIdentityFloat 8s ease-in-out infinite; }
           .nexus-atelier-heading { margin-top:-.35rem; color:#f8fbff; font-size:clamp(1.7rem,2.5vw,2.35rem); font-weight:400; letter-spacing:-.038em; line-height:1.1; text-shadow:0 2px 22px rgba(0,0,0,.46); }
           .nexus-atelier-heading span { color:#1597ff; text-shadow:0 0 20px rgba(28,158,255,.25); }
           .nexus-atelier-submit { animation:atelierButtonBreathe 4.2s ease-in-out infinite; }
           @media (max-height:760px) and (min-width:1024px) { .nexus-atelier-main { padding-top:2.8rem; } .nexus-atelier-identity { width:min(100%,25rem); margin-top:-1.9rem; } .nexus-atelier-form { margin-top:1.5rem; } .nexus-atelier-form > div + div { margin-top:1rem; } .nexus-atelier-submit { margin-top:1.5rem; } }
-          @media (prefers-reduced-motion:reduce) { .nexus-atelier-identity,.nexus-atelier-horizon,.nexus-atelier-submit { animation:none; } }
+          @media (prefers-reduced-motion:reduce) { .nexus-atelier-identity,.nexus-atelier-horizon,.nexus-atelier-horizon-glare,.nexus-atelier-submit { animation:none; } }
         `}</style>
       </div>
     );
