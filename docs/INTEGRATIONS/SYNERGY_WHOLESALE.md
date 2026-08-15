@@ -48,3 +48,20 @@ domains, DNS, hosting/cPanel, SSL certificates and Microsoft 365 subscriptions.
 Nexus remains the system of record for customer, domain, certificate and web
 delivery records. Synergy responses are integration evidence, not a second
 authoritative customer record.
+
+## Managed WordPress sites
+
+Each Web Studio site is explicitly linked to its Nexus client and may carry a
+service plan, agreement reference, billing status and monthly service value.
+This keeps website support visible to service and billing workflows instead of
+leaving it as an unowned hosting login.
+
+To enable WordPress inventory, configure a distinct Fernet key in
+`WEB_STUDIO_ENCRYPTION_KEY`, then link the site using a dedicated WordPress
+Application Password over HTTPS. Nexus encrypts that password at rest and only
+uses it server-side for the WordPress REST API inventory check.
+
+Plugin, theme and core updates are approval-backed Nexus work items. They are
+not silently executed through the browser; production execution is reserved for
+the Nexus WordPress Control worker (for example a controlled WP-CLI/cPanel
+worker) so backups, verification and rollback evidence can be required first.
