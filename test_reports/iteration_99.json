@@ -42,7 +42,7 @@
     "frontend": "100%"
   },
   "test_credentials": {
-    "admin": "aaron@stech.com.au / Lucky@2871$!"
+    "admin": "aaron@stech.com.au / [redacted-test-password]"
   },
   "seed_data_creation": "None - using existing seed data",
   "retest_needed": false,

@@ -24,7 +24,7 @@
     "backend": "100% (12/12 tests passed)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required - tested with existing data",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -40,8 +40,8 @@
     "frontend_components": {
       "Automation tab (data-testid='tab-automation')": "PASS - Tab present in Command Center tabs",
       "automation-card (data-testid='automation-card')": "PASS - Card renders with Zero-touch chain reactions title",
-      "automation-status (data-testid='automation-status')": "PASS - Shows '● Running' (green) or '○ Paused'",
-      "Run now button (data-testid='automation-run-now-btn')": "PASS - Triggers tick, shows 'Tick complete · 4 reactions ran' toast",
+      "automation-status (data-testid='automation-status')": "PASS - Shows 'â— Running' (green) or 'â—‹ Paused'",
+      "Run now button (data-testid='automation-run-now-btn')": "PASS - Triggers tick, shows 'Tick complete Â· 4 reactions ran' toast",
       "Pause/Resume toggle (data-testid='automation-toggle-btn')": "PASS - Toggles between Pause/Resume, updates status badge",
       "Interval buttons (5m/15m/30m/60m)": "PASS - Quick-switch buttons update interval, show toast confirmation",
       "Recent ticks table": "PASS - Shows tick history with When, Triggered by, Results columns"

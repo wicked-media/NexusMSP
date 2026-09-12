@@ -22,7 +22,7 @@
     "backend": "100% (14/14 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None - used existing ticket data",
   "retest_needed": false,
   "main_agent_can_self_test": true,

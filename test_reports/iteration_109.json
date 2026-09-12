@@ -31,7 +31,7 @@
   "retest_needed": false,
   "should_main_agent_self_test": false,
   "context_for_next_testing_agent": "Shadow IT Detector fully implemented and tested. Backend endpoints all working: baseline GET/PUT, device software-report, seed-demo, scan (all/single client), summary, findings with filters, actions (approve/ignore/create_ticket). Frontend has all data-testid attributes: shadow-it-page, sit-metric-*, sit-scan-btn, sit-seed-demo-btn, sit-search, sit-risk-filter-*, sit-client-row-*, sit-finding-row-*, sit-approve-*, sit-ticket-*, sit-ignore-*, sit-devices-btn-*, sit-devices-dialog. Navigation: Security > Endpoint Security > Shadow IT.",
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "features_tested": {
     "backend_endpoints": {
       "baseline": {

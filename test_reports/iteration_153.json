@@ -1,5 +1,5 @@
 {
-  "summary": "Iteration 153: Team Pins (NOC Strip) feature fully tested. All 14 backend tests passed. Frontend verified: TeamPinsStrip component on Dashboard shows team-pinned tickets with red pulsing stripe, 'TEAM PINNED · NOC STRIP' header, count badge, and ticket cards. Ticket detail shows red 'TEAM' badge with Siren icon when team-pinned. Actions menu has 'Pin for Team (NOC strip)' / 'Unpin from Team' option. Existing flows (workspace, personal pin, C.R.A.I.G, Actions, Billing) all working.",
+  "summary": "Iteration 153: Team Pins (NOC Strip) feature fully tested. All 14 backend tests passed. Frontend verified: TeamPinsStrip component on Dashboard shows team-pinned tickets with red pulsing stripe, 'TEAM PINNED Â· NOC STRIP' header, count badge, and ticket cards. Ticket detail shows red 'TEAM' badge with Siren icon when team-pinned. Actions menu has 'Pin for Team (NOC strip)' / 'Unpin from Team' option. Existing flows (workspace, personal pin, C.R.A.I.G, Actions, Billing) all working.",
   "backend_issues": {
     "critical": [],
     "minor": []
@@ -28,7 +28,7 @@
     "backend": "100% (14/14 tests passed)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Test tickets created and cleaned up during backend tests. Existing team pins (INC-0003, INC-0008) used for frontend verification.",
   "retest_needed": false,
   "should_main_agent_self_test": false,

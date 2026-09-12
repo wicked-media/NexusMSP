@@ -22,7 +22,7 @@
     "backend": "100% (20/20 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Test windows created during backend tests (TEST_ prefixed, cleaned up)",
   "retest_needed": false,
   "main_agent_can_self_test": true,
@@ -33,7 +33,7 @@
       "list_windows": "GET /api/maintenance-windows - supports ?status= filter and ?limit= parameter",
       "get_window_detail": "GET /api/maintenance-windows/{id} - returns window with runs[] array",
       "stats_summary": "GET /api/maintenance-windows/stats/summary - returns {counts:{}, upcoming:[]} - no route collision with /{wid}",
-      "run_now": "POST /api/maintenance-windows/{id}/run-now - triggers immediate execution, status goes scheduled→running→completed",
+      "run_now": "POST /api/maintenance-windows/{id}/run-now - triggers immediate execution, status goes scheduledâ†’runningâ†’completed",
       "cancel_window": "DELETE /api/maintenance-windows/{id} - cancels scheduled windows only, returns 400 for running/completed",
       "parent_ticket_comment": "When parent_ticket_id is set, completion posts comment with kind='maintenance_window' to ticket_comments"
     },
