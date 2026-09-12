@@ -1,3 +1,86 @@
+# Team Hub design QA
+
+## Evidence
+
+- Source visual truth paths: `http://localhost:3000/workspace` and `http://localhost:3000/clients`
+- Baseline path: `http://localhost:3000/team-hub`
+- Implementation screenshot path: `http://localhost:3000/team-hub?view=directory`
+- Browser: Codex in-app browser, authenticated NexusMSP session
+- Viewport and capture pixels: 1132 x 900 for source and implementation captures
+- CSS size and density normalization: identical browser surface and zoom; device pixel ratio was not exposed by the automation API, so no cross-density scaling was applied
+- State: all permitted clients, dark theme, populated five-member directory, one member needing attention
+- Browser-rendered evidence: source workspace/client captures, baseline Team Hub capture, final Team Hub capture, invitations empty state, member actions menu, manage-member dialog, and add-teammate dialog were opened in the current task
+- Console errors checked: the in-app browser API did not expose a console stream; the live route showed no rendered error boundary and the production build completed successfully
+
+## Full-view comparison evidence
+
+The source workspaces use one canonical header, a clear action hierarchy, four wide summary tiles, restrained accent colour, and focused content regions. The final Team Hub now follows the same composition. The page no longer presents an eleven-control, three-row tab matrix or three cramped cards across the available desktop content width.
+
+## Focused region comparison evidence
+
+- **Header and actions:** visually compared with Clients; secondary tools are grouped under More, Invite is outlined, and Add teammate is the rightmost primary action.
+- **Metrics:** visually compared with Clients and My Workspace; four equal tracks now carry decision-oriented labels and supporting copy.
+- **Navigation:** inspected in the rendered accessibility tree and browser; five semantic tabs remain visible and six specialist views are keyboard-accessible through More views. The selected overflow view is named on the trigger.
+- **Directory cards:** inspected at the rendered desktop width; names, roles and emails remain readable, the decorative radar is removed, text labels accompany workload values, and member actions are split between Manage member and an Actions menu.
+- **Dialogs:** Manage member and Add teammate were opened without submitting changes; labels, focusable controls and cancel/close paths remained available.
+
+## Required fidelity surfaces
+
+- **Fonts and typography:** preserved the application font stack and shared component weights; raised staff metadata and action labels from micro text to readable 10-12px UI sizes; removed critical identity truncation.
+- **Spacing and layout rhythm:** matched the established 24px workspace gutters, 20px section padding, four-tile metric rhythm, rounded control surfaces and two-column desktop directory density.
+- **Colors and visual tokens:** reused Nexus `border`, `background`, `muted`, violet, emerald, cyan and amber tokens; colour is supplemented by status and metric text.
+- **Image quality and asset fidelity:** preserved real profile imagery and Lucide icons; removed the decorative handcrafted radar SVG instead of replacing it with an approximation.
+- **Copy and content:** standardised Team Hub naming, clarified metric meanings, renamed Add user to Add teammate, and made archival wording explicit.
+
+## Comparison history
+
+### Iteration 1 - baseline
+
+- [P1] Eleven always-visible tabs created a dense, multi-row navigation surface.
+- [P1] Three-column staff cards truncated identity and made actions compete with content.
+- [P2] Header actions lacked a clear primary/secondary hierarchy.
+- [P2] Six equal-weight metrics overemphasised colour and underemphasised decisions.
+- [P2] Decorative skill radars used space without providing legible values.
+
+### Fixes made
+
+- Reduced visible navigation to five common views and moved six specialist views into an overflow menu.
+- Standardised the header with More, Invite and Add teammate action priority.
+- Reduced the metric strip to Team members, Ready now, On call and Needs attention.
+- Widened cards, exposed full identity, added readable workload/capacity labels and top-skill badges, and moved archival actions into a menu.
+
+### Post-fix evidence
+
+- The final 1132 x 900 capture shows the same broad hierarchy and density as the reference workspaces.
+- The rendered accessibility tree exposes a five-item tab group, labelled overflow and staff actions menus, named filters, readable member content, and labelled dialogs.
+- More views successfully opened Invites and retained `?view=invites`; the trigger changed to Invites to make hidden selection visible.
+- The first member Actions menu exposed Archive account without executing it.
+- Manage member and Add teammate dialogs opened successfully and were closed without saving.
+
+## Findings
+
+No actionable P0, P1 or P2 visual differences remain for the audited desktop state. Responsive viewport capture and browser-console capture remain evidence gaps, not observed defects.
+
+## Validation
+
+- Production build passed.
+- Full frontend lint passed with zero errors and zero warnings.
+- All 31 frontend Jest suites passed: 113 tests.
+- Workspace consistency audit passed with zero legacy headers, header contract issues or crowded action headers.
+- `git diff --check` passed.
+
+## Follow-up polish
+
+- [P3] Add automated narrow-viewport screenshot coverage when the selected browser surface supports resizing.
+
+## Final result
+
+passed
+
+---
+
+# Previous workspace header system QA
+
 # Nexus workspace header system design QA
 
 ## Comparison target
