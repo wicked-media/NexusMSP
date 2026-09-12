@@ -49,6 +49,9 @@ services:
       NEXUS_CLAMAV_HOST: clamav
       NEXUS_CLAMAV_PORT: "3310"
       NEXUS_MALWARE_SCAN_TIMEOUT_SECONDS: ${NEXUS_MALWARE_SCAN_TIMEOUT_SECONDS:-30}
+      NEXUS_LOG_FORMAT: json
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      NEXUS_ALERT_WEBHOOK_URL: ${NEXUS_ALERT_WEBHOOK_URL:?Set an HTTPS on-call webhook destination}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       mongo:
@@ -59,6 +62,7 @@ services:
       - nexus-uploads:/app/uploads
       - nexus-private-uploads:/app/private_uploads
       - nexus-installers:/app/data/agent-installers
+    secrets: [nexus-observability-ingest-token]
     networks: [backend]
 
   worker:
@@ -72,6 +76,8 @@ services:
     environment:
       <<: *backend-env
       NEXUS_RUN_BACKGROUND_WORKERS: "true"
+      OTEL_SERVICE_NAME: nexus-worker
+      NEXUS_METRICS_PORT: "9101"
     depends_on:
       mongo:
         condition: service_healthy
@@ -81,6 +87,74 @@ services:
       - nexus-uploads:/app/uploads
       - nexus-private-uploads:/app/private_uploads
       - nexus-installers:/app/data/agent-installers
+    networks: [backend]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    depends_on: [tempo, loki]
+    networks: [backend]
+
+  tempo:
+    image: grafana/tempo:2.10.8
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo.yml:ro
+      - nexus-tempo:/var/tempo
+    networks: [backend]
+
+  loki:
+    image: grafana/loki:3.7.7
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/local-config.yml"]
+    volumes:
+      - ./observability/loki.yml:/etc/loki/local-config.yml:ro
+      - nexus-loki:/loki
+    networks: [backend]
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - nexus-alertmanager:/alertmanager
+    secrets: [nexus-observability-ingest-token]
+    networks: [backend]
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - nexus-prometheus:/prometheus
+    depends_on: [api, worker, alertmanager]
+    networks: [backend]
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${NEXUS_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${NEXUS_GRAFANA_ADMIN_PASSWORD:?Set NEXUS_GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "${NEXUS_GRAFANA_BIND_HOST:-127.0.0.1}:${NEXUS_GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - nexus-grafana:/var/lib/grafana
+    depends_on: [prometheus, tempo, loki]
     networks: [backend]
 
   web:
@@ -103,3 +177,12 @@ volumes:
   nexus-uploads:
   nexus-private-uploads:
   nexus-installers:
+  nexus-prometheus:
+  nexus-alertmanager:
+  nexus-tempo:
+  nexus-loki:
+  nexus-grafana:
+
+secrets:
+  nexus-observability-ingest-token:
+    environment: NEXUS_OBSERVABILITY_INGEST_TOKEN

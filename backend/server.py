@@ -1,4 +1,4 @@
-from fastapi import APIRouter, FastAPI, HTTPException, Request as FastAPIRequest
+from fastapi import APIRouter, FastAPI, HTTPException, Request as FastAPIRequest, Response
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
@@ -15,9 +15,21 @@ import uuid
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
 from app.services.runtime_config import background_workers_enabled, cors_origins, demo_seed_enabled
+from app.services.observability import (
+    HTTP_IN_PROGRESS,
+    configure_observability,
+    deliver_alertmanager_webhook,
+    metrics_payload,
+    observe_http,
+    observability_ingest_authorized,
+    refresh_operational_metrics,
+    request_span,
+    shutdown_observability,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+configure_observability(service_name=os.getenv("OTEL_SERVICE_NAME", "nexus-api"))
 
 app = FastAPI(title="NexusOps API", version="3.0.0")
 _background_tasks: set[asyncio.Task] = set()
@@ -33,19 +45,36 @@ async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
     correlation_id = supplied if _CORRELATION_ID_RE.fullmatch(supplied) else str(uuid.uuid4())
     request.state.correlation_id = correlation_id
     started = time.perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception:
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.exception(
-            "request_failed correlation_id=%s method=%s path=%s elapsed_ms=%s",
-            correlation_id,
-            request.method,
-            request.url.path,
-            elapsed_ms,
+    HTTP_IN_PROGRESS.inc()
+    with request_span(method=request.method, correlation_id=correlation_id) as span:
+        try:
+            response = await call_next(request)
+        except Exception:
+            elapsed_seconds = time.perf_counter() - started
+            route = getattr(request.scope.get("route"), "path", "unmatched")
+            observe_http(method=request.method, route=route, status_code=500, elapsed_seconds=elapsed_seconds)
+            logger.exception(
+                "request_failed correlation_id=%s method=%s route=%s elapsed_ms=%s",
+                correlation_id,
+                request.method,
+                route,
+                round(elapsed_seconds * 1000, 1),
+            )
+            raise
+        finally:
+            HTTP_IN_PROGRESS.dec()
+        route = getattr(request.scope.get("route"), "path", "unmatched")
+        elapsed_seconds = time.perf_counter() - started
+        observe_http(
+            method=request.method,
+            route=route,
+            status_code=response.status_code,
+            elapsed_seconds=elapsed_seconds,
         )
-        raise
-    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        if span is not None:
+            span.set_attribute("http.route", route)
+            span.set_attribute("http.response.status_code", response.status_code)
+    elapsed_ms = round(elapsed_seconds * 1000, 1)
     response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     # PDFs are displayed inside the authenticated Nexus document preview. The
@@ -62,10 +91,10 @@ async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
         response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     logger.info(
-        "request_complete correlation_id=%s method=%s path=%s status=%s elapsed_ms=%s",
+        "request_complete correlation_id=%s method=%s route=%s status=%s elapsed_ms=%s",
         correlation_id,
         request.method,
-        request.url.path,
+        route,
         response.status_code,
         elapsed_ms,
     )
@@ -301,6 +330,43 @@ async def readiness_check():
         logger.error("Readiness database ping failed: %s", exc)
         raise HTTPException(status_code=503, detail="Database is unavailable") from exc
     return {"status": "ready", "service": "nexusops-api", "version": "3.0.0"}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    """Private-network scrape target; the production proxy does not expose it."""
+    await refresh_operational_metrics(db)
+    payload, content_type = metrics_payload()
+    return Response(content=payload, media_type=content_type)
+
+
+@app.post("/internal/observability/alerts", include_in_schema=False)
+async def receive_observability_alerts(request: FastAPIRequest):
+    """Private Alertmanager relay to the configured HTTPS on-call destination."""
+    if not observability_ingest_authorized(request.headers.get("Authorization")):
+        raise HTTPException(
+            status_code=401,
+            detail="Observability ingest authentication failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        content_length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid content length") from None
+    if content_length > 256 * 1024:
+        raise HTTPException(status_code=413, detail="Alert payload is too large")
+    try:
+        payload = await request.json()
+        delivered = await deliver_alertmanager_webhook(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.error("observability_alert_delivery_unavailable reason=%s", str(exc))
+        raise HTTPException(status_code=503, detail="On-call alert delivery is unavailable") from None
+    except Exception:
+        logger.exception("observability_alert_delivery_failed")
+        raise HTTPException(status_code=502, detail="On-call alert delivery failed") from None
+    return {"status": "delivered", "alert_count": delivered}
 
 
 def _start_background_task(coro, name: str) -> asyncio.Task:
@@ -981,6 +1047,7 @@ async def shutdown_db_client():
         task.cancel()
     if _background_tasks:
         await asyncio.gather(*tuple(_background_tasks), return_exceptions=True)
+    shutdown_observability()
     client.close()
 
 async def _standup_digest_scheduler():

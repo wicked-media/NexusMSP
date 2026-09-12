@@ -103,3 +103,13 @@ New tenant-aware Nexus read and write paths use the authenticated actor's stable
 ## Required placement decision
 
 Use PostgreSQL when a new domain needs transactional, relational, constrained business truth. Use MongoDB for variable-shape ingestion, telemetry, snapshots and document-centric retrieval. Add the decision and any cache/replica semantics here before introducing the new store.
+
+# Observability data
+
+Prometheus, Tempo, Loki, Alertmanager, and Grafana hold derived operational
+telemetry only. MongoDB remains the authoritative business-data store. Metrics,
+traces, logs, alert state, and dashboards are non-authoritative operational
+evidence with bounded retention; they must not be used as relationship keys or
+to reconstruct customer records. Metric labels and trace attributes exclude
+tenant, client, user, device, ticket, mutable provider identifiers, payloads,
+and secrets. Platform Operations owns access, retention, export, and deletion.

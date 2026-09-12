@@ -34,6 +34,8 @@ CI must also build both containers and validate `docker-compose.production.yml`.
 5. Store production secrets in the deployment platform's secret store and restrict read access.
 6. Rotate the JWT and encryption secrets under an approved change plan; changing the encryption key without a migration can make stored integration credentials unreadable.
 7. Keep `NEXUS_MALWARE_SCANNER=clamav`; never use the acceptance-only deterministic scanner outside the isolated test runner. See [UPLOAD_QUARANTINE_RUNBOOK.md](UPLOAD_QUARANTINE_RUNBOOK.md).
+8. Set a unique `NEXUS_GRAFANA_ADMIN_PASSWORD` and an approved HTTPS
+   `NEXUS_ALERT_WEBHOOK_URL`; see [OBSERVABILITY_RUNBOOK.md](OBSERVABILITY_RUNBOOK.md).
 
 ## 3. Deployment
 
@@ -53,6 +55,8 @@ Confirm:
 - Correlation IDs appear in proxy responses and API logs.
 - ClamAV is reachable only on the backend network, its signatures are current,
   and the clean/EICAR/outage checks in the upload-quarantine runbook pass.
+- Prometheus sees the API and worker targets, Grafana shows metrics/logs/traces,
+  and the firing/resolved alert drill reaches and is acknowledged by on-call.
 
 ## 4. Backup and restore proof
 

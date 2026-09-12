@@ -131,4 +131,7 @@ jobs:
           NEXUS_SECRET_ENCRYPTION_KEY: ci-only-encryption-key
           NEXUS_DMARC_RECEIVER_TOKEN: ci-only-dmarc-receiver-token
           CORS_ORIGINS: https://nexus.example.invalid
+          NEXUS_GRAFANA_ADMIN_PASSWORD: ci-only-dashboard-password
+          NEXUS_ALERT_WEBHOOK_URL: https://alerts.example.invalid/nexus
+          NEXUS_OBSERVABILITY_INGEST_TOKEN: ci-only-observability-ingest-token
         run: docker compose -f docker-compose.production.yml config --quiet
