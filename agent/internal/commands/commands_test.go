@@ -7,12 +7,16 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"nexusagent/internal/config"
+	"nexusagent/internal/transport"
 )
 
 func TestExecutePing(t *testing.T) {
@@ -49,6 +53,40 @@ func TestTruncateBoundsCommandOutput(t *testing.T) {
 	result := truncate("abcdef", 3)
 	if result != "abc\n...[truncated]" {
 		t.Fatalf("unexpected truncated output: %q", result)
+	}
+}
+
+func TestInstallVerifiedCompanionChecksFingerprintBeforeActivation(t *testing.T) {
+	payload := []byte("trusted companion binary")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/nexus-agent/companion/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	digest := sha256.Sum256(payload)
+	destination := filepath.Join(t.TempDir(), "nexus-client-chat.exe")
+	client := transport.New(server.URL, "test")
+	if err := installVerifiedCompanion(client, "/api/nexus-agent/companion/latest", destination, hex.EncodeToString(digest[:]), "test companion"); err != nil {
+		t.Fatalf("installVerifiedCompanion() error = %v", err)
+	}
+	installed, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatalf("read installed companion: %v", err)
+	}
+	if string(installed) != string(payload) {
+		t.Fatalf("installed payload = %q, want %q", installed, payload)
+	}
+
+	wrongDestination := filepath.Join(t.TempDir(), "nexus-agent-tray.exe")
+	if err := installVerifiedCompanion(client, "/api/nexus-agent/companion/latest", wrongDestination, strings.Repeat("0", 64), "test tray"); err == nil {
+		t.Fatal("installVerifiedCompanion() accepted an incorrect fingerprint")
+	}
+	if _, err := os.Stat(wrongDestination); !os.IsNotExist(err) {
+		t.Fatalf("unverified companion became active: %v", err)
 	}
 }
 

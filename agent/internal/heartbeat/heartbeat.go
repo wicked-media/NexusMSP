@@ -34,6 +34,7 @@ type payload struct {
 	AgentVersion string                 `json:"agent_version"`
 	Snapshot     telemetry.Snapshot     `json:"snapshot"`
 	Capabilities []string               `json:"capabilities,omitempty"`
+	RuntimeCapabilities []string        `json:"runtime_capabilities,omitempty"`
 	NexusDNS     *config.NexusDNSConfig `json:"nexus_dns,omitempty"`
 	Identity     map[string]any         `json:"identity,omitempty"`
 	Policy       map[string]any         `json:"policy_evidence,omitempty"`
@@ -84,6 +85,7 @@ func (l *Loop) sendOnce() {
 		AgentVersion: l.version,
 		Snapshot:     snapshot,
 		Capabilities: l.cfg.ShieldCapabilities(),
+		RuntimeCapabilities: l.cfg.RuntimeCapabilities(),
 		NexusDNS:     l.cfg.NexusDNS,
 		Identity:     identity.Report(l.cfg),
 		Policy:       identity.PolicyEvidence(l.cfg),
@@ -107,7 +109,7 @@ func (l *Loop) sendOnce() {
 	}
 
 	if response.Policy != nil && !reflect.DeepEqual(l.cfg.PlatformPolicy, response.Policy) {
-		l.cfg.PlatformPolicy = response.Policy
+		l.cfg.ApplyPlatformPolicy(response.Policy)
 		if err := config.Save(l.cfg); err != nil {
 			log.Printf("[policy] persist cache failed: %v", err)
 		} else {

@@ -60,6 +60,7 @@ type commandPayload struct {
 	ProgramPath   string   `json:"program_path,omitempty"`
 	Arguments     []string `json:"arguments,omitempty"`
 	SHA256        string   `json:"sha256,omitempty"`
+	TraySHA256    string   `json:"tray_sha256,omitempty"`
 	ApprovedUntil string   `json:"approved_until,omitempty"`
 	CanaryID      string   `json:"canary_id,omitempty"`
 	CanaryPath    string   `json:"canary_path,omitempty"`
@@ -711,13 +712,19 @@ func fileSHA256(path string) (string, error) {
 func installCompanion(tr *transport.Client, c cmdItem, res cmdResult) cmdResult {
 	if runtime.GOOS != "windows" {
 		res.Status = "error"
-		res.Stderr = "the Nexus Client Chat companion is currently supported on Windows endpoints only"
+		res.Stderr = "the Nexus Client Chat and Tray companions are currently supported on Windows endpoints only"
 		return res
 	}
-	expectedHash := strings.TrimSpace(c.Payload.SHA256)
-	if expectedHash != "" && len(expectedHash) != 64 {
+	chatHash := strings.TrimSpace(c.Payload.SHA256)
+	trayHash := strings.TrimSpace(c.Payload.TraySHA256)
+	if chatHash != "" && len(chatHash) != 64 {
 		res.Status = "error"
-		res.Stderr = "companion rollout has an invalid expected SHA-256"
+		res.Stderr = "client chat rollout has an invalid expected SHA-256"
+		return res
+	}
+	if trayHash != "" && len(trayHash) != 64 {
+		res.Status = "error"
+		res.Stderr = "tray rollout has an invalid expected SHA-256"
 		return res
 	}
 	executable, err := os.Executable()
@@ -726,42 +733,68 @@ func installCompanion(tr *transport.Client, c cmdItem, res cmdResult) cmdResult 
 		res.Stderr = "could not locate agent install directory: " + err.Error()
 		return res
 	}
-	destination := filepath.Join(filepath.Dir(executable), "nexus-client-chat.exe")
-	temporary := destination + ".download"
-	defer os.Remove(temporary)
-	if err := tr.Download("/api/nexus-agent/companion/latest", temporary); err != nil {
+	installDir := filepath.Dir(executable)
+	chatPath := filepath.Join(installDir, "nexus-client-chat.exe")
+	if err := installVerifiedCompanion(tr, "/api/nexus-agent/companion/latest", chatPath, chatHash, "Nexus Client Chat"); err != nil {
 		res.Status = "error"
-		res.Stderr = "could not download the client companion: " + err.Error()
-		return res
-	}
-	actualHash, err := fileSHA256(temporary)
-	if err != nil {
-		res.Status = "error"
-		res.Stderr = "could not fingerprint downloaded companion: " + err.Error()
-		return res
-	}
-	if expectedHash != "" && !strings.EqualFold(actualHash, expectedHash) {
-		res.Status = "error"
-		res.Stderr = "downloaded companion fingerprint did not match the rollout command"
-		return res
-	}
-	if err := os.Remove(destination); err != nil && !os.IsNotExist(err) {
-		res.Status = "error"
-		res.Stderr = "could not replace the client companion; close it and retry: " + err.Error()
-		return res
-	}
-	if err := os.Rename(temporary, destination); err != nil {
-		res.Status = "error"
-		res.Stderr = "could not install the client companion: " + err.Error()
+		res.Stderr = err.Error()
 		return res
 	}
 	res.Stdout = "Nexus Client Chat companion installed successfully"
-	if launcherPath, err := installCompanionStartMenuEntry(destination); err != nil {
+	if launcherPath, err := installCompanionStartMenuEntry(chatPath); err != nil {
 		res.Stdout += "; the Start Menu launcher could not be created: " + err.Error()
 	} else {
 		res.Stdout += "; Start Menu launcher created at " + launcherPath
 	}
+	if trayHash != "" {
+		trayPath := filepath.Join(installDir, "nexus-agent-tray.exe")
+		if err := installVerifiedCompanion(tr, "/api/nexus-agent/tray/latest", trayPath, trayHash, "Nexus Agent Tray"); err != nil {
+			res.Status = "error"
+			res.Stderr = err.Error()
+			return res
+		}
+		if err := installTrayLauncher(trayPath); err != nil {
+			res.Status = "error"
+			res.Stderr = "Nexus Agent Tray was installed but could not be registered for user sign-in: " + err.Error()
+			return res
+		}
+		res.Stdout += "; Nexus Agent Tray installed and registered for sign-in"
+	}
 	return res
+}
+
+func installVerifiedCompanion(tr *transport.Client, route, destination, expectedHash, name string) error {
+	temporary := destination + ".download"
+	defer os.Remove(temporary)
+	if err := tr.Download(route, temporary); err != nil {
+		return fmt.Errorf("could not download %s: %w", name, err)
+	}
+	actualHash, err := fileSHA256(temporary)
+	if err != nil {
+		return fmt.Errorf("could not fingerprint %s: %w", name, err)
+	}
+	if expectedHash != "" && !strings.EqualFold(actualHash, expectedHash) {
+		return fmt.Errorf("%s fingerprint did not match the rollout command", name)
+	}
+	if err := os.Remove(destination); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("could not replace %s; close it and retry: %w", name, err)
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		return fmt.Errorf("could not install %s: %w", name, err)
+	}
+	return nil
+}
+
+func installTrayLauncher(trayPath string) error {
+	value := `"` + trayPath + `"`
+	out, err := exec.Command(
+		"reg", "add", `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`,
+		"/v", "NexusAgentTray", "/t", "REG_SZ", "/d", value, "/f",
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("register tray launcher: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // installCompanionStartMenuEntry gives the signed-in endpoint user a normal

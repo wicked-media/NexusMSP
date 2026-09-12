@@ -18,11 +18,12 @@ import (
 	"nexusagent/internal/enroll"
 	"nexusagent/internal/heartbeat"
 	"nexusagent/internal/identity"
+	"nexusagent/internal/localbroker"
 	"nexusagent/internal/transport"
 )
 
 // Version is injected at build time via -ldflags.
-var Version = "0.1.10-signed-commands"
+var Version = "0.1.11-endpoint-readiness"
 
 func main() {
 	var (
@@ -114,7 +115,7 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	// Ensure enrollment — first boot only.
 	if cfg.AgentToken == "" {
 		log.Println("[enroll] no agent token; enrolling with server...")
-		token, deviceID, err := enroll.Run(tr, cfg)
+		token, deviceID, err := enroll.Run(tr, cfg, Version)
 		if err != nil {
 			log.Fatalf("[enroll] failed: %v — agent will retry on next start", err)
 		}
@@ -127,6 +128,13 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	}
 
 	tr.SetToken(cfg.AgentToken)
+	localBroker, err := localbroker.Start(cfg)
+	if err != nil {
+		log.Printf("[local-broker] WARN: user-session companion bridge is unavailable: %v", err)
+	} else {
+		defer func() { _ = localBroker.Shutdown(context.Background()) }()
+		log.Printf("[local-broker] protected companion bridge listening at %s", localbroker.Address)
+	}
 	if _, _, err := identity.Ensure(cfg); err != nil {
 		log.Printf("[identity] WARN: device identity initialisation failed: %v", err)
 	} else if identity.NeedsRotation(cfg, 30*24*time.Hour) {

@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 type Config struct {
@@ -125,7 +129,52 @@ func LoadOrInit(explicit string) (*Config, error) {
 	if cfg.ServerURL == "" {
 		return nil, fmt.Errorf("config %s missing server_url", path)
 	}
+	if err := ValidateServerURL(cfg.ServerURL); err != nil {
+		return nil, fmt.Errorf("config %s has invalid server_url: %w", path, err)
+	}
 	return &cfg, nil
+}
+
+// ValidateServerURL keeps agent credentials off cleartext networks. HTTPS is
+// required for any deployed endpoint; HTTP is accepted only for explicit
+// loopback development on the same machine.
+func ValidateServerURL(raw string) error {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return errors.New("server_url is required")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errors.New("server_url must be an absolute http(s) URL")
+	}
+	if parsed.User != nil {
+		return errors.New("server_url must not contain user credentials")
+	}
+	if parsed.Fragment != "" {
+		return errors.New("server_url must not contain a fragment")
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		if isLoopbackHost(parsed.Hostname()) {
+			return nil
+		}
+		return errors.New("server_url must use https outside local loopback development")
+	default:
+		return errors.New("server_url must use http or https")
+	}
+}
+
+func isLoopbackHost(host string) bool {
+	clean := strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.EqualFold(clean, "localhost") {
+		return true
+	}
+	if address := net.ParseIP(clean); address != nil {
+		return address.IsLoopback()
+	}
+	return false
 }
 
 // Save persists the current config back to disk (atomic write).
@@ -141,7 +190,14 @@ func Save(c *Config) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, c.configPath)
+	if err := securePersistedConfig(tmp); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, c.configPath); err != nil {
+		return err
+	}
+	return securePersistedConfig(c.configPath)
 }
 
 func (c *Config) BaseDir() string {
@@ -171,7 +227,7 @@ func (c *Config) ShieldCapabilities() []string {
 	var capabilities []string
 	if c.NexusShield == nil {
 		capabilities = []string{"nexus_shield", "endpoint_posture", "nexus_canary"}
-	} else {
+	} else if c.NexusShield.Enabled {
 		capabilities = []string{"nexus_shield"}
 		if c.NexusShield.PostureTelemetry {
 			capabilities = append(capabilities, "endpoint_posture")
@@ -184,4 +240,60 @@ func (c *Config) ShieldCapabilities() []string {
 		capabilities = append(capabilities, "nexus_dns", "dns_visibility", "dns_policy_cache")
 	}
 	return capabilities
+}
+
+// RuntimeCapabilities describes what the installed binary can actually do,
+// independent of whether a customer has enabled or licensed a corresponding
+// Nexus module. This deliberately avoids claiming DNS enforcement, remote
+// desktop, or any other capability that this agent binary does not implement.
+func (c *Config) RuntimeCapabilities() []string {
+	capabilities := []string{
+		"system_inventory",
+		"signed_command_envelopes",
+		"command_replay_protection",
+		"device_identity",
+		"signed_agent_updates",
+		"update_health_rollback",
+		"policy_cache",
+		"self_repair",
+	}
+	if runtime.GOOS == "windows" {
+		capabilities = append(capabilities,
+			"windows_service",
+			"windows_security_posture",
+			"windows_update_inventory",
+			"hardware_inventory",
+			"software_inventory",
+			"network_inventory",
+			"nexus_canary",
+			"approved_elevation_launch",
+		)
+	}
+	return capabilities
+}
+
+// ApplyPlatformPolicy persists the service-controlled cadence alongside the
+// signed policy cache. The current process keeps its existing timers; a normal
+// service restart adopts any changed cadence without needing a new installer.
+func (c *Config) ApplyPlatformPolicy(policy *PlatformPolicy) {
+	c.PlatformPolicy = policy
+	if policy == nil {
+		return
+	}
+	if policy.HeartbeatSecs > 0 {
+		c.HeartbeatSecs = clamp(policy.HeartbeatSecs, 15, 3600)
+	}
+	if policy.PollSecs > 0 {
+		c.PollSecs = clamp(policy.PollSecs, 2, 300)
+	}
+}
+
+func clamp(value, minimum, maximum int) int {
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
 }

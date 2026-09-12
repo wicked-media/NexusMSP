@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
@@ -55,15 +56,29 @@ func svcInstall(cfg *config.Config) error {
 	}
 	// No explicit run flag: main detects Service Control Manager execution and
 	// starts the Windows service handler; interactive launches remain console-mode.
-	cmd := exec.Command("sc", "create", svcName,
-		"binPath=", fmt.Sprintf("\"%s\"", exe),
-		"start=", "auto",
-		"DisplayName=", "NexusOps Agent",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("sc create failed: %v: %s", err, string(out))
+	if serviceExists() {
+		cmd := exec.Command("sc", "config", svcName,
+			"binPath=", fmt.Sprintf("\"%s\"", exe),
+			"start=", "auto",
+			"DisplayName=", "NexusOps Agent",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("sc config failed: %v: %s", err, string(out))
+		}
+	} else {
+		cmd := exec.Command("sc", "create", svcName,
+			"binPath=", fmt.Sprintf("\"%s\"", exe),
+			"start=", "auto",
+			"DisplayName=", "NexusOps Agent",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("sc create failed: %v: %s", err, string(out))
+		}
 	}
 	_ = exec.Command("sc", "description", svcName, "NexusOps Remote Monitoring & Management Agent").Run()
+	if err := configureServiceRecovery(); err != nil {
+		return err
+	}
 	// The service runs in Session 0 and cannot own a user-visible tray icon.
 	// The adjacent tray companion is registered for each interactive user instead.
 	if trayPath := filepath.Join(filepath.Dir(exe), "nexus-agent-tray.exe"); fileExists(trayPath) {
@@ -72,6 +87,27 @@ func svcInstall(cfg *config.Config) error {
 		}
 	}
 	return svcStart()
+}
+
+func serviceExists() bool {
+	return exec.Command("sc", "query", svcName).Run() == nil
+}
+
+// configureServiceRecovery makes the installed service resilient to a normal
+// process crash. It intentionally does not attempt self-updates or recovery
+// from an operator-requested stop; Windows Service Control Manager owns that
+// distinction and records it in the host event log.
+func configureServiceRecovery() error {
+	commands := [][]string{
+		{"failure", svcName, "reset=", "86400", "actions=", "restart/5000/restart/15000/restart/60000"},
+		{"failureflag", svcName, "1"},
+	}
+	for _, args := range commands {
+		if out, err := exec.Command("sc", args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("configure service recovery failed: %v: %s", err, string(out))
+		}
+	}
+	return nil
 }
 
 func svcUninstall() error {
@@ -111,6 +147,9 @@ func removeTrayLauncher() error {
 func svcStart() error {
 	out, err := exec.Command("sc", "start", svcName).CombinedOutput()
 	if err != nil {
+		if strings.Contains(string(out), "1056") {
+			return nil
+		}
 		return fmt.Errorf("sc start: %v: %s", err, string(out))
 	}
 	return nil

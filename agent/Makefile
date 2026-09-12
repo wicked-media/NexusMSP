@@ -1,4 +1,4 @@
-VERSION ?= 0.1.10-signed-commands
+VERSION ?= 0.1.11-endpoint-readiness
 LDFLAGS  = -s -w -X main.Version=$(VERSION)
 
 .PHONY: all windows chat windows-chat windows-tray linux edge-linux edge-windows test clean fmt vet tidy

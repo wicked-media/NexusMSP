@@ -8,15 +8,18 @@ Cross-platform RMM agent (Windows-first) for the NexusOps platform.
 +------------------+       HTTPS         +-----------------------+
 |  NexusOps Agent  |  <-- poll cmds -->  |   NexusOps Backend    |
 |  (Go binary)     |  --> heartbeat -->  |   /api/nexus-agent/*  |
-|  + Splashtop     |                     |                       |
-|  Streamer        |                     |   MongoDB             |
+|  + local broker  |                     |   MongoDB             |
+|  + companions    |                     |                       |
 +------------------+                     +-----------------------+
 ```
 
 - Heartbeat every 60s (configurable) with telemetry: CPU, RAM, disks, network, OS, uptime, processes, services.
 - Long-poll every 10s for new commands; processes them; reports results.
-- Phase 1: HTTPS long-poll. Phase 2 will upgrade transport to WebSocket.
-- Auto-update: agent compares `version` against `/api/nexus-agent/version` on each heartbeat.
+- HTTPS control plane with signed command envelopes and replay protection.
+- Signed update manifests are evaluated on heartbeat; the agent fails closed if
+  the version, pinned signing key, signature or artifact fingerprint is wrong.
+- Nexus Remote session governance is first-party. Current screen/input transport
+  remains the explicitly labelled RustDesk adapter; see `docs/NEXUS_REMOTE_PRODUCT.md`.
 
 ## Nexus Shield deployment profile
 
@@ -36,15 +39,23 @@ an endpoint automatically. Those actions remain explicit, reviewed workflows.
 
 ```bash
 cd /app/agent
-make windows         # Cross-compile windows/amd64 -> dist/nexus-agent.exe
+make all             # Build service, Client Chat and Tray for windows/amd64
 ```
+
+The production API image builds those three components from the checked-in
+Agent source in its Docker build stage. It does not copy a developer's
+ignored `agent/dist` directory or any per-device `config.json` into the image.
+Pass the same `NEXUS_AGENT_VERSION` build argument and API environment value
+when promoting a release so the advertised and embedded versions agree.
 
 ## Install (test machine)
 
 The backend's installer builder produces a ZIP per client containing:
 
 - `nexus-agent.exe`
-- `config.json` (per-client enrollment token + server URL)
+- `nexus-client-chat.exe` and `nexus-agent-tray.exe`
+- `config.json` (per-client enrollment token + server URL, ACL-restricted to
+  `SYSTEM` and local Administrators after installation)
 - `install.bat` (silent installer — creates service "NexusOps Agent" + auto-start)
 
 Run `install.bat` as Administrator.
@@ -58,7 +69,8 @@ Run `install.bat` as Administrator.
 - `internal/commands/`         — command poller + executor
 - `internal/telemetry/`        — system inventory collectors
 - `internal/transport/`        — HTTP client (with auth, retry)
-- `internal/splashtop/`        — Splashtop Streamer bootstrapper
+- `internal/localbroker/`      — narrow, service-owned localhost bridge for companions
+- `internal/updater/`          — signed update verification and staged swap/rollback
 
 ## Nexus Elevate (native endpoint privilege approvals)
 
@@ -83,15 +95,26 @@ user-session companion and service-hardening rollout.
 
 ### User-session companion
 
-The `nexus-client-chat.exe` companion is included in current installer packs.
-It opens a local-only window at `http://127.0.0.1:5967` for client chat and
-**Request administrator access**. The companion fingerprints the selected
-executable locally, relays the request with the protected agent token, and
-polls the technician decision. The browser window never receives the token.
+The installer includes `nexus-client-chat.exe` and `nexus-agent-tray.exe`.
+Client Chat opens a local-only window at `http://127.0.0.1:5967` for client
+chat and **Request administrator access**. The companion fingerprints the
+selected executable locally, then asks the protected Agent service to forward
+only that narrow request through its local broker at `127.0.0.1:5968`.
+The long-lived Agent token stays in the protected service configuration; it is
+not read by Client Chat, the Tray app or the browser.
 
-The installer and the managed rollout both add **Nexus Client Chat** to the
-Windows Start Menu under **NexusMSP**. It is deliberately user launched: the
-background service does not inject a GUI into an endpoint user's session.
+The loopback broker is deliberately route-limited, but it is not yet an
+OS-authenticated caller boundary. Requests arriving through Client Chat are
+therefore forcibly held for technician approval even when an auto-allow policy
+matches. Do not use an Agent-side caller as a substitute for Windows
+caller-bound IPC; a Windows pilot install/update/rollback drill remains a
+release gate.
+
+The installer and managed rollout add **Nexus Client Chat** to the Windows
+Start Menu under **NexusMSP**. The tray companion is registered for sign-in so
+the user can see Agent status, included services, updates, chat and Elevate
+progress. Both companions are deliberately user-session processes: the
+background service never injects a GUI into an endpoint user's session.
 
 ## Nexus Edge
 
@@ -120,5 +143,11 @@ inflate the billable count.
 - [x] Phase 1 — Enrollment + heartbeat
 - [x] Phase 2 — Full telemetry (CPU/RAM/disks/services/processes/software)
 - [x] Phase 3 — Remote command execution (scripts/reboot/etc.)
-- [ ] Phase 4 — Splashtop bundling + per-client deployment packs
-- [ ] Phase 5 — Auto-update, code signing, MSI builder
+- [x] Phase 4 — Per-client deployment packs, Client Chat and Tray companions
+- [~] Phase 5a — Application-level update verification and swap/rollback code paths
+- [ ] Phase 5b — Release code signing, MSI builder and staged production rings
+
+Phase 5 is not production-complete until Windows code signing, caller-bound
+companion IPC, staged rings, and a retained endpoint update/rollback drill are
+in place. An Ed25519 application manifest is integrity logic; it is not a
+replacement for Windows Authenticode signing or release provenance.
