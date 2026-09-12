@@ -24,13 +24,59 @@ from app.services.action_permissions import (
 )
 from app.services.core_relationships import core_integrity_snapshot, core_schema
 from app.services.event_backbone import event_backbone_health
+from app.services.m365_provider_visibility import (
+    m365_tenant_connection_query,
+    m365_provider_evidence_query,
+    m365_provider_tenant_query,
+    visible_m365_provider_tenant_ids,
+)
 from app.services.nexus_ideas import ideas_snapshot
 from app.services.platform_foundation import EVENT_SUBJECTS
 from app.services.product_roadmap import build_product_roadmap
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 
 router = APIRouter()
+
+
+def _platform_control_plane_query(
+    current_user: dict,
+    query: dict | None = None,
+) -> dict:
+    """Scope Nexus-owned Control Plane records to the MSP platform tenant.
+
+    Microsoft ``tenant_id`` fields deliberately continue to mean an Entra
+    customer tenant.  Control Plane plans and approvals therefore carry a
+    separate ``platform_tenant_id`` rather than overloading that stable
+    provider identifier as Nexus ownership.
+    """
+    return tenant_scoped_query(
+        current_user,
+        query,
+        tenant_field="platform_tenant_id",
+    )
+
+
+def _platform_configuration_query(
+    current_user: dict,
+    query: dict | None = None,
+) -> dict:
+    """Constrain connector credentials/state to the MSP platform tenant.
+
+    Partner Center and CIPP settings are MSP-owned configuration, not customer
+    Microsoft tenant data.  They therefore use the Nexus platform partition
+    rather than an Entra tenant ID.
+    """
+    return tenant_scoped_query(
+        current_user,
+        query,
+        tenant_field="platform_tenant_id",
+    )
 
 MICROSOFT_ACTION_TEMPLATES: tuple[dict, ...] = (
     {
@@ -589,7 +635,10 @@ async def _recent_activity(current_user: dict) -> list[dict]:
     to restricted technicians: attribution is safer than guessing from a
     mutable name or a related object at read time.
     """
-    query = scoped_query(current_user, {}, site_field=None)
+    query = tenant_scoped_query(
+        current_user,
+        scoped_query(current_user, {}, site_field=None),
+    )
     rows = await db.activity_logs.find(
         query,
         {
@@ -614,11 +663,38 @@ async def _recent_activity(current_user: dict) -> list[dict]:
     ]
 
 
+async def _microsoft_overview_counts(current_user: dict) -> tuple[int, int]:
+    """Count verified Microsoft evidence through a safe provider mapping."""
+    visible_tenant_ids = await visible_m365_provider_tenant_ids(
+        current_user,
+        database=db,
+    )
+    return tuple(
+        await asyncio.gather(
+            db.m365_tenants.count_documents(
+                m365_provider_tenant_query(visible_tenant_ids)
+            ),
+            db.m365_users.count_documents(
+                m365_provider_evidence_query(visible_tenant_ids)
+            ),
+        )
+    )
+
+
 @router.get("/control-plane/overview")
 async def control_plane_overview(current_user: dict = Depends(get_current_user)):
     cipp_settings, m365_settings = await asyncio.gather(
-        db.settings.find_one({"type": "cipp"}, {"_id": 0}),
-        db.settings.find_one({"key": "m365_connection"}, {"_id": 0}),
+        db.settings.find_one(
+            _platform_configuration_query(current_user, {"type": "cipp"}),
+            {"_id": 0},
+        ),
+        db.settings.find_one(
+            _platform_configuration_query(
+                current_user,
+                {"key": "m365_connection"},
+            ),
+            {"_id": 0},
+        ),
     )
     m365_value = (m365_settings or {}).get("value") or {}
 
@@ -627,32 +703,76 @@ async def control_plane_overview(current_user: dict = Depends(get_current_user))
         devices,
         open_tickets,
         open_invoices,
-        m365_tenants,
-        m365_users,
+        microsoft_evidence,
         voice_pbxs,
         backup_jobs,
         linked_clients,
         recent_activity,
     ) = await asyncio.gather(
-        db.clients.count_documents(scoped_query(current_user, {}, field="id", site_field=None)),
-        db.devices.count_documents(scoped_query(current_user, {})),
-        db.tickets.count_documents(scoped_query(current_user, {"status": {"$nin": ["closed", "resolved", "cancelled"]}})),
-        db.invoices.count_documents(scoped_query(current_user, {"status": {"$nin": ["paid", "void", "cancelled"]}})),
-        db.m365_tenants.count_documents(scoped_query(current_user, {"source": {"$in": ["m365_graph", "m365_partner_center"]}}, site_field=None)),
-        db.m365_users.count_documents(scoped_query(current_user, {"source": {"$in": ["m365_graph", "m365_partner_center"]}}, site_field=None)),
-        db.yeastar_pbxs.count_documents(scoped_query(current_user, {"enabled": {"$ne": False}})),
-        db.backup_jobs.count_documents(scoped_query(current_user, {})),
-        db.clients.count_documents(scoped_query(current_user, {"cipp_tenant_id": {"$exists": True, "$nin": [None, ""]}}, field="id", site_field=None)),
+        db.clients.count_documents(
+            tenant_scoped_query(
+                current_user,
+                scoped_query(current_user, {}, field="id", site_field=None),
+            )
+        ),
+        db.devices.count_documents(
+            tenant_scoped_query(current_user, scoped_query(current_user, {}))
+        ),
+        db.tickets.count_documents(
+            tenant_scoped_query(
+                current_user,
+                scoped_query(
+                    current_user,
+                    {"status": {"$nin": ["closed", "resolved", "cancelled"]}},
+                ),
+            )
+        ),
+        db.invoices.count_documents(
+            tenant_scoped_query(
+                current_user,
+                scoped_query(
+                    current_user,
+                    {"status": {"$nin": ["paid", "void", "cancelled"]}},
+                ),
+            )
+        ),
+        _microsoft_overview_counts(current_user),
+        db.yeastar_pbxs.count_documents(
+            tenant_scoped_query(
+                current_user,
+                scoped_query(current_user, {"enabled": {"$ne": False}}),
+            )
+        ),
+        db.backup_jobs.count_documents(
+            tenant_scoped_query(current_user, scoped_query(current_user, {}))
+        ),
+        db.clients.count_documents(
+            tenant_scoped_query(
+                current_user,
+                scoped_query(
+                    current_user,
+                    {"cipp_tenant_id": {"$exists": True, "$nin": [None, ""]}},
+                    field="id",
+                    site_field=None,
+                ),
+            )
+        ),
         _recent_activity(current_user),
     )
+    m365_tenants, m365_users = microsoft_evidence
 
     cipp_connected = bool(
         cipp_settings
         and cipp_settings.get("base_url")
-        and cipp_settings.get("api_key_full")
+        and (
+            cipp_settings.get("api_key_encrypted")
+            or cipp_settings.get("api_key_full")
+        )
     )
-    m365_configured = all(
-        m365_value.get(field) for field in ("app_id", "tenant_id", "app_secret")
+    m365_configured = bool(
+        m365_value.get("app_id")
+        and (m365_value.get("partner_tenant_id") or m365_value.get("tenant_id"))
+        and (m365_value.get("app_secret_encrypted") or m365_value.get("app_secret"))
     )
     providers = [
         {
@@ -707,34 +827,54 @@ async def control_plane_overview(current_user: dict = Depends(get_current_user))
         "recent_activity": recent_activity,
         "compatibility": {
             "cipp_adapter_configured": cipp_connected,
+            # Keep this legacy key for existing UI consumers. It means a
+            # Partner Center connection is configured; it is not Graph proof.
             "m365_graph_configured": m365_configured,
+            "partner_center_configured": m365_configured,
+            "m365_evidence_tenant_count": m365_tenants,
+            "m365_linked_tenant_count": linked_clients,
         },
     }
 
 
 async def _microsoft_provider_state(current_user: dict | None = None) -> dict:
+    visible_tenant_ids = (
+        await visible_m365_provider_tenant_ids(current_user, database=db)
+        if current_user
+        else None
+    )
     cipp_settings, graph_settings, verified_tenant_count = await asyncio.gather(
-        db.settings.find_one({"type": "cipp"}, {"_id": 0}),
-        db.settings.find_one({"key": "m365_connection"}, {"_id": 0}),
+        db.settings.find_one(
+            _platform_configuration_query(current_user or {}, {"type": "cipp"}),
+            {"_id": 0},
+        ) if current_user else db.settings.find_one({"type": "cipp"}, {"_id": 0}),
+        db.settings.find_one(
+            _platform_configuration_query(
+                current_user or {},
+                {"key": "m365_connection"},
+            ),
+            {"_id": 0},
+        ) if current_user else db.settings.find_one({"key": "m365_connection"}, {"_id": 0}),
         db.m365_tenants.count_documents(
-            scoped_query(
-                current_user,
-                {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
-                site_field=None,
+            m365_provider_tenant_query(
+                visible_tenant_ids,
+                {"source": "m365_graph", "graph_verified": True},
             )
-            if current_user
-            else {"source": {"$in": ["m365_graph", "m365_partner_center"]}}
         ),
     )
     graph_value = (graph_settings or {}).get("value") or {}
     cipp_configured = bool(
         cipp_settings
         and cipp_settings.get("base_url")
-        and cipp_settings.get("api_key_full")
+        and (
+            cipp_settings.get("api_key_encrypted")
+            or cipp_settings.get("api_key_full")
+        )
     )
-    partner_configured = all(
-        graph_value.get(field)
-        for field in ("app_id", "tenant_id", "app_secret")
+    partner_configured = bool(
+        graph_value.get("app_id")
+        and (graph_value.get("partner_tenant_id") or graph_value.get("tenant_id"))
+        and (graph_value.get("app_secret_encrypted") or graph_value.get("app_secret"))
     )
     cipp_verified = bool(
         cipp_configured
@@ -770,29 +910,34 @@ async def _microsoft_provider_state(current_user: dict | None = None) -> dict:
 
 async def _microsoft_tenant_registry(provider: dict, current_user: dict) -> list[dict]:
     """Merge legacy, Partner Center and verified Graph tenant evidence once."""
+    visible_tenant_ids = await visible_m365_provider_tenant_ids(
+        current_user,
+        database=db,
+    )
     clients, connections, verified_tenants = await asyncio.gather(
         db.clients.find(
-            scoped_query(current_user, {}, field="id", site_field=None),
+            tenant_scoped_query(
+                current_user,
+                scoped_query(current_user, {}, field="id", site_field=None),
+            ),
             {
                 "_id": 0,
                 "id": 1,
                 "name": 1,
                 "cipp_tenant_id": 1,
+                "m365_tenant_id": 1,
+                "office365_tenant_id": 1,
                 "cipp_tenant_display": 1,
                 "cipp_tenant_domain": 1,
             },
         ).sort("name", 1).to_list(2000),
         db.m365_tenant_connections.find(
-            scoped_query(current_user, {}, site_field=None), {"_id": 0}
+            m365_tenant_connection_query(visible_tenant_ids), {"_id": 0}
         )
         .sort("tenant_name", 1)
         .to_list(2000),
         db.m365_tenants.find(
-            scoped_query(
-                current_user,
-                {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
-                site_field=None,
-            ),
+            m365_provider_tenant_query(visible_tenant_ids),
             {
                 "_id": 0,
                 "id": 1,
@@ -802,6 +947,7 @@ async def _microsoft_tenant_registry(provider: dict, current_user: dict) -> list
                 "default_domain": 1,
                 "client_id": 1,
                 "source": 1,
+                "graph_verified": 1,
                 "verified_at": 1,
             },
         ).sort("name", 1).to_list(2000),
@@ -811,9 +957,14 @@ async def _microsoft_tenant_registry(provider: dict, current_user: dict) -> list
         str(client.get("id")): client for client in clients if client.get("id")
     }
     client_by_tenant = {
-        str(client.get("cipp_tenant_id")): client
+        str(client.get(field)): client
         for client in clients
-        if client.get("cipp_tenant_id")
+        for field in (
+            "cipp_tenant_id",
+            "m365_tenant_id",
+            "office365_tenant_id",
+        )
+        if client.get(field)
     }
     verified_by_tenant = {
         str(tenant.get("tenant_id") or tenant.get("id")): tenant
@@ -821,9 +972,9 @@ async def _microsoft_tenant_registry(provider: dict, current_user: dict) -> list
         if tenant.get("tenant_id") or tenant.get("id")
     }
     connections_by_tenant = {
-        str(connection.get("tenant_id")): connection
+        str(connection.get("tenant_id") or connection.get("tenantId")): connection
         for connection in connections
-        if connection.get("tenant_id")
+        if connection.get("tenant_id") or connection.get("tenantId")
     }
 
     tenant_ids = set(client_by_tenant) | set(verified_by_tenant) | set(
@@ -843,8 +994,13 @@ async def _microsoft_tenant_registry(provider: dict, current_user: dict) -> list
             else None
         ) or client_by_tenant.get(tenant_id)
         mapped = bool(linked_client)
-        graph_verified = bool(
-            connection.get("graph_verified") or verified
+        # Partner Center discovery proves that the partner can enumerate a
+        # customer relationship. It is not Microsoft Graph consent. Keep the
+        # two evidence types distinct so a directory import cannot make the
+        # UI claim tenant-level Graph capability.
+        graph_verified = bool(connection.get("graph_verified")) or bool(
+            verified.get("source") == "m365_graph"
+            and verified.get("graph_verified") is True
         )
         source = (
             connection.get("source")
@@ -937,10 +1093,13 @@ async def microsoft_control_readiness(current_user: dict = Depends(get_current_u
     provider, recent_plans = await asyncio.gather(
         _microsoft_provider_state(current_user),
         db.control_plane_action_plans.find(
-            scoped_query(
+            _platform_control_plane_query(
                 current_user,
-                {"domain": "microsoft365"},
-                site_field=None,
+                scoped_query(
+                    current_user,
+                    {"domain": "microsoft365"},
+                    site_field=None,
+                ),
             ),
             {"_id": 0},
         ).sort("created_at", -1).limit(12).to_list(12),
@@ -1125,6 +1284,7 @@ async def preview_microsoft_action(
     plan = {
         "id": plan_id,
         "domain": "microsoft365",
+        "platform_tenant_id": platform_tenant_id(current_user),
         "simulation_mode": True,
         "will_execute": False,
         "action_id": action_id,
@@ -1172,6 +1332,8 @@ async def preview_microsoft_action(
             "description": f"{actor} previewed {template['label']} for {target_id or tenant_id}",
             "user_name": actor,
             "user_email": current_user.get("email"),
+            "platform_tenant_id": platform_tenant_id(current_user),
+            "client_id": tenant.get("client_id"),
             "timestamp": now,
             "metadata": {
                 "status": status,
@@ -1196,7 +1358,10 @@ async def submit_microsoft_action_plan(
 ):
     """Submit a preview for approval or retain it as an execution-ready plan."""
     plan = await db.control_plane_action_plans.find_one(
-        {"id": plan_id, "domain": "microsoft365"},
+        _platform_control_plane_query(
+            current_user,
+            {"id": plan_id, "domain": "microsoft365"},
+        ),
         {"_id": 0},
     )
     if not plan:
@@ -1223,7 +1388,7 @@ async def submit_microsoft_action_plan(
             expired = True
         if expired:
             await db.control_plane_action_plans.update_one(
-                {"id": plan_id},
+                _platform_control_plane_query(current_user, {"id": plan_id}),
                 {"$set": {"status": "expired"}},
             )
             raise HTTPException(
@@ -1277,6 +1442,7 @@ async def submit_microsoft_action_plan(
                 "created_at": now,
                 "entity_type": "microsoft_action_plan",
                 "entity_id": plan_id,
+                "platform_tenant_id": plan.get("platform_tenant_id"),
                 "tenant_id": plan.get("tenant_id"),
                 "tenant_name": plan.get("tenant_name"),
                 "client_id": plan.get("client_id"),
@@ -1294,7 +1460,7 @@ async def submit_microsoft_action_plan(
         next_status = "ready_for_execution"
 
     await db.control_plane_action_plans.update_one(
-        {"id": plan_id},
+        _platform_control_plane_query(current_user, {"id": plan_id}),
         {
             "$set": {
                 "status": next_status,
@@ -1689,6 +1855,10 @@ async def control_plane_search(
     term = q.strip()
     escaped = re.escape(term)
     regex = {"$regex": escaped, "$options": "i"}
+    visible_m365_tenant_ids = await visible_m365_provider_tenant_ids(
+        current_user,
+        database=db,
+    )
 
     (
         clients,
@@ -1723,7 +1893,16 @@ async def control_plane_search(
         ),
         _find(
             db.m365_users,
-            scoped_query(current_user, {"source": {"$in": ["m365_graph", "m365_partner_center"]}, "$or": [{"display_name": regex}, {"upn": regex}, {"tenant_name": regex}]}, site_field=None),
+            m365_provider_evidence_query(
+                visible_m365_tenant_ids,
+                {
+                    "$or": [
+                        {"display_name": regex},
+                        {"upn": regex},
+                        {"tenant_name": regex},
+                    ]
+                },
+            ),
             {"id": 1, "display_name": 1, "upn": 1, "tenant_name": 1, "tenant_id": 1, "account_enabled": 1},
         ),
         _find(

@@ -97,7 +97,10 @@ async def _compute_health(client: dict) -> dict:
     network_score = None
     network_stats = None
     if client.get("unifi_site_id"):
-        uni = await db.unifi_site_cache.find_one({"site_id": client["unifi_site_id"]}, {"_id": 0})
+        uni = await db.unifi_site_cache.find_one(
+            {"site_id": client["unifi_site_id"], "client_id": client.get("id")},
+            {"_id": 0},
+        )
         total = _numeric((uni or {}).get("devices_total"))
         online = _numeric((uni or {}).get("devices_online"))
         if uni and total is not None and total > 0 and online is not None:

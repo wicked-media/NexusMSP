@@ -58,6 +58,7 @@ from app.routers import (  # noqa: E402
     procurement_planner,
     qr_assets,
     qbr_generator,
+    ransomware_canary,
     remediation_playbooks,
     revenue,
     ransomware_tabletop,
@@ -67,6 +68,7 @@ from app.routers import (  # noqa: E402
     zero_trust,
 )
 from app.models import UserCreate  # noqa: E402
+from app.services import scope_permissions  # noqa: E402
 
 
 class ListCursor:
@@ -118,8 +120,255 @@ def test_agent_command_permission_is_explicit():
     assert asyncio.run(nexus_agent.require_agent_admin(user={"role": "admin"}))["role"] == "admin"
 
 
+def test_agent_telemetry_keeps_missing_observations_unknown_but_preserves_zero():
+    """A compact heartbeat must not manufacture a healthy-looking zero metric."""
+    unknown, _, _ = nexus_agent._agent_device_telemetry({"hostname": "TEST"})
+    assert unknown["cpu_usage"] is None
+    assert unknown["memory_usage"] is None
+    assert unknown["disk_usage"] is None
+    assert unknown["uptime_hours"] is None
+
+    observed, _, _ = nexus_agent._agent_device_telemetry({
+        "cpu_percent": 0,
+        "mem_percent": 0,
+        "uptime_sec": 0,
+        "disks": [{"percent": 0, "total_gb": 0, "used_gb": 0}],
+    })
+    assert observed["cpu_usage"] == 0.0
+    assert observed["memory_usage"] == 0.0
+    assert observed["disk_usage"] == 0.0
+    assert observed["uptime_hours"] == 0.0
+
+
+class ScopedAgentRecords:
+    def __init__(self):
+        now = datetime.now(timezone.utc).isoformat()
+        self.records = {
+            "agent-client-a": {
+                "id": "agent-client-a",
+                "client_id": "client-a",
+                "is_active": True,
+                "last_seen": now,
+            },
+            "agent-client-b": {
+                "id": "agent-client-b",
+                "client_id": "client-b",
+                "is_active": True,
+                "last_seen": now,
+            },
+        }
+        self.queries = []
+
+    async def find_one(self, query, *_args, **_kwargs):
+        self.queries.append(dict(query))
+        record = self.records.get(query.get("id"))
+        if not record:
+            return None
+        if query.get("is_active") and not record.get("is_active"):
+            return None
+        return dict(record)
+
+
+class CapturedCommandRecords:
+    def __init__(self):
+        self.docs = []
+
+    async def insert_one(self, document):
+        self.docs.append(dict(document))
+        return SimpleNamespace(inserted_id=document["id"])
+
+
+class CapturedScopeDenials:
+    def __init__(self):
+        self.docs = []
+
+    async def insert_one(self, document):
+        self.docs.append(dict(document))
+        return SimpleNamespace(inserted_id=document.get("user_id"))
+
+
+class ScopedDeviceRecords:
+    def __init__(self):
+        self.records = {
+            "device-client-a": {
+                "id": "device-client-a",
+                "client_id": "client-a",
+                "name": "CLIENT-A-WORKSTATION",
+                "nexus_agent_id": "agent-client-a",
+                "status": "online",
+            },
+            "device-client-b": {
+                "id": "device-client-b",
+                "client_id": "client-b",
+                "name": "CLIENT-B-WORKSTATION",
+                "nexus_agent_id": "agent-client-b",
+                "status": "online",
+            },
+        }
+
+    async def find_one(self, query, *_args, **_kwargs):
+        record = self.records.get(query.get("id"))
+        return dict(record) if record else None
+
+
+def _restricted_agent_operator() -> dict:
+    return {
+        "id": "operator-client-a",
+        "email": "operator-client-a@example.test",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+        "site_scope_ids": [],
+        "permissions": {"agent_commands": {"execute": True}},
+    }
+
+
+def test_agent_command_queue_enforces_client_scope_before_dispatch(monkeypatch):
+    """A command operator must not reach a foreign endpoint by guessing its ID."""
+    agents = ScopedAgentRecords()
+    commands = CapturedCommandRecords()
+    scope_denials = CapturedScopeDenials()
+    fake_db = SimpleNamespace(
+        nexus_agents=agents,
+        nexus_agent_commands=commands,
+        nexus_agent_audit=AuditCollection(),
+        scope_denials=scope_denials,
+    )
+    monkeypatch.setattr(nexus_agent, "db", fake_db)
+    monkeypatch.setattr(scope_permissions, "db", fake_db)
+    operator = _restricted_agent_operator()
+    request = nexus_agent.CommandRequest(kind="ping", payload={"target": "127.0.0.1"})
+
+    with pytest.raises(HTTPException) as foreign:
+        asyncio.run(nexus_agent.queue_command("agent-client-b", request, user=operator))
+    assert foreign.value.status_code == 404
+    assert commands.docs == []
+    assert scope_denials.docs[0]["client_id"] == "client-b"
+
+    allowed = asyncio.run(nexus_agent.queue_command("agent-client-a", request, user=operator))
+    assert allowed["status"] == "pending"
+    assert commands.docs[0]["device_id"] == "agent-client-a"
+    assert commands.docs[0]["client_id"] == "client-a"
+
+
+def test_terminal_session_rejects_foreign_device_before_session_creation(monkeypatch):
+    devices = ScopedDeviceRecords()
+    sessions = CapturedCommandRecords()
+    denials = CapturedScopeDenials()
+    fake_db = SimpleNamespace(
+        devices=devices,
+        terminal_sessions=sessions,
+        scope_denials=denials,
+    )
+    monkeypatch.setattr(device_terminal, "db", fake_db)
+    monkeypatch.setattr(scope_permissions, "db", fake_db)
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(device_terminal.create_terminal_session(
+            {"device_id": "device-client-b", "session_type": "powershell"},
+            current_user=_restricted_agent_operator(),
+        ))
+
+    assert denied.value.status_code == 404
+    assert sessions.docs == []
+    assert denials.docs[0]["client_id"] == "client-b"
+
+
+def test_bulk_device_action_rejects_foreign_target_before_any_command_is_queued(monkeypatch):
+    devices = ScopedDeviceRecords()
+    denials = CapturedScopeDenials()
+    fake_db = SimpleNamespace(devices=devices, scope_denials=denials)
+    queued = []
+
+    async def queue(*args, **kwargs):
+        queued.append((args, kwargs))
+        return "unexpected-command"
+
+    monkeypatch.setattr(device_intel, "db", fake_db)
+    monkeypatch.setattr(nexus_agent, "queue_command_for_device", queue)
+    monkeypatch.setattr(scope_permissions, "db", fake_db)
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(device_intel.bulk_action({
+            "device_ids": ["device-client-a", "device-client-b"],
+            "action": "reboot",
+        }, current_user=_restricted_agent_operator()))
+
+    assert denied.value.status_code == 404
+    assert queued == []
+    assert denials.docs[0]["client_id"] == "client-b"
+
+
+def test_canary_deployment_rejects_foreign_agent_before_command_creation(monkeypatch):
+    agents = ScopedAgentRecords()
+    commands = CapturedCommandRecords()
+    denials = CapturedScopeDenials()
+    fake_db = SimpleNamespace(
+        nexus_agents=agents,
+        nexus_agent_commands=commands,
+        scope_denials=denials,
+    )
+    monkeypatch.setattr(ransomware_canary, "db", fake_db)
+    monkeypatch.setattr(nexus_agent, "db", fake_db)
+    monkeypatch.setattr(scope_permissions, "db", fake_db)
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(ransomware_canary.deploy_canary(
+            {"agent_id": "agent-client-b"},
+            current_user=_restricted_agent_operator(),
+        ))
+
+    assert denied.value.status_code == 404
+    assert commands.docs == []
+    assert denials.docs[0]["client_id"] == "client-b"
+
+
+class LinkedAgentRecords:
+    def __init__(self, client_id: str):
+        self.client_id = client_id
+        self.queries = []
+
+    async def find_one(self, query, *_args, **_kwargs):
+        self.queries.append(dict(query))
+        if query.get("id") != "agent-1" or query.get("client_id") != self.client_id:
+            return None
+        return {
+            "id": "agent-1",
+            "client_id": self.client_id,
+            "is_active": True,
+            "last_seen": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+def test_shared_device_command_factory_binds_command_to_matching_client(monkeypatch):
+    commands = CapturedCommandRecords()
+    foreign_agent = LinkedAgentRecords("client-b")
+    fake_db = SimpleNamespace(
+        nexus_agents=foreign_agent,
+        nexus_agent_commands=commands,
+        nexus_agent_audit=AuditCollection(),
+    )
+    monkeypatch.setattr(nexus_agent, "db", fake_db)
+    device = {"id": "device-a", "client_id": "client-a", "nexus_agent_id": "agent-1"}
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(nexus_agent.queue_command_for_device(device, "ping", {}, "operator-client-a"))
+
+    assert denied.value.status_code == 409
+    assert commands.docs == []
+    assert foreign_agent.queries[0]["client_id"] == "client-a"
+
+    matching_agent = LinkedAgentRecords("client-a")
+    fake_db.nexus_agents = matching_agent
+    command_id = asyncio.run(nexus_agent.queue_command_for_device(device, "ping", {}, "operator-client-a"))
+
+    assert command_id
+    assert commands.docs[0]["client_id"] == "client-a"
+    assert commands.docs[0]["device_id"] == "agent-1"
+
+
 def test_change_management_requires_independent_reviewer_and_valid_schedule(monkeypatch):
-    async def pending_change(_change_id):
+    async def pending_change(_change_id, _user):
         return {"id": "CHG-100", "status": "pending_review", "requested_by_id": "tech-requester"}
 
     monkeypatch.setattr(change_management, "_get_change", pending_change)
@@ -129,9 +378,9 @@ def test_change_management_requires_independent_reviewer_and_valid_schedule(monk
             "CHG-100",
             {"note": "Reviewed against the approved CAB agenda."},
             user={"id": "tech-requester", "name": "Requester"},
-        ))
+    ))
     assert self_approval.value.status_code == 403
-    assert "cannot approve their own" in self_approval.value.detail
+    assert "independent change approver" in self_approval.value.detail
 
     with pytest.raises(HTTPException) as invalid_date:
         change_management._optional_date("21/07/2026")
@@ -145,7 +394,7 @@ def test_m365_workspace_never_promotes_saved_credentials_to_live_telemetry(monke
     assert m365._connection_status({"app_id": "app", "tenant_id": "tenant", "app_secret": "secret"}) == "configured_unverified"
     assert not any(name.startswith("MOCK_") for name in vars(m365))
 
-    async def configured_settings():
+    async def configured_settings(**_kwargs):
         return {"app_id": "app", "tenant_id": "tenant", "app_secret": "secret"}
 
     async def unavailable_partner_provider(*_args, **_kwargs):
@@ -153,7 +402,7 @@ def test_m365_workspace_never_promotes_saved_credentials_to_live_telemetry(monke
 
     monkeypatch.setattr(m365, "_get_settings", configured_settings)
     monkeypatch.setattr(m365, "_partner_center_customers", unavailable_partner_provider)
-    result = asyncio.run(m365.test_connection(current_user={"id": "operator-1"}))
+    result = asyncio.run(m365.test_connection(current_user={"id": "operator-1", "role": "admin"}))
     assert result["ok"] is False
     assert result["mode"] == "configured_unverified"
     assert "not installed" in result["reason"].lower()
@@ -364,14 +613,24 @@ def test_installer_records_the_configured_agent_intervals():
         enrollment_token="token-1",
         server_url="https://nexus.example.test",
         binary_bytes=b"agent-binary",
+        chat_companion_bytes=b"chat-companion",
+        tray_companion_bytes=b"tray-companion",
         heartbeat_secs=120,
         poll_secs=30,
     )
     with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
         config = json.loads(bundle.read("config.json"))
+        install_script = bundle.read("install.bat").decode("utf-8")
+        release_manifest = json.loads(bundle.read("release-manifest.json"))
+        names = set(bundle.namelist())
     assert config["heartbeat_secs"] == 120
     assert config["poll_secs"] == 30
     assert config["nexus_shield"] == nexus_agent.NEXUS_SHIELD_AGENT_PROFILE
+    assert 'icacls "%INSTDIR%\\config.json" /inheritance:r' in install_script
+    assert "*S-1-5-18:(F)" in install_script
+    assert "*S-1-5-32-544:(F)" in install_script
+    assert {"nexus-client-chat.exe", "nexus-agent-tray.exe"} <= names
+    assert release_manifest["bundled_components"] == {"client_chat": True, "agent_tray": True}
 
 
 def test_public_registration_cannot_request_an_elevated_role():
@@ -403,16 +662,19 @@ class StaleCommandCollection:
     """Always returns the same stale candidate to reproduce overlapping polls."""
 
     def __init__(self):
+        self.find_query = None
         self.command = {
             "_id": "mongo-1",
             "id": "cmd-1",
             "device_id": "agent-1",
+            "client_id": "client-1",
             "kind": "ping",
             "payload": {},
             "status": "pending",
         }
 
-    def find(self, _query):
+    def find(self, query):
+        self.find_query = dict(query)
         return ListCursor([self.command])
 
     async def update_one(self, query, update):
@@ -457,7 +719,7 @@ class EmptyCollection:
 class AgentTokenCollection:
     async def find_one(self, query):
         if query.get("agent_token") == "valid-token":
-            return {"id": "agent-1", "is_active": True}
+            return {"id": "agent-1", "client_id": "client-1", "is_active": True}
         return None
 
 
@@ -490,9 +752,10 @@ class IdentityAgentCollection:
 
 
 def test_command_poll_claims_each_command_only_once(monkeypatch):
+    commands = StaleCommandCollection()
     fake_db = SimpleNamespace(
         nexus_agents=AgentTokenCollection(),
-        nexus_agent_commands=StaleCommandCollection(),
+        nexus_agent_commands=commands,
     )
     monkeypatch.setattr(nexus_agent, "db", fake_db)
 
@@ -505,6 +768,7 @@ def test_command_poll_claims_each_command_only_once(monkeypatch):
     assert first["commands"][0]["authorization"]["signature_algorithm"] == "ed25519"
     assert first["commands"][0]["authorization"]["nonce"]
     assert second["commands"] == []
+    assert commands.find_query["client_id"] == "client-1"
 
 
 def test_command_result_requires_dispatch_nonce_and_single_terminal_transition(monkeypatch):
@@ -663,13 +927,20 @@ def test_legacy_unauthenticated_heartbeat_endpoints_are_retired():
 
 
 class BulkDeviceCollection:
-    def find(self, *_args, **_kwargs):
-        return ListCursor([{
+    def __init__(self):
+        self.record = {
             "id": "device-1",
             "name": "WORKSTATION-1",
+            "client_id": "client-1",
             "nexus_agent_id": "agent-1",
             "status": "online",
-        }])
+        }
+
+    def find(self, *_args, **_kwargs):
+        return ListCursor([dict(self.record)])
+
+    async def find_one(self, query, *_args, **_kwargs):
+        return dict(self.record) if query.get("id") == self.record["id"] else None
 
 
 def test_device_bulk_actions_are_queued_and_message_text_is_not_executable(monkeypatch):
@@ -702,6 +973,9 @@ class MaintenanceDevicesCollection:
 
     def find(self, *_args, **_kwargs):
         return ListCursor(self.rows)
+
+    async def find_one(self, query, *_args, **_kwargs):
+        return next((dict(row) for row in self.rows if row.get("id") == query.get("id")), None)
 
 
 def test_maintenance_requires_enrolled_nexus_agent(monkeypatch):
@@ -849,7 +1123,10 @@ class NetworkRows:
     def find(self, *_args, **_kwargs):
         return ListCursor(self.rows)
 
-    async def find_one(self, *_args, **_kwargs):
+    async def find_one(self, query, *_args, **_kwargs):
+        for row in self.rows:
+            if all(row.get(key) == value for key, value in query.items()):
+                return dict(row)
         return None
 
     async def insert_one(self, doc):
@@ -866,14 +1143,16 @@ def test_network_workspace_never_autoseeds_demo_inventory(monkeypatch):
     wlans = NetworkRows([])
     dpi = NetworkRows([])
     monkeypatch.setattr(networking, "db", SimpleNamespace(
+        network_sites=NetworkRows([{"id": "site-1", "client_id": "client-1", "site_id": "default"}]),
         network_wlans=wlans,
         network_port_profiles=NetworkRows([]),
         network_dpi=dpi,
     ))
 
-    returned_wlans = asyncio.run(networking.get_site_wlans("site-1", current_user={"id": "operator-1"}))
-    returned_profiles = asyncio.run(networking.get_port_profiles("site-1", current_user={"id": "operator-1"}))
-    returned_dpi = asyncio.run(networking.get_site_dpi("site-1", current_user={"id": "operator-1"}))
+    admin = {"id": "operator-1", "role": "admin"}
+    returned_wlans = asyncio.run(networking.get_site_wlans("site-1", current_user=admin))
+    returned_profiles = asyncio.run(networking.get_port_profiles("site-1", current_user=admin))
+    returned_dpi = asyncio.run(networking.get_site_dpi("site-1", current_user=admin))
 
     assert returned_wlans == []
     assert returned_profiles == []
@@ -893,12 +1172,13 @@ def test_network_site_creation_starts_pending_and_hides_controller_secrets(monke
         "username": "unifi-admin",
         "password": "never-return-this",
         "verify_ssl": True,
-    }, current_user={"id": "operator-1"}))
+    }, current_user={"id": "operator-1", "role": "admin"}))
 
     assert created["status"] == "pending_sync"
     assert created["controller_url"] == "https://controller.example.test"
     assert "password" not in created
-    assert sites.inserted[0]["password"] == "never-return-this"
+    assert "password" not in sites.inserted[0]
+    assert sites.inserted[0]["password_encrypted"] != "never-return-this"
 
 
 def test_lifecycle_reads_the_canonical_inventory_register(monkeypatch):
@@ -1004,6 +1284,11 @@ class SettingsRows:
         self.settings = settings
 
     async def find_one(self, query, *_args, **_kwargs):
+        if "$and" in query:
+            for clause in query["$and"]:
+                if "type" in clause:
+                    value = self.settings.get(clause["type"])
+                    return dict(value) if value else None
         if "type" in query:
             value = self.settings.get(query["type"])
             return dict(value) if value else None
@@ -1012,7 +1297,15 @@ class SettingsRows:
         return None
 
 
+def _stub_optional_integration_runtime(monkeypatch):
+    async def storage():
+        return {"configured": False, "ready": False}
+    monkeypatch.setattr(integrations_overview, "_artifact_storage_status", storage)
+    monkeypatch.setattr(integrations_overview, "_nexus_agent_binary_info", lambda: {"exists": False})
+
+
 def test_integration_saved_credentials_are_not_reported_as_verified(monkeypatch):
+    _stub_optional_integration_runtime(monkeypatch)
     settings = SettingsRows({
         "huntress": {
             "type": "huntress",
@@ -1022,7 +1315,7 @@ def test_integration_saved_credentials_are_not_reported_as_verified(monkeypatch)
     })
     monkeypatch.setattr(integrations_overview, "db", SimpleNamespace(settings=settings))
 
-    overview = asyncio.run(integrations_overview.integrations_overview(current_user={"id": "operator-1"}))
+    overview = asyncio.run(integrations_overview.integrations_overview(current_user={"id": "operator-1", "role": "admin"}))
     huntress = next(tile for tile in overview["tiles"] if tile["key"] == "huntress")
 
     assert huntress["configured"] is True
@@ -1032,6 +1325,7 @@ def test_integration_saved_credentials_are_not_reported_as_verified(monkeypatch)
 
 
 def test_integration_failed_test_requires_attention(monkeypatch):
+    _stub_optional_integration_runtime(monkeypatch)
     settings = SettingsRows({
         "huntress": {
             "type": "huntress",
@@ -1042,7 +1336,7 @@ def test_integration_failed_test_requires_attention(monkeypatch):
     })
     monkeypatch.setattr(integrations_overview, "db", SimpleNamespace(settings=settings))
 
-    overview = asyncio.run(integrations_overview.integrations_overview(current_user={"id": "operator-1"}))
+    overview = asyncio.run(integrations_overview.integrations_overview(current_user={"id": "operator-1", "role": "admin"}))
     huntress = next(tile for tile in overview["tiles"] if tile["key"] == "huntress")
 
     assert huntress["connection_state"] == "failed"
@@ -1082,6 +1376,24 @@ def test_nexus_elevate_enforced_allow_requires_exact_path_and_hash():
 
     assert matches is True
     assert {"client scope", "endpoint scope", "exact executable path", "SHA-256 fingerprint", "argument conditions"} == set(reasons)
+
+
+def test_nexus_elevate_local_companion_never_auto_approves_an_enforced_policy():
+    evaluation = {
+        "decision": "allow",
+        "matched": {"id": "policy-1", "name": "Pinned updater", "action": "allow"},
+        "monitor_matches": [],
+    }
+
+    downgraded = permission_elevation._require_manual_review_for_local_companion(
+        evaluation,
+        is_local_companion=True,
+    )
+
+    assert downgraded["decision"] == "approval"
+    assert downgraded["matched"]["action"] == "approval"
+    assert "technician approval" in downgraded["matched"]["downgraded_reason"]
+    assert permission_elevation._require_manual_review_for_local_companion(evaluation, is_local_companion=False) is evaluation
 
 
 def test_shadow_it_demo_seed_is_retired_without_overwriting_agent_inventory():

@@ -30,7 +30,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     data = response.json()
@@ -53,7 +53,7 @@ class TestSmartNumbering:
         assert "format" in data
         assert "fy_start_month" in data
         assert "next_seq" in data
-        print(f"✓ Numbering defaults: format={data.get('format')}, fy_start={data.get('fy_start_month')}")
+        print(f"Ã¢Å“â€œ Numbering defaults: format={data.get('format')}, fy_start={data.get('fy_start_month')}")
     
     def test_save_numbering(self, headers):
         """PUT /api/billing-pro/numbering saves config"""
@@ -66,7 +66,7 @@ class TestSmartNumbering:
         r = requests.put(f"{BASE_URL}/api/billing-pro/numbering", json=payload, headers=headers)
         assert r.status_code == 200
         assert "message" in r.json()
-        print("✓ Numbering saved")
+        print("Ã¢Å“â€œ Numbering saved")
     
     def test_preview_numbering(self, headers):
         """POST /api/billing-pro/numbering/preview returns formatted sample"""
@@ -80,7 +80,7 @@ class TestSmartNumbering:
         data = r.json()
         assert "sample" in data
         assert "INV-" in data["sample"]
-        print(f"✓ Preview sample: {data['sample']}")
+        print(f"Ã¢Å“â€œ Preview sample: {data['sample']}")
 
 
 class TestMRRAnalytics:
@@ -97,7 +97,7 @@ class TestMRRAnalytics:
         assert "by_month" in data
         assert isinstance(data["by_month"], list)
         assert len(data["by_month"]) == 13  # 13 months
-        print(f"✓ MRR Analytics: current_mrr=${data['current_mrr']}, new=${data['new_mrr_this_month']}, churn=${data['cancelled_mrr']}")
+        print(f"Ã¢Å“â€œ MRR Analytics: current_mrr=${data['current_mrr']}, new=${data['new_mrr_this_month']}, churn=${data['cancelled_mrr']}")
 
 
 class TestGenerationCalendar:
@@ -112,7 +112,7 @@ class TestGenerationCalendar:
         assert isinstance(data["months"], list)
         assert "horizon" in data
         assert "total_events" in data
-        print(f"✓ Calendar: {data['total_events']} events over {len(data['months'])} months")
+        print(f"Ã¢Å“â€œ Calendar: {data['total_events']} events over {len(data['months'])} months")
 
 
 class TestBulkInvoiceActions:
@@ -122,7 +122,7 @@ class TestBulkInvoiceActions:
         """POST /api/billing-pro/invoices/bulk-action requires invoice_ids and action"""
         r = requests.post(f"{BASE_URL}/api/billing-pro/invoices/bulk-action", json={}, headers=headers)
         assert r.status_code == 400
-        print("✓ Bulk action validation works")
+        print("Ã¢Å“â€œ Bulk action validation works")
     
     def test_export_csv(self, headers):
         """POST /api/billing-pro/invoices/export-csv returns CSV"""
@@ -133,7 +133,7 @@ class TestBulkInvoiceActions:
         assert "count" in data
         assert "filename" in data
         assert data["csv"].startswith("Invoice #")  # CSV header
-        print(f"✓ Export CSV: {data['count']} invoices, filename={data['filename']}")
+        print(f"Ã¢Å“â€œ Export CSV: {data['count']} invoices, filename={data['filename']}")
 
 
 class TestWarehouses:
@@ -146,7 +146,7 @@ class TestWarehouses:
         data = r.json()
         assert isinstance(data, list)
         assert len(data) >= 1
-        print(f"✓ Warehouses: {len(data)} locations")
+        print(f"Ã¢Å“â€œ Warehouses: {len(data)} locations")
     
     def test_create_and_delete_warehouse(self, headers):
         """POST creates, DELETE removes warehouse"""
@@ -157,12 +157,12 @@ class TestWarehouses:
         wh = r.json()
         assert "id" in wh
         wh_id = wh["id"]
-        print(f"✓ Created warehouse: {wh['name']}")
+        print(f"Ã¢Å“â€œ Created warehouse: {wh['name']}")
         
         # Delete
         r2 = requests.delete(f"{BASE_URL}/api/billing-pro/warehouses/{wh_id}", headers=headers)
         assert r2.status_code == 200
-        print(f"✓ Deleted warehouse: {wh_id}")
+        print(f"Ã¢Å“â€œ Deleted warehouse: {wh_id}")
 
 
 class TestInventorySnapshot:
@@ -177,7 +177,7 @@ class TestInventorySnapshot:
         assert "total_value_cost" in data
         assert "by_category" in data
         assert "low_stock" in data
-        print(f"✓ Snapshot: {data['total_units']} units, cost=${data['total_value_cost']}, low_stock={data['low_stock_count']}")
+        print(f"Ã¢Å“â€œ Snapshot: {data['total_units']} units, cost=${data['total_value_cost']}, low_stock={data['low_stock_count']}")
 
 
 class TestSuggestRetail:
@@ -194,7 +194,7 @@ class TestSuggestRetail:
         # 35% margin on $100 cost = $153.85 retail
         assert abs(data["suggested_retail"] - 153.85) < 0.1
         assert abs(data["markup_pct"] - 53.8) < 1
-        print(f"✓ Suggest retail: cost=$100, margin=35% → retail=${data['suggested_retail']}, markup={data['markup_pct']}%")
+        print(f"Ã¢Å“â€œ Suggest retail: cost=$100, margin=35% Ã¢â€ â€™ retail=${data['suggested_retail']}, markup={data['markup_pct']}%")
 
 
 class TestBulkImport:
@@ -208,7 +208,7 @@ class TestBulkImport:
         data = r.json()
         assert "inserted" in data or "updated" in data
         assert data.get("inserted", 0) + data.get("updated", 0) >= 1
-        print(f"✓ Bulk import: inserted={data.get('inserted', 0)}, updated={data.get('updated', 0)}")
+        print(f"Ã¢Å“â€œ Bulk import: inserted={data.get('inserted', 0)}, updated={data.get('updated', 0)}")
 
 
 class TestTierPricing:
@@ -233,14 +233,14 @@ class TestTierPricing:
         ]
         r = requests.put(f"{BASE_URL}/api/billing-pro/products/{product_id}/pricing-tiers", json={"tiers": tiers}, headers=headers)
         assert r.status_code == 200
-        print(f"✓ Saved {len(tiers)} tiers for product {product_id}")
+        print(f"Ã¢Å“â€œ Saved {len(tiers)} tiers for product {product_id}")
         
         # Get price for qty=25 (should be $90)
         r = requests.get(f"{BASE_URL}/api/billing-pro/products/{product_id}/price-for-qty?qty=25", headers=headers)
         assert r.status_code == 200
         data = r.json()
         assert data["unit_price"] == 90
-        print(f"✓ Price for qty=25: ${data['unit_price']} (tier 10+)")
+        print(f"Ã¢Å“â€œ Price for qty=25: ${data['unit_price']} (tier 10+)")
 
 
 class TestApprovalWorkflow:
@@ -253,14 +253,14 @@ class TestApprovalWorkflow:
         data = r.json()
         assert "enabled" in data
         assert "threshold" in data
-        print(f"✓ Approval settings: enabled={data['enabled']}, threshold=${data['threshold']}")
+        print(f"Ã¢Å“â€œ Approval settings: enabled={data['enabled']}, threshold=${data['threshold']}")
     
     def test_save_approval_settings(self, headers):
         """PUT /api/billing-pro/settings/approval saves config"""
         payload = {"enabled": True, "threshold": 5000, "approver_role": "admin"}
         r = requests.put(f"{BASE_URL}/api/billing-pro/settings/approval", json=payload, headers=headers)
         assert r.status_code == 200
-        print("✓ Approval settings saved")
+        print("Ã¢Å“â€œ Approval settings saved")
 
 
 class TestTaxCompliance:
@@ -273,14 +273,14 @@ class TestTaxCompliance:
         data = r.json()
         assert "country" in data
         assert "gst_pct" in data
-        print(f"✓ Tax compliance: country={data['country']}, gst={data['gst_pct']}%")
+        print(f"Ã¢Å“â€œ Tax compliance: country={data['country']}, gst={data['gst_pct']}%")
     
     def test_save_tax_compliance(self, headers):
         """PUT /api/billing-pro/settings/tax-compliance saves config"""
         payload = {"country": "AU", "abn": "12345678901", "gst_registered": True, "gst_pct": 10}
         r = requests.put(f"{BASE_URL}/api/billing-pro/settings/tax-compliance", json=payload, headers=headers)
         assert r.status_code == 200
-        print("✓ Tax compliance saved")
+        print("Ã¢Å“â€œ Tax compliance saved")
 
 
 class TestFXRate:
@@ -294,7 +294,7 @@ class TestFXRate:
         assert "rate" in data
         assert isinstance(data["rate"], (int, float))
         assert data["rate"] > 0
-        print(f"✓ FX rate: AUD→USD = {data['rate']}")
+        print(f"Ã¢Å“â€œ FX rate: AUDÃ¢â€ â€™USD = {data['rate']}")
 
 
 class TestRetainers:
@@ -316,21 +316,21 @@ class TestRetainers:
         assert r.status_code == 200
         data = r.json()
         initial_balance = data.get("balance_hours", 0)
-        print(f"✓ Initial retainer balance: {initial_balance}h")
+        print(f"Ã¢Å“â€œ Initial retainer balance: {initial_balance}h")
         
         # Top up
         r = requests.post(f"{BASE_URL}/api/billing-pro/retainers/{client_id}/topup", json={"hours": 10, "rate": 150}, headers=headers)
         assert r.status_code == 200
         data = r.json()
         assert data["balance_hours"] == initial_balance + 10
-        print(f"✓ Topped up 10h, new balance: {data['balance_hours']}h")
+        print(f"Ã¢Å“â€œ Topped up 10h, new balance: {data['balance_hours']}h")
         
         # Draw
         r = requests.post(f"{BASE_URL}/api/billing-pro/retainers/{client_id}/draw", json={"hours": 2}, headers=headers)
         assert r.status_code == 200
         data = r.json()
         assert data["balance_hours"] == initial_balance + 10 - 2
-        print(f"✓ Drew 2h, new balance: {data['balance_hours']}h")
+        print(f"Ã¢Å“â€œ Drew 2h, new balance: {data['balance_hours']}h")
 
 
 class TestDepositInvoice:
@@ -355,7 +355,7 @@ class TestDepositInvoice:
         assert data.get("deposit_pct") == 50
         expected_amount = round(parent_total * 0.5, 2)
         assert abs(data.get("total", 0) - expected_amount) < 0.01
-        print(f"✓ Created deposit invoice: {data.get('invoice_number')}, amount=${data.get('total')}")
+        print(f"Ã¢Å“â€œ Created deposit invoice: {data.get('invoice_number')}, amount=${data.get('total')}")
 
 
 class TestIndexation:
@@ -379,7 +379,7 @@ class TestIndexation:
         assert "indexation" in data
         assert data["indexation"]["enabled"] == True
         assert data["indexation"]["pct"] == 3.5
-        print(f"✓ Set indexation: {data['indexation']['pct']}% on {data['indexation']['anniversary_date']}")
+        print(f"Ã¢Å“â€œ Set indexation: {data['indexation']['pct']}% on {data['indexation']['anniversary_date']}")
 
 
 class TestProration:
@@ -403,7 +403,7 @@ class TestProration:
         assert "prorated_amount" in data
         assert "remaining_days" in data
         assert "period_days" in data
-        print(f"✓ Proration: {data['remaining_days']}/{data['period_days']} days, prorated=${data['prorated_amount']}")
+        print(f"Ã¢Å“â€œ Proration: {data['remaining_days']}/{data['period_days']} days, prorated=${data['prorated_amount']}")
 
 
 class TestInvoiceCreationWithPerLineTax:
@@ -438,7 +438,7 @@ class TestInvoiceCreationWithPerLineTax:
         # Line A: 2*100 = 200, Line B: 1*50*(1-0.1) = 45, subtotal = 245
         # Invoice discount 5% = 12.25, discounted = 232.75
         # Tax on line A (200 * 0.95 * 10%) = 19, line B has 0% tax
-        print(f"✓ Created invoice {data['invoice_number']}: subtotal=${data.get('subtotal')}, tax=${data.get('tax')}, total=${data.get('total')}")
+        print(f"Ã¢Å“â€œ Created invoice {data['invoice_number']}: subtotal=${data.get('subtotal')}, tax=${data.get('tax')}, total=${data.get('total')}")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/invoices/{data['id']}", headers=headers)
@@ -473,7 +473,7 @@ class TestSmartNumberingOnInvoiceCreate:
         # Check invoice number matches format
         inv_num = data.get("invoice_number", "")
         assert inv_num.startswith("TEST-2026-") or inv_num.startswith("TEST-2025-")
-        print(f"✓ Smart numbering applied: {inv_num}")
+        print(f"Ã¢Å“â€œ Smart numbering applied: {inv_num}")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/invoices/{data['id']}", headers=headers)
@@ -509,7 +509,7 @@ class TestApprovalWorkflowOnInvoice:
         
         # Check status is pending_approval
         assert data.get("status") == "pending_approval"
-        print(f"✓ Large invoice ({data.get('total')}) got status=pending_approval")
+        print(f"Ã¢Å“â€œ Large invoice ({data.get('total')}) got status=pending_approval")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/invoices/{data['id']}", headers=headers)

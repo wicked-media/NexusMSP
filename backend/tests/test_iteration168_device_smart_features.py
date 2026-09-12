@@ -1,8 +1,8 @@
 """
-Iteration 168 — Device Smart Features Testing
+Iteration 168 Ã¢â‚¬â€ Device Smart Features Testing
 Tests for:
 1. AI Diagnose (single device + ticket posting)
-2. Live Metrics (with synthetic fallback)
+2. Live Metrics (with an explicit no-observation state)
 3. Screenshot to Ticket
 4. Fleet Health Score
 5. Fleet Insights (AI summary)
@@ -17,7 +17,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 # Test credentials
 TEST_EMAIL = "aaron@stech.com.au"
-TEST_PASSWORD = "Lucky@2871$!"
+TEST_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="module")
@@ -164,8 +164,8 @@ class TestLiveMetrics:
         data = response.json()
         assert data["minutes"] == 15, "Minutes param not respected"
 
-    def test_live_metrics_synthetic_fallback(self, headers, test_device_id):
-        """Live metrics returns synthetic points when no agent data exists"""
+    def test_live_metrics_does_not_fabricate_missing_history(self, headers, test_device_id):
+        """Live metrics returns real samples or an explicit no-observation state."""
         response = requests.get(
             f"{BASE_URL}/api/devices/{test_device_id}/live-metrics",
             headers=headers
@@ -173,15 +173,14 @@ class TestLiveMetrics:
         assert response.status_code == 200
         data = response.json()
         
-        # If series has synthetic points, verify structure
         series = data.get("series", [])
-        if series and series[0].get("synthetic"):
-            assert len(series) == 20, "Synthetic fallback should have 20 points"
-            for point in series:
-                assert point.get("synthetic") == True, "Synthetic points should have synthetic=true"
-            print("Verified synthetic fallback with 20 points")
-        else:
+        assert all(not point.get("synthetic") for point in series), "Metrics must never fabricate synthetic points"
+        if series:
+            assert data.get("observation_state") == "observed"
             print(f"Real agent data found: {len(series)} points")
+        else:
+            assert data.get("observation_state") == "not_collected"
+            print("No metrics history collected yet")
 
     def test_live_metrics_invalid_device(self, headers):
         """GET /api/devices/{invalid}/live-metrics returns 404"""

@@ -1,12 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
+import math
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.ticket_time import create_canonical_ticket_time_entry, sync_ticket_time_cache
 from app.models import *
 
 router = APIRouter()
@@ -20,6 +22,45 @@ async def _time_entry_or_404(entry_id: str, current_user: dict) -> dict:
         operation="time_entry.access",
         resource_name="Time entry",
     )
+
+
+def _normalise_bool(value: Any, *, field: str = "Billable") -> bool:
+    """Keep permissive JSON clients compatible without coercing arbitrary strings."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in {"true", "1", "yes"}:
+            return True
+        if value in {"false", "0", "no"}:
+            return False
+    raise HTTPException(status_code=422, detail=f"{field} must be a boolean value")
+
+
+def _safe_user_hourly_rate(user: dict | None) -> float:
+    """Use the stored technician rate; never a caller-supplied financial value."""
+    raw_rate = (user or {}).get("hourly_rate", 75.0)
+    try:
+        rate = float(75.0 if raw_rate is None or raw_rate == "" else raw_rate)
+    except (TypeError, ValueError):
+        return 75.0
+    return round(rate, 4) if math.isfinite(rate) and rate >= 0 else 75.0
+
+
+async def _current_time_actor(current_user: dict) -> tuple[dict, float]:
+    """Resolve attribution/rate from the authenticated technician only."""
+    user_id = str(current_user.get("id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authenticated technician identity is required")
+    stored_user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    actor = {
+        "id": user_id,
+        "name": (stored_user or {}).get("name") or current_user.get("name"),
+        "email": (stored_user or {}).get("email") or current_user.get("email"),
+    }
+    return actor, _safe_user_hourly_rate(stored_user)
 
 # ============== TIME ENTRIES ENDPOINTS ==============
 
@@ -61,32 +102,20 @@ async def create_time_entry(entry_data: TimeEntryCreate, current_user: dict = De
         operation="time_entry.create",
         mask_not_found=True,
     )
-    user = await db.users.find_one({"id": entry_data.user_id}, {"_id": 0})
-    
-    hourly_rate = user.get('hourly_rate', 75.0) if user else 75.0
-    total_amount = (entry_data.minutes / 60) * hourly_rate if entry_data.billable else 0
-    
-    entry = TimeEntry(
-        **entry_data.model_dump(),
-        ticket_title=ticket['title'] if ticket else None,
-        client_id=ticket['client_id'] if ticket else None,
-        client_name=ticket['client_name'] if ticket else None,
-        user_name=user['name'] if user else None,
+    actor, hourly_rate = await _current_time_actor(current_user)
+    entry, _ = await create_canonical_ticket_time_entry(
+        ticket=ticket,
+        actor=actor,
+        minutes=entry_data.minutes,
+        description=entry_data.description,
+        billable=entry_data.billable,
+        source="manual_time_entry",
+        idempotency_key=entry_data.idempotency_key,
         hourly_rate=hourly_rate,
-        total_amount=total_amount
+        date=entry_data.date,
+        database=db,
     )
-    doc = entry.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    await db.time_entries.insert_one(doc)
-    
-    # Update ticket total time
-    if ticket:
-        await db.tickets.update_one(
-            {"id": entry_data.ticket_id},
-            {"$inc": {"total_time_minutes": entry_data.minutes}}
-        )
-    
-    return entry
+    return TimeEntry(**entry)
 
 @router.put("/time-entries/{entry_id}")
 async def update_time_entry(entry_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
@@ -106,7 +135,8 @@ async def update_time_entry(entry_id: str, entry_data: dict, current_user: dict 
             raise HTTPException(status_code=422, detail="Minutes must be at least one")
     if "minutes" in update or "billable" in update:
         minutes = update.get("minutes", existing.get("minutes", 0))
-        billable = update.get("billable", existing.get("billable", False))
+        billable = _normalise_bool(update.get("billable", existing.get("billable", False)))
+        update["billable"] = billable
         update["total_amount"] = round(
             (float(minutes) / 60) * float(existing.get("hourly_rate") or 75)
             if billable else 0,
@@ -116,24 +146,16 @@ async def update_time_entry(entry_id: str, entry_data: dict, current_user: dict 
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
     if "minutes" in update:
-        minute_delta = update["minutes"] - int(existing.get("minutes", 0) or 0)
-        if minute_delta:
-            await db.tickets.update_one(
-                {"id": existing.get("ticket_id")},
-                {"$inc": {"total_time_minutes": minute_delta}},
-            )
+        await sync_ticket_time_cache(existing.get("ticket_id"), database=db)
     return {"message": "Time entry updated"}
 
 @router.delete("/time-entries/{entry_id}")
 async def delete_time_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
     entry = await _time_entry_or_404(entry_id, current_user)
-    await db.tickets.update_one(
-        {"id": entry['ticket_id']},
-        {"$inc": {"total_time_minutes": -entry['minutes']}}
-    )
     result = await db.time_entries.delete_one({"id": entry_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
+    await sync_ticket_time_cache(entry["ticket_id"], database=db)
     return {"message": "Time entry deleted"}
 
 # ============== TIME TRACKING ENHANCED ==============
@@ -209,7 +231,14 @@ async def generate_invoice_from_time(data: dict, current_user: dict = Depends(ge
     client_id = next(iter(client_ids))
     await assert_client_scope(current_user, client_id, operation="time.invoice.generate")
 
-    invoice_id = f"INV-{uuid.uuid4().hex[:6].upper()}"
+    now = datetime.now(timezone.utc)
+    # Keep the Nexus object identifier separate from the human-facing invoice
+    # number.  The previous time-to-invoice path used an ``INV-*`` value for
+    # both, which made the resulting record look unlike every other invoice
+    # and omitted the canonical financial fields used by payments, PDFs and
+    # reconciliation.
+    invoice_id = str(uuid.uuid4())
+    invoice_number = f"INV-{now.strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
     claimed_entries = []
     for entry in entries:
         result = await db.time_entries.update_one(
@@ -217,7 +246,7 @@ async def generate_invoice_from_time(data: dict, current_user: dict = Depends(ge
             {"$set": {
                 "invoiced": True,
                 "invoice_id": invoice_id,
-                "invoiced_at": datetime.now(timezone.utc).isoformat(),
+                "invoiced_at": now.isoformat(),
             }},
         )
         if result.modified_count == 1:
@@ -237,36 +266,64 @@ async def generate_invoice_from_time(data: dict, current_user: dict = Depends(ge
     line_items = []
     for e in entries:
         hrs = round(e.get("minutes", 0) / 60, 2)
+        amount = entry_amount(e)
+        description = f'{e.get("ticket_title", "N/A")} - {e.get("description", "")}'
         line_items.append({
-            "description": f'{e.get("ticket_title", "N/A")} - {e.get("description", "")}',
+            "name": "Technician time",
+            "description": description,
+            "quantity": hrs,
+            "unit_price": e.get("hourly_rate", 75),
+            "total": amount,
             "hours": hrs,
             "rate": e.get("hourly_rate", 75),
-            "amount": entry_amount(e),
+            "amount": amount,
             "date": e.get("date", ""),
             "tech": e.get("user_name", ""),
         })
 
+    ticket_ids = sorted({e.get("ticket_id") for e in entries if e.get("ticket_id")})
+    single_ticket = None
+    if len(ticket_ids) == 1:
+        single_ticket = await db.tickets.find_one({"id": ticket_ids[0]}, {"_id": 0})
+
     invoice = {
         "id": invoice_id,
+        "invoice_number": invoice_number,
         "client_id": client_id,
         "client_name": client_name or entries[0].get("client_name", "Unknown"),
         "status": "draft",
+        "payment_status": "unpaid",
+        "amount_paid": 0.0,
+        "amount_due": round(total_amount, 2),
+        "subtotal": round(total_amount, 2),
+        "tax": 0.0,
+        "tax_amount": 0.0,
+        "tax_rate": 0.0,
+        "total": round(total_amount, 2),
         "total_hours": round(total_minutes / 60, 2),
         "total_amount": round(total_amount, 2),
         "line_items": line_items,
         "entry_count": len(entries),
         "generated_from": "time_tracking",
-        "ticket_ids": sorted({e.get("ticket_id") for e in entries if e.get("ticket_id")}),
+        "ticket_ids": ticket_ids,
+        "ticket_id": single_ticket.get("id") if single_ticket else None,
+        "ticket_number": single_ticket.get("ticket_number") if single_ticket else None,
+        "ticket_title": single_ticket.get("title") if single_ticket else None,
+        "due_date": (now + timedelta(days=30)).strftime("%Y-%m-%d"),
+        "currency": "AUD",
+        "version": 1,
         "source_refs": [
             {
                 "type": "time_entry",
                 "id": e["id"],
                 "ticket_id": e.get("ticket_id"),
                 "remote_session_id": e.get("remote_session_id"),
+                "source": e.get("source") or "manual_time_entry",
+                "source_reference": e.get("source_reference") or e.get("id"),
             }
             for e in entries
         ],
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now.isoformat(),
         "created_by": current_user.get("name", "Admin"),
     }
     try:
@@ -293,6 +350,13 @@ async def generate_invoice_from_time(data: dict, current_user: dict = Depends(ge
             "total_amount": invoice["total_amount"],
         },
     )
+    for ticket_id in ticket_ids:
+        await ticket_audit(
+            ticket_id,
+            current_user,
+            "invoice_linked",
+            f"Invoice {invoice_number} was generated from billable time and linked to this ticket.",
+        )
 
     return invoice
 
@@ -303,6 +367,7 @@ async def bulk_create_time_entries(data: dict, current_user: dict = Depends(get_
     entries_data = data.get("entries", [])
     if not entries_data:
         raise HTTPException(status_code=400, detail="No entries provided")
+    actor, hourly_rate = await _current_time_actor(current_user)
     created = []
     for ed in entries_data:
         ticket_id = str(ed.get("ticket_id") or "").strip()
@@ -315,25 +380,19 @@ async def bulk_create_time_entries(data: dict, current_user: dict = Depends(get_
             operation="time_entry.bulk_create",
             mask_not_found=True,
         )
-        entry = {
-            "id": f"TE-{uuid.uuid4().hex[:8]}",
-            "ticket_id": ticket_id,
-            "ticket_title": ticket.get("title", ""),
-            "user_id": ed.get("user_id", current_user.get("id", "")),
-            "user_name": ed.get("user_name", current_user.get("name", "")),
-            "client_id": ticket.get("client_id", ""),
-            "client_name": ticket.get("client_name", ""),
-            "minutes": ed.get("minutes", 0),
-            "description": ed.get("description", ""),
-            "billable": ed.get("billable", True),
-            "date": ed.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
-            "hourly_rate": ed.get("hourly_rate", 75),
-            "total_amount": round(ed.get("minutes", 0) / 60 * ed.get("hourly_rate", 75), 2) if ed.get("billable", True) else 0,
-            "category": ed.get("category", "general"),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.time_entries.insert_one(entry)
-        entry.pop("_id", None)
+        entry, _created = await create_canonical_ticket_time_entry(
+            ticket=ticket,
+            actor=actor,
+            minutes=ed.get("minutes", 0),
+            description=str(ed.get("description") or ""),
+            billable=_normalise_bool(ed.get("billable", True)),
+            source="bulk_time_entry",
+            idempotency_key=str(ed.get("idempotency_key") or "").strip() or None,
+            hourly_rate=hourly_rate,
+            date=ed.get("date"),
+            extra={"category": ed.get("category", "general")},
+            database=db,
+        )
         created.append(entry)
     return {"created": len(created), "entries": created}
 

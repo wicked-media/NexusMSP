@@ -13,7 +13,9 @@ import uuid
 
 from app.database import db
 from app.routers.auth import get_current_user
+from app.routers.nexus_agent import require_agent_operator
 from app.services.activity import log_activity
+from app.services.scope_permissions import assert_record_scope
 
 
 MAINTENANCE_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
@@ -96,7 +98,7 @@ async def convert_to_change(ticket_id: str, payload: dict = Body(default={}), cu
 # ─────────────────── Schedule maintenance window ───────────────────
 
 @router.post("/tickets/{ticket_id}/schedule-maintenance")
-async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), current_user: dict = Depends(require_agent_operator)):
     start_iso = payload.get("start")
     duration_min = int(payload.get("duration_min") or 60)
     notes = (payload.get("notes") or "").strip()
@@ -113,21 +115,31 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
     except Exception:
         raise HTTPException(400, "start must be valid ISO datetime")
 
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "device_id": 1, "client_id": 1, "title": 1})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.maintenance.schedule",
+        resource_name="Ticket",
+    )
     device_id = device_id or ticket.get("device_id") or ""
     if not device_id:
         raise HTTPException(400, "Link a device to the ticket before scheduling maintenance")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(404, "Linked device not found")
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="ticket.maintenance.schedule",
+        resource_name="Managed asset",
+    )
+    if not ticket.get("client_id") or device.get("client_id") != ticket.get("client_id"):
+        raise HTTPException(409, "The linked device no longer belongs to this ticket's client")
 
     scheduled_at = start_dt.isoformat()
     device_meta = {
         "id": device["id"], "name": device.get("name") or device.get("hostname"),
         "client_id": device.get("client_id"), "client_name": device.get("client_name"),
-        "nexus_agent_id": device.get("nexus_agent_id"), "status": device.get("status"),
+        "site_id": device.get("site_id"), "nexus_agent_id": device.get("nexus_agent_id"), "status": device.get("status"),
     }
 
     window = {
@@ -138,6 +150,8 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
         "device_ids": [device_id],
         "devices_meta": [device_meta],
         "client_id": ticket.get("client_id"),
+        "client_ids": [ticket.get("client_id")],
+        "site_ids": [device.get("site_id")] if device.get("site_id") else [],
         "name": f"Ticket maintenance - {ticket.get('title', '')[:80]}",
         "title": f"Maintenance — {ticket.get('title', '')[:80]}",
         "description": notes[:600],
@@ -169,7 +183,16 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
 
 @router.get("/tickets/{ticket_id}/maintenance-window")
 async def get_maintenance_window(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    return await db.maintenance_windows.find_one({"ticket_id": ticket_id}, {"_id": 0})
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.maintenance.read",
+        resource_name="Ticket",
+    )
+    return await db.maintenance_windows.find_one(
+        {"ticket_id": ticket_id, "client_id": ticket.get("client_id")}, {"_id": 0}
+    )
 
 
 # ─────────────────── CSAT (Customer satisfaction survey) ───────────────────
@@ -178,9 +201,13 @@ async def get_maintenance_window(ticket_id: str, current_user: dict = Depends(ge
 async def send_csat(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Generate a CSAT survey link for the ticket and log that it was sent.
     Actual email delivery is best-effort via the existing email layer."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket_workflow.send_csat",
+        resource_name="Ticket",
+    )
     if not ticket.get("contact_email") and not ticket.get("requester_email"):
         raise HTTPException(400, "Ticket has no contact email")
 

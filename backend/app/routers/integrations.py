@@ -7,6 +7,8 @@ from app.auth import get_current_user, hash_password, verify_password, create_to
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.models import *
 from app.services.integrations import domotz_service, office365_service, acronis_service
+from app.services.microsoft365_credentials import has_microsoft365_client_secret
+from app.services.secret_store import encrypt_secret
 
 router = APIRouter()
 
@@ -124,7 +126,7 @@ async def get_office365_status(current_user: dict = Depends(get_current_user)):
         settings.get("connected")
         and settings.get("tenant_id")
         and settings.get("client_id")
-        and settings.get("client_secret")
+        and has_microsoft365_client_secret(settings)
         and (settings.get("outbound_mailbox_email") or settings.get("mailbox_email"))
     )
     if not mailbox_settings:
@@ -132,7 +134,7 @@ async def get_office365_status(current_user: dict = Depends(get_current_user)):
             legacy_settings
             and legacy_settings.get("tenant_id")
             and legacy_settings.get("client_id")
-            and legacy_settings.get("client_secret")
+            and has_microsoft365_client_secret(legacy_settings)
         )
     return {
         "configured": configured,
@@ -151,10 +153,10 @@ async def save_office365_settings(settings: Office365Settings, current_user: dic
             "type": "office365",
             "tenant_id": settings.tenant_id,
             "client_id": settings.client_id,
-            "client_secret": settings.client_secret,
+            "client_secret_encrypted": encrypt_secret(settings.client_secret),
             "redirect_uri": settings.redirect_uri,
             "updated_at": datetime.now(timezone.utc).isoformat()
-        }},
+        }, "$unset": {"client_secret": ""}},
         upsert=True
     )
     return {"message": "Office 365 settings saved"}

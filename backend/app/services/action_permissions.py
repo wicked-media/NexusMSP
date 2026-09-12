@@ -38,6 +38,24 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("settings", "edit"),
     },
     {
+        "id": "platform.events.view",
+        "category": "Platform",
+        "label": "View event operations",
+        "description": "View governed platform event health, subscriptions, deliveries and replay evidence.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("settings", "view"),
+    },
+    {
+        "id": "platform.events.publish",
+        "category": "Platform",
+        "label": "Publish governed platform events",
+        "description": "Publish an authenticated, scope-checked event through the Nexus event backbone.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("settings", "edit"),
+    },
+    {
         "id": "platform.events.manage",
         "category": "Platform",
         "label": "Manage event subscriptions",
@@ -63,6 +81,69 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "impact": "low",
         "approval_required": False,
         "legacy": ("settings", "view"),
+    },
+    {
+        "id": "platform.audit.view",
+        "category": "Platform",
+        "label": "View central audit trail",
+        "description": "Review the cross-client administrative audit ledger for authorised operational or security investigation.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("settings", "view"),
+    },
+    {
+        "id": "platform.configuration.manage",
+        "category": "Platform",
+        "label": "Manage organisation configuration",
+        "description": "Change global operational configuration such as custom fields and legacy escalation rotations.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "platform.migration.view",
+        "category": "Platform",
+        "label": "View Nexus Switchboard migration plans",
+        "description": "Review global MSP migration planning, mapping and reconciliation evidence without granting any provider-import capability.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("settings", "view"),
+    },
+    {
+        "id": "platform.migration.manage",
+        "category": "Platform",
+        "label": "Manage Nexus Switchboard migration plans",
+        "description": "Create and review global MSP migration plans, exception ownership and cutover evidence. This permission does not authorise external imports.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "platform.recovery.view",
+        "category": "Platform",
+        "label": "View platform recovery evidence",
+        "description": "Review Nexus Core backup profiles, restore-point evidence and isolated recovery verification without exposing backup payloads or secrets.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("settings", "view"),
+    },
+    {
+        "id": "platform.recovery.manage",
+        "category": "Platform",
+        "label": "Manage platform recovery plans",
+        "description": "Configure non-secret recovery policy, request restore points and retain backup or validation evidence.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "platform.recovery.restore",
+        "category": "Platform",
+        "label": "Plan platform recovery or cutover",
+        "description": "Create a guarded fresh-host recovery or cutover plan from an independently verified restore point. It never permits a live in-place database overwrite.",
+        "impact": "critical",
+        "approval_required": True,
+        "legacy": ("settings", "delete"),
     },
     {
         "id": "platform.readiness.manage",
@@ -272,6 +353,60 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("tickets", "edit"),
     },
     {
+        "id": "ticket.conversation.create",
+        "category": "Service desk",
+        "label": "Add ticket conversation entries",
+        "description": "Create audited internal notes and customer-visible updates on an authorised ticket.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("tickets", "edit"),
+    },
+    {
+        "id": "ticket.public_update.send",
+        "category": "Service desk",
+        "label": "Send customer ticket updates",
+        "description": "Publish a ticket update to a client portal and, when selected, its configured customer email route.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("tickets", "edit"),
+    },
+    {
+        "id": "ticket.time.create",
+        "category": "Service desk",
+        "label": "Log ticket time",
+        "description": "Create an attributable, auditable time entry against an authorised ticket.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("tickets", "edit"),
+    },
+    {
+        "id": "ticket.bulk.modify",
+        "category": "Service desk",
+        "label": "Modify tickets in bulk",
+        "description": "Apply a governed bulk update to a validated, client-scoped ticket selection.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("tickets", "edit"),
+    },
+    {
+        "id": "ticket.attachment.upload",
+        "category": "Service desk",
+        "label": "Add ticket evidence",
+        "description": "Attach approved customer evidence, exports and diagnostics to a ticket.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("tickets", "edit"),
+    },
+    {
+        "id": "ticket.attachment.delete",
+        "category": "Service desk",
+        "label": "Permanently remove ticket evidence",
+        "description": "Delete a retained ticket attachment while preserving a central audit record.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("tickets", "delete"),
+    },
+    {
         "id": "billing.invoice.create",
         "category": "Billing",
         "label": "Create invoice",
@@ -288,6 +423,25 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "impact": "high",
         "approval_required": False,
         "legacy": ("invoices", "edit"),
+    },
+    {
+        "id": "billing.analytics.view",
+        "category": "Billing",
+        "label": "View organisation billing analytics",
+        "description": "View cross-client receivables, revenue, purchase-order and cash-flow analytics.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("financial_reports", "view"),
+    },
+    {
+        # Deliberately has no legacy mapping or role default.  Catalogue cost,
+        # retail and kit changes can affect every future customer charge.
+        "id": "billing.catalogue.pricing.manage",
+        "category": "Billing",
+        "label": "Manage catalogue pricing and product kits",
+        "description": "Change global product prices, product kits, and client-specific price books through a governed workflow.",
+        "impact": "high",
+        "approval_required": False,
     },
     {
         "id": "billing.payment.record",
@@ -308,6 +462,22 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("invoices", "delete"),
     },
     {
+        "id": "billing.late_fee.policy.manage",
+        "category": "Billing",
+        "label": "Manage late-fee policy",
+        "description": "Change the global or client-specific late-fee rules that can alter customer financial documents.",
+        "impact": "critical",
+        "approval_required": True,
+    },
+    {
+        "id": "billing.document_template.manage",
+        "category": "Billing",
+        "label": "Manage commercial document templates",
+        "description": "Create, change, retire or select the organisation-wide templates used for customer invoices, estimates, statements and QBRs.",
+        "impact": "high",
+        "approval_required": False,
+    },
+    {
         "id": "automation.workflow.modify",
         "category": "Automation",
         "label": "Modify workflow",
@@ -315,6 +485,15 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "impact": "high",
         "approval_required": False,
         "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "automation.workflow.view",
+        "category": "Automation",
+        "label": "View workflow evidence",
+        "description": "View scoped workflow definitions, retained simulations and governed run evidence without receiving permission to simulate or execute.",
+        "impact": "low",
+        "approval_required": False,
+        "legacy": ("settings", "view"),
     },
     {
         "id": "automation.workflow.simulate",
@@ -416,12 +595,147 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("invoices", "edit"),
     },
     {
+        "id": "billing.integration.manage",
+        "category": "Billing",
+        "label": "Manage accounting integrations",
+        "description": "Configure or rotate the organisation-wide accounting connection and its provider credentials.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "billing.portal.view",
+        "category": "Billing",
+        "label": "View customer billing portal status",
+        "description": "View client-scoped billing portal status, collections evidence and reminder health.",
+        "impact": "low",
+        "approval_required": False,
+        "legacy": ("invoices", "view"),
+    },
+    {
+        "id": "billing.portal.link.create",
+        "category": "Billing",
+        "label": "Create customer billing portal session",
+        "description": "Create an auditable Stripe customer billing portal session for an authorised client.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("invoices", "edit"),
+    },
+    {
+        "id": "billing.portal.reminder.send",
+        "category": "Billing",
+        "label": "Send customer payment reminder",
+        "description": "Send an auditable payment reminder to an authorised client billing contact.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("invoices", "edit"),
+    },
+    {
         "id": "synergy.wholesale.manage",
         "category": "Web & domains",
         "label": "Manage Synergy Wholesale services",
         "description": "Request governed domain, DNS, hosting, certificate and Microsoft 365 provider actions.",
         "impact": "high",
         "approval_required": True,
+        "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "platform.webhooks.manage",
+        "category": "Platform",
+        "label": "Manage outbound webhooks",
+        "description": "Configure, test, pause and retire compatibility outbound webhook integrations.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("settings", "edit"),
+    },
+    {
+        "id": "portal.audit.view",
+        "category": "Client portal",
+        "label": "View client portal audit evidence",
+        "description": "Review client portal access and administration evidence for an authorised client scope.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("clients", "view"),
+    },
+    {
+        "id": "portal.configuration.manage",
+        "category": "Client portal",
+        "label": "Manage client portal configuration",
+        "description": "Change portal availability, branding and exposed self-service capabilities.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "portal.link.manage",
+        "category": "Client portal",
+        "label": "Manage secure portal links",
+        "description": "Issue or revoke a bearer link that provides client portal access.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "portal.user.manage",
+        "category": "Client portal",
+        "label": "Manage client portal users",
+        "description": "Create, change, remove or reset client portal user access.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "client.contact.manage",
+        "category": "Client success",
+        "label": "Manage client contacts",
+        "description": "Create, update or remove operational contacts for a permitted client account.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "client.follow_up.manage",
+        "category": "Client success",
+        "label": "Manage client follow-ups",
+        "description": "Create, reassign, complete or cancel accountable client follow-ups for a permitted account.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "crm.lead.convert",
+        "category": "Client success",
+        "label": "Convert leads to clients",
+        "description": "Create a client record from a lead in the permitted tenant portfolio.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("clients", "create"),
+    },
+    {
+        "id": "client.account.manage",
+        "category": "Client success",
+        "label": "Manage client account plan and stakeholders",
+        "description": "Create or change account plans, stakeholder records and client service-priority markers.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "client.site.manage",
+        "category": "Client success",
+        "label": "Manage client sites",
+        "description": "Create, update or retire a client site, address and service-location record.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("clients", "edit"),
+    },
+    {
+        "id": "client.portfolio.recalculate",
+        "category": "Client success",
+        "label": "Recalculate client portfolio suggestions",
+        "description": "Recalculate suggested service tiers across the client portfolio without overwriting technician-managed tiers.",
+        "impact": "high",
+        "approval_required": False,
         "legacy": ("settings", "edit"),
     },
     {
@@ -449,24 +763,39 @@ TECHNICIAN_DEFAULTS = frozenset(
         "asset.lifecycle.manage",
         "confidence.verify",
         "entra.credential.reset",
+        "ticket.conversation.create",
+        "ticket.public_update.send",
+        "ticket.time.create",
         "ticket.handoff.manage",
+        "ticket.attachment.upload",
         "automation.autopilot.pause",
         "automation.autopilot.simulate",
+        "automation.workflow.view",
         "automation.workflow.simulate",
     }
 )
-DISPATCHER_DEFAULTS = frozenset({"automation.workflow.simulate"})
+DISPATCHER_DEFAULTS = frozenset({"automation.workflow.view", "automation.workflow.simulate"})
 SERVICE_DESK_MANAGER_DEFAULTS = frozenset(
     permission_id
     for permission_id in ACTION_PERMISSION_IDS
     if permission_id
     not in {
+        "billing.catalogue.pricing.manage",
         "billing.payment.record",
         "billing.invoice.void",
+        "billing.analytics.view",
+        "billing.late_fee.policy.manage",
+        "billing.document_template.manage",
+        "ticket.bulk.modify",
         "dns.emergency.disable",
         "platform.core.rebuild",
         "platform.events.replay",
         "platform.readiness.manage",
+        "platform.migration.view",
+        "platform.migration.manage",
+        "platform.recovery.view",
+        "platform.recovery.manage",
+        "platform.recovery.restore",
         "security.containment.approve",
         "executive.intelligence.view",
         "executive.scenario.simulate",
@@ -587,6 +916,43 @@ async def effective_action_permissions(user: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def assert_action_permission(
+    user: dict[str, Any],
+    permission_id: str,
+    *,
+    request: Request | None = None,
+) -> dict[str, Any]:
+    """Enforce one action permission outside a FastAPI dependency chain.
+
+    Composite workflows (for example, publishing a client update while also
+    logging time) need more than one action grant.  Keep their denial evidence
+    identical to ordinary ``require_action`` routes rather than treating a
+    second permission check as a frontend-only convention.
+    """
+    result = await evaluate_action_permission(user, permission_id)
+    if result["allowed"]:
+        return user
+
+    await db.permission_denials.insert_one(
+        {
+            "permission": permission_id,
+            "user_id": user.get("id"),
+            "user_name": user.get("name"),
+            "role": user.get("role"),
+            "source": result.get("source"),
+            "method": request.method if request else None,
+            "path": str(request.url.path) if request else None,
+            "correlation_id": getattr(getattr(request, "state", None), "correlation_id", None),
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    raise HTTPException(
+        status_code=403,
+        detail=f"Action permission required: {permission_id}",
+        headers={"X-Required-Permission": permission_id},
+    )
+
+
 def require_action(permission_id: str) -> Callable[..., Any]:
     if permission_id not in ACTION_PERMISSION_BY_ID:
         raise RuntimeError(f"Unknown NexusMSP action permission: {permission_id}")
@@ -595,28 +961,6 @@ def require_action(permission_id: str) -> Callable[..., Any]:
         request: Request,
         current_user: dict = Depends(get_current_user),
     ) -> dict:
-        result = await evaluate_action_permission(current_user, permission_id)
-        if result["allowed"]:
-            return current_user
-
-        correlation_id = getattr(request.state, "correlation_id", None)
-        await db.permission_denials.insert_one(
-            {
-                "permission": permission_id,
-                "user_id": current_user.get("id"),
-                "user_name": current_user.get("name"),
-                "role": current_user.get("role"),
-                "source": result.get("source"),
-                "method": request.method,
-                "path": request.url.path,
-                "correlation_id": correlation_id,
-                "occurred_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        raise HTTPException(
-            status_code=403,
-            detail=f"Action permission required: {permission_id}",
-            headers={"X-Required-Permission": permission_id},
-        )
+        return await assert_action_permission(current_user, permission_id, request=request)
 
     return dependency

@@ -21,7 +21,7 @@ def auth_token():
     """Get authentication token for admin user"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     data = response.json()
@@ -55,7 +55,7 @@ class TestOpsSettings:
         assert "interval_minutes" in data, "Missing 'interval_minutes' field"
         assert isinstance(data["enabled"], bool), "enabled should be boolean"
         assert isinstance(data["interval_minutes"], int), "interval_minutes should be int"
-        print(f"✓ GET /api/ops/settings: enabled={data['enabled']}, interval={data['interval_minutes']}min")
+        print(f"Ã¢Å“â€œ GET /api/ops/settings: enabled={data['enabled']}, interval={data['interval_minutes']}min")
     
     def test_put_ops_settings_disable(self, api_client):
         """PUT /api/ops/settings with enabled=false should persist"""
@@ -79,7 +79,7 @@ class TestOpsSettings:
         verify_data = verify_resp.json()
         assert verify_data["enabled"] == False, "enabled not persisted"
         assert verify_data["interval_minutes"] == 30, "interval_minutes not persisted"
-        print(f"✓ PUT /api/ops/settings: disabled, interval=30min persisted")
+        print(f"Ã¢Å“â€œ PUT /api/ops/settings: disabled, interval=30min persisted")
         
         # Restore original settings
         api_client.put(f"{BASE_URL}/api/ops/settings", json={
@@ -98,7 +98,7 @@ class TestOpsSettings:
         data = response.json()
         assert data["enabled"] == True, "enabled should be True"
         assert data["interval_minutes"] == 15, "interval_minutes should be 15"
-        print(f"✓ PUT /api/ops/settings: enabled, interval=15min")
+        print(f"Ã¢Å“â€œ PUT /api/ops/settings: enabled, interval=15min")
     
     def test_put_ops_settings_minimum_interval(self, api_client):
         """PUT /api/ops/settings should enforce minimum interval of 5 minutes"""
@@ -110,7 +110,7 @@ class TestOpsSettings:
         
         data = response.json()
         assert data["interval_minutes"] >= 5, "interval_minutes should be at least 5"
-        print(f"✓ PUT /api/ops/settings: minimum interval enforced (got {data['interval_minutes']})")
+        print(f"Ã¢Å“â€œ PUT /api/ops/settings: minimum interval enforced (got {data['interval_minutes']})")
         
         # Restore to 15
         api_client.put(f"{BASE_URL}/api/ops/settings", json={
@@ -152,7 +152,7 @@ class TestOpsNightlyTick:
         assert "broken_count" in results["promise_reconcile"], "promise_reconcile missing 'broken_count'"
         assert "newly_broadcast" in results["patch_broadcast"], "patch_broadcast missing 'newly_broadcast'"
         
-        print(f"✓ POST /api/ops/nightly-tick: triggered_by={data['triggered_by']}")
+        print(f"Ã¢Å“â€œ POST /api/ops/nightly-tick: triggered_by={data['triggered_by']}")
         print(f"  Results: apology_queue={results['apology_queue']}, sla_auto_page={results['sla_auto_page']}")
         print(f"           promise_reconcile={results['promise_reconcile']}, patch_broadcast={results['patch_broadcast']}")
         print(f"  Errors: {data['errors']}")
@@ -168,7 +168,7 @@ class TestOpsNightlyTick:
         # On a clean environment, errors should be empty or have no critical failures
         # Note: Some errors might occur if dependencies are missing, but we check structure
         assert isinstance(errors, dict), "errors should be a dict"
-        print(f"✓ POST /api/ops/nightly-tick: errors object = {errors}")
+        print(f"Ã¢Å“â€œ POST /api/ops/nightly-tick: errors object = {errors}")
 
 
 class TestOpsTickLog:
@@ -186,7 +186,7 @@ class TestOpsTickLog:
         assert isinstance(data["count"], int), "count should be int"
         assert data["count"] == len(data["ticks"]), "count should match ticks length"
         
-        print(f"✓ GET /api/ops/tick-log: {data['count']} ticks in history")
+        print(f"Ã¢Å“â€œ GET /api/ops/tick-log: {data['count']} ticks in history")
     
     def test_tick_log_contains_manual_tick(self, api_client):
         """After manual tick, tick-log should contain an entry with triggered_by='manual:...'"""
@@ -212,7 +212,7 @@ class TestOpsTickLog:
         assert "results" in tick, "tick missing 'results'"
         assert "finished_at" in tick, "tick missing 'finished_at'"
         
-        print(f"✓ GET /api/ops/tick-log: Found manual tick - {tick['triggered_by']} at {tick['started_at']}")
+        print(f"Ã¢Å“â€œ GET /api/ops/tick-log: Found manual tick - {tick['triggered_by']} at {tick['started_at']}")
 
 
 class TestSchedulerAutoFiring:
@@ -242,7 +242,7 @@ class TestSchedulerAutoFiring:
         # or wait for one to appear
         
         if initial_scheduler_count > 0:
-            print(f"✓ Scheduler tick already present: {initial_scheduler_ticks[0]['triggered_by']} at {initial_scheduler_ticks[0]['started_at']}")
+            print(f"Ã¢Å“â€œ Scheduler tick already present: {initial_scheduler_ticks[0]['triggered_by']} at {initial_scheduler_ticks[0]['started_at']}")
             return
         
         # Wait up to 90 seconds for a scheduler tick to appear
@@ -260,7 +260,7 @@ class TestSchedulerAutoFiring:
             
             if len(scheduler_ticks) > initial_scheduler_count:
                 new_tick = scheduler_ticks[0]
-                print(f"✓ New scheduler tick appeared after {waited}s: {new_tick['triggered_by']} at {new_tick['started_at']}")
+                print(f"Ã¢Å“â€œ New scheduler tick appeared after {waited}s: {new_tick['triggered_by']} at {new_tick['started_at']}")
                 return
             
             print(f"  Waiting... {waited}s elapsed, {len(scheduler_ticks)} scheduler ticks")
@@ -268,7 +268,7 @@ class TestSchedulerAutoFiring:
         # If we get here, no new scheduler tick appeared
         # This might be expected if the backend hasn't been restarted recently
         # or if the interval hasn't elapsed yet
-        print(f"⚠ No new scheduler tick appeared within {max_wait}s (this may be expected if backend wasn't recently restarted)")
+        print(f"Ã¢Å¡Â  No new scheduler tick appeared within {max_wait}s (this may be expected if backend wasn't recently restarted)")
         # Don't fail the test - just report
         # pytest.skip("No scheduler tick appeared - backend may not have been recently restarted")
 
@@ -280,19 +280,19 @@ class TestOpsEndpointsAuth:
         """GET /api/ops/settings should require authentication"""
         response = requests.get(f"{BASE_URL}/api/ops/settings")
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ GET /api/ops/settings requires auth")
+        print("Ã¢Å“â€œ GET /api/ops/settings requires auth")
     
     def test_ops_tick_log_requires_auth(self):
         """GET /api/ops/tick-log should require authentication"""
         response = requests.get(f"{BASE_URL}/api/ops/tick-log")
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ GET /api/ops/tick-log requires auth")
+        print("Ã¢Å“â€œ GET /api/ops/tick-log requires auth")
     
     def test_ops_nightly_tick_requires_auth(self):
         """POST /api/ops/nightly-tick should require authentication"""
         response = requests.post(f"{BASE_URL}/api/ops/nightly-tick")
         assert response.status_code in [401, 403], f"Expected 401/403, got {response.status_code}"
-        print("✓ POST /api/ops/nightly-tick requires auth")
+        print("Ã¢Å“â€œ POST /api/ops/nightly-tick requires auth")
 
 
 if __name__ == "__main__":

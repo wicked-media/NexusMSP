@@ -12,7 +12,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 # Test credentials
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASSWORD = "Lucky@2871$!"
+ADMIN_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="module")
@@ -197,16 +197,16 @@ class TestChatReactions:
         
         # Add reaction
         react_resp = requests.post(f"{BASE_URL}/api/chat/messages/{msg_id}/reactions",
-                                   json={"emoji": "👍"}, headers=headers)
+                                   json={"emoji": "Ã°Å¸â€˜Â"}, headers=headers)
         assert react_resp.status_code == 200
         data = react_resp.json()
         assert "reactions" in data
-        assert "👍" in data["reactions"]
-        print(f"Added reaction 👍 to message {msg_id}")
+        assert "Ã°Å¸â€˜Â" in data["reactions"]
+        print(f"Added reaction Ã°Å¸â€˜Â to message {msg_id}")
         
         # Toggle off (remove)
         react_resp2 = requests.post(f"{BASE_URL}/api/chat/messages/{msg_id}/reactions",
-                                    json={"emoji": "👍"}, headers=headers)
+                                    json={"emoji": "Ã°Å¸â€˜Â"}, headers=headers)
         assert react_resp2.status_code == 200
         data2 = react_resp2.json()
         # Should be removed or empty

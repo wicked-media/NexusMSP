@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from urllib.parse import quote
+import hashlib
+import secrets
 import uuid
 import jwt
 import pyotp
@@ -9,10 +12,57 @@ from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import hash_password, verify_password
 from app.services.nexus_document_pdf import render_nexus_document_pdf
 from app.services.portal_audit import record_portal_event
+from app.services.public_url import configured_public_base_url
 from app.services.remote_runtime import build_rustdesk_uri, rustdesk_config
+from app.services.scope_permissions import platform_tenant_id
+from app.services.ticket_conversation import sanitise_ticket_rich_text
 
 router = APIRouter(prefix="/portal/v2", tags=["Portal V2"])
 portal_security = HTTPBearer(auto_error=False)
+
+
+def _portal_ticket_comment(comment: dict) -> dict:
+    """Project a public ticket comment without leaking service-desk metadata.
+
+    Internal delivery, idempotency and labour links are useful to technicians
+    but must never become customer-facing API fields.  Rich service-desk
+    content is projected to its audited plain-text form because the portal
+    intentionally renders a safe text conversation, not technician HTML.
+    """
+    return {
+        "id": comment.get("id"),
+        "ticket_id": comment.get("ticket_id"),
+        "sender_name": comment.get("user_name") or comment.get("sender_name") or "Support",
+        "sender_email": comment.get("sender_email", ""),
+        "sender_type": comment.get("sender_type") or "technician",
+        "content": comment.get("content_text") or comment.get("content") or "",
+        "subject": comment.get("subject", ""),
+        "subject_label": comment.get("subject_label", ""),
+        "created_at": comment.get("created_at"),
+        "attachment_count": comment.get("attachment_count", 0),
+    }
+
+
+def _portal_ticket_comment_scope(ticket: dict, user: dict, client: dict | None = None) -> dict:
+    """Build the immutable scope fields for a portal-created ticket comment.
+
+    Portal users are client-bound, but older portal and ticket records may not
+    have been backfilled with the platform tenant marker.  Prefer the parent
+    ticket, then the canonical client record, and finally the authenticated
+    portal user before using the documented local partition fallback.
+    """
+    tenant_id = str(
+        ticket.get("tenant_id")
+        or (client or {}).get("tenant_id")
+        or user.get("tenant_id")
+        or platform_tenant_id(user)
+    ).strip()
+    site_id = str(ticket.get("site_id") or user.get("site_id") or "").strip() or None
+    return {
+        "tenant_id": tenant_id,
+        "client_id": str(ticket.get("client_id") or user.get("client_id") or "").strip(),
+        "site_id": site_id,
+    }
 
 
 def _request_context(request: Request) -> dict:
@@ -50,6 +100,148 @@ def _latest_timestamp(*values):
             candidate = candidate.replace(tzinfo=timezone.utc)
         parsed.append(candidate.astimezone(timezone.utc))
     return max(parsed).isoformat() if parsed else None
+
+
+_PORTAL_CHECKOUT_LINK_TTL = timedelta(hours=24)
+_MAX_PORTAL_INVOICE_ID_LENGTH = 200
+
+
+async def _load_portal_checkout_invoice(invoice_id: str, client_id: str) -> tuple[dict, str]:
+    """Resolve exactly one client-owned invoice for a portal payment.
+
+    Invoice IDs historically occur in both the native and Xero collections.
+    A portal checkout must not guess which record a shared ID refers to: the
+    chosen collection is persisted in the payment transaction and is later
+    enforced by the signed Stripe webhook settlement boundary.
+    """
+    clean_invoice_id = str(invoice_id or "").strip()
+    if not clean_invoice_id or len(clean_invoice_id) > _MAX_PORTAL_INVOICE_ID_LENGTH:
+        raise HTTPException(status_code=422, detail="Invalid invoice identifier")
+    clean_client_id = str(client_id or "").strip()
+    if not clean_client_id:
+        raise HTTPException(status_code=403, detail="Invoice access not permitted")
+
+    native = await db.invoices.find_one(
+        {"id": clean_invoice_id, "client_id": clean_client_id},
+        {"_id": 0},
+    )
+    xero = await db.xero_invoices.find_one(
+        {"id": clean_invoice_id, "client_id": clean_client_id},
+        {"_id": 0},
+    )
+    matches = [(invoice, collection) for invoice, collection in ((native, "invoices"), (xero, "xero_invoices")) if invoice]
+    if not matches:
+        # Keep the old not-found behaviour rather than revealing whether the
+        # invoice exists for another portal client.
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if len(matches) != 1:
+        raise HTTPException(status_code=409, detail="Invoice requires reconciliation before online payment")
+    return matches[0]
+
+
+def _portal_checkout_link_id(
+    *,
+    invoice: dict,
+    invoice_id: str,
+    client_id: str,
+    collection: str,
+    balance: float,
+    currency: str,
+) -> str:
+    """Return a retry-stable, server-owned payment-link identity.
+
+    Version/balance/currency are included so an old checkout cannot be reused
+    after a material invoice change.  It contains no secret and is not sent to
+    the portal browser.
+    """
+    material = ":".join(
+        (
+            "nexus-portal-checkout-link:v1",
+            collection,
+            invoice_id,
+            client_id,
+            str(invoice.get("version", 0)),
+            str(int(round(balance * 100))),
+            currency,
+        )
+    )
+    return f"portal-checkout-{hashlib.sha256(material.encode('utf-8')).hexdigest()[:40]}"
+
+
+async def _get_or_create_portal_checkout_link(
+    *,
+    invoice: dict,
+    invoice_id: str,
+    client_id: str,
+    collection: str,
+    balance: float,
+    currency: str,
+    portal_user: dict,
+) -> dict:
+    """Create one internal payment capability for the authenticated portal flow.
+
+    The link is intentionally never returned to the browser.  It exists so a
+    portal-created Stripe checkout uses the same reservation, transaction and
+    webhook-settlement controls as public payment links.  A deterministic
+    Mongo ``_id`` makes concurrent retries converge on one link document.
+    """
+    link_id = _portal_checkout_link_id(
+        invoice=invoice,
+        invoice_id=invoice_id,
+        client_id=client_id,
+        collection=collection,
+        balance=balance,
+        currency=currency,
+    )
+    now = datetime.now(timezone.utc)
+    link = {
+        "_id": link_id,
+        "id": link_id,
+        "token": secrets.token_urlsafe(32),
+        "invoice_id": invoice_id,
+        "invoice_collection": collection,
+        "invoice_number": str(invoice.get("invoice_number") or ""),
+        "client_id": client_id,
+        "client_name": str(invoice.get("client_name") or portal_user.get("client_name") or ""),
+        "currency": currency,
+        "total": invoice.get("total", 0),
+        "balance_at_creation": balance,
+        "invoice_version": invoice.get("version", 0),
+        "allowed_methods": ["card"],
+        "expires_at": (now + _PORTAL_CHECKOUT_LINK_TTL).isoformat(),
+        "status": "active",
+        "source": "portal_checkout",
+        "visibility": "portal_authenticated",
+        "created_at": now.isoformat(),
+        "created_by": "Client portal",
+        "created_by_id": portal_user.get("id"),
+        "payments": [],
+    }
+    await db.payment_links.update_one(
+        {"_id": link_id},
+        {"$setOnInsert": link},
+        upsert=True,
+    )
+    stored = await db.payment_links.find_one({"_id": link_id}, {"_id": 0})
+    if not stored:
+        raise HTTPException(status_code=503, detail="Unable to initialise online payment")
+
+    # Do not treat a stale/corrupt row with a matching deterministic ID as a
+    # valid checkout boundary.  The public-link loader performs the remaining
+    # expiry, invoice status and client-binding checks before a provider call.
+    if (
+        stored.get("id") != link_id
+        or stored.get("source") != "portal_checkout"
+        or stored.get("visibility") != "portal_authenticated"
+        or stored.get("invoice_id") != invoice_id
+        or stored.get("invoice_collection") != collection
+        or stored.get("client_id") != client_id
+        or stored.get("currency") != currency
+        or stored.get("allowed_methods") != ["card"]
+        or not str(stored.get("token") or "").strip()
+    ):
+        raise HTTPException(status_code=409, detail="Invoice requires reconciliation before online payment")
+    return stored
 
 # --- Portal Auth Dependency ---
 async def get_portal_user(credentials: HTTPAuthorizationCredentials = Depends(portal_security)):
@@ -531,7 +723,19 @@ async def portal_tickets(user: dict = Depends(get_portal_user)):
 async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)):
     if not user.get("can_create_tickets", True):
         raise HTTPException(status_code=403, detail="Ticket creation not permitted")
-    client = await db.clients.find_one({"id": user.get("client_id")}, {"_id": 0, "name": 1})
+    client = await db.clients.find_one(
+        {"id": user.get("client_id")},
+        {"_id": 0, "name": 1, "tenant_id": 1},
+    )
+    ticket_scope = _portal_ticket_comment_scope(
+        {"client_id": user.get("client_id"), "site_id": user.get("site_id")},
+        user,
+        client,
+    )
+    description = str(data.get("description") or "")
+    comment_content, comment_content_text = ("", "")
+    if description.strip():
+        comment_content, comment_content_text = sanitise_ticket_rich_text(description)
     ticket = {
         "id": f"TKT-{uuid.uuid4().hex[:6].upper()}", "ticket_number": f"PT-{datetime.now(timezone.utc).strftime('%m%d%H%M')}",
         "title": data.get("title", "Portal Ticket"), "description": data.get("description", ""),
@@ -544,6 +748,7 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
         "affected_device_name": data.get("affected_device_name") or None,
         "status": "open", "source": "client_portal",
         "client_id": user.get("client_id"), "client_name": client["name"] if client else "",
+        "tenant_id": ticket_scope["tenant_id"], "site_id": ticket_scope["site_id"],
         "contact_name": user.get("name"), "contact_email": user.get("email"),
         "assigned_to": None, "assigned_name": None, "tags": [],
         "created_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -553,17 +758,22 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
     await db.ticket_comments.insert_one({
         "id": str(uuid.uuid4()),
         "ticket_id": ticket["id"],
+        **ticket_scope,
+        "user_id": user.get("id"),
         "user_name": user.get("name", "Client"),
         "sender_name": user.get("name", "Client"),
         "sender_email": user.get("email", ""),
         "sender_type": "client",
-        "content": data.get("description", ""),
+        "content": comment_content,
+        "content_text": comment_content_text,
+        "content_format": "tiptap_html.v1",
         "is_internal": False,
         "visibility": "public",
         "portal_visible": True,
         "client_notified": False,
         "delivery_status": "received",
         "event_type": "portal_request_created",
+        "source": "client_portal",
         "created_at": ticket["created_at"],
     })
     ticket.pop("_id", None)
@@ -589,12 +799,7 @@ async def portal_ticket_detail(ticket_id: str, user: dict = Depends(get_portal_u
     messages = [
         *legacy_messages,
         *[
-            {
-                **comment,
-                "sender_name": comment.get("user_name") or comment.get("sender_name") or "Support",
-                "sender_email": comment.get("sender_email", ""),
-                "sender_type": comment.get("sender_type") or "technician",
-            }
+            _portal_ticket_comment(comment)
             for comment in public_comments
         ],
     ]
@@ -607,26 +812,32 @@ async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Dep
     """Add a message to a ticket conversation from the portal."""
     ticket = await db.tickets.find_one(
         {"id": ticket_id, "client_id": user.get("client_id")},
-        {"_id": 0, "id": 1, "status": 1},
+        {"_id": 0, "id": 1, "status": 1, "tenant_id": 1, "client_id": 1, "site_id": 1},
     )
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     content = str(data.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="Write a reply before sending")
+    content_html, content_text = sanitise_ticket_rich_text(content)
     message = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
+        **_portal_ticket_comment_scope(ticket, user),
+        "user_id": user.get("id"),
         "user_name": user.get("name", "Client"),
         "sender_name": user.get("name", "Client"),
         "sender_email": user.get("email", ""),
         "sender_type": "client",
-        "content": content,
+        "content": content_html,
+        "content_text": content_text,
+        "content_format": "tiptap_html.v1",
         "is_internal": False,
         "visibility": "public",
         "portal_visible": True,
         "client_notified": False,
         "delivery_status": "received",
+        "source": "client_portal",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.ticket_comments.insert_one(dict(message))
@@ -636,7 +847,7 @@ async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Dep
         update["reopened_at"] = update["updated_at"]
         update["reopened_reason"] = "Client replied through the portal"
     await db.tickets.update_one({"id": ticket_id}, {"$set": update})
-    return message
+    return _portal_ticket_comment(message)
 
 
 
@@ -1227,61 +1438,218 @@ async def portal_invoice_detail(invoice_id: str, user: dict = Depends(get_portal
 
 
 @router.post("/invoices/{invoice_id}/pay")
-async def portal_pay_invoice(invoice_id: str, data: dict, user: dict = Depends(get_portal_user)):
-    """Create a Stripe checkout session for portal invoice payment."""
-    import os
+async def portal_pay_invoice(
+    invoice_id: str,
+    data: dict,
+    request: Request,
+    user: dict = Depends(get_portal_user),
+):
+    """Start one verified, client-bound Stripe checkout for a portal invoice.
+
+    The request body is retained for backwards-compatible clients, but origin,
+    currency, amount and idempotency are all determined by Nexus.  Browsers
+    cannot create a chargeable session that is not reserved and persisted in
+    the payment-link/payment-transaction boundary consumed by signed webhooks.
+    """
+    del data  # Legacy callers submit origin/currency; neither is trusted here.
+    invoice_id = str(invoice_id or "").strip()
     if not user.get("can_view_invoices", False):
+        await record_portal_event(
+            action="portal_invoice_payment_checkout",
+            client_id=str(user.get("client_id") or ""),
+            portal_user=user,
+            outcome="blocked",
+            details="Portal payment checkout rejected because invoice access is not enabled",
+            metadata={"invoice_id": str(invoice_id or "")[:_MAX_PORTAL_INVOICE_ID_LENGTH]},
+            **_request_context(request),
+        )
         raise HTTPException(status_code=403, detail="Invoice access not permitted")
 
-    cid = user.get("client_id")
-    invoice = await db.invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
-    if not invoice:
-        invoice = await db.xero_invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-
-    total = float(invoice.get("total", 0))
-    amount_paid = float(invoice.get("amount_paid", 0))
-    balance = round(total - amount_paid, 2)
-    if balance <= 0:
-        raise HTTPException(status_code=400, detail="Invoice already fully paid")
-
-    stripe_key = os.environ.get("STRIPE_API_KEY", "")
-    if not stripe_key or stripe_key == "sk_test_placeholder":
-        # Mock payment for demo â€” record as pending
-        payment = {
-            "id": str(uuid.uuid4()),
-            "method": "portal_payment",
-            "amount": balance,
-            "status": "pending",
-            "initiated_at": datetime.now(timezone.utc).isoformat(),
-            "portal_user": user.get("email"),
-        }
-        return {"status": "demo", "message": f"Payment of ${balance:.2f} initiated (Stripe test mode)", "balance": balance, "payment": payment}
-
-    origin_url = data.get("origin_url", "").rstrip("/")
-    success_url = f"{origin_url}/portal-dashboard?payment=success&invoice={invoice_id}"
-    cancel_url = f"{origin_url}/portal-dashboard?payment=cancelled"
-
+    client_id = str(user.get("client_id") or "").strip()
     try:
+        from app.routers import payment_links
         from app.services.stripe_checkout import StripeCheckout, CheckoutSessionRequest
-        stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=f"{origin_url}/api/webhook/stripe")
+
+        invoice, collection = await _load_portal_checkout_invoice(invoice_id, client_id)
+        if str(invoice.get("status") or "").strip().lower() in payment_links._CANCELLED_INVOICE_STATUSES:
+            raise HTTPException(status_code=409, detail="Cannot collect payment for a voided invoice")
+        balance = payment_links._invoice_balance(invoice)
+        if balance <= 0:
+            raise HTTPException(status_code=409, detail="Invoice already fully paid")
+        currency = payment_links._currency(invoice.get("currency"))
+        stripe_key = await payment_links._stripe_api_key()
+        if not stripe_key or stripe_key == "sk_test_placeholder":
+            await record_portal_event(
+                action="portal_invoice_payment_checkout",
+                client_id=client_id,
+                client_name=str(invoice.get("client_name") or ""),
+                portal_user=user,
+                outcome="blocked",
+                details="Portal payment checkout was unavailable because card payments are not configured",
+                metadata={"invoice_id": invoice_id, "invoice_collection": collection},
+                **_request_context(request),
+            )
+            raise HTTPException(status_code=503, detail="Online card payments are not configured")
+
+        link = await _get_or_create_portal_checkout_link(
+            invoice=invoice,
+            invoice_id=invoice_id,
+            client_id=client_id,
+            collection=collection,
+            balance=balance,
+            currency=currency,
+            portal_user=user,
+        )
+        # Re-load through the shared public-payment gate.  Although this
+        # portal-only token is never sent to the browser, the gate is the
+        # canonical implementation of link expiry, invoice/client binding and
+        # outstanding-balance enforcement for all online payment methods.
+        link, invoice, collection, balance = await payment_links._load_public_link(str(link["token"]))
+        if invoice.get("client_id") != client_id:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+
+        amount_cents = int(round(balance * 100))
+        idempotency_material = ":".join(
+            (
+                "nexus-portal-checkout:v1",
+                str(link["id"]),
+                collection,
+                str(invoice.get("id") or invoice_id),
+                client_id,
+                str(invoice.get("version", 0)),
+                str(amount_cents),
+                currency,
+            )
+        )
+        idempotency_key = hashlib.sha256(idempotency_material.encode("utf-8")).hexdigest()
+        reservation, reused_attempt = await payment_links._reserve_online_payment_attempt(
+            link=link,
+            invoice=invoice,
+            method="card",
+            amount=balance,
+            idempotency_key=idempotency_key,
+        )
+        if reused_attempt and reservation.get("stripe_session_id") and reservation.get("stripe_checkout_url"):
+            await payment_links._ensure_payment_transaction(
+                link=link,
+                invoice=invoice,
+                collection=collection,
+                payment_record=reservation,
+                provider_id_field="stripe_session_id",
+                provider_id=str(reservation["stripe_session_id"]),
+            )
+            await record_portal_event(
+                action="portal_invoice_payment_checkout_reused",
+                client_id=client_id,
+                client_name=str(invoice.get("client_name") or ""),
+                portal_user=user,
+                details="Portal payment checkout was safely reused",
+                metadata={
+                    "invoice_id": invoice_id,
+                    "invoice_collection": collection,
+                    "payment_link_id": link["id"],
+                    "amount": balance,
+                    "currency": currency,
+                },
+                **_request_context(request),
+            )
+            return {
+                "status": "checkout",
+                "url": reservation["stripe_checkout_url"],
+                "session_id": reservation["stripe_session_id"],
+                "balance": balance,
+                "reused": True,
+            }
+        if reused_attempt and reservation.get("status") != "initiating":
+            # A corrupted/incomplete persisted attempt must not be rewritten
+            # into another provider session under a different lifecycle state.
+            raise HTTPException(status_code=409, detail="An online payment attempt requires reconciliation")
+
+        public_base = configured_public_base_url()
+        quoted_invoice_id = quote(str(invoice.get("id") or invoice_id), safe="")
         checkout_req = CheckoutSessionRequest(
             amount=balance,
-            currency=data.get("currency", "aud"),
-            success_url=success_url,
-            cancel_url=cancel_url,
+            currency=currency,
+            success_url=(
+                f"{public_base}/portal-dashboard?payment=success&invoice={quoted_invoice_id}"
+                "&session_id={CHECKOUT_SESSION_ID}"
+            ),
+            cancel_url=f"{public_base}/portal-dashboard?payment=cancelled&invoice={quoted_invoice_id}",
             metadata={
-                "invoice_id": invoice_id,
-                "invoice_number": invoice.get("invoice_number", ""),
-                "client_id": cid,
-                "portal_user": user.get("email"),
+                "payment_link_id": link["id"],
+                "invoice_id": str(invoice.get("id") or invoice_id),
+                "invoice_number": str(invoice.get("invoice_number") or ""),
             }
         )
-        session = await stripe_checkout.create_checkout_session(checkout_req)
+        try:
+            session = await StripeCheckout(api_key=stripe_key).create_checkout_session(
+                checkout_req,
+                idempotency_key=idempotency_key,
+            )
+        except Exception:
+            await record_portal_event(
+                action="portal_invoice_payment_checkout",
+                client_id=client_id,
+                client_name=str(invoice.get("client_name") or ""),
+                portal_user=user,
+                outcome="failed",
+                details="Portal payment provider did not accept the checkout request",
+                metadata={"invoice_id": invoice_id, "invoice_collection": collection, "payment_link_id": link["id"]},
+                **_request_context(request),
+            )
+            raise HTTPException(status_code=502, detail="Unable to start card payment") from None
+
+        payment_record = {
+            **reservation,
+            "status": "pending",
+            "stripe_session_id": session.session_id,
+            "stripe_checkout_url": session.url,
+            "initiated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await payment_links._persist_online_payment_attempt(link=link, payment_record=payment_record)
+        await payment_links._ensure_payment_transaction(
+            link=link,
+            invoice=invoice,
+            collection=collection,
+            payment_record=payment_record,
+            provider_id_field="stripe_session_id",
+            provider_id=session.session_id,
+        )
+        await record_portal_event(
+            action="portal_invoice_payment_checkout",
+            client_id=client_id,
+            client_name=str(invoice.get("client_name") or ""),
+            portal_user=user,
+            details="Portal payment checkout was created and bound for webhook settlement",
+            metadata={
+                "invoice_id": invoice_id,
+                "invoice_collection": collection,
+                "payment_link_id": link["id"],
+                "amount": balance,
+                "currency": currency,
+            },
+            **_request_context(request),
+        )
         return {"status": "checkout", "url": session.url, "session_id": session.session_id, "balance": balance}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Payment failed: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception:
+        # Database/provider integration errors must not disclose operational
+        # details through a customer-facing endpoint.  Preserve a bounded
+        # audit trail where possible, then make the caller retry later.
+        try:
+            await record_portal_event(
+                action="portal_invoice_payment_checkout",
+                client_id=client_id,
+                portal_user=user,
+                outcome="failed",
+                details="Portal payment checkout could not be safely initialised",
+                metadata={"invoice_id": invoice_id},
+                **_request_context(request),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail="Unable to initialise online payment") from None
 
 
 @router.get("/invoices/{invoice_id}/pdf")

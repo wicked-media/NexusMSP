@@ -22,7 +22,7 @@ class TestSMSSignatureFeatures:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")

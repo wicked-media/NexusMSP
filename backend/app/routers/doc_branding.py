@@ -1,8 +1,19 @@
-"""Document Branding Templates - Invoice, Letterhead, PO styling and customization"""
-from fastapi import APIRouter, Depends, HTTPException
+"""Legacy document-branding compatibility endpoints.
+
+The canonical customer-document path is Organisation Branding plus the
+commercial document-template studio.  These endpoints remain for existing
+Finance Center data, but are protected as global configuration and must not be
+presented as the renderer used for standard invoices.
+"""
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone
+from html import escape
+import re
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
+from app.services.scope_permissions import assert_global_scope
 import uuid
 
 router = APIRouter(prefix="/doc-branding", tags=["doc-branding"])
@@ -63,19 +74,74 @@ DEFAULT_TEMPLATES = {
 }
 
 DOC_TYPES = ["invoice", "purchase_order", "estimate", "letterhead"]
+LEGACY_BRANDING_GUIDANCE = (
+    "These legacy Finance Center preferences do not control standard invoice PDFs. "
+    "Use Organisation Branding and the document template studio for customer documents."
+)
+_HEX_COLOR_RE = re.compile(r"^#?[0-9a-fA-F]{6}$")
 
 
-@router.get("/templates")
-async def get_branding_templates(current_user: dict = Depends(get_current_user)):
+async def _require_global_legacy_branding_scope(
+    current_user: dict,
+    request: Request | None,
+    operation: str,
+) -> None:
+    """Legacy branding records are organisation-wide commercial configuration."""
+    await assert_global_scope(current_user, operation=operation, request=request)
+
+
+def _preview_text(value: object, fallback: str) -> str:
+    """Escape stored legacy data before it reaches the HTML preview sink."""
+    return escape(str(value or fallback), quote=True)
+
+
+def _safe_preview_color(value: object, fallback: str) -> str:
+    candidate = str(value or "").strip()
+    if _HEX_COLOR_RE.fullmatch(candidate):
+        return f"#{candidate.lstrip('#')}"
+    return fallback
+
+
+def _safe_preview_font(value: object) -> str:
+    return value if isinstance(value, str) and value in {"Helvetica", "Times", "Courier"} else "Helvetica"
+
+
+def _safe_preview_header_style(value: object) -> str:
+    return value if isinstance(value, str) and value in {"bar", "minimal", "gradient", "full"} else "bar"
+
+
+@router.get(
+    "/templates",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def get_branding_templates(
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Get all built-in and custom branding templates"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.template.list"
+    )
     custom = await db.doc_branding_templates.find({}, {"_id": 0}).to_list(50)
     builtin = [{"type": "builtin", **v} for v in DEFAULT_TEMPLATES.values()]
     return {"builtin": builtin, "custom": custom}
 
 
-@router.post("/templates")
-async def create_custom_template(data: dict, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/templates",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def create_custom_template(
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Create a custom branding template"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.template.create"
+    )
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Template payload must be an object")
     now = datetime.now(timezone.utc).isoformat()
     template = {
         "id": f"TPL-{uuid.uuid4().hex[:6].upper()}",
@@ -95,36 +161,99 @@ async def create_custom_template(data: dict, current_user: dict = Depends(get_cu
     }
     await db.doc_branding_templates.insert_one(template)
     template.pop("_id", None)
-    return template
+    await log_activity(
+        current_user,
+        "created",
+        "legacy_document_branding_template",
+        template["id"],
+        template["name"],
+        "Created a legacy document-branding compatibility template",
+        metadata={"deprecated": True},
+    )
+    return {**template, "deprecated": True, "guidance": LEGACY_BRANDING_GUIDANCE}
 
 
-@router.put("/templates/{template_id}")
-async def update_template(template_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.put(
+    "/templates/{template_id}",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def update_template(
+    template_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Update a custom branding template"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.template.update"
+    )
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Template payload must be an object")
+    existing = await db.doc_branding_templates.find_one({"id": template_id}, {"_id": 0, "name": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Template not found")
     updates = {}
     for key in ["name", "description", "header_style", "color_scheme", "font_family", "logo_position", "show_watermark", "footer_text", "layout"]:
         if key in data:
             updates[key] = data[key]
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     result = await db.doc_branding_templates.update_one({"id": template_id}, {"$set": updates})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Template not found")
     updated = await db.doc_branding_templates.find_one({"id": template_id}, {"_id": 0})
-    return updated
+    await log_activity(
+        current_user,
+        "updated",
+        "legacy_document_branding_template",
+        template_id,
+        existing.get("name") or "Legacy document branding template",
+        "Updated a legacy document-branding compatibility template",
+        metadata={"fields": sorted(key for key in updates if key != "updated_at"), "deprecated": True},
+    )
+    return {**updated, "deprecated": True, "guidance": LEGACY_BRANDING_GUIDANCE}
 
 
-@router.delete("/templates/{template_id}")
-async def delete_template(template_id: str, current_user: dict = Depends(get_current_user)):
+@router.delete(
+    "/templates/{template_id}",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def delete_template(
+    template_id: str,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Delete a custom branding template"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.template.delete"
+    )
+    existing = await db.doc_branding_templates.find_one({"id": template_id}, {"_id": 0, "name": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Template not found")
     result = await db.doc_branding_templates.delete_one({"id": template_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Template not found")
-    return {"message": "Template deleted"}
+    await log_activity(
+        current_user,
+        "deleted",
+        "legacy_document_branding_template",
+        template_id,
+        existing.get("name") or "Legacy document branding template",
+        "Deleted a legacy document-branding compatibility template",
+        metadata={"deprecated": True},
+    )
+    return {"message": "Template deleted", "deprecated": True, "guidance": LEGACY_BRANDING_GUIDANCE}
 
 
-@router.get("/settings")
-async def get_branding_settings(current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/settings",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def get_branding_settings(
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Get the active branding settings for each doc type"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.settings.read"
+    )
     settings = await db.doc_branding_settings.find({}, {"_id": 0}).to_list(10)
     # Index by doc_type
     by_type = {s["doc_type"]: s for s in settings}
@@ -148,11 +277,24 @@ async def get_branding_settings(current_user: dict = Depends(get_current_user)):
     return result
 
 
-@router.put("/settings/{doc_type}")
-async def update_branding_settings(doc_type: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.put(
+    "/settings/{doc_type}",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def update_branding_settings(
+    doc_type: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Update branding settings for a specific doc type"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.settings.update"
+    )
     if doc_type not in DOC_TYPES:
         raise HTTPException(status_code=400, detail=f"Invalid doc type. Must be one of: {DOC_TYPES}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Branding payload must be an object")
 
     now = datetime.now(timezone.utc).isoformat()
     settings = {
@@ -178,12 +320,34 @@ async def update_branding_settings(doc_type: str, data: dict, current_user: dict
         {"$set": settings},
         upsert=True
     )
-    return settings
+    await log_activity(
+        current_user,
+        "updated",
+        "legacy_document_branding_settings",
+        doc_type,
+        doc_type.replace("_", " ").title(),
+        "Updated legacy document-branding compatibility settings",
+        metadata={"doc_type": doc_type, "deprecated": True},
+    )
+    return {**settings, "deprecated": True, "guidance": LEGACY_BRANDING_GUIDANCE}
 
 
-@router.get("/preview/{template_id}")
-async def preview_template(template_id: str, doc_type: str = "invoice", current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/preview/{template_id}",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def preview_template(
+    template_id: str,
+    doc_type: str = "invoice",
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Generate a preview of a template with sample data"""
+    await _require_global_legacy_branding_scope(
+        current_user, request, "commercial_document.legacy_branding.preview"
+    )
+    if doc_type not in DOC_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid doc type. Must be one of: {DOC_TYPES}")
     # Get template
     if template_id.startswith("tpl-"):
         key = template_id.replace("tpl-", "")
@@ -207,24 +371,25 @@ async def preview_template(template_id: str, doc_type: str = "invoice", current_
 
 
 def _generate_preview_html(template: dict, settings: dict, doc_type: str) -> str:
-    """Generate an HTML preview of a document template"""
+    """Generate an escaped HTML preview of a legacy document template."""
     colors = template.get("color_scheme", {})
-    primary = colors.get("primary", "#1a56db")
-    secondary = colors.get("secondary", "#8b5cf6")
-    accent = colors.get("accent", "#06b6d4")
-    bg = colors.get("background", "#ffffff")
-    text_color = colors.get("text", "#1f2937")
-    company = (settings or {}).get("company_name", "") or "Your Company Name"
-    address = (settings or {}).get("company_address", "") or "123 Business St, Suite 100"
-    phone = (settings or {}).get("company_phone", "") or "+1 (555) 000-0000"
-    email = (settings or {}).get("company_email", "") or "accounts@company.com"
-    footer = (settings or {}).get("footer_text", "") or "Thank you for your business"
+    primary = _safe_preview_color(colors.get("primary"), "#1a56db")
+    secondary = _safe_preview_color(colors.get("secondary"), "#8b5cf6")
+    accent = _safe_preview_color(colors.get("accent"), "#06b6d4")
+    bg = _safe_preview_color(colors.get("background"), "#ffffff")
+    text_color = _safe_preview_color(colors.get("text"), "#1f2937")
+    company = _preview_text((settings or {}).get("company_name"), "Your Company Name")
+    address = _preview_text((settings or {}).get("company_address"), "123 Business St, Suite 100")
+    phone = _preview_text((settings or {}).get("company_phone"), "+1 (555) 000-0000")
+    email = _preview_text((settings or {}).get("company_email"), "accounts@company.com")
+    footer = _preview_text((settings or {}).get("footer_text"), "Thank you for your business")
+    font_family = _safe_preview_font(template.get("font_family"))
 
-    doc_label = doc_type.replace("_", " ").upper()
+    doc_label = escape(doc_type.replace("_", " ").upper(), quote=True)
     if doc_type == "letterhead":
         doc_label = ""
 
-    header_style = template.get("header_style", "bar")
+    header_style = _safe_preview_header_style(template.get("header_style"))
     header_html = ""
     if header_style == "bar":
         header_html = f'<div style="background:{primary};padding:20px 28px;color:#fff"><div style="font-size:20px;font-weight:bold">{company}</div><div style="font-size:11px;opacity:0.8;margin-top:4px">{address}</div></div><div style="background:{accent};height:3px"></div>'
@@ -236,7 +401,7 @@ def _generate_preview_html(template: dict, settings: dict, doc_type: str) -> str
         header_html = f'<div style="background:{primary};padding:24px 28px;color:#fff"><div style="font-size:20px;font-weight:bold">{company}</div><div style="font-size:11px;opacity:0.8;margin-top:4px">{address} | {phone}</div></div>'
 
     return f"""
-    <div style="max-width:600px;margin:0 auto;background:{bg};border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-family:{template.get("font_family","Helvetica")},Arial,sans-serif">
+    <div style="max-width:600px;margin:0 auto;background:{bg};border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-family:{font_family},Arial,sans-serif">
       {header_html}
       <div style="padding:28px;color:{text_color}">
         {"" if not doc_label else f'<div style="text-align:right;font-size:28px;font-weight:bold;color:{primary};margin-bottom:20px">{doc_label}</div>'}

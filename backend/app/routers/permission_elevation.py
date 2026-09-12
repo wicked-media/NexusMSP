@@ -414,6 +414,22 @@ async def _evaluate_native_policy(request: dict) -> dict:
     return {"decision": "approval", "matched": None, "monitor_matches": monitored}
 
 
+def _require_manual_review_for_local_companion(evaluation: dict, *, is_local_companion: bool) -> dict:
+    """Never auto-approve authority requested through the local UI bridge.
+
+    The service token remains protected, but a loopback HTTP bridge cannot yet
+    bind a request to a trusted Windows caller. Keep policies observable and
+    preserve their matching evidence, while requiring a human technician until
+    the companion channel moves to caller-bound IPC.
+    """
+    if not is_local_companion or evaluation.get("decision") != "allow":
+        return evaluation
+    matched = dict(evaluation.get("matched") or {})
+    matched["action"] = "approval"
+    matched["downgraded_reason"] = "Local companion requests require technician approval until caller-bound endpoint IPC is enabled."
+    return {**evaluation, "decision": "approval", "matched": matched}
+
+
 async def _write_policy_audit(kind: str, policy: dict | None, actor: dict | None, details: dict | None = None) -> None:
     event = {
         "id": str(uuid.uuid4()),
@@ -454,6 +470,7 @@ async def _queue_policy_auto_approval(request: dict, policy_match: dict) -> str:
     command = {
         "id": command_id,
         "device_id": request["device_id"],
+        "client_id": request.get("client_id"),
         "kind": "elevate_launch",
         "payload": {
             "request_id": request["id"],
@@ -939,6 +956,7 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
     command = {
         "id": command_id,
         "device_id": request["device_id"],
+        "client_id": request.get("client_id"),
         "kind": "elevate_launch",
         "payload": {
             "request_id": request["id"],
@@ -1039,7 +1057,11 @@ async def deny_nexus_elevate_request(request_id: str, data: dict, current_user: 
 # The future tray/companion sends the request using the enrolled agent token;
 # it never receives an administrator JWT or a capability to self-approve.
 @router.post("/nexus-elevate/agent/requests")
-async def create_native_elevation_request(data: dict, x_agent_token: str | None = Header(None)):
+async def create_native_elevation_request(
+    data: dict,
+    x_agent_token: str | None = Header(None),
+    x_nexus_local_companion: str | None = Header(None, alias="X-Nexus-Local-Companion"),
+):
     if not x_agent_token:
         raise HTTPException(status_code=401, detail="Missing agent token")
     agent = await db.nexus_agents.find_one({"agent_token": x_agent_token, "is_active": True}, {"_id": 0})
@@ -1060,6 +1082,7 @@ async def create_native_elevation_request(data: dict, x_agent_token: str | None 
     requested_duration = max(5, min(settings["max_duration_minutes"], int(data.get("requested_duration_minutes") or settings["max_duration_minutes"])))
     request_id = f"nel-{uuid.uuid4().hex[:16]}"
     requester = data.get("requester") if isinstance(data.get("requester"), dict) else {}
+    request_channel = "local_companion" if x_nexus_local_companion == "1" else "agent"
     request = {
         "id": request_id,
         "status": "pending",
@@ -1081,8 +1104,12 @@ async def create_native_elevation_request(data: dict, x_agent_token: str | None 
         "requested_duration_minutes": requested_duration,
         "requested_at": datetime.now(timezone.utc).isoformat(),
         "agent_version": str(data.get("agent_version") or "").strip()[:100],
+        "request_channel": request_channel,
     }
-    evaluation = await _evaluate_native_policy(request)
+    evaluation = _require_manual_review_for_local_companion(
+        await _evaluate_native_policy(request),
+        is_local_companion=request_channel == "local_companion",
+    )
     request["policy_evaluation"] = evaluation
     matched_policy = evaluation.get("matched") or {}
     if evaluation.get("decision") == "deny":
@@ -1101,6 +1128,7 @@ async def create_native_elevation_request(data: dict, x_agent_token: str | None 
         "sha256": sha256,
         "ticket_id": request["ticket_id"],
         "policy_decision": evaluation.get("decision"),
+        "request_channel": request_channel,
         "matched_policy_id": matched_policy.get("id"),
         "monitor_policy_ids": [item.get("id") for item in evaluation.get("monitor_matches") or []],
     })

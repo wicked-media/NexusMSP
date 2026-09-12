@@ -1,7 +1,7 @@
 """
 Iteration 72 - Code Quality & Security Fixes Testing
 Tests:
-1. Backend APIs still work after random→SystemRandom changes
+1. Backend APIs still work after randomÃ¢â€ â€™SystemRandom changes
 2. Login flow works correctly
 3. Portal login works correctly
 4. Key endpoints return valid data
@@ -14,7 +14,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASSWORD = "Lucky@2871$!"
+ADMIN_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 PORTAL_EMAIL = "john@acmecorp.com"
 PORTAL_PASSWORD = "portal123"
 
@@ -33,7 +33,7 @@ class TestAdminAuth:
         assert "token" in data, "No token in response"
         assert "user" in data, "No user in response"
         assert data["user"]["email"] == ADMIN_EMAIL
-        print(f"✓ Admin login successful, token received")
+        print(f"Ã¢Å“â€œ Admin login successful, token received")
     
     def test_auth_me_endpoint(self):
         """Test /api/auth/me returns user info"""
@@ -51,7 +51,7 @@ class TestAdminAuth:
         assert response.status_code == 200
         data = response.json()
         assert data["email"] == ADMIN_EMAIL
-        print(f"✓ Auth me endpoint works correctly")
+        print(f"Ã¢Å“â€œ Auth me endpoint works correctly")
 
 
 class TestPortalAuth:
@@ -69,9 +69,9 @@ class TestPortalAuth:
         assert "token" in data or "requires_2fa" in data, "No token or 2FA flag in response"
         if "token" in data:
             assert "user" in data, "No user in response"
-            print(f"✓ Portal login successful, token received")
+            print(f"Ã¢Å“â€œ Portal login successful, token received")
         else:
-            print(f"✓ Portal login requires 2FA (expected behavior)")
+            print(f"Ã¢Å“â€œ Portal login requires 2FA (expected behavior)")
 
 
 class TestSystemRandomEndpoints:
@@ -95,7 +95,7 @@ class TestSystemRandomEndpoints:
         assert "surveys" in data, "No surveys in response"
         assert "summary" in data, "No summary in response"
         assert "nps_score" in data["summary"], "No NPS score in summary"
-        print(f"✓ NPS tracker works, NPS score: {data['summary']['nps_score']}")
+        print(f"Ã¢Å“â€œ NPS tracker works, NPS score: {data['summary']['nps_score']}")
     
     def test_hardware_refresh_overview(self):
         """Test hardware refresh endpoint works after SystemRandom change"""
@@ -109,14 +109,14 @@ class TestSystemRandomEndpoints:
         assert response.status_code == 200, f"Backup verify failed: {response.text}"
         data = response.json()
         assert "jobs" in data or "summary" in data, "No jobs or summary in response"
-        print(f"✓ Backup verify works")
+        print(f"Ã¢Å“â€œ Backup verify works")
     
     def test_executive_reports_overview(self):
         """Test executive reports endpoint works after SystemRandom change"""
         response = requests.get(f"{BASE_URL}/api/executive-reports/overview", headers=self.headers)
         assert response.status_code == 200, f"Executive reports failed: {response.text}"
         data = response.json()
-        print(f"✓ Executive reports works")
+        print(f"Ã¢Å“â€œ Executive reports works")
 
 
 class TestDashboardEndpoints:
@@ -137,7 +137,7 @@ class TestDashboardEndpoints:
         response = requests.get(f"{BASE_URL}/api/dashboard/stats", headers=self.headers)
         assert response.status_code == 200, f"Dashboard stats failed: {response.text}"
         data = response.json()
-        print(f"✓ Dashboard stats works")
+        print(f"Ã¢Å“â€œ Dashboard stats works")
     
     def test_tickets_list(self):
         """Test tickets list endpoint"""
@@ -145,7 +145,7 @@ class TestDashboardEndpoints:
         assert response.status_code == 200, f"Tickets list failed: {response.text}"
         data = response.json()
         assert isinstance(data, list), "Tickets should be a list"
-        print(f"✓ Tickets list works, {len(data)} tickets")
+        print(f"Ã¢Å“â€œ Tickets list works, {len(data)} tickets")
     
     def test_devices_list(self):
         """Test devices list endpoint"""
@@ -153,7 +153,7 @@ class TestDashboardEndpoints:
         assert response.status_code == 200, f"Devices list failed: {response.text}"
         data = response.json()
         assert isinstance(data, list), "Devices should be a list"
-        print(f"✓ Devices list works, {len(data)} devices")
+        print(f"Ã¢Å“â€œ Devices list works, {len(data)} devices")
 
 
 class TestSeedEndpoint:
@@ -163,7 +163,7 @@ class TestSeedEndpoint:
         """Test seed endpoint works"""
         response = requests.post(f"{BASE_URL}/api/seed")
         assert response.status_code == 200, f"Seed failed: {response.text}"
-        print(f"✓ Seed endpoint works")
+        print(f"Ã¢Å“â€œ Seed endpoint works")
 
 
 if __name__ == "__main__":

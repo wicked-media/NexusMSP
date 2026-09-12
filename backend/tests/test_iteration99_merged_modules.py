@@ -1,13 +1,13 @@
 """
 Iteration 99 - Testing Merged Modules (8 groups consolidated)
 Tests:
-1. Revenue Command Center (4→1): /revenue-forecast, /revenue-tracker, /revenue-tracking
-2. AI Triage (3→1): /ticket-triage/analyze, /ai/auto-route
-3. Backup Command Center (4→1): /backup-dashboard, /backup-compliance, /backup-verify
-4. SLA Manager (4→1): /sla-timer, /sla-penalties, /sla-report-gen
-5. Compliance Hub (4→1): /compliance-frameworks, /compliance-generator
-6. Dispatch Center (3→1): /dispatch, /scheduling
-7. Reports Hub (5→1): /reports, /executive-reports, /client-reports, /financial-reports, /roi-reports
+1. Revenue Command Center (4Ã¢â€ â€™1): /revenue-forecast, /revenue-tracker, /revenue-tracking
+2. AI Triage (3Ã¢â€ â€™1): /ticket-triage/analyze, /ai/auto-route
+3. Backup Command Center (4Ã¢â€ â€™1): /backup-dashboard, /backup-compliance, /backup-verify
+4. SLA Manager (4Ã¢â€ â€™1): /sla-timer, /sla-penalties, /sla-report-gen
+5. Compliance Hub (4Ã¢â€ â€™1): /compliance-frameworks, /compliance-generator
+6. Dispatch Center (3Ã¢â€ â€™1): /dispatch, /scheduling
+7. Reports Hub (5Ã¢â€ â€™1): /reports, /executive-reports, /client-reports, /financial-reports, /roi-reports
 """
 import pytest
 import requests
@@ -20,7 +20,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -31,10 +31,10 @@ def headers(auth_token):
     return {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
 
 
-# ── Revenue Command Center Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ Revenue Command Center Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestRevenueCommandCenter:
-    """Tests for merged Revenue module (4→1)"""
+    """Tests for merged Revenue module (4Ã¢â€ â€™1)"""
     
     def test_revenue_forecast_dashboard(self, headers):
         """GET /api/revenue-forecast/dashboard - MRR/ARR projections"""
@@ -58,10 +58,10 @@ class TestRevenueCommandCenter:
         assert isinstance(data, dict)
 
 
-# ── AI Triage Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ AI Triage Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestAITriage:
-    """Tests for consolidated AI Triage (3→1)"""
+    """Tests for consolidated AI Triage (3Ã¢â€ â€™1)"""
     
     def test_keyword_triage_analyze(self, headers):
         """POST /api/ticket-triage/analyze - Keyword-based triage"""
@@ -87,10 +87,10 @@ class TestAITriage:
         assert "ticket_id" in response.json().get("detail", "").lower()
 
 
-# ── Backup Command Center Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ Backup Command Center Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestBackupCommandCenter:
-    """Tests for merged Backup module (4→1)"""
+    """Tests for merged Backup module (4Ã¢â€ â€™1)"""
     
     def test_backup_dashboard_overview(self, headers):
         """GET /api/backup-dashboard/overview - Backup status"""
@@ -114,10 +114,10 @@ class TestBackupCommandCenter:
         assert isinstance(data, dict)
 
 
-# ── SLA Manager Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ SLA Manager Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestSLAManager:
-    """Tests for merged SLA module (4→1)"""
+    """Tests for merged SLA module (4Ã¢â€ â€™1)"""
     
     def test_sla_timer_active(self, headers):
         """GET /api/sla-timer/active - Active SLA timers"""
@@ -148,10 +148,10 @@ class TestSLAManager:
         assert isinstance(data, (list, dict))
 
 
-# ── Compliance Hub Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ Compliance Hub Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestComplianceHub:
-    """Tests for merged Compliance module (4→1)"""
+    """Tests for merged Compliance module (4Ã¢â€ â€™1)"""
     
     def test_compliance_frameworks_overview(self, headers):
         """GET /api/compliance-frameworks/overview - Framework status"""
@@ -175,10 +175,10 @@ class TestComplianceHub:
         assert isinstance(data, (list, dict))
 
 
-# ── Dispatch Center Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ Dispatch Center Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestDispatchCenter:
-    """Tests for merged Dispatch/Scheduling module (3→1)"""
+    """Tests for merged Dispatch/Scheduling module (3Ã¢â€ â€™1)"""
     
     def test_dispatch_board(self, headers):
         """GET /api/dispatch/board - Dispatch board"""
@@ -202,10 +202,10 @@ class TestDispatchCenter:
         assert isinstance(data, (list, dict))
 
 
-# ── Reports Hub Tests ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ Reports Hub Tests Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestReportsHub:
-    """Tests for merged Reports module (5→1)"""
+    """Tests for merged Reports module (5Ã¢â€ â€™1)"""
     
     def test_reports_ticket_analytics(self, headers):
         """GET /api/reports/ticket-analytics - Operational reports"""
@@ -243,7 +243,7 @@ class TestReportsHub:
         assert isinstance(data, (list, dict))
 
 
-# ── Backend Health Check ──
+# Ã¢â€â‚¬Ã¢â€â‚¬ Backend Health Check Ã¢â€â‚¬Ã¢â€â‚¬
 
 class TestBackendHealth:
     """Verify backend loads with all routers (no import errors)"""

@@ -18,7 +18,7 @@ from app.routers.nexus_agent import queue_command_for_device, require_agent_oper
 from app.services.action_permissions import require_action
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import start_remote_session
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,23 +28,87 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _ticket_with_agent(ticket_id: str, device_id: str | None = None) -> tuple[dict, dict]:
-    """Resolve ticket → linked device. Raises 404/400 cleanly. Returns (ticket, device)."""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+async def _ticket_in_scope(
+    ticket_id: str,
+    current_user: dict,
+    *,
+    operation: str,
+    request: Request | None = None,
+) -> dict:
+    """Load a ticket only after enforcing its client and site boundary."""
+    return await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation=operation,
+        request=request,
+        resource_name="Ticket",
+    )
+
+
+def _linked_device_ids(ticket: dict) -> list[str]:
     primary = ticket.get("device_id")
     linked = list(ticket.get("device_ids") or [])
     if primary and primary not in linked:
         linked.append(primary)
+    return linked
+
+
+async def _ticket_with_linked_device(
+    ticket_id: str,
+    current_user: dict,
+    device_id: str | None = None,
+    *,
+    operation: str,
+    request: Request | None = None,
+) -> tuple[dict, dict]:
+    """Resolve a scoped ticket and one of its scoped, same-client devices.
+
+    Ticket/device bindings are security-sensitive: a ticket action must never
+    be able to reach an endpoint belonging to a different client merely
+    because stale or malformed linkage data exists.
+    """
+    ticket = await _ticket_in_scope(
+        ticket_id,
+        current_user,
+        operation=operation,
+        request=request,
+    )
+    primary = ticket.get("device_id")
+    linked = _linked_device_ids(ticket)
     target_id = device_id or primary
     if not target_id:
         raise HTTPException(400, "This ticket has no device linked. Link a device first.")
     if device_id and device_id not in linked:
         raise HTTPException(400, f"Device {device_id} is not linked to this ticket")
-    device = await db.devices.find_one({"id": target_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(404, "Linked device not found")
+
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        target_id,
+        operation=operation,
+        request=request,
+        resource_name="Device",
+    )
+    if not ticket.get("client_id") or device.get("client_id") != ticket.get("client_id"):
+        raise HTTPException(409, "The linked device belongs to a different client than this ticket")
+    return ticket, device
+
+
+async def _ticket_with_agent(
+    ticket_id: str,
+    current_user: dict,
+    device_id: str | None = None,
+    *,
+    operation: str = "ticket.device.command",
+) -> tuple[dict, dict]:
+    """Resolve a scoped ticket device that has an enrolled Nexus Agent."""
+    ticket, device = await _ticket_with_linked_device(
+        ticket_id,
+        current_user,
+        device_id,
+        operation=operation,
+    )
     if not device.get("nexus_agent_id"):
         raise HTTPException(400, f"Device '{device.get('hostname') or device.get('name')}' has no NexusOps Agent installed")
     return ticket, device
@@ -78,7 +142,7 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
 
 @router.post("/tickets/{ticket_id}/device/reboot", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_reboot(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.reboot")
     cmd_id = await queue_command_for_device(device, "reboot", {"delay_sec": 30}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Reboot queued", f"{device.get('name')} via NexusOps Agent")
     return {"success": True, "command_id": cmd_id}
@@ -86,7 +150,7 @@ async def device_reboot(ticket_id: str, device_id: str | None = Query(None), cur
 
 @router.post("/tickets/{ticket_id}/device/shutdown", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.shutdown")
     cmd_id = await queue_command_for_device(device, "shutdown", {"delay_sec": 60}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Shutdown queued", f"{device.get('name')} · 60s grace")
     return {"success": True, "command_id": cmd_id}
@@ -95,7 +159,7 @@ async def device_shutdown(ticket_id: str, device_id: str | None = Query(None), c
 @router.post("/tickets/{ticket_id}/device/wol", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_wake_on_lan(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
     """Wake-on-LAN requires a LAN proxy agent — log the intent."""
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.wol")
     await _post_action_note(ticket_id, current_user, "Wake-on-LAN requested", f"{device.get('name', '')} — requires LAN proxy agent")
     return {"success": False, "message": "Wake-on-LAN not yet wired to a LAN proxy. Action logged on the ticket."}
 
@@ -103,7 +167,7 @@ async def device_wake_on_lan(ticket_id: str, device_id: str | None = Query(None)
 @router.post("/tickets/{ticket_id}/device/run-checks", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_run_checks(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Trigger an immediate telemetry refresh (no-op ping at the moment)."""
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.run_checks")
     cmd_id = await queue_command_for_device(device, "ping", {}, current_user.get("email") or "system")
     await _post_action_note(ticket_id, current_user, "Telemetry refresh queued", device.get("name", ""))
     return {"success": True, "command_id": cmd_id}
@@ -111,7 +175,7 @@ async def device_run_checks(ticket_id: str, device_id: str | None = Query(None),
 
 @router.post("/tickets/{ticket_id}/device/install-patches", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_install_patches(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.install_patches")
     # Requires PSWindowsUpdate module on the endpoint
     script = "if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) { Install-PackageProvider NuGet -Force; Install-Module PSWindowsUpdate -Force -SkipPublisherCheck }; Import-Module PSWindowsUpdate; Get-WindowsUpdate -Install -AcceptAll -IgnoreReboot"
     cmd_id = await queue_command_for_device(device, "run_script", {"shell": "powershell", "script": script, "timeout_sec": 3600}, current_user.get("email") or "system")
@@ -122,7 +186,7 @@ async def device_install_patches(ticket_id: str, device_id: str | None = Query(N
 @router.post("/tickets/{ticket_id}/device/send-message", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_send_message(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Pop a message on the user's screen via msg.exe."""
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.send_message")
     title = (payload.get("title") or "Message from IT").strip().replace("'", "")
     body = (payload.get("body") or "").strip().replace("'", "")
     if not body:
@@ -136,7 +200,7 @@ async def device_send_message(ticket_id: str, payload: dict = Body(...), device_
 @router.post("/tickets/{ticket_id}/device/run-script", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
     """Generic script runner — pass {shell, script, timeout_sec}."""
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.run_script")
     shell = payload.get("shell", "powershell")
     script = (payload.get("script") or "").strip()
     if not script:
@@ -155,7 +219,7 @@ async def device_run_script(ticket_id: str, payload: dict = Body(...), device_id
 
 @router.post("/tickets/{ticket_id}/device/kill-process", dependencies=[Depends(require_action("device.command.execute"))])
 async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_id: str | None = Query(None), current_user: dict = Depends(require_agent_operator)):
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(ticket_id, current_user, device_id, operation="ticket.device.kill_process")
     pid = int(payload.get("pid") or 0)
     if pid <= 0:
         raise HTTPException(400, "pid required")
@@ -169,7 +233,12 @@ async def device_kill_process(ticket_id: str, payload: dict = Body(...), device_
 @router.get("/tickets/{ticket_id}/device/legacy-remote-url", include_in_schema=False)
 async def device_remote_url(ticket_id: str, device_id: str | None = Query(None), current_user: dict = Depends(get_current_user)):
     """Splashtop session URL — implementation pending Splashtop API integration."""
-    _, device = await _ticket_with_agent(ticket_id, device_id)
+    _, device = await _ticket_with_agent(
+        ticket_id,
+        current_user,
+        device_id,
+        operation="ticket.device.legacy_remote_url",
+    )
     await _post_action_note(ticket_id, current_user, "Remote control requested", f"{device.get('name','')} — Splashtop integration pending")
     return {"success": False, "message": "Splashtop integration not yet wired. Coming in Phase 4."}
 
@@ -288,16 +357,22 @@ async def governed_ticket_device_remote_connect(
 
 @router.get("/tickets/{ticket_id}/devices")
 async def list_ticket_devices(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
+    ticket = await _ticket_in_scope(
+        ticket_id,
+        current_user,
+        operation="ticket.device.list",
+    )
     primary = ticket.get("device_id")
-    ids = list(ticket.get("device_ids") or [])
-    if primary and primary not in ids:
-        ids.insert(0, primary)
+    ids = _linked_device_ids(ticket)
     if not ids:
         return {"primary_id": None, "devices": []}
-    cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0})
+    cursor = db.devices.find(
+        scoped_query(
+            current_user,
+            {"id": {"$in": ids}, "client_id": ticket.get("client_id")},
+        ),
+        {"_id": 0},
+    )
     devices = []
     async for d in cursor:
         devices.append({
@@ -326,17 +401,22 @@ async def device_fanout(ticket_id: str, action: str, payload: dict = Body(defaul
     if action not in allowed:
         raise HTTPException(400, f"Action must be one of {sorted(allowed)}")
 
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
-    primary = ticket.get("device_id")
-    ids = list(ticket.get("device_ids") or [])
-    if primary and primary not in ids:
-        ids.insert(0, primary)
+    ticket = await _ticket_in_scope(
+        ticket_id,
+        current_user,
+        operation="ticket.device.fanout",
+    )
+    ids = _linked_device_ids(ticket)
     if not ids:
         return {"results": [], "summary": {"total": 0, "ok": 0, "failed": 0, "skipped": 0}}
 
-    cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0})
+    cursor = db.devices.find(
+        scoped_query(
+            current_user,
+            {"id": {"$in": ids}, "client_id": ticket.get("client_id")},
+        ),
+        {"_id": 0},
+    )
     targets = [d async for d in cursor]
 
     async def _run_one(d: dict) -> dict:

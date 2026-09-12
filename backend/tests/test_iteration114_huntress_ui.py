@@ -21,7 +21,7 @@ class TestHuntressActionsEndpoint:
         """Login and get auth token"""
         login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"
         self.token = login_response.json().get("token")
@@ -84,7 +84,7 @@ class TestHuntressStatusEndpoint:
         """Login and get auth token"""
         login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         self.token = login_response.json().get("token")
@@ -112,7 +112,7 @@ class TestIdentityThreatsEndpoint:
         """Login and get auth token"""
         login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         self.token = login_response.json().get("token")
@@ -150,7 +150,7 @@ class TestHuntressIncidentReportsEndpoint:
         """Login and get auth token"""
         login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         self.token = login_response.json().get("token")
@@ -176,7 +176,7 @@ class TestRegressionHuntressSummary:
         """Login and get auth token"""
         login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         self.token = login_response.json().get("token")
@@ -203,7 +203,7 @@ class TestRegressionSOCDashboard:
         """Login and get auth token"""
         login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         self.token = login_response.json().get("token")

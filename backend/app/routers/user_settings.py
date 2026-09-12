@@ -12,7 +12,14 @@ import struct
 import time
 import qrcode
 from app.database import db
-from app.auth import cache_busted_avatar_url, get_current_user, hash_password, verify_password, password_policy_error
+from app.auth import (
+    cache_busted_avatar_url,
+    get_current_user,
+    hash_password,
+    password_policy_error,
+    revoke_all_user_sessions,
+    verify_password,
+)
 
 router = APIRouter()
 
@@ -71,8 +78,15 @@ async def change_password(data: dict, current_user: dict = Depends(get_current_u
     user = await db.users.find_one({"id": current_user["id"]})
     if not user or not verify_password(current_pw, user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    await db.users.update_one({"id": current_user["id"]}, {"$set": {"password_hash": hash_password(new_pw)}})
-    return {"message": "Password changed successfully"}
+    await db.users.update_one(
+        {"id": current_user["id"]},
+        {"$set": {"password_hash": hash_password(new_pw)}},
+    )
+    await revoke_all_user_sessions(current_user["id"])
+    return {
+        "message": "Password changed. All active sessions were revoked; sign in again to continue.",
+        "sessions_revoked": True,
+    }
 
 # ============== 2FA / TOTP ==============
 
@@ -132,7 +146,11 @@ async def disable_2fa(data: dict, current_user: dict = Depends(get_current_user)
     if not user or not verify_password(password, user.get("password_hash", "")):
         raise HTTPException(status_code=400, detail="Password is incorrect")
     await db.user_2fa.delete_one({"user_id": current_user["id"]})
-    return {"message": "2FA disabled"}
+    await revoke_all_user_sessions(current_user["id"])
+    return {
+        "message": "2FA disabled. All active sessions were revoked; sign in again to continue.",
+        "sessions_revoked": True,
+    }
 
 # ============== FIDO2 / SECURITY KEYS ==============
 

@@ -19,7 +19,7 @@ class TestAuth:
     def auth_token(self):
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         return response.json()["token"]
@@ -49,7 +49,7 @@ class TestHelpArticles(TestAuth):
         assert response.status_code == 200
         data = response.json()
         assert data["slug"] == "devices-page-audit"
-        assert data["title"] == "Devices Page — Every Button & Filter Explained"
+        assert data["title"] == "Devices Page Ã¢â‚¬â€ Every Button & Filter Explained"
         assert data["category"] == "Infrastructure"
         assert "TRMM Freshness Strip" in data["body_md"]
         assert "Tinker" in data["body_md"]
@@ -60,7 +60,7 @@ class TestHelpArticles(TestAuth):
         assert response.status_code == 200
         data = response.json()
         assert data["slug"] == "invoice-detail-audit"
-        assert data["title"] == "Invoice Detail — Every Button Explained"
+        assert data["title"] == "Invoice Detail Ã¢â‚¬â€ Every Button Explained"
         assert data["category"] == "Business"
         assert "Late-payment risk" in data["body_md"]
         assert "Dispute Shield" in data["body_md"]
@@ -71,7 +71,7 @@ class TestHelpArticles(TestAuth):
         assert response.status_code == 200
         data = response.json()
         assert data["slug"] == "backup-page-audit"
-        assert data["title"] == "Backup Center — Every Tab Explained"
+        assert data["title"] == "Backup Center Ã¢â‚¬â€ Every Tab Explained"
         assert data["category"] == "Infrastructure"
         assert "Acronis" in data["body_md"]
         assert "Restore Drills" in data["body_md"]

@@ -17,7 +17,7 @@ PORTAL_PASSWORD = "portal123"
 
 # Admin credentials
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASSWORD = "Lucky@2871$!"
+ADMIN_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 class TestPortalV2Auth:

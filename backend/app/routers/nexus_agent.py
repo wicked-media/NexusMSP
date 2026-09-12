@@ -24,8 +24,10 @@ from __future__ import annotations
 import io
 import json
 import hashlib
+import ipaddress
 import logging
 import os
+import re
 import secrets
 import time
 import uuid
@@ -33,6 +35,7 @@ import zipfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path, PureWindowsPath
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from fastapi.responses import Response, StreamingResponse
@@ -82,7 +85,7 @@ CHAT_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_CHAT_COMPANION_BINARY"]) if 
 TRAY_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_TRAY_COMPANION_BINARY"]) if os.environ.get("NEXUS_TRAY_COMPANION_BINARY") else (
     _CONTAINER_TRAY_COMPANION_BINARY if _CONTAINER_TRAY_COMPANION_BINARY.exists() else _LOCAL_TRAY_COMPANION_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.10-signed-commands"
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.11-endpoint-readiness"
 MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
@@ -116,6 +119,7 @@ NEXUS_DNS_AGENT_PROFILE = {
 # Cached binary fingerprint (computed lazily; invalidated when mtime changes).
 _binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 _companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
+_tray_companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 
 
 def _binary_info() -> dict[str, Any]:
@@ -147,6 +151,24 @@ def _companion_binary_info() -> dict[str, Any]:
     return {"sha256": _companion_binary_cache["sha256"], "size": _companion_binary_cache["size"], "exists": True}
 
 
+def _tray_companion_binary_info() -> dict[str, Any]:
+    """Return the fingerprint for the optional user-session tray companion."""
+    if not TRAY_COMPANION_BINARY_PATH.exists():
+        return {"sha256": "", "size": 0, "exists": False}
+    stat = TRAY_COMPANION_BINARY_PATH.stat()
+    if _tray_companion_binary_cache["mtime"] != stat.st_mtime or not _tray_companion_binary_cache["sha256"]:
+        digest = hashlib.sha256()
+        with TRAY_COMPANION_BINARY_PATH.open("rb") as fp:
+            for chunk in iter(lambda: fp.read(1024 * 64), b""):
+                digest.update(chunk)
+        _tray_companion_binary_cache.update({"mtime": stat.st_mtime, "sha256": digest.hexdigest(), "size": stat.st_size})
+    return {
+        "sha256": _tray_companion_binary_cache["sha256"],
+        "size": _tray_companion_binary_cache["size"],
+        "exists": True,
+    }
+
+
 def _is_windows_agent(agent: dict) -> bool:
     platform = " ".join(str(agent.get(key) or "") for key in ("os", "os_platform", "platform")).lower()
     return "windows" in platform
@@ -176,24 +198,34 @@ async def _ensure_elevate_companion_for_agent(agent: dict) -> str:
     if not companion["exists"]:
         await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "awaiting_companion_build"}})
         return "awaiting_companion_build"
-    if agent.get("client_companion_sha256") == companion["sha256"] and agent.get("client_companion_installed_at"):
-        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+    tray_companion = _tray_companion_binary_info()
+    elevation = agent.get("nexus_elevate") if isinstance(agent.get("nexus_elevate"), dict) else {}
+    tray_is_current = not tray_companion["exists"] or agent.get("tray_companion_sha256") == tray_companion["sha256"]
+    if agent.get("client_companion_sha256") == companion["sha256"] and agent.get("client_companion_installed_at") and tray_is_current:
+        companion_state = {
             "nexus_elevate.state": "active",
-            "nexus_elevate.active_at": agent.get("nexus_elevate", {}).get("active_at") or _now(),
+            "nexus_elevate.active_at": elevation.get("active_at") or _now(),
             "nexus_elevate.companion_sha256": companion["sha256"],
+        }
+        if tray_companion["exists"]:
+            companion_state["nexus_elevate.tray_companion_sha256"] = tray_companion["sha256"]
+        await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+            **companion_state,
         }})
         return "active"
     if agent.get("agent_version") != AGENT_VERSION:
         await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "requires_agent_update"}})
         return "requires_agent_update"
-    elevation = agent.get("nexus_elevate") if isinstance(agent.get("nexus_elevate"), dict) else {}
     retry_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
     if elevation.get("state") == "deployment_failed" and str(elevation.get("last_attempt_at") or "") >= retry_cutoff:
         return "deployment_failed"
-    existing = await db.nexus_agent_commands.find_one({
+    existing_query = {
         "device_id": agent["id"], "kind": "install_companion", "status": {"$in": ["pending", "dispatched"]},
         "payload.sha256": companion["sha256"],
-    }, {"_id": 0, "id": 1})
+    }
+    if tray_companion["exists"]:
+        existing_query["payload.tray_sha256"] = tray_companion["sha256"]
+    existing = await db.nexus_agent_commands.find_one(existing_query, {"_id": 0, "id": 1})
     if existing:
         await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"nexus_elevate.state": "deploying", "nexus_elevate.command_id": existing["id"]}})
         return "deploying"
@@ -203,18 +235,25 @@ async def _ensure_elevate_companion_for_agent(agent: dict) -> str:
         "device_id": agent["id"],
         "client_id": agent.get("client_id"),
         "kind": "install_companion",
-        "payload": {"sha256": companion["sha256"], "reason": "nexus_elevate_entitlement"},
+        "payload": {
+            "sha256": companion["sha256"],
+            "tray_sha256": tray_companion["sha256"] if tray_companion["exists"] else "",
+            "reason": "nexus_elevate_entitlement",
+        },
         "status": "pending",
         "queued_by": "Nexus Elevate entitlement",
         "created_at": _now(),
     })
-    await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+    queued_state = {
         "nexus_elevate.state": "deploying",
         "nexus_elevate.entitled_at": _now(),
         "nexus_elevate.last_attempt_at": _now(),
         "nexus_elevate.command_id": command_id,
         "nexus_elevate.companion_sha256": companion["sha256"],
-    }, "$inc": {"nexus_elevate.deployment_attempts": 1}})
+    }
+    if tray_companion["exists"]:
+        queued_state["nexus_elevate.tray_companion_sha256"] = tray_companion["sha256"]
+    await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": queued_state, "$inc": {"nexus_elevate.deployment_attempts": 1}})
     await _audit(db, "nexus_elevate_companion_queued", {"device_id": agent["id"], "command_id": command_id})
     return "deploying"
 
@@ -224,7 +263,10 @@ async def _mirror_elevate_state_to_device(agent_id: str, state: str, details: di
     update = {"nexus_elevate_state": state, "nexus_elevate_updated_at": _now()}
     if details:
         update.update(details)
-    await db.devices.update_one({"nexus_agent_id": agent_id}, {"$set": update})
+    # Archiving retires the managed-asset record without uninstalling the
+    # companion. Agent telemetry must not silently resurrect it in active fleet
+    # views; restoring the asset is an explicit technician decision.
+    await db.devices.update_one({"nexus_agent_id": agent_id, "archived": {"$ne": True}}, {"$set": update})
 
 
 async def _notify_elevate_companion_failure(agent: dict, error: str) -> None:
@@ -299,6 +341,65 @@ def _storage_get(path: str) -> bytes | None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_AGENT_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+
+
+def _agent_version_tuple(value: str) -> tuple[int, int, int] | None:
+    """Parse the release number without treating an unknown version as stale.
+
+    Agents can carry a development or vendor-suffixed build label.  We only
+    advertise an update when both ends have a comparable semantic release
+    number, which prevents the control plane from accidentally offering a
+    downgrade to a newer or unmanaged build.
+    """
+    match = _AGENT_VERSION_RE.match(value.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _agent_release_state(current_version: str, target_version: str = AGENT_VERSION) -> str:
+    current = _agent_version_tuple(current_version)
+    target = _agent_version_tuple(target_version)
+    if not current or not target:
+        return "version_unparseable"
+    if current < target:
+        return "update_available"
+    if current == target:
+        return "current"
+    return "ahead_or_unmanaged"
+
+
+def _validate_agent_server_url(value: str, *, allow_empty: bool = True) -> str:
+    """Validate an agent callback origin before it is placed in an installer.
+
+    Agent credentials and device telemetry must not be sent across a cleartext
+    network.  HTTP is deliberately limited to loopback development so local
+    developers can run the stack without weakening deployed endpoint safety.
+    """
+    raw = value.strip().rstrip("/")
+    if not raw:
+        if allow_empty:
+            return ""
+        raise HTTPException(422, "Nexus Agent callback URL is required")
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() not in {"https", "http"} or not parsed.hostname:
+        raise HTTPException(422, "Nexus Agent callback URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password or parsed.fragment or parsed.query:
+        raise HTTPException(422, "Nexus Agent callback URL cannot contain credentials, a query, or a fragment")
+    if parsed.scheme.lower() == "http":
+        host = parsed.hostname.lower()
+        is_loopback = host == "localhost"
+        if not is_loopback:
+            try:
+                is_loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                is_loopback = False
+        if not is_loopback:
+            raise HTTPException(422, "Nexus Agent callback URL must use HTTPS outside local loopback development")
+    return raw
 
 
 def _timestamp_has_expired(value: Any) -> bool:
@@ -439,6 +540,7 @@ async def get_local_agent_status(
         state = str(elevate.get("state") or "not_activated") if module_id == "nexus_elevate" else ("active" if enabled else "not_included")
         services.append({"id": module_id, "name": name, "state": state, "included": enabled})
     current_version = str(agent.get("agent_version") or "unknown")
+    release_state = _agent_release_state(current_version)
     return {
         "agent": {
             "id": agent.get("id"),
@@ -453,8 +555,9 @@ async def get_local_agent_status(
             "current_version": current_version,
             "target_version": AGENT_VERSION,
             "state": str(update.get("status") or "not_reported"),
+            "release_state": release_state,
             "signature_verified": bool(update.get("signature_verified")),
-            "update_available": current_version != AGENT_VERSION,
+            "update_available": release_state == "update_available",
         },
         "services": services,
     }
@@ -620,6 +723,12 @@ async def _queue_default_nexus_canary(agent: dict[str, Any], profile: dict[str, 
     canary_id = f"canary-{uuid.uuid4().hex[:12]}"
     path = str(PureWindowsPath(r"C:\Users\Public\Documents") / f"NexusShield-{canary_id}-Canary.txt")
     mirrored = await db.devices.find_one({"nexus_agent_id": agent_id}, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "client_name": 1}) or {}
+    client_id = str(mirrored.get("client_id") or agent.get("client_id") or "").strip()
+    # Commands are cryptographically bound to the owning client before an
+    # endpoint can poll them.  An agent without that identity must be repaired
+    # or re-enrolled rather than receiving an ambiguous privileged command.
+    if not client_id:
+        return
     now = _now()
     command_id = str(uuid.uuid4())
     await db.ransomware_canaries.insert_one({
@@ -627,7 +736,7 @@ async def _queue_default_nexus_canary(agent: dict[str, Any], profile: dict[str, 
         "agent_id": agent_id,
         "device_id": mirrored.get("id") or agent_id,
         "device_name": mirrored.get("name") or agent.get("hostname") or agent_id,
-        "client_id": mirrored.get("client_id") or agent.get("client_id"),
+        "client_id": client_id,
         "client_name": mirrored.get("client_name") or agent.get("client_name") or "Unassigned client",
         "file_path": path,
         "status": "queued",
@@ -639,6 +748,7 @@ async def _queue_default_nexus_canary(agent: dict[str, Any], profile: dict[str, 
     await db.nexus_agent_commands.insert_one({
         "id": command_id,
         "device_id": agent_id,
+        "client_id": client_id,
         "kind": "canary_deploy",
         "payload": {"canary_id": canary_id, "canary_path": path},
         "status": "pending",
@@ -676,8 +786,12 @@ async def queue_command_for_device(device_doc: dict, kind: str, payload: dict, q
     nid = device_doc.get("nexus_agent_id")
     if not nid:
         return None
+    client_id = str(device_doc.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(409, "Managed asset has no client binding; command was not queued")
     agent = await db.nexus_agents.find_one({
         "id": nid,
+        "client_id": client_id,
         "is_active": True,
         "last_seen": {"$gte": _online_cutoff()},
     }, {"_id": 1})
@@ -687,6 +801,7 @@ async def queue_command_for_device(device_doc: dict, kind: str, payload: dict, q
     await db.nexus_agent_commands.insert_one({
         "id": cmd_id,
         "device_id": nid,
+        "client_id": client_id,
         "kind": kind,
         "payload": payload or {},
         "status": "pending",
@@ -717,6 +832,7 @@ class EnrollRequest(BaseModel):
     mac: str = ""
     agent_version: str = ""
     capabilities: list[str] = Field(default_factory=list, max_length=20)
+    runtime_capabilities: list[str] = Field(default_factory=list, max_length=64)
     install_id: str = Field(default="", max_length=200)
     certificate_signing_request: str = Field(default="", max_length=20_000)
     public_key_fingerprint: str = Field(default="", max_length=128)
@@ -738,6 +854,7 @@ class HeartbeatPayload(BaseModel):
     agent_version: str = ""
     snapshot: dict = Field(default_factory=dict)
     capabilities: list[str] = Field(default_factory=list, max_length=20)
+    runtime_capabilities: list[str] = Field(default_factory=list, max_length=64)
     nexus_dns: dict = Field(default_factory=dict)
     identity: dict = Field(default_factory=dict)
     policy_evidence: dict = Field(default_factory=dict)
@@ -816,6 +933,7 @@ async def enroll(req: EnrollRequest):
     shield_profile = _nexus_shield_profile_from_token(tok)
     dns_profile = tok.get("nexus_dns") if isinstance(tok.get("nexus_dns"), dict) else dict(NEXUS_DNS_AGENT_PROFILE)
     reported_capabilities = [item for item in req.capabilities if isinstance(item, str)][:20]
+    reported_runtime_capabilities = [item for item in req.runtime_capabilities if isinstance(item, str)][:64]
     settings = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
     policy = build_agent_policy(settings, dns_profile)
 
@@ -851,6 +969,7 @@ async def enroll(req: EnrollRequest):
                 "primary_mac": req.mac,
                 "nexus_shield": shield_profile,
                 "nexus_shield_capabilities": reported_capabilities,
+                "agent_runtime_capabilities": reported_runtime_capabilities,
                 "nexus_dns": {**dns_profile, "enrolled": bool(dns_profile.get("enrolled", False))},
                 "device_identity": stored_identity,
                 "policy_evidence": {
@@ -915,6 +1034,7 @@ async def enroll(req: EnrollRequest):
         "source": "nexus-agent",
         "nexus_shield": shield_profile,
         "nexus_shield_capabilities": reported_capabilities,
+        "agent_runtime_capabilities": reported_runtime_capabilities,
         "nexus_dns": {**dns_profile, "enrolled": bool(dns_profile.get("enrolled", False))},
         "device_identity": stored_identity,
         "policy_evidence": {
@@ -1011,6 +1131,9 @@ async def _sync_to_devices(db, nexus_device_id: str, client_id: str, req: "Enrol
     except Exception:
         pass
     device_filter = {"nexus_agent_id": nexus_device_id}
+    existing_device = await db.devices.find_one(device_filter, {"_id": 0, "id": 1, "archived": 1})
+    if existing_device and existing_device.get("archived"):
+        return
     update = {
         "$set": {
             "nexus_agent_id": nexus_device_id,
@@ -1036,7 +1159,7 @@ async def _sync_to_devices(db, nexus_device_id: str, client_id: str, req: "Enrol
             "device_type": "workstation",
         },
     }
-    await db.devices.update_one(device_filter, update, upsert=True)
+    await db.devices.update_one(device_filter, update, upsert=not bool(existing_device))
 
 
 def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1048,10 +1171,28 @@ def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], l
     """
     disks = snapshot.get("disks") or []
     nics = snapshot.get("nics") or []
-    disk_percent = max((float(d.get("percent") or 0) for d in disks), default=0)
-    total_gb = round(sum(float(d.get("total_gb") or 0) for d in disks), 2)
-    used_gb = round(sum(float(d.get("used_gb") or 0) for d in disks), 2)
-    uptime_seconds = int(snapshot.get("uptime_sec") or 0)
+
+    def _number(value: Any) -> float | None:
+        """Preserve a reported zero, but never turn an absent value into zero."""
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    disk_percentages = [value for value in (_number(disk.get("percent")) for disk in disks) if value is not None]
+    disk_totals = [value for value in (_number(disk.get("total_gb")) for disk in disks) if value is not None]
+    disk_used = [value for value in (_number(disk.get("used_gb")) for disk in disks) if value is not None]
+    disk_percent = max(disk_percentages) if disk_percentages else None
+    total_gb = round(sum(disk_totals), 2) if disk_totals else None
+    used_gb = round(sum(disk_used), 2) if disk_used else None
+    uptime_raw = _number(snapshot.get("uptime_sec"))
+    uptime_seconds = int(uptime_raw) if uptime_raw is not None else None
+    cpu_percent = _number(snapshot.get("cpu_percent"))
+    memory_percent = _number(snapshot.get("mem_percent"))
+    cpu_count = _number(snapshot.get("cpu_count"))
+    memory_total_mb = _number(snapshot.get("mem_total_mb"))
 
     # Prefer a routable IPv4 address. Link-local addresses are not useful for
     # a technician trying to identify or reach the endpoint.
@@ -1067,22 +1208,22 @@ def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], l
 
     device_update = {
         # DeviceDetailPage gauges use these canonical names.
-        "cpu_usage": float(snapshot.get("cpu_percent") or 0),
-        "memory_usage": float(snapshot.get("mem_percent") or 0),
+        "cpu_usage": cpu_percent,
+        "memory_usage": memory_percent,
         "disk_usage": disk_percent,
         # Keep the compact list-view fields in sync as well.
-        "cpu_load": float(snapshot.get("cpu_percent") or 0),
-        "memory_pct": float(snapshot.get("mem_percent") or 0),
+        "cpu_load": cpu_percent,
+        "memory_pct": memory_percent,
         "disk_pct": disk_percent,
         "processor": str(snapshot.get("cpu_model") or "").strip(),
-        "processor_cores": int(snapshot.get("cpu_count") or 0),
-        "ram_gb": round(float(snapshot.get("mem_total_mb") or 0) / 1024, 1),
+        "processor_cores": int(cpu_count) if cpu_count is not None else None,
+        "ram_gb": round(memory_total_mb / 1024, 1) if memory_total_mb is not None else None,
         "storage_total_gb": total_gb,
         "storage_used_gb": used_gb,
-        "storage_free_gb": round(total_gb - used_gb, 2),
+        "storage_free_gb": round(total_gb - used_gb, 2) if total_gb is not None and used_gb is not None else None,
         "uptime_sec": uptime_seconds,
-        "uptime_hours": round(uptime_seconds / 3600, 1),
-        "uptime_display": f"{uptime_seconds // 86400}d {(uptime_seconds % 86400) // 3600}h",
+        "uptime_hours": round(uptime_seconds / 3600, 1) if uptime_seconds is not None else None,
+        "uptime_display": f"{uptime_seconds // 86400}d {(uptime_seconds % 86400) // 3600}h" if uptime_seconds is not None else None,
     }
     if snapshot.get("boot_time"):
         device_update["last_reboot"] = datetime.fromtimestamp(int(snapshot["boot_time"]), tz=timezone.utc).isoformat()
@@ -1096,14 +1237,16 @@ def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], l
         defender_enabled = bool(security.get("defender_enabled"))
         realtime_enabled = bool(security.get("real_time_enabled"))
         firewall_enabled = bool(security.get("firewall_enabled"))
-        signature_age = int(security.get("signature_age_days") or 0)
-        pending_updates = int(security.get("pending_update_count") or 0)
+        signature_age_raw = _number(security.get("signature_age_days"))
+        signature_age = int(signature_age_raw) if signature_age_raw is not None else None
+        pending_updates_raw = _number(security.get("pending_update_count"))
+        pending_updates = int(pending_updates_raw) if pending_updates_raw is not None else None
         encryption = str(security.get("encryption_status") or "Unknown")
         # Transparent scoring: 40 Defender + 20 signatures + 20 firewall +
         # 10 patch status + 10 encryption. Each input remains visible in UI.
         score = 0
         score += 40 if defender_enabled and realtime_enabled else 0
-        score += 20 if signature_age <= 3 else (10 if signature_age <= 7 else 0)
+        score += 20 if signature_age is not None and signature_age <= 3 else (10 if signature_age is not None and signature_age <= 7 else 0)
         score += 20 if firewall_enabled else 0
         score += 10 if pending_updates == 0 else 0
         score += 10 if any(marker in encryption.lower() for marker in ("encrypted", "bitlocker on", "protection on")) else 0
@@ -1154,6 +1297,29 @@ def _agent_device_telemetry(snapshot: dict[str, Any]) -> tuple[dict[str, Any], l
     return device_update, disk_records, network_records
 
 
+def _patch_evidence_update(snapshot: dict[str, Any], observed_at: str) -> dict[str, Any]:
+    """Return only the patch fields supported by this exact agent payload.
+
+    Heartbeat liveness and patch-collector liveness are deliberately separate:
+    no count is better than a stale zero when a technician is deciding whether
+    an endpoint is actually current.
+    """
+    security_snapshot = snapshot.get("security") if isinstance(snapshot.get("security"), dict) else {}
+    raw_pending_count = security_snapshot.get("pending_update_count")
+    try:
+        parsed_pending_count = float(raw_pending_count)
+        pending_count = int(parsed_pending_count) if parsed_pending_count >= 0 and parsed_pending_count.is_integer() else None
+    except (TypeError, ValueError):
+        pending_count = None
+    return {
+        "patch_evidence_state": "reported" if pending_count is not None else "not_reported",
+        "patch_evidence_source": "nexus-agent" if pending_count is not None else None,
+        "patch_evidence_observed_at": observed_at if pending_count is not None else None,
+        "patch_evidence_not_reported_at": None if pending_count is not None else observed_at,
+        "pending_patches": pending_count,
+    }
+
+
 @router.post("/nexus-agent/heartbeat")
 async def heartbeat(
     p: HeartbeatPayload,
@@ -1168,6 +1334,7 @@ async def heartbeat(
         "agent_version": p.agent_version or agent.get("agent_version", ""),
         "online": True,
         "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
+        "agent_runtime_capabilities": [item for item in p.runtime_capabilities if isinstance(item, str)][:64],
     }
     if p.identity:
         update.update({
@@ -1222,8 +1389,12 @@ async def heartbeat(
     # Mirror into devices collection so the existing /devices page sees live data.
     try:
         telemetry, disk_records, network_records = _agent_device_telemetry(snap)
+        # A heartbeat can be fresh while its patch collector is unavailable.
+        # Preserve that uncertainty rather than letting a prior zero count look
+        # like a current patch assessment on the Devices/RMM workspace.
+        patch_evidence = _patch_evidence_update(snap, now)
         await db.devices.update_one(
-            {"nexus_agent_id": agent["id"]},
+            {"nexus_agent_id": agent["id"], "archived": {"$ne": True}},
             {"$set": {
                 "status": "online",
                 "last_seen": now,
@@ -1238,11 +1409,13 @@ async def heartbeat(
                 "nexus_shield_enabled": "nexus_shield" in p.capabilities,
                 "nexus_canary_enabled": "nexus_canary" in p.capabilities,
                 "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
+                "agent_runtime_capabilities": [item for item in p.runtime_capabilities if isinstance(item, str)][:64],
                 **telemetry,
+                **patch_evidence,
             }},
         )
         mirrored_device = await db.devices.find_one(
-            {"nexus_agent_id": agent["id"]},
+            {"nexus_agent_id": agent["id"], "archived": {"$ne": True}},
             {"_id": 0, "id": 1, "client_id": 1},
         )
         if mirrored_device and mirrored_device.get("id"):
@@ -1328,9 +1501,20 @@ async def heartbeat(
                     pass
             if should_event:
                 security = snap.get("security") or {}
+                pending_updates = security.get("pending_update_count")
+                update_summary = (
+                    f"{int(pending_updates)} updates pending"
+                    if pending_updates not in (None, "")
+                    else "update state not reported"
+                )
                 await db.device_events.insert_one({
                     "id": str(uuid.uuid4()), "device_id": device_id, "event_type": "agent_check_in",
-                    "message": f"NexusOps Agent checked in Ã‚Â· CPU {telemetry['cpu_usage']:.0f}% Ã‚Â· memory {telemetry['memory_usage']:.0f}% Ã‚Â· {security.get('pending_update_count', 0)} updates pending.",
+                    "message": (
+                        "NexusOps Agent checked in Ã‚Â· "
+                        f"CPU {telemetry['cpu_usage']:.0f}%" if telemetry["cpu_usage"] is not None else "NexusOps Agent checked in Ã‚Â· CPU not reported"
+                    ) + (
+                        f" Ã‚Â· memory {telemetry['memory_usage']:.0f}%" if telemetry["memory_usage"] is not None else " Ã‚Â· memory not reported"
+                    ) + f" Ã‚Â· {update_summary}.",
                     "severity": "info", "timestamp": now, "source": "nexus-agent",
                 })
                 await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"last_device_event_at": now}})
@@ -1366,7 +1550,7 @@ async def heartbeat(
     if auto_update_enabled:
         info = _binary_info()
         agent_ver = (p.agent_version or "").strip()
-        if info["exists"] and agent_ver and agent_ver != info["version"]:
+        if info["exists"] and _agent_release_state(agent_ver, info["version"]) == "update_available":
             update_info = {
                 "version": info["version"],
                 "url": "/api/nexus-agent/binary/latest",
@@ -1443,17 +1627,24 @@ async def commands_poll(
     x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
 ):
     agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    agent_client_id = str(agent.get("client_id") or "").strip()
+    # Commands created before client binding was mandatory are intentionally
+    # not dispatched. Requeueing under a current, scoped workflow is safer
+    # than allowing a cross-client command to execute on a guessed agent ID.
+    if not agent_client_id:
+        return []
     # Read candidates, then atomically claim each one. The status predicate on
     # update prevents overlapping polls from dispatching the same command twice.
     pending = await db.nexus_agent_commands.find({
         "device_id": agent["id"],
+        "client_id": agent_client_id,
         "status": "pending",
     }).to_list(length=20)
     out: list[dict] = []
     for c in pending:
         authorization = _seal_agent_command(c, agent)
         claimed = await db.nexus_agent_commands.update_one(
-            {"_id": c["_id"], "status": "pending"},
+            {"_id": c["_id"], "client_id": agent_client_id, "status": "pending"},
             {"$set": {
                 "status": "dispatched",
                 "dispatched_at": _now(),
@@ -1543,10 +1734,6 @@ async def command_result(
                     "command_id": res.id,
                 },
             }})
-            await _mirror_elevate_state_to_device(agent["id"], "active", {
-                "nexus_elevate_active_at": _now(),
-                "nexus_elevate_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
-            })
             await emit_platform_event(
                 subject="device.trust.changed",
                 source="nexus.agent.repair",
@@ -1647,16 +1834,24 @@ async def command_result(
             {"_id": 0},
         )
         if companion_command and res.status == "ok":
-            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+            companion_payload = companion_command.get("payload") or {}
+            installed_state = {
                 "client_companion_installed_at": _now(),
-                "client_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+                "client_companion_sha256": companion_payload.get("sha256", ""),
                 "nexus_elevate.state": "active",
                 "nexus_elevate.active_at": _now(),
-                "nexus_elevate.companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+                "nexus_elevate.companion_sha256": companion_payload.get("sha256", ""),
+            }
+            if companion_payload.get("tray_sha256"):
+                installed_state["tray_companion_sha256"] = companion_payload["tray_sha256"]
+                installed_state["nexus_elevate.tray_companion_sha256"] = companion_payload["tray_sha256"]
+            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+                **installed_state,
             }})
             await _mirror_elevate_state_to_device(agent["id"], "active", {
                 "nexus_elevate_active_at": _now(),
-                "nexus_elevate_companion_sha256": (companion_command.get("payload") or {}).get("sha256", ""),
+                "nexus_elevate_companion_sha256": companion_payload.get("sha256", ""),
+                "nexus_elevate_tray_companion_sha256": companion_payload.get("tray_sha256", ""),
             })
             await _resolve_elevate_companion_failure(agent["id"])
             await _audit(db, "companion_installed", {"device_id": agent["id"], "command_id": res.id})
@@ -1853,6 +2048,7 @@ async def remediate_agent_trust(
     await db.nexus_agent_commands.insert_one({
         "id": command_id,
         "device_id": device_id,
+        "client_id": agent.get("client_id"),
         "kind": "agent_repair",
         "payload": {
             "actions": req.actions,
@@ -1892,7 +2088,11 @@ async def remediate_agent_trust(
 @router.post("/nexus-agent/agents/{device_id}/command")
 async def queue_command(device_id: str, req: CommandRequest, user=Depends(require_agent_operator)):
     scoped_agent = await _agent_in_scope(device_id, user, "agent.command.queue")
-    agent_query: dict[str, Any] = {"id": device_id, "is_active": True}
+    agent_query: dict[str, Any] = {
+        "id": device_id,
+        "client_id": scoped_agent.get("client_id"),
+        "is_active": True,
+    }
     if not req.include_offline:
         agent_query["last_seen"] = {"$gte": _online_cutoff()}
     agent = await db.nexus_agents.find_one(agent_query)
@@ -1926,6 +2126,7 @@ async def deploy_client_companion(req: CompanionDeployRequest, user=Depends(requ
     companion = _companion_binary_info()
     if not companion["exists"]:
         raise HTTPException(409, "Nexus Client Chat companion binary is not available on the server")
+    tray_companion = _tray_companion_binary_info()
     selected_ids = list(dict.fromkeys([item.strip() for item in req.device_ids if item and item.strip()]))
     if req.all_online:
         agents = await db.nexus_agents.find(scoped_query(user, {
@@ -1955,30 +2156,38 @@ async def deploy_client_companion(req: CompanionDeployRequest, user=Depends(requ
             "device_id": agent["id"],
             "client_id": agent.get("client_id"),
             "kind": "install_companion",
-            "payload": {"sha256": companion["sha256"]},
+            "payload": {
+                "sha256": companion["sha256"],
+                "tray_sha256": tray_companion["sha256"] if tray_companion["exists"] else "",
+            },
             "status": "pending",
             "queued_by": user.get("email") or user.get("id"),
             "created_at": now,
         })
     await db.nexus_agent_commands.insert_many(commands)
     for command in commands:
-        await db.nexus_agents.update_one({"id": command["device_id"]}, {"$set": {
+        rollout_state = {
             "nexus_elevate.state": "deploying",
             "nexus_elevate.entitled_at": now,
             "nexus_elevate.command_id": command["id"],
             "nexus_elevate.companion_sha256": companion["sha256"],
-        }})
+        }
+        if tray_companion["exists"]:
+            rollout_state["nexus_elevate.tray_companion_sha256"] = tray_companion["sha256"]
+        await db.nexus_agents.update_one({"id": command["device_id"]}, {"$set": rollout_state})
         await _mirror_elevate_state_to_device(command["device_id"], "deploying")
     await _audit(db, "companion_deploy", {
         "count": len(commands),
         "device_ids": [command["device_id"] for command in commands],
         "sha256": companion["sha256"],
+        "tray_sha256": tray_companion["sha256"] if tray_companion["exists"] else "",
         "by": user.get("email") or user.get("id"),
     })
     return {
         "queued": len(commands),
         "commands": [{"id": command["id"], "device_id": command["device_id"]} for command in commands],
         "companion_sha256": companion["sha256"],
+        "tray_companion_sha256": tray_companion["sha256"] if tray_companion["exists"] else "",
     }
 
 
@@ -2008,7 +2217,12 @@ def _build_installer_zip(
     heartbeat_secs: int = 60,
     poll_secs: int = 10,
 ) -> bytes:
-    """Build a ZIP containing the service agent and optional user-session companion."""
+    """Build a deterministic ZIP containing the service agent and companions.
+
+    The package carries a signed release manifest so a technician can inspect
+    the exact binary supplied at installation time.  The running agent still
+    independently verifies signed update manifests before auto-updating.
+    """
     config = {
         "server_url": server_url,
         "enrollment_token": enrollment_token,
@@ -2026,6 +2240,18 @@ def _build_installer_zip(
         'copy /Y "%~dp0Open Nexus Client Chat.bat" "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP\\Nexus Client Chat.bat" >nul\r\n'
         if chat_companion_bytes else ""
     )
+    agent_sha256 = hashlib.sha256(binary_bytes).hexdigest()
+    release_manifest = {
+        "schema_version": 1,
+        "agent_version": AGENT_VERSION,
+        "sha256": agent_sha256,
+        "size": len(binary_bytes),
+        "bundled_components": {
+            "client_chat": bool(chat_companion_bytes),
+            "agent_tray": bool(tray_companion_bytes),
+        },
+        **sign_update_manifest(version=AGENT_VERSION, sha256=agent_sha256, size=len(binary_bytes)),
+    }
     install_bat = (
         "@echo off\r\n"
         "REM NexusOps Agent installer\r\n"
@@ -2033,8 +2259,18 @@ def _build_installer_zip(
         "set INSTDIR=%ProgramFiles%\\NexusOps Agent\r\n"
         "echo Installing NexusOps Agent to %INSTDIR%\r\n"
         "if not exist \"%INSTDIR%\" mkdir \"%INSTDIR%\"\r\n"
+        "sc query NexusOpsAgent >nul 2>&1\r\n"
+        "if not errorlevel 1 (\r\n"
+        "  echo Stopping existing NexusOps Agent service...\r\n"
+        "  sc stop NexusOpsAgent >nul 2>&1\r\n"
+        "  timeout /t 3 /nobreak >nul\r\n"
+        ")\r\n"
         "copy /Y \"%~dp0nexus-agent.exe\" \"%INSTDIR%\\nexus-agent.exe\" >nul\r\n"
+        "if errorlevel 1 ( echo Could not copy nexus-agent.exe & exit /b 1 )\r\n"
         "copy /Y \"%~dp0config.json\"     \"%INSTDIR%\\config.json\"     >nul\r\n"
+        "if errorlevel 1 ( echo Could not copy config.json & exit /b 1 )\r\n"
+        "icacls \"%INSTDIR%\\config.json\" /inheritance:r /grant:r \"*S-1-5-18:(F)\" \"*S-1-5-32-544:(F)\" >nul\r\n"
+        "if errorlevel 1 ( echo Could not protect config.json & exit /b 1 )\r\n"
         + companion_copy_line
         + tray_copy_line
         + companion_start_menu_lines
@@ -2057,6 +2293,7 @@ def _build_installer_zip(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("nexus-agent.exe", binary_bytes)
+        z.writestr("release-manifest.json", json.dumps(release_manifest, indent=2, sort_keys=True))
         if chat_companion_bytes:
             z.writestr("nexus-client-chat.exe", chat_companion_bytes)
             z.writestr("Open Nexus Client Chat.bat", "@echo off\r\n\"%ProgramFiles%\\NexusOps Agent\\nexus-client-chat.exe\"\r\n")
@@ -2067,9 +2304,11 @@ def _build_installer_zip(
         z.writestr("uninstall.bat", uninstall_bat)
         z.writestr("README.txt",
                    "NexusOps Agent\n\n"
-                   "1) Right-click install.bat Ã¢â€ â€™ Run as Administrator\n"
+                   "1) Review release-manifest.json, then right-click install.bat Ã¢â€ â€™ Run as Administrator\n"
                    "2) Agent will register itself as the 'NexusOpsAgent' Windows service\n"
-                   "3) Within 60 seconds the device will appear in NexusOps Ã¢â€ â€™ Devices\n\n"
+                   "3) Existing NexusOps Agent services are stopped, reconfigured and restarted safely\n"
+                   "4) Within 60 seconds the device will appear in NexusOps Ã¢â€ â€™ Devices\n\n"
+                   "The callback URL uses HTTPS except for explicit local loopback development.\n"
                    "To remove: run uninstall.bat as Administrator.\n")
     return buf.getvalue()
 
@@ -2088,7 +2327,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         host = request.headers.get("x-forwarded-host") or request.headers.get("host")
         scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
         server_url = f"{scheme}://{host}" if host else str(request.base_url)
-    server_url = server_url.rstrip("/")
+    server_url = _validate_agent_server_url(server_url, allow_empty=False)
 
     # Store the cadence in each package so the installer is deterministic.
     # Values may pre-date Pydantic validation, so normalise legacy settings.
@@ -2099,6 +2338,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     if not AGENT_BINARY_PATH.exists():
         raise HTTPException(500, f"agent binary missing at {AGENT_BINARY_PATH}; run `make windows` in /app/agent")
     binary_bytes = AGENT_BINARY_PATH.read_bytes()
+    agent_binary_sha256 = hashlib.sha256(binary_bytes).hexdigest()
     chat_companion_bytes = CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None
     tray_companion_bytes = TRAY_COMPANION_BINARY_PATH.read_bytes() if TRAY_COMPANION_BINARY_PATH.exists() else None
     includes_client_chat = bool(chat_companion_bytes)
@@ -2160,6 +2400,8 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "download_expires_at": (datetime.now(timezone.utc) + timedelta(hours=INSTALLER_DOWNLOAD_TTL_HOURS)).isoformat(),
         "created_by": user.get("email") or user.get("id"),
         "agent_version": AGENT_VERSION,
+        "agent_sha256": agent_binary_sha256,
+        "agent_size": len(binary_bytes),
         "package_format": "zip",
         "includes_client_chat": includes_client_chat,
         "includes_agent_tray": includes_agent_tray,
@@ -2180,6 +2422,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "installer_id": manifest["id"],
         "client_id": req.client_id,
         "agent_version": AGENT_VERSION,
+        "agent_sha256": agent_binary_sha256,
         "includes_client_chat": includes_client_chat,
         "includes_agent_tray": includes_agent_tray,
         "includes_nexus_elevate": includes_nexus_elevate,
@@ -2209,8 +2452,11 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         "filename": f"NexusOpsAgent_{client['name'].replace(' ', '_')}.zip",
         "size_bytes": len(zip_bytes),
         "agent_version": AGENT_VERSION,
+        "agent_sha256": agent_binary_sha256,
+        "agent_size": len(binary_bytes),
         "package_format": "zip",
         "includes_client_chat": includes_client_chat,
+        "includes_agent_tray": includes_agent_tray,
         "includes_nexus_elevate": includes_nexus_elevate,
         "includes_nexus_shield": includes_nexus_shield,
         "includes_nexus_canary": includes_nexus_canary,
@@ -2235,20 +2481,27 @@ async def installer_download(token: str):
         # An administrator can create a fresh package without extending an old
         # public URL that may have been forwarded or logged elsewhere.
         raise HTTPException(404, "installer not found")
-    # Try storage first, fall back to live-rebuild
+    # Try storage first. A historical installer must never silently change
+    # release if its package file has been pruned: rebuilding it with the
+    # current binary would make the recorded version/hash misleading.
     zip_bytes: bytes | None = None
     if manifest.get("storage_path"):
         zip_bytes = _storage_get(manifest["storage_path"])
     if not zip_bytes:
-        # Rebuild on the fly
+        if str(manifest.get("agent_version") or "") != AGENT_VERSION:
+            raise HTTPException(409, "installer artifact is unavailable; build a fresh installer for the current release")
         if not AGENT_BINARY_PATH.exists():
             raise HTTPException(500, "agent binary missing Ã¢â‚¬â€ rebuild required")
+        current_binary = AGENT_BINARY_PATH.read_bytes()
+        expected_sha256 = str(manifest.get("agent_sha256") or "")
+        if expected_sha256 and not secrets.compare_digest(expected_sha256, hashlib.sha256(current_binary).hexdigest()):
+            raise HTTPException(409, "installer artifact is unavailable; current binary does not match the recorded release")
         zip_bytes = _build_installer_zip(
             client_id=manifest["client_id"],
             client_name=manifest["client_name"],
             enrollment_token=manifest["enrollment_token"],
             server_url=str(manifest.get("server_url") or "").strip(),
-            binary_bytes=AGENT_BINARY_PATH.read_bytes(),
+            binary_bytes=current_binary,
             chat_companion_bytes=CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None,
             tray_companion_bytes=TRAY_COMPANION_BINARY_PATH.read_bytes() if TRAY_COMPANION_BINARY_PATH.exists() else None,
             heartbeat_secs=int(manifest.get("heartbeat_secs") or 60),
@@ -2276,7 +2529,12 @@ async def list_installers(client_id: str | None = None, user=Depends(require_age
     q: dict[str, Any] = {"is_deleted": False}
     if client_id:
         q["client_id"] = client_id
-    cur = db.nexus_agent_installers.find(scoped_query(user, q), {"_id": 0}).sort("created_at", -1)
+    # Download and enrollment tokens are package capabilities, not fleet
+    # metadata.  They must never appear in an ordinary installer listing.
+    cur = db.nexus_agent_installers.find(
+        scoped_query(user, q),
+        {"_id": 0, "enrollment_token": 0, "download_token": 0, "storage_path": 0},
+    ).sort("created_at", -1)
     return await cur.to_list(length=200)
 
 
@@ -2591,6 +2849,22 @@ async def latest_client_companion(
     )
 
 
+@router.get("/nexus-agent/tray/latest")
+async def latest_tray_companion(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    """Authenticated tray companion download used only by an enrolled agent."""
+    await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    if not TRAY_COMPANION_BINARY_PATH.exists():
+        raise HTTPException(404, "Nexus Agent Tray companion binary is not built")
+    return Response(
+        content=TRAY_COMPANION_BINARY_PATH.read_bytes(),
+        media_type="application/vnd.microsoft.portable-executable",
+        headers={"Content-Disposition": 'attachment; filename="nexus-agent-tray.exe"'},
+    )
+
+
 # ----------------------------------------------------------------------
 # ADMIN SETTINGS
 # ----------------------------------------------------------------------
@@ -2617,6 +2891,9 @@ async def get_settings(user=Depends(require_agent_admin)):
         "client_companion_exists": _companion_binary_info()["exists"],
         "client_companion_sha256": _companion_binary_info()["sha256"],
         "client_companion_size": _companion_binary_info()["size"],
+        "tray_companion_exists": _tray_companion_binary_info()["exists"],
+        "tray_companion_sha256": _tray_companion_binary_info()["sha256"],
+        "tray_companion_size": _tray_companion_binary_info()["size"],
         "transport_mode": "mtls-required" if s.get("require_mtls", False) else "token-compatible-mtls-ready",
         "mtls_proxy_header": "X-Client-Cert-Fingerprint",
         "mtls_proxy_trust_enabled": MTLS_PROXY_TRUST_ENABLED,
@@ -2630,12 +2907,13 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
             409,
             "Enable NEXUS_AGENT_TRUST_PROXY_MTLS before requiring device certificates",
         )
+    server_url = _validate_agent_server_url(payload.server_url)
     await db.nexus_agent_settings.update_one(
         {"_id": "settings"},
         {"$set": {
             "heartbeat_secs": payload.heartbeat_secs,
             "poll_secs": payload.poll_secs,
-            "server_url": payload.server_url,
+            "server_url": server_url,
             "splashtop_enabled": payload.splashtop_enabled,
             "splashtop_deploy_code_default": payload.splashtop_deploy_code_default,
             "auto_update_enabled": payload.auto_update_enabled,

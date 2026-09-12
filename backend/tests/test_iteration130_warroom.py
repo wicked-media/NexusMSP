@@ -87,7 +87,7 @@ class TestWarRoomCRUD:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"
         token = login_response.json().get("token")
@@ -218,7 +218,7 @@ class TestWarRoomMessages:
         # Login
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")
@@ -296,7 +296,7 @@ class TestWarRoomStatus:
         # Login
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")
@@ -405,7 +405,7 @@ class TestWarRoomResolve:
         # Login
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")
@@ -455,7 +455,7 @@ class TestWarRoomPublicView:
         # Login for creating war room
         login_response = self.auth_session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")
@@ -555,7 +555,7 @@ class TestWarRoomE2E:
         # Login
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200
         token = login_response.json().get("token")

@@ -3,9 +3,9 @@ Iteration 129: TRMM Broadcast Notifications (Slack/Teams)
 Tests for notification settings and webhook delivery after broadcast completion.
 
 Endpoints tested:
-- GET /api/trmm/notifications/settings — returns default shape when nothing saved
-- POST /api/trmm/notifications/settings — saves notification settings
-- POST /api/trmm/notifications/test — sends test notification to configured webhooks
+- GET /api/trmm/notifications/settings Ã¢â‚¬â€ returns default shape when nothing saved
+- POST /api/trmm/notifications/settings Ã¢â‚¬â€ saves notification settings
+- POST /api/trmm/notifications/test Ã¢â‚¬â€ sends test notification to configured webhooks
 
 Features tested:
 - Default notification settings shape
@@ -301,7 +301,7 @@ class TestTrmmNotificationsE2E:
     """End-to-end tests: broadcast completion triggers notification"""
 
     def test_e2e_broadcast_with_notification(self, auth_token, setup_dummy_trmm, cleanup_notif_settings, cleanup_broadcasts):
-        """E2E: configure TRMM + slack webhook (httpbin) + run broadcast — verify db.trmm_broadcasts gets 'notifications' field and 'notified_at' timestamp"""
+        """E2E: configure TRMM + slack webhook (httpbin) + run broadcast Ã¢â‚¬â€ verify db.trmm_broadcasts gets 'notifications' field and 'notified_at' timestamp"""
         headers = {"Authorization": f"Bearer {auth_token}"}
         
         # Configure notification settings with httpbin
@@ -631,14 +631,14 @@ class TestTrmmRegressionIterations122to128:
         print("PASS: Regression - GET /api/remote-providers/active")
 
 
-# ─────────────────────────── Fixtures ───────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Fixtures Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 @pytest.fixture(scope="session")
 def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code != 200:
         pytest.skip(f"Authentication failed: {response.status_code} - {response.text}")

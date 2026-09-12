@@ -750,10 +750,25 @@ async def push_blueprint_to_clients(bp_id: str, data: dict, current_user: dict =
     bp = await db.blueprints.find_one({"id": bp_id, "active": True}, {"_id": 0, "id": 1, "name": 1})
     if not bp:
         raise HTTPException(404, "Blueprint not found")
-    client_ids = data.get("client_ids") or []
+    client_ids = list(dict.fromkeys(
+        str(client_id).strip()
+        for client_id in (data.get("client_ids") or [])
+        if str(client_id).strip()
+    ))
     if not client_ids:
         raise HTTPException(400, "client_ids required")
     make_default = bool(data.get("make_default", False))
+
+    # Validate the entire bulk scope before mutating any client.  A technician
+    # with delegated access to one client must not be able to attach a shared
+    # blueprint to another client, and a mixed client list must not partially
+    # apply before the unauthorised entry is discovered.
+    for client_id in client_ids:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="client.blueprints.bulk_modify",
+        )
 
     updated = 0
     for cid in client_ids:

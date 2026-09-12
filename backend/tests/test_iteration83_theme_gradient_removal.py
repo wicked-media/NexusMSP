@@ -18,13 +18,13 @@ class TestGradientMSPRemoval:
         """GET /api/gradient should return 404 (router deleted)"""
         response = requests.get(f"{BASE_URL}/api/gradient")
         assert response.status_code == 404, f"Expected 404, got {response.status_code}"
-        print("✓ /api/gradient returns 404 (correctly removed)")
+        print("Ã¢Å“â€œ /api/gradient returns 404 (correctly removed)")
     
     def test_gradient_list_endpoint_not_found(self):
         """GET /api/gradient/list should return 404"""
         response = requests.get(f"{BASE_URL}/api/gradient/list")
         assert response.status_code == 404, f"Expected 404, got {response.status_code}"
-        print("✓ /api/gradient/list returns 404 (correctly removed)")
+        print("Ã¢Å“â€œ /api/gradient/list returns 404 (correctly removed)")
 
 
 class TestAuthAndBasicAPIs:
@@ -35,7 +35,7 @@ class TestAuthAndBasicAPIs:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         return response.json().get("token")
@@ -49,13 +49,13 @@ class TestAuthAndBasicAPIs:
         """Test login with valid credentials"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         data = response.json()
         assert "token" in data
         assert "user" in data
-        print("✓ Login successful")
+        print("Ã¢Å“â€œ Login successful")
     
     def test_auth_me_endpoint(self, auth_headers):
         """Test /api/auth/me returns user info"""
@@ -63,7 +63,7 @@ class TestAuthAndBasicAPIs:
         assert response.status_code == 200
         data = response.json()
         assert "email" in data
-        print(f"✓ /api/auth/me returns user: {data.get('email')}")
+        print(f"Ã¢Å“â€œ /api/auth/me returns user: {data.get('email')}")
 
 
 class TestPaymentLinksStillWork:
@@ -74,7 +74,7 @@ class TestPaymentLinksStillWork:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -85,7 +85,7 @@ class TestPaymentLinksStillWork:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list) or "payments" in data or isinstance(data, dict)
-        print(f"✓ Payment links endpoint works, returned {len(data) if isinstance(data, list) else 'data'}")
+        print(f"Ã¢Å“â€œ Payment links endpoint works, returned {len(data) if isinstance(data, list) else 'data'}")
     
     def test_payment_links_create(self, auth_headers):
         """POST /api/payment-links should create a payment link"""
@@ -106,7 +106,7 @@ class TestPaymentLinksStillWork:
                 )
                 # Accept 200, 201, or 400 (if link already exists)
                 assert response.status_code in [200, 201, 400], f"Unexpected status: {response.status_code}"
-                print(f"✓ Payment link creation endpoint works (status: {response.status_code})")
+                print(f"Ã¢Å“â€œ Payment link creation endpoint works (status: {response.status_code})")
             else:
                 pytest.skip("No invoices available for testing")
         else:
@@ -121,7 +121,7 @@ class TestRemoteAccessStillWorks:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -132,13 +132,13 @@ class TestRemoteAccessStillWorks:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, dict)
-        print(f"✓ Remote status endpoint works")
+        print(f"Ã¢Å“â€œ Remote status endpoint works")
     
     def test_remote_sessions(self, auth_headers):
         """GET /api/remote/sessions should return list"""
         response = requests.get(f"{BASE_URL}/api/remote/sessions", headers=auth_headers)
         assert response.status_code == 200
-        print("✓ Remote sessions endpoint works")
+        print("Ã¢Å“â€œ Remote sessions endpoint works")
 
 
 class TestUserSettingsForTheme:
@@ -149,7 +149,7 @@ class TestUserSettingsForTheme:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -160,7 +160,7 @@ class TestUserSettingsForTheme:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, dict)
-        print(f"✓ User display settings endpoint works")
+        print(f"Ã¢Å“â€œ User display settings endpoint works")
     
     def test_user_settings_profile(self, auth_headers):
         """GET /api/user-settings/profile should return profile"""
@@ -168,7 +168,7 @@ class TestUserSettingsForTheme:
         assert response.status_code == 200
         data = response.json()
         assert "name" in data or "email" in data
-        print(f"✓ User profile settings endpoint works")
+        print(f"Ã¢Å“â€œ User profile settings endpoint works")
 
 
 class TestDashboardStillWorks:
@@ -179,7 +179,7 @@ class TestDashboardStillWorks:
         """Get authentication headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -190,13 +190,13 @@ class TestDashboardStillWorks:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, dict)
-        print(f"✓ Dashboard stats endpoint works")
+        print(f"Ã¢Å“â€œ Dashboard stats endpoint works")
     
     def test_dashboard_enhanced_stats(self, auth_headers):
         """GET /api/dashboard/enhanced-stats should return enhanced stats"""
         response = requests.get(f"{BASE_URL}/api/dashboard/enhanced-stats", headers=auth_headers)
         assert response.status_code == 200
-        print("✓ Dashboard enhanced stats endpoint works")
+        print("Ã¢Å“â€œ Dashboard enhanced stats endpoint works")
 
 
 if __name__ == "__main__":

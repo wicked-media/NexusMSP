@@ -1,3 +1,6 @@
+import asyncio
+import logging
+
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -5,9 +8,76 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.scope_permissions import scoped_query
 from app.models import *
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# The dashboard must remain responsive even when a customer PBX is offline or
+# its remote API is slow. Detailed live PBX troubleshooting belongs in Voice;
+# this small budget only covers optional call activity in the shared feed.
+DASHBOARD_PBX_ACTIVITY_TIMEOUT_SECONDS = 2.0
+
+
+async def _recent_yeastar_call_activity(limit: int, current_user: dict) -> list[dict]:
+    """Return best-effort Yeastar call entries without becoming dashboard truth.
+
+    This intentionally uses the same configured PBX credentials as the Voice
+    workspace, but the caller applies a short overall timeout. A slow remote
+    endpoint therefore omits only optional call activity rather than delaying
+    the technician's landing page.
+    """
+    from app.routers.yeastar import _yeastar_api_get, _yeastar_get_token
+
+    activities: list[dict] = []
+    yeastar_pbxs = await db.yeastar_pbxs.find(
+        scoped_query(
+            current_user,
+            {"enabled": {"$ne": False}},
+            site_field=None,
+        ),
+        {
+            "_id": 0,
+            "id": 1,
+            "name": 1,
+            "client_name": 1,
+            "pbx_url": 1,
+            "client_api_id": 1,
+            "client_secret": 1,
+            "tls_validation": 1,
+        },
+    ).to_list(20)
+
+    for yeastar_pbx in yeastar_pbxs:
+        yeastar_token = await _yeastar_get_token(yeastar_pbx)
+        if not yeastar_token:
+            continue
+        cdr_data = await _yeastar_api_get(
+            "cdr/list",
+            {"page": 1, "page_size": 5},
+            settings=yeastar_pbx,
+            token=yeastar_token,
+        )
+        if not isinstance(cdr_data, dict) or cdr_data.get("errcode") != 0:
+            continue
+        for cdr in (cdr_data.get("data", []) or [])[:5]:
+            call_from = cdr.get("call_from", "")
+            call_to = cdr.get("call_to", "")
+            disposition = cdr.get("disposition", "").upper()
+            icon = "phone-missed" if disposition in ("NO ANSWER", "FAILED") else "phone"
+            title_prefix = "Missed call" if disposition in ("NO ANSWER", "FAILED") else f"{cdr.get('call_type', 'Call')} call"
+            activities.append({
+                "id": f"cdr-{yeastar_pbx.get('id', '')}-{cdr.get('id', '')}",
+                "type": "call",
+                "icon": icon,
+                "title": f"{title_prefix}: {call_from} -> {call_to}",
+                "description": f"{yeastar_pbx.get('client_name') or yeastar_pbx.get('name') or 'Client PBX'} | Duration: {cdr.get('duration', 0)}s | {disposition}",
+                "user": call_from.split("<")[0].strip() if "<" in call_from else call_from,
+                "timestamp": cdr.get("time", datetime.now(timezone.utc).isoformat()),
+                "meta": {"direction": cdr.get("call_type", "internal").lower(), "duration": cdr.get("duration", 0)},
+            })
+    return activities[:limit]
 
 # ============== DASHBOARD ENDPOINTS ==============
 
@@ -150,35 +220,18 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "ref_type": "device", "ref_id": a.get("device_id"),
         })
 
-    # Yeastar call log entries (live from client-linked PBXs)
+    # Yeastar call activity is optional enrichment. Do not let an unreachable
+    # PBX hold the shared dashboard request open; the frontend's own request
+    # timeout is a final safety net, not the normal dashboard control flow.
     try:
-        from datetime import timezone as tz
-        from app.routers.yeastar import _yeastar_api_get, _yeastar_get_token
-        yeastar_pbxs = await db.yeastar_pbxs.find(
-            {"enabled": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "client_name": 1, "pbx_url": 1, "client_api_id": 1, "client_secret": 1, "tls_validation": 1},
-        ).to_list(20)
-        for yeastar_pbx in yeastar_pbxs:
-            yeastar_token = await _yeastar_get_token(yeastar_pbx)
-            if yeastar_token:
-                cdr_data = await _yeastar_api_get("cdr/list", {"page": 1, "page_size": 5}, settings=yeastar_pbx)
-                if cdr_data and cdr_data.get("errcode") == 0:
-                    for cdr in (cdr_data.get("data", []) or [])[:5]:
-                        call_from = cdr.get("call_from", "")
-                        call_to = cdr.get("call_to", "")
-                        disp = cdr.get("disposition", "").upper()
-                        icon = "phone-missed" if disp in ("NO ANSWER", "FAILED") else "phone"
-                        title_prefix = "Missed call" if disp in ("NO ANSWER", "FAILED") else f"{cdr.get('call_type', 'Call')} call"
-                        activities.append({
-                            "id": f"cdr-{yeastar_pbx.get('id', '')}-{cdr.get('id','')}", "type": "call", "icon": icon,
-                            "title": f"{title_prefix}: {call_from} -> {call_to}",
-                            "description": f"{yeastar_pbx.get('client_name') or yeastar_pbx.get('name') or 'Client PBX'} | Duration: {cdr.get('duration', 0)}s | {disp}",
-                            "user": call_from.split("<")[0].strip() if "<" in call_from else call_from,
-                            "timestamp": cdr.get("time", datetime.now(tz.utc).isoformat()),
-                            "meta": {"direction": cdr.get("call_type", "internal").lower(), "duration": cdr.get("duration", 0)}
-                        })
-    except Exception as e:
-        logger.debug(f"Activity feed Yeastar CDR fetch skipped: {e}")
+        activities.extend(await asyncio.wait_for(
+            _recent_yeastar_call_activity(limit, current_user),
+            timeout=DASHBOARD_PBX_ACTIVITY_TIMEOUT_SECONDS,
+        ))
+    except TimeoutError:
+        logger.debug("Dashboard activity feed skipped slow Yeastar enrichment")
+    except Exception as exc:
+        logger.debug("Dashboard activity feed skipped Yeastar enrichment: %s", exc)
 
     # Sort by timestamp descending
     def sort_key(a):

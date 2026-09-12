@@ -8,6 +8,7 @@ an explicit approved response action exist.
 
 from datetime import datetime, timezone
 from typing import Any
+import os
 import uuid
 import re
 
@@ -16,7 +17,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.auth import get_current_user
 from app.database import db
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_client_scope, effective_scope, scoped_query
+from app.services.m365_provider_visibility import (
+    m365_provider_tenant_query,
+    m365_tenant_connection_query,
+    visible_m365_provider_tenant_ids,
+)
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 
 router = APIRouter()
@@ -54,12 +60,46 @@ def _severity(value: Any) -> str:
     return str(value or "medium").strip().lower() if str(value or "medium").strip().lower() in SEVERITIES else "medium"
 
 
+async def _visible_verified_provider_tenant(
+    current_user: dict,
+    tenant_id: str,
+) -> tuple[dict[str, Any] | None, set[str] | None]:
+    """Resolve a verified Entra tenant through Nexus-owned visibility.
+
+    Entra tenant IDs are provider IDs, not Nexus platform-tenant IDs. Direct
+    Mail Shield routes must use the same fail-closed mapping as Control Plane.
+    ``None`` intentionally retains the documented nexus-local admin path.
+    """
+    visible_tenant_ids = await visible_m365_provider_tenant_ids(
+        current_user,
+        database=db,
+    )
+    tenant = await db.m365_tenants.find_one(
+        m365_provider_tenant_query(
+            visible_tenant_ids,
+            {
+                "graph_verified": True,
+                "$or": [{"tenant_id": tenant_id}, {"id": tenant_id}],
+            },
+        ),
+        {"_id": 0},
+    )
+    return tenant, visible_tenant_ids
+
+
 async def _overview(current_user: dict, client_id: str = "") -> dict[str, Any]:
     if client_id:
         await assert_client_scope(current_user, client_id, operation="mail_shield_overview")
     query = scoped_query(current_user, {"client_id": client_id} if client_id else {})
     signals = await db.nexus_mail_shield_signals.find(query, {"_id": 0}).sort("observed_at", -1).to_list(500)
-    tenants = await db.m365_tenants.find({"source": {"$in": ["m365_graph", "m365_partner_center"]}}, {"_id": 0, "id": 1, "name": 1, "client_id": 1, "graph_verified": 1}).to_list(500)
+    visible_tenant_ids = await visible_m365_provider_tenant_ids(
+        current_user,
+        database=db,
+    )
+    tenants = await db.m365_tenants.find(
+        m365_provider_tenant_query(visible_tenant_ids),
+        {"_id": 0, "id": 1, "name": 1, "client_id": 1, "graph_verified": 1},
+    ).to_list(500)
     allowed_tenants = [tenant for tenant in tenants if not client_id or str(tenant.get("client_id") or "") == client_id]
     verified_tenants = [tenant for tenant in allowed_tenants if tenant.get("graph_verified")]
     open_signals = [signal for signal in signals if str(signal.get("status") or "new").lower() in OPEN_STATUSES]
@@ -126,11 +166,18 @@ async def list_mail_shield_connections(current_user: dict = Depends(get_current_
     A saved setup is deliberately not reported as active coverage until a
     dedicated Graph synchroniser has written verified mail evidence.
     """
-    scope = effective_scope(current_user)
-    tenants = await db.m365_tenants.find({"source": {"$in": ["m365_graph", "m365_partner_center"]}, "graph_verified": True}, {"_id": 0, "id": 1, "tenant_id": 1, "name": 1, "domain": 1, "client_id": 1}).sort("name", 1).to_list(1000)
-    if scope["mode"] != "all":
-        tenants = [tenant for tenant in tenants if str(tenant.get("client_id") or "") in scope["client_ids"]]
-    configs = await db.nexus_mail_shield_connections.find(scoped_query(current_user), {"_id": 0}).to_list(1000)
+    visible_tenant_ids = await visible_m365_provider_tenant_ids(
+        current_user,
+        database=db,
+    )
+    tenants = await db.m365_tenants.find(
+        m365_provider_tenant_query(visible_tenant_ids, {"graph_verified": True}),
+        {"_id": 0, "id": 1, "tenant_id": 1, "name": 1, "domain": 1, "client_id": 1},
+    ).sort("name", 1).to_list(1000)
+    configs = await db.nexus_mail_shield_connections.find(
+        m365_tenant_connection_query(visible_tenant_ids, scoped_query(current_user)),
+        {"_id": 0},
+    ).to_list(1000)
     by_tenant = {str(item.get("tenant_id")): item for item in configs if item.get("tenant_id")}
     rows = []
     for tenant in tenants:
@@ -151,7 +198,10 @@ async def list_mail_shield_connections(current_user: dict = Depends(get_current_
 
 @router.put("/mail-shield/connections/{tenant_id}")
 async def configure_mail_shield_connection(tenant_id: str, data: dict[str, Any], current_user: dict = Depends(get_current_user)):
-    tenant = await db.m365_tenants.find_one({"$and": [{"source": {"$in": ["m365_graph", "m365_partner_center"]}}, {"graph_verified": True}, {"$or": [{"tenant_id": tenant_id}, {"id": tenant_id}]}]}, {"_id": 0})
+    tenant, visible_tenant_ids = await _visible_verified_provider_tenant(
+        current_user,
+        tenant_id,
+    )
     if not tenant:
         raise HTTPException(status_code=404, detail="A verified Microsoft tenant is required before Mail Shield can be configured")
     client_id = str(tenant.get("client_id") or "").strip()
@@ -167,9 +217,16 @@ async def configure_mail_shield_connection(tenant_id: str, data: dict[str, Any],
     if not bool(data.get("consent_confirmed")):
         raise HTTPException(status_code=422, detail="Confirm tenant-admin consent and mailbox scope before saving Mail Shield setup")
     now = _now()
-    existing = await db.nexus_mail_shield_connections.find_one({"tenant_id": str(tenant.get("tenant_id") or tenant.get("id"))}, {"_id": 0, "id": 1})
+    canonical_tenant_id = str(tenant.get("tenant_id") or tenant.get("id"))
+    existing = await db.nexus_mail_shield_connections.find_one(
+        m365_tenant_connection_query(
+            visible_tenant_ids,
+            {"tenant_id": canonical_tenant_id},
+        ),
+        {"_id": 0, "id": 1},
+    )
     record = {
-        "id": (existing or {}).get("id") or f"mail-connection-{uuid.uuid4().hex[:12]}", "tenant_id": str(tenant.get("tenant_id") or tenant.get("id")),
+        "id": (existing or {}).get("id") or f"mail-connection-{uuid.uuid4().hex[:12]}", "tenant_id": canonical_tenant_id,
         "tenant_name": tenant.get("name") or tenant_id, "client_id": client_id,
         "mode": "monitor_only", "mailbox_scope": mailbox_scope,
         "mailboxes": mailboxes if mailbox_scope == "pilot_mailboxes" else [],
@@ -177,7 +234,14 @@ async def configure_mail_shield_connection(tenant_id: str, data: dict[str, Any],
         "permissions": ["Mail.Read", "MailboxSettings.Read"], "updated_at": now,
         "updated_by": current_user.get("name") or current_user.get("email") or "Authenticated technician",
     }
-    await db.nexus_mail_shield_connections.update_one({"tenant_id": record["tenant_id"]}, {"$set": record, "$setOnInsert": {"created_at": now}}, upsert=True)
+    await db.nexus_mail_shield_connections.update_one(
+        m365_tenant_connection_query(
+            visible_tenant_ids,
+            {"tenant_id": record["tenant_id"]},
+        ),
+        {"$set": record, "$setOnInsert": {"created_at": now}},
+        upsert=True,
+    )
     await log_activity(current_user, "mail_shield_connection_configured", "nexus_mail_shield_connection", record["id"], record["tenant_name"], f"Saved monitor-only Mail Shield setup for {mailbox_scope}", metadata={"client_id": client_id, "tenant_id": record["tenant_id"], "external_changes": False})
     return {"message": "Monitor-only Mail Shield setup saved. Connector evidence is still required before coverage becomes active.", "connection": record}
 
@@ -185,7 +249,20 @@ async def configure_mail_shield_connection(tenant_id: str, data: dict[str, Any],
 @router.post("/mail-shield/connections/{tenant_id}/verify-evidence")
 async def verify_mail_shield_evidence_connection(tenant_id: str, data: dict[str, Any], current_user: dict = Depends(get_current_user)):
     """Record a completed Graph/webhook verification; no mailbox access is performed here."""
-    connection = await db.nexus_mail_shield_connections.find_one({"tenant_id": tenant_id}, {"_id": 0})
+    tenant, visible_tenant_ids = await _visible_verified_provider_tenant(
+        current_user,
+        tenant_id,
+    )
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Mail Shield connection not found")
+    canonical_tenant_id = str(tenant.get("tenant_id") or tenant.get("id") or "")
+    connection = await db.nexus_mail_shield_connections.find_one(
+        m365_tenant_connection_query(
+            visible_tenant_ids,
+            {"tenant_id": canonical_tenant_id},
+        ),
+        {"_id": 0},
+    )
     if not connection:
         raise HTTPException(status_code=404, detail="Save Mail Shield monitor scope before verifying evidence delivery")
     await assert_client_scope(current_user, connection.get("client_id"), operation="verify_mail_shield_evidence_connection")
@@ -193,7 +270,13 @@ async def verify_mail_shield_evidence_connection(tenant_id: str, data: dict[str,
     if len(verification_id) < 8:
         raise HTTPException(status_code=422, detail="Record the verified Graph subscription or webhook reference")
     now = _now()
-    await db.nexus_mail_shield_connections.update_one({"tenant_id": tenant_id}, {"$set": {"webhook_verified": True, "verification_id": verification_id, "verified_at": now, "updated_at": now}})
+    await db.nexus_mail_shield_connections.update_one(
+        m365_tenant_connection_query(
+            visible_tenant_ids,
+            {"tenant_id": canonical_tenant_id},
+        ),
+        {"$set": {"webhook_verified": True, "verification_id": verification_id, "verified_at": now, "updated_at": now}},
+    )
     return {"message": "Mail Shield evidence connection verified. Mailbox remediation is still not enabled."}
 
 

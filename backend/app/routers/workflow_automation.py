@@ -16,7 +16,13 @@ from app.auth import get_current_user
 from app.database import db
 from app.services.action_permissions import require_action
 from app.services.platform_foundation import emit_platform_event, request_correlation_id
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_record_scope,
+    effective_scope,
+    scoped_query,
+)
 
 router = APIRouter()
 
@@ -38,6 +44,146 @@ async def _run_in_scope(run_id: str, current_user: dict, operation: str, request
         request=request,
         resource_name="Automation run",
     )
+
+
+def _workflow_scope(workflow: dict) -> dict:
+    """Normalise a workflow's ownership declaration without widening access."""
+    raw_scope = workflow.get("scope")
+    if raw_scope is None:
+        return {"type": "all_clients", "client_id": None, "legacy": True}
+    if not isinstance(raw_scope, dict):
+        return {"type": "invalid", "client_id": None}
+    scope_type = str(raw_scope.get("type") or "").strip().lower()
+    client_id = str(raw_scope.get("client_id") or "").strip() or None
+    if scope_type == "client" and client_id:
+        return {"type": "client", "client_id": client_id, "client_name": raw_scope.get("client_name")}
+    if scope_type == "all_clients" and not client_id:
+        return {"type": "all_clients", "client_id": None}
+    return {"type": "invalid", "client_id": client_id}
+
+
+async def _require_global_workflow_scope(
+    current_user: dict,
+    operation: str,
+    request: Request | None = None,
+) -> None:
+    """Keep direct references to global workflows indistinguishable for restricted users."""
+    try:
+        await assert_global_scope(current_user, operation=operation, request=request)
+    except HTTPException as error:
+        if error.status_code == 403:
+            raise HTTPException(status_code=404, detail="Workflow not found") from error
+        raise
+
+
+async def _workflow_in_scope(
+    workflow_id: str,
+    current_user: dict,
+    operation: str,
+    request: Request | None = None,
+    *,
+    include_archived: bool = False,
+) -> dict:
+    query: dict[str, Any] = {"id": workflow_id}
+    if not include_archived:
+        query["archived"] = {"$ne": True}
+    workflow = await db.workflows.find_one(query, {"_id": 0})
+    if not workflow:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    scope = _workflow_scope(workflow)
+    if scope["type"] == "client":
+        await assert_client_scope(
+            current_user,
+            scope["client_id"],
+            operation=operation,
+            request=request,
+            mask_not_found=True,
+        )
+    elif scope["type"] == "all_clients":
+        await _require_global_workflow_scope(current_user, operation, request)
+    else:
+        if effective_scope(current_user)["mode"] != "all":
+            await assert_client_scope(
+                current_user,
+                None,
+                operation=operation,
+                request=request,
+                mask_not_found=True,
+            )
+        raise HTTPException(status_code=409, detail="Workflow scope is invalid and must be repaired by a global administrator")
+    return workflow
+
+
+def _visible_workflow_query(current_user: dict, query: dict | None = None) -> dict:
+    operational = dict(query or {})
+    if effective_scope(current_user)["mode"] == "all":
+        return operational
+    clauses = [operational] if operational else []
+    return {
+        "$and": [
+            *clauses,
+            {"scope.type": "client", "scope.client_id": {"$in": effective_scope(current_user)["client_ids"]}},
+        ]
+    }
+
+
+async def _normalise_workflow_scope(data: dict, current_user: dict, operation: str) -> dict:
+    raw_scope = data.get("scope")
+    scope_data = raw_scope if isinstance(raw_scope, dict) else {}
+    scope_type = str(scope_data.get("type") or data.get("scope_type") or raw_scope or "all_clients").strip().lower()
+    client_id = str(scope_data.get("client_id") or data.get("client_id") or "").strip()
+    if scope_type == "client":
+        if not client_id:
+            raise HTTPException(status_code=400, detail="Choose a client for a client-scoped workflow")
+        await assert_client_scope(current_user, client_id, operation=operation)
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return {"type": "client", "client_id": client_id, "client_name": client.get("name") or ""}
+    if scope_type == "all_clients":
+        await assert_global_scope(current_user, operation=operation)
+        return {"type": "all_clients", "client_id": None, "client_name": None}
+    raise HTTPException(status_code=400, detail="Workflow scope must be client or all_clients")
+
+
+async def _workflow_context_in_scope(
+    workflow: dict,
+    context: dict,
+    current_user: dict,
+    operation: str,
+    request: Request | None = None,
+) -> dict:
+    context = dict(context or {})
+    scope = _workflow_scope(workflow)
+    context_client_id = str(context.get("client_id") or "").strip() or None
+    if scope["type"] == "client":
+        if context_client_id and context_client_id != scope["client_id"]:
+            raise HTTPException(status_code=422, detail="Workflow context must match the workflow's client scope")
+        context["client_id"] = scope["client_id"]
+        await assert_client_scope(current_user, scope["client_id"], operation=operation, request=request)
+    elif scope["type"] == "all_clients":
+        if context_client_id:
+            await assert_client_scope(current_user, context_client_id, operation=operation, request=request)
+    else:
+        raise HTTPException(status_code=409, detail="Workflow scope is invalid and must be repaired before use")
+    return context
+
+
+async def _audit_run_control(run: dict, current_user: dict, action: str, reason: str, request: Request | None = None) -> None:
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": current_user.get("id"),
+        "user_name": _actor(current_user),
+        "action": action,
+        "entity_type": "workflow_run",
+        "entity_id": run.get("id"),
+        "entity_name": run.get("workflow_name") or run.get("workflow_id"),
+        "tenant_id": run.get("tenant_id"),
+        "client_id": run.get("client_id"),
+        "correlation_id": run.get("correlation_id") or request_correlation_id(request),
+        "metadata": {"workflow_id": run.get("workflow_id"), "reason": str(reason or "")},
+        "created_at": _now(),
+    })
 
 
 TRIGGER_TYPES = [
@@ -632,16 +778,23 @@ async def _install_pack_artifact(
 
 @router.get("/workflows/templates")
 async def get_workflow_templates(current_user: dict = Depends(get_current_user)):
+    visible_workflows = await db.workflows.find(
+        _visible_workflow_query(
+            current_user,
+            {"source_pack_id": {"$exists": True}, "archived": {"$ne": True}},
+        ),
+        {"_id": 0, "source_pack_id": 1, "id": 1, "enabled": 1, "approval_status": 1},
+    ).to_list(500)
+    visible_workflow_ids = [item.get("id") for item in visible_workflows if item.get("id")]
     installations = await db.workflow_pack_installations.find(
-        {"status": {"$ne": "removed"}},
+        {
+            "status": {"$ne": "removed"},
+            "workflow_id": {"$in": visible_workflow_ids},
+        },
         {"_id": 0},
     ).sort("installed_at", -1).to_list(500)
     installation_by_pack = {item.get("pack_id"): item for item in installations}
-    legacy_workflows = await db.workflows.find(
-        {"source_pack_id": {"$exists": True}, "archived": {"$ne": True}},
-        {"_id": 0, "source_pack_id": 1, "id": 1, "enabled": 1, "approval_status": 1},
-    ).to_list(500)
-    legacy_by_pack = {item.get("source_pack_id"): item for item in legacy_workflows}
+    legacy_by_pack = {item.get("source_pack_id"): item for item in visible_workflows}
     result = []
     for item in AUTOMATION_PACKS:
         pack = _pack_manifest(item)
@@ -673,14 +826,6 @@ async def install_workflow_template(
     if not source_pack:
         raise HTTPException(404, "Automation pack not found")
     pack = _pack_manifest(source_pack)
-    existing_installation = await db.workflow_pack_installations.find_one(
-        {"pack_id": pack_id, "status": {"$ne": "removed"}},
-        {"_id": 0},
-    )
-    if existing_installation:
-        existing_workflow = await db.workflows.find_one({"id": existing_installation.get("workflow_id")}, {"_id": 0})
-        return {"installation": existing_installation, "workflow": existing_workflow, "already_installed": True}
-
     requested_scope = str(payload.get("scope") or "all_clients")
     if requested_scope not in {"all_clients", "client"}:
         raise HTTPException(400, "Pack scope must be all_clients or client")
@@ -698,6 +843,22 @@ async def install_workflow_template(
         client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
         if not client:
             raise HTTPException(404, "Client not found")
+    else:
+        await assert_global_scope(current_user, operation="automation.pack.install", request=request)
+
+    existing_installation = await db.workflow_pack_installations.find_one(
+        {"pack_id": pack_id, "status": {"$ne": "removed"}},
+        {"_id": 0},
+    )
+    if existing_installation:
+        existing_workflow = await _workflow_in_scope(
+            existing_installation.get("workflow_id"),
+            current_user,
+            "automation.pack.install",
+            request,
+            include_archived=True,
+        )
+        return {"installation": existing_installation, "workflow": existing_workflow, "already_installed": True}
 
     now = _now()
     installation_id = f"wpi-{uuid.uuid4().hex[:10]}"
@@ -835,6 +996,13 @@ async def remove_workflow_template(pack_id: str, request: Request, current_user:
         )
         if not legacy_workflow:
             raise HTTPException(404, "Installed automation pack not found")
+        await _workflow_in_scope(
+            legacy_workflow["id"],
+            current_user,
+            "automation.pack.remove",
+            request,
+            include_archived=True,
+        )
         installation = {
             "id": f"legacy-{legacy_workflow['id']}",
             "pack_id": pack_id,
@@ -853,7 +1021,13 @@ async def remove_workflow_template(pack_id: str, request: Request, current_user:
             "component_total": 1,
             "legacy_installation": True,
         }
-    workflow = await db.workflows.find_one({"id": installation.get("workflow_id")}, {"_id": 0})
+    workflow = await _workflow_in_scope(
+        installation.get("workflow_id"),
+        current_user,
+        "automation.pack.remove",
+        request,
+        include_archived=True,
+    )
     if workflow and workflow.get("enabled"):
         raise HTTPException(409, "Pause the workflow before removing its pack")
     active_runs = await db.workflow_runs.count_documents({
@@ -930,11 +1104,15 @@ async def remove_workflow_template(pack_id: str, request: Request, current_user:
 
 @router.get("/workflows/simulations/recent")
 async def get_recent_simulations(current_user: dict = Depends(get_current_user)):
-    return await db.workflow_simulations.find({}, {"_id": 0}).sort("simulated_at", -1).to_list(100)
+    return await db.workflow_simulations.find(
+        scoped_query(current_user, site_field=None),
+        {"_id": 0},
+    ).sort("simulated_at", -1).to_list(100)
 
 
 @router.get("/workflows/stats/overview")
 async def get_workflow_stats(current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="automation.workflow.stats")
     await db.workflows.update_many(
         {"approval_status": {"$exists": False}},
         {"$set": {"enabled": False, "approval_status": "not_submitted", "updated_at": _now()}},
@@ -955,12 +1133,11 @@ async def get_workflow_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/workflows")
 async def get_workflows(current_user: dict = Depends(get_current_user)):
-    await db.workflows.update_many(
-        {"approval_status": {"$exists": False}},
-        {"$set": {"enabled": False, "approval_status": "not_submitted", "updated_at": _now()}},
-    )
-    workflows = await db.workflows.find({"archived": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(200)
-    if not workflows:
+    workflows = await db.workflows.find(
+        _visible_workflow_query(current_user, {"archived": {"$ne": True}}),
+        {"_id": 0},
+    ).sort("updated_at", -1).to_list(200)
+    if not workflows and effective_scope(current_user)["mode"] == "all":
         workflows = await _seed_monitoring_workflow()
     return workflows
 
@@ -969,6 +1146,7 @@ async def get_workflows(current_user: dict = Depends(get_current_user)):
 async def get_automation_runtime_health(current_user: dict = Depends(get_current_user)):
     from app.services.automation_runtime import runtime_health
 
+    await assert_global_scope(current_user, operation="automation.runtime.health")
     return await runtime_health()
 
 
@@ -1009,9 +1187,11 @@ async def approve_automation_run(
 ):
     from app.services.automation_runtime import decide_run_approval
 
-    await _run_in_scope(run_id, current_user, "automation.run.approve", request)
+    run = await _run_in_scope(run_id, current_user, "automation.run.approve", request)
     try:
-        return await decide_run_approval(run_id, True, current_user, payload.get("reason"))
+        result = await decide_run_approval(run_id, True, current_user, payload.get("reason"))
+        await _audit_run_control(run, current_user, "automation.run.approved", payload.get("reason"), request)
+        return result
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
 
@@ -1025,8 +1205,11 @@ async def reject_automation_run(
 ):
     from app.services.automation_runtime import decide_run_approval
 
+    run = await _run_in_scope(run_id, current_user, "automation.run.reject", request)
     try:
-        return await decide_run_approval(run_id, False, current_user, payload.get("reason"))
+        result = await decide_run_approval(run_id, False, current_user, payload.get("reason"))
+        await _audit_run_control(run, current_user, "automation.run.rejected", payload.get("reason"), request)
+        return result
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
 
@@ -1040,8 +1223,11 @@ async def retry_automation_run(
 ):
     from app.services.automation_runtime import retry_run
 
+    run = await _run_in_scope(run_id, current_user, "automation.run.retry", request)
     try:
-        return await retry_run(run_id, current_user, payload.get("reason"))
+        result = await retry_run(run_id, current_user, payload.get("reason"))
+        await _audit_run_control(run, current_user, "automation.run.retry_requested", payload.get("reason"), request)
+        return result
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
 
@@ -1067,8 +1253,11 @@ async def execute_automation_compensation(
 ):
     from app.services.automation_runtime import compensate_run
 
+    run = await _run_in_scope(run_id, current_user, "automation.run.compensate", request)
     try:
-        return await compensate_run(run_id, current_user, payload.get("reason"))
+        result = await compensate_run(run_id, current_user, payload.get("reason"))
+        await _audit_run_control(run, current_user, "automation.run.compensated", payload.get("reason"), request)
+        return result
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
 
@@ -1082,17 +1271,15 @@ async def run_workflow_now(
 ):
     from app.services.automation_runtime import queue_workflow_run
 
-    workflow = await db.workflows.find_one({"id": workflow_id}, {"_id": 0})
-    if not workflow:
-        raise HTTPException(404, "Workflow not found")
+    workflow = await _workflow_in_scope(workflow_id, current_user, "automation.workflow.execute", request)
     if not workflow.get("enabled") or workflow.get("approval_status") not in {"approved", "not_required"}:
         raise HTTPException(409, "Only an enabled, approved workflow can be queued")
-    context = payload.get("context") or {}
-    await assert_client_scope(
+    context = await _workflow_context_in_scope(
+        workflow,
+        payload.get("context") or {},
         current_user,
-        context.get("client_id") or None,
-        operation="automation.workflow.execute",
-        request=request,
+        "automation.workflow.execute",
+        request,
     )
     source_id = str(payload.get("idempotency_key") or f"manual:{uuid.uuid4()}")
     event = {
@@ -1100,6 +1287,7 @@ async def run_workflow_now(
         "subject": "automation.manual.requested",
         "payload": context,
         "client_id": context.get("client_id"),
+        "tenant_id": current_user.get("tenant_id"),
         "correlation_id": getattr(request.state, "correlation_id", None) or str(uuid.uuid4()),
         "actor": {"id": current_user.get("id"), "name": _actor(current_user), "role": current_user.get("role")},
         "occurred_at": _now(),
@@ -1113,6 +1301,9 @@ async def run_workflow_now(
         "entity_type": "workflow_run",
         "entity_id": run["id"],
         "entity_name": workflow.get("name"),
+        "tenant_id": run.get("tenant_id"),
+        "client_id": run.get("client_id"),
+        "correlation_id": run.get("correlation_id"),
         "metadata": {"workflow_id": workflow_id, "run_key": run.get("run_key")},
         "created_at": _now(),
     })
@@ -1122,6 +1313,7 @@ async def run_workflow_now(
 @router.post("/workflows", dependencies=[Depends(require_action("automation.workflow.modify"))])
 async def create_workflow(data: dict, current_user: dict = Depends(get_current_user)):
     now = _now()
+    scope = await _normalise_workflow_scope(data, current_user, "automation.workflow.create")
     workflow = {
         "id": f"wf-{uuid.uuid4().hex[:8]}",
         "name": str(data.get("name") or "Untitled workflow").strip(),
@@ -1138,6 +1330,7 @@ async def create_workflow(data: dict, current_user: dict = Depends(get_current_u
         "last_executed": None,
         "last_simulated_at": None,
         "approval_status": "not_submitted",
+        "scope": scope,
         "created_by": _actor(current_user),
         "created_at": now,
         "updated_at": now,
@@ -1149,18 +1342,17 @@ async def create_workflow(data: dict, current_user: dict = Depends(get_current_u
 
 @router.get("/workflows/{workflow_id}")
 async def get_workflow(workflow_id: str, current_user: dict = Depends(get_current_user)):
-    workflow = await db.workflows.find_one({"id": workflow_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not workflow:
-        raise HTTPException(404, "Workflow not found")
-    return workflow
+    return await _workflow_in_scope(workflow_id, current_user, "automation.workflow.read")
 
 
 @router.put("/workflows/{workflow_id}", dependencies=[Depends(require_action("automation.workflow.modify"))])
 async def update_workflow(workflow_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    workflow = await db.workflows.find_one({"id": workflow_id})
-    if not workflow:
-        raise HTTPException(404, "Workflow not found")
-    update = {key: value for key, value in data.items() if key not in {"id", "_id", "created_at", "created_by", "execution_count"}}
+    await _workflow_in_scope(workflow_id, current_user, "automation.workflow.update", include_archived=True)
+    update = {
+        key: value
+        for key, value in data.items()
+        if key not in {"id", "_id", "created_at", "created_by", "execution_count", "scope", "client_id"}
+    }
     if "actions" in update:
         update["actions"] = _normalise_actions(update["actions"])
     update["updated_at"] = _now()
@@ -1171,6 +1363,7 @@ async def update_workflow(workflow_id: str, data: dict, current_user: dict = Dep
 
 @router.delete("/workflows/{workflow_id}", dependencies=[Depends(require_action("automation.workflow.modify"))])
 async def delete_workflow(workflow_id: str, current_user: dict = Depends(get_current_user)):
+    await _workflow_in_scope(workflow_id, current_user, "automation.workflow.delete", include_archived=True)
     result = await db.workflows.delete_one({"id": workflow_id})
     if not result.deleted_count:
         raise HTTPException(404, "Workflow not found")
@@ -1179,9 +1372,7 @@ async def delete_workflow(workflow_id: str, current_user: dict = Depends(get_cur
 
 @router.post("/workflows/{workflow_id}/toggle", dependencies=[Depends(require_action("automation.workflow.modify"))])
 async def toggle_workflow(workflow_id: str, current_user: dict = Depends(get_current_user)):
-    workflow = await db.workflows.find_one({"id": workflow_id}, {"_id": 0})
-    if not workflow:
-        raise HTTPException(404, "Workflow not found")
+    workflow = await _workflow_in_scope(workflow_id, current_user, "automation.workflow.toggle")
     if not workflow.get("enabled") and workflow.get("approval_status") not in {"approved", "not_required"}:
         raise HTTPException(409, "Simulate this workflow and complete approval before enabling it")
     enabled = not workflow.get("enabled", False)
@@ -1191,10 +1382,16 @@ async def toggle_workflow(workflow_id: str, current_user: dict = Depends(get_cur
 
 @router.post("/workflows/{workflow_id}/simulate", dependencies=[Depends(require_action("automation.workflow.simulate"))])
 async def simulate_workflow(workflow_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
-    workflow = await db.workflows.find_one({"id": workflow_id}, {"_id": 0})
-    if not workflow:
-        raise HTTPException(404, "Workflow not found")
-    simulation = _build_simulation(workflow, payload.get("context") or payload.get("test_data") or {}, current_user)
+    workflow = await _workflow_in_scope(workflow_id, current_user, "automation.workflow.simulate")
+    context = await _workflow_context_in_scope(
+        workflow,
+        payload.get("context") or payload.get("test_data") or {},
+        current_user,
+        "automation.workflow.simulate",
+    )
+    simulation = _build_simulation(workflow, context, current_user)
+    simulation["client_id"] = context.get("client_id")
+    simulation["tenant_id"] = current_user.get("tenant_id")
     await db.workflow_simulations.insert_one(simulation)
     await db.workflows.update_one(
         {"id": workflow_id},
@@ -1231,9 +1428,7 @@ async def test_workflow(workflow_id: str, payload: dict = Body(default={}), curr
 
 @router.post("/workflows/{workflow_id}/submit-approval", dependencies=[Depends(require_action("automation.workflow.approve"))])
 async def submit_workflow_approval(workflow_id: str, request: Request, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
-    workflow = await db.workflows.find_one({"id": workflow_id}, {"_id": 0})
-    if not workflow:
-        raise HTTPException(404, "Workflow not found")
+    workflow = await _workflow_in_scope(workflow_id, current_user, "automation.workflow.approve", request)
     simulation_id = payload.get("simulation_id") or workflow.get("last_simulation_id")
     simulation = await db.workflow_simulations.find_one({"id": simulation_id, "workflow_id": workflow_id}, {"_id": 0})
     if not simulation:
@@ -1250,13 +1445,14 @@ async def submit_workflow_approval(workflow_id: str, request: Request, payload: 
     if existing:
         return existing
 
-    client_id = str(payload.get("client_id") or simulation.get("context", {}).get("client_id") or "")
-    await assert_client_scope(
+    context = await _workflow_context_in_scope(
+        workflow,
+        {"client_id": payload.get("client_id") or simulation.get("context", {}).get("client_id")},
         current_user,
-        client_id or None,
         operation="automation.workflow.approve",
         request=request,
     )
+    client_id = str(context.get("client_id") or "")
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1}) if client_id else None
     now = _now()
     change = {
@@ -1271,6 +1467,8 @@ async def submit_workflow_approval(workflow_id: str, request: Request, payload: 
         "rollback_plan": simulation["rollback_plan"],
         "before_after": [{"step": step["step"], "action": step["label"], "before": step["before"], "after": step["after"]} for step in simulation["steps"]],
         "client_id": client_id,
+        "tenant_id": simulation.get("tenant_id") or current_user.get("tenant_id"),
+        "correlation_id": request_correlation_id(request),
         "client_name": (client or {}).get("name") or simulation.get("context", {}).get("client_name") or "",
         "devices_affected": simulation.get("context", {}).get("device_ids") or [],
         "scheduled_date": "",
@@ -1302,7 +1500,12 @@ async def submit_workflow_approval(workflow_id: str, request: Request, payload: 
 
 @router.get("/workflows/{workflow_id}/logs")
 async def get_workflow_logs(workflow_id: str, current_user: dict = Depends(get_current_user)):
-    return await db.workflow_logs.find({"workflow_id": workflow_id}, {"_id": 0}).sort("executed_at", -1).to_list(50)
+    workflow = await _workflow_in_scope(workflow_id, current_user, "automation.workflow.logs")
+    scope = _workflow_scope(workflow)
+    query: dict[str, Any] = {"workflow_id": workflow_id}
+    if scope["type"] == "client":
+        query["client_id"] = scope["client_id"]
+    return await db.workflow_logs.find(query, {"_id": 0}).sort("executed_at", -1).to_list(50)
 
 
 async def dispatch_workflow_event(trigger_type: str, event: dict[str, Any]) -> list[dict]:
@@ -1334,12 +1537,10 @@ async def _seed_monitoring_workflow() -> list[dict]:
         "last_executed": None,
         "last_simulated_at": None,
         "approval_status": "not_submitted",
+        "scope": {"type": "all_clients", "client_id": None, "client_name": None},
         "created_by": "NexusMSP",
         "created_at": now,
         "updated_at": now,
     }
     await db.workflows.update_one({"id": workflow["id"]}, {"$setOnInsert": workflow}, upsert=True)
     return [workflow]
-    await _run_in_scope(run_id, current_user, "automation.run.reject", request)
-    await _run_in_scope(run_id, current_user, "automation.run.retry", request)
-    await _run_in_scope(run_id, current_user, "automation.run.compensate", request)

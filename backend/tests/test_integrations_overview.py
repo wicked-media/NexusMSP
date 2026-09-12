@@ -10,7 +10,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_EMAIL = "aaron@stech.com.au"
-TEST_PASSWORD = "Lucky@2871$!"
+TEST_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 class TestIntegrationsOverviewAuth:
@@ -65,7 +65,7 @@ class TestIntegrationsOverviewEndpoint:
         assert "coverage_pct" in data, "Missing 'coverage_pct' key"
         assert "tiles" in data, "Missing 'tiles' key"
         
-        assert data["total"] == 16, f"Expected total=16, got {data['total']}"
+        assert data["total"] == 21, f"Expected total=21, got {data['total']}"
         assert data["total"] == len(data["tiles"]), "Total must match the returned tile count"
         
         # Check coverage_pct is calculated correctly
@@ -84,8 +84,8 @@ class TestIntegrationsOverviewEndpoint:
         data = response.json()
         
         tiles = data.get("tiles", [])
-        assert len(tiles) == 16, f"Expected 16 tiles, got {len(tiles)}"
-        print("PASS: Tiles array has 16 integrations")
+        assert len(tiles) == 21, f"Expected 21 tiles, got {len(tiles)}"
+        print("PASS: Tiles array has 21 integrations")
     
     def test_integrations_overview_tile_keys(self):
         """Test that each tile has all required keys"""
@@ -99,7 +99,8 @@ class TestIntegrationsOverviewEndpoint:
         required_keys = [
             "key", "name", "category", "description", "configured",
             "connection_state", "last_synced_at", "last_test_status",
-            "command_center", "settings_anchor", "settings_path"
+            "command_center", "settings_anchor", "settings_path",
+            "management_owner", "evidence"
         ]
         
         for tile in data.get("tiles", []):
@@ -120,7 +121,9 @@ class TestIntegrationsOverviewEndpoint:
         expected_keys = [
             "rustdesk", "cipp", "huntress", "hudu", "acronis", "pax8",
             "domotz", "stripe", "xero", "yeastar", "microsoft365", "sms",
-            "splynx", "syncro", "suped", "unifi"
+            "splynx", "syncro", "suped", "unifi", "synergy_wholesale",
+            "supabase_artifacts", "nexus_agent", "nexus_elevate",
+            "microsoft_partner_center"
         ]
         
         tile_keys = [t["key"] for t in data.get("tiles", [])]
@@ -143,6 +146,7 @@ class TestIntegrationsOverviewEndpoint:
         # Expected command centers
         expected_command_centers = {
             "rustdesk": "/remote-access",
+            "microsoft_partner_center": "/control-plane?module=microsoft365&view=connections",
             "cipp": "/control-plane?module=microsoft365&view=connections",
             "huntress": "/security-dashboard",
             "hudu": "/hudu",
@@ -154,6 +158,9 @@ class TestIntegrationsOverviewEndpoint:
             "microsoft365": "/email",
             "suped": "/suped",
             "unifi": "/unifi",
+            "synergy_wholesale": "/web-studio",
+            "nexus_agent": "/nexus-agent",
+            "nexus_elevate": "/nexus-elevate",
         }
         
         tiles_by_key = {t["key"]: t for t in data.get("tiles", [])}
@@ -164,7 +171,7 @@ class TestIntegrationsOverviewEndpoint:
             assert tile["command_center"] == expected_cc, f"{key} command_center should be {expected_cc}, got {tile['command_center']}"
         
         # Integrations without command centers should have None
-        no_command_center = ["stripe", "sms", "splynx", "syncro"]
+        no_command_center = ["stripe", "sms", "splynx", "syncro", "supabase_artifacts"]
         for key in no_command_center:
             tile = tiles_by_key.get(key)
             assert tile is not None, f"Missing tile: {key}"
@@ -186,7 +193,7 @@ class TestIntegrationsOverviewEndpoint:
                 f"Tile '{tile['key']}' has no management target"
             )
             if tile["settings_anchor"]:
-                assert tile["settings_anchor"].endswith("-settings-card"), (
+                assert tile["settings_anchor"].endswith("-settings-card") or tile["settings_anchor"] == "supabase-storage-card", (
                     f"Tile '{tile['key']}' settings_anchor format incorrect"
                 )
 

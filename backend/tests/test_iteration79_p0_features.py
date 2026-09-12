@@ -3,7 +3,7 @@ Iteration 79 - P0 Features Testing
 1. Remote Access Integrations Tab (7 providers)
 2. Invoice PDF Export & Email
 
-Test credentials: aaron@stech.com.au / Lucky@2871$!
+Test credentials are supplied through the test environment.
 """
 import pytest
 import requests
@@ -19,7 +19,7 @@ class TestAuth:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()

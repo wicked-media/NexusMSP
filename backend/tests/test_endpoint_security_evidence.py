@@ -28,8 +28,10 @@ class FakeCursor:
 class FakeDevices:
     def __init__(self, rows):
         self.rows = rows
+        self.queries = []
 
-    def find(self, _query, _projection):
+    def find(self, query, _projection):
+        self.queries.append(query)
         return FakeCursor(self.rows)
 
 
@@ -87,3 +89,17 @@ def test_verified_agent_security_fields_preserve_live_evidence(monkeypatch):
     assert endpoint["patch_status"] == "up_to_date"
     assert endpoint["overall_score"] == 100
     assert endpoint["grade"] == "A"
+
+
+def test_endpoint_scores_apply_the_callers_client_scope(monkeypatch):
+    database = FakeDb([])
+    monkeypatch.setattr(endpoint_security, "db", database)
+
+    asyncio.run(endpoint_security.get_endpoint_scores({
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }))
+
+    assert database.devices.queries == [{"client_id": {"$in": ["client-a"]}}]

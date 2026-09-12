@@ -6,21 +6,117 @@ when the required provider or technician evidence is absent.
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Any
+from typing import Any, Literal
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth import get_current_user
 from app.database import db
+from app.services.action_permissions import require_action
+from app.services.client_account_plan import editable_account_plan
+from app.services.scope_permissions import tenant_scoped_query, platform_tenant_id
+from app.services.scope_permissions import assert_global_scope, assert_tenant_record_scope, scoped_query
 
 
-router = APIRouter(tags=["Client Studio"])
+_GLOBAL_CLIENT_STUDIO_PATHS = frozenset({
+    "/client-studio/universe",
+    "/client-studio/pulse",
+    "/client-studio/renewal-watch",
+    "/client-studio/recompute-tiers",
+})
+
+
+async def _enforce_client_studio_scope(request: Request, current_user: dict = Depends(get_current_user)):
+    """Enforce a client boundary, or explicit global access for portfolio views."""
+    client_id = request.path_params.get("client_id")
+    if client_id:
+        await assert_tenant_record_scope(
+            current_user,
+            db.clients,
+            client_id,
+            request=request,
+            operation=f"client_studio:{request.method.lower()}",
+            resource_name="Client",
+            client_field="id",
+            site_field="site_id",
+        )
+    elif request.url.path.rstrip("/") in _GLOBAL_CLIENT_STUDIO_PATHS:
+        await assert_global_scope(
+            current_user,
+            operation=f"client_studio:{request.method.lower()}",
+            request=request,
+        )
+
+
+router = APIRouter(tags=["Client Studio"], dependencies=[Depends(_enforce_client_studio_scope)])
 TRUSTED_SENTIMENT_SOURCES = {"manual", "survey", "csat", "nps", "provider", "integration"}
+
+
+class StakeholderCreatePayload(BaseModel):
+    """The deliberate relationship context kept alongside, not inside, contacts."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=160)
+    title: str = Field(default="", max_length=160)
+    email: str = Field(default="", max_length=254)
+    phone: str = Field(default="", max_length=64)
+    role: Literal["decision_maker", "champion", "influencer", "blocker", "gatekeeper"] = "influencer"
+    relationship_strength: int = Field(default=50, ge=0, le=100)
+    sentiment: float | None = Field(default=None, ge=0, le=100)
+    notes: str = Field(default="", max_length=4000)
+
+
+class StakeholderUpdatePayload(BaseModel):
+    """A partial, validated update for an existing client stakeholder."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    title: str | None = Field(default=None, max_length=160)
+    email: str | None = Field(default=None, max_length=254)
+    phone: str | None = Field(default=None, max_length=64)
+    role: Literal["decision_maker", "champion", "influencer", "blocker", "gatekeeper"] | None = None
+    relationship_strength: int | None = Field(default=None, ge=0, le=100)
+    sentiment: float | None = Field(default=None, ge=0, le=100)
+    notes: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("name")
+    @classmethod
+    def _name_cannot_be_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("name cannot be blank")
+        return value
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+async def _write_client_studio_audit(
+    current_user: dict,
+    action: str,
+    *,
+    client_id: str | None,
+    entity_type: str,
+    entity_id: str,
+    metadata: dict | None = None,
+) -> None:
+    """Retain safe, operator-facing evidence for governed account changes."""
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
+        "user_id": current_user.get("id"),
+        "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
+        "metadata": metadata or {},
+        "created_at": _now(),
+    })
 
 
 def _number(value: Any) -> float | None:
@@ -53,22 +149,34 @@ def derive_tier(mrr: float, active_services: int = 0) -> str:
     return "bronze"
 
 
-async def _client_or_404(client_id: str) -> dict:
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    return client
+async def _client_or_404(client_id: str, current_user: dict) -> dict:
+    """Load one client inside both its tenant and technician boundaries."""
+    return await assert_tenant_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        client_field="id",
+        operation="client_studio.client.read",
+        resource_name="Client",
+    )
 
 
-async def _sentiment(client_id: str) -> float | None:
-    record = await db.sentiment_scores.find_one({"client_id": client_id}, {"_id": 0})
+async def _sentiment(client_id: str, current_user: dict) -> float | None:
+    record = await db.sentiment_scores.find_one(
+        tenant_scoped_query(current_user, {"client_id": client_id}),
+        {"_id": 0},
+    )
     source = str((record or {}).get("source") or "").lower()
     score = _number((record or {}).get("score"))
     return score if source in TRUSTED_SENTIMENT_SOURCES and score is not None else None
 
 
-async def compute_client_metrics(client_id: str) -> dict:
-    contracts = await db.contracts.find({"client_id": client_id, "status": "active"}, {"_id": 0}).to_list(200)
+async def compute_client_metrics(client_id: str, current_user: dict) -> dict:
+    """Aggregate client evidence without crossing the actor's tenant boundary."""
+    contracts = await db.contracts.find(
+        tenant_scoped_query(current_user, {"client_id": client_id, "status": "active"}),
+        {"_id": 0},
+    ).to_list(200)
     mrr = 0.0
     for contract in contracts:
         value = _number(contract.get("monthly_value"))
@@ -78,10 +186,10 @@ async def compute_client_metrics(client_id: str) -> dict:
             value = _number(contract.get("recurring_amount"))
         if value is not None:
             mrr += value
-    subscriptions = await db.subscriptions.count_documents({"client_id": client_id, "status": "active"})
-    devices = await db.devices.count_documents({"client_id": client_id})
-    total_tickets = await db.tickets.count_documents({"client_id": client_id})
-    open_tickets = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}})
+    subscriptions = await db.subscriptions.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "status": "active"}))
+    devices = await db.devices.count_documents(tenant_scoped_query(current_user, {"client_id": client_id}))
+    total_tickets = await db.tickets.count_documents(tenant_scoped_query(current_user, {"client_id": client_id}))
+    open_tickets = await db.tickets.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "status": {"$in": ["open", "in_progress"]}}))
     return {"mrr": round(mrr, 2), "subscriptions": subscriptions, "devices": devices, "total_tickets": total_tickets, "open_tickets": open_tickets, "contracts": len(contracts)}
 
 
@@ -107,17 +215,17 @@ def _risk_label(score: float | None) -> str:
 
 @router.get("/client-studio/{client_id}/360-context")
 async def client_360(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await _client_or_404(client_id)
-    metrics = await compute_client_metrics(client_id)
-    sentiment = await _sentiment(client_id)
+    client = await _client_or_404(client_id, current_user)
+    metrics = await compute_client_metrics(client_id, current_user)
+    sentiment = await _sentiment(client_id, current_user)
     tier = client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"])
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "id": 1, "name": 1, "device_type": 1, "status": 1, "os_name": 1, "os": 1, "cpu_usage": 1, "ram_usage": 1, "disk_usage": 1}).to_list(500)
-    contracts = await db.contracts.find({"client_id": client_id}, {"_id": 0}).to_list(50)
-    subscriptions = await db.subscriptions.find({"client_id": client_id}, {"_id": 0}).to_list(50)
-    tickets = await db.tickets.find({"client_id": client_id, "status": {"$in": ["open", "in_progress"]}}, {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1, "ticket_number": 1}).sort("created_at", -1).to_list(20)
-    invoices = await db.invoices.find({"client_id": client_id}, {"_id": 0}).sort("issue_date", -1).to_list(20)
-    stakeholders = await db.client_stakeholders.find({"client_id": client_id}, {"_id": 0}).to_list(50)
-    notes = await db.client_notes.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
+    devices = await db.devices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "id": 1, "name": 1, "device_type": 1, "status": 1, "os_name": 1, "os": 1, "cpu_usage": 1, "ram_usage": 1, "disk_usage": 1}).to_list(500)
+    contracts = await db.contracts.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).to_list(50)
+    subscriptions = await db.subscriptions.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).to_list(50)
+    tickets = await db.tickets.find(tenant_scoped_query(current_user, {"client_id": client_id, "status": {"$in": ["open", "in_progress"]}}), {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1, "ticket_number": 1}).sort("created_at", -1).to_list(20)
+    invoices = await db.invoices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).sort("issue_date", -1).to_list(20)
+    stakeholders = await db.client_stakeholders.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).to_list(50)
+    notes = await db.client_notes.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).sort("created_at", -1).limit(5).to_list(5)
     for record in [*devices, *contracts, *subscriptions, *tickets]:
         record["tier"] = tier
     return {
@@ -129,11 +237,11 @@ async def client_360(client_id: str, current_user: dict = Depends(get_current_us
 
 @router.get("/client-studio/universe")
 async def universe(current_user: dict = Depends(get_current_user)):
-    clients = await db.clients.find({}, {"_id": 0}).to_list(500)
+    clients = await db.clients.find(tenant_scoped_query(current_user), {"_id": 0}).to_list(500)
     nodes, industries = [], set()
     for client in clients:
-        metrics = await compute_client_metrics(client["id"])
-        sentiment = await _sentiment(client["id"])
+        metrics = await compute_client_metrics(client["id"], current_user)
+        sentiment = await _sentiment(client["id"], current_user)
         industry = client.get("industry") or "other"
         industries.add(industry)
         nodes.append({"id": client["id"], "name": client.get("name", "Client"), "industry": industry, "tier": client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"]), "mrr": metrics["mrr"], "devices": metrics["devices"], "open_tickets": metrics["open_tickets"], "sentiment": sentiment, "health": _health(metrics, sentiment), "vip": bool(client.get("vip"))})
@@ -142,12 +250,12 @@ async def universe(current_user: dict = Depends(get_current_user)):
 
 @router.get("/client-studio/pulse")
 async def pulse_wall(current_user: dict = Depends(get_current_user)):
-    clients = await db.clients.find({}, {"_id": 0}).to_list(500)
+    clients = await db.clients.find(tenant_scoped_query(current_user), {"_id": 0}).to_list(500)
     tiles = []
     for client in clients:
-        metrics = await compute_client_metrics(client["id"])
-        sentiment = await _sentiment(client["id"])
-        snapshots = await db.health_snapshots_client.find({"client_id": client["id"], "health_score": {"$type": "number"}}, {"_id": 0, "health_score": 1}).sort("date", -1).limit(12).to_list(12)
+        metrics = await compute_client_metrics(client["id"], current_user)
+        sentiment = await _sentiment(client["id"], current_user)
+        snapshots = await db.health_snapshots_client.find(tenant_scoped_query(current_user, {"client_id": client["id"], "health_score": {"$type": "number"}}), {"_id": 0, "health_score": 1}).sort("date", -1).limit(12).to_list(12)
         tiles.append({"id": client["id"], "name": client.get("name", "Client"), "industry": client.get("industry") or "other", "tier": client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"]), "vip": bool(client.get("vip")), "mrr": metrics["mrr"], "devices": metrics["devices"], "open_tickets": metrics["open_tickets"], "sentiment": sentiment, "health": _health(metrics, sentiment), "spark_health": [row["health_score"] for row in reversed(snapshots) if isinstance(row.get("health_score"), (int, float))], "spark_tickets": []})
     tiles.sort(key=lambda item: (-int(item["vip"]), -item["mrr"]))
     return {"tiles": tiles, "total": len(tiles)}
@@ -156,11 +264,22 @@ async def pulse_wall(current_user: dict = Depends(get_current_user)):
 @router.get("/client-studio/my-accounts")
 async def my_accounts(current_user: dict = Depends(get_current_user)):
     identifier = current_user.get("id") or current_user.get("email")
-    rows = await db.clients.find({"$or": [{"assigned_to": identifier}, {"account_manager_id": identifier}, {"owner_id": identifier}]}, {"_id": 0}).to_list(200)
+    rows = await db.clients.find(
+        tenant_scoped_query(
+            current_user,
+            scoped_query(
+                current_user,
+                {"$or": [{"assigned_to": identifier}, {"account_manager_id": identifier}, {"owner_id": identifier}]},
+                field="id",
+                site_field=None,
+            ),
+        ),
+        {"_id": 0},
+    ).to_list(200)
     accounts = []
     for client in rows:
-        metrics = await compute_client_metrics(client["id"])
-        sentiment = await _sentiment(client["id"])
+        metrics = await compute_client_metrics(client["id"], current_user)
+        sentiment = await _sentiment(client["id"], current_user)
         alerts = []
         if metrics["open_tickets"] > 5:
             alerts.append({"kind": "tickets", "msg": f"{metrics['open_tickets']} open tickets"})
@@ -173,17 +292,17 @@ async def my_accounts(current_user: dict = Depends(get_current_user)):
 @router.get("/client-studio/renewal-watch")
 async def renewal_watch(current_user: dict = Depends(get_current_user)):
     now, horizon = datetime.now(timezone.utc), datetime.now(timezone.utc) + timedelta(days=90)
-    contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(500)
+    contracts = await db.contracts.find(tenant_scoped_query(current_user, {"status": "active"}), {"_id": 0}).to_list(500)
     watch = []
     for contract in contracts:
         renewal = _date(contract.get("renewal_date") or contract.get("end_date"))
         if not renewal or renewal < now or renewal > horizon:
             continue
-        client = await db.clients.find_one({"id": contract.get("client_id")}, {"_id": 0})
+        client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": contract.get("client_id")}), {"_id": 0})
         if not client:
             continue
-        metrics = await compute_client_metrics(client["id"])
-        sentiment = await _sentiment(client["id"])
+        metrics = await compute_client_metrics(client["id"], current_user)
+        sentiment = await _sentiment(client["id"], current_user)
         signals = []
         if sentiment is not None and sentiment < 60:
             signals.append("Recorded sentiment is below 60")
@@ -197,9 +316,9 @@ async def renewal_watch(current_user: dict = Depends(get_current_user)):
 
 @router.get("/client-studio/{client_id}/expansion")
 async def expansion(client_id: str, current_user: dict = Depends(get_current_user)):
-    await _client_or_404(client_id)
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "device_type": 1}).to_list(500)
-    subscriptions = await db.subscriptions.find({"client_id": client_id, "status": "active"}, {"_id": 0, "product_name": 1, "name": 1}).to_list(100)
+    await _client_or_404(client_id, current_user)
+    devices = await db.devices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "device_type": 1}).to_list(500)
+    subscriptions = await db.subscriptions.find(tenant_scoped_query(current_user, {"client_id": client_id, "status": "active"}), {"_id": 0, "product_name": 1, "name": 1}).to_list(100)
     names = " ".join((row.get("product_name") or row.get("name") or "").lower() for row in subscriptions)
     endpoints = sum(1 for device in devices if device.get("device_type") in {"workstation", "laptop", "server"})
     servers = sum(1 for device in devices if device.get("device_type") == "server")
@@ -215,9 +334,9 @@ async def expansion(client_id: str, current_user: dict = Depends(get_current_use
 
 @router.get("/client-studio/{client_id}/renewal-forecast")
 async def renewal_forecast(client_id: str, current_user: dict = Depends(get_current_user)):
-    await _client_or_404(client_id)
-    metrics = await compute_client_metrics(client_id)
-    sentiment = await _sentiment(client_id)
+    await _client_or_404(client_id, current_user)
+    metrics = await compute_client_metrics(client_id, current_user)
+    sentiment = await _sentiment(client_id, current_user)
     reasoning = []
     if sentiment is not None:
         reasoning.append(f"Recorded sentiment: {sentiment:g}/100")
@@ -229,11 +348,11 @@ async def renewal_forecast(client_id: str, current_user: dict = Depends(get_curr
 
 @router.get("/client-studio/{client_id}/account-briefing")
 async def account_briefing(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await _client_or_404(client_id)
-    metrics = await compute_client_metrics(client_id)
-    sentiment = await _sentiment(client_id)
+    client = await _client_or_404(client_id, current_user)
+    metrics = await compute_client_metrics(client_id, current_user)
+    sentiment = await _sentiment(client_id, current_user)
     tier = client.get("tier") or derive_tier(metrics["mrr"], metrics["subscriptions"])
-    recent = await db.tickets.find({"client_id": client_id}, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "created_at": 1}).sort("created_at", -1).limit(1).to_list(1)
+    recent = await db.tickets.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "created_at": 1}).sort("created_at", -1).limit(1).to_list(1)
     briefing = [f"Tier: {tier.title()} | Recorded MRR: ${metrics['mrr']:,.0f}", f"Devices: {metrics['devices']} | Active subscriptions: {metrics['subscriptions']} | Open tickets: {metrics['open_tickets']}", f"Sentiment: {sentiment:g}/100" if sentiment is not None else "Sentiment: not assessed"]
     if recent:
         ticket = recent[0]
@@ -245,79 +364,170 @@ async def account_briefing(client_id: str, current_user: dict = Depends(get_curr
 
 @router.get("/client-studio/{client_id}/account-plan")
 async def get_account_plan(client_id: str, current_user: dict = Depends(get_current_user)):
-    return await db.client_account_plans.find_one({"client_id": client_id}, {"_id": 0}) or {"client_id": client_id, "goals": [], "risks": [], "opportunities": [], "people": [], "next_actions": []}
+    return await db.client_account_plans.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}) or {"client_id": client_id, "goals": [], "risks": [], "opportunities": [], "people": [], "next_actions": []}
 
 
-@router.post("/client-studio/{client_id}/account-plan")
+@router.post(
+    "/client-studio/{client_id}/account-plan",
+    dependencies=[Depends(require_action("client.account.manage"))],
+)
 async def save_account_plan(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    await _client_or_404(client_id)
-    payload = {**(data or {}), "client_id": client_id, "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
-    await db.client_account_plans.update_one({"client_id": client_id}, {"$set": payload}, upsert=True)
+    await _client_or_404(client_id, current_user)
+    payload = {**editable_account_plan(data), "client_id": client_id, "tenant_id": platform_tenant_id(current_user), "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
+    await db.client_account_plans.update_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"$set": payload}, upsert=True)
+    await _write_client_studio_audit(
+        current_user,
+        "client_account_plan_saved",
+        client_id=client_id,
+        entity_type="client_account_plan",
+        entity_id=client_id,
+        metadata={"fields": sorted(key for key in payload if key not in {"client_id", "updated_at", "updated_by"})},
+    )
     return {"saved": True, "updated_at": payload["updated_at"]}
 
 
-@router.post("/client-studio/{client_id}/account-plan/generate")
+@router.post(
+    "/client-studio/{client_id}/account-plan/generate",
+    dependencies=[Depends(require_action("client.account.manage"))],
+)
 async def generate_account_plan(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await _client_or_404(client_id)
-    metrics = await compute_client_metrics(client_id)
+    client = await _client_or_404(client_id, current_user)
+    metrics = await compute_client_metrics(client_id, current_user)
     coverage = await expansion(client_id, current_user)
     plan = {"client_id": client_id, "goals": ["Confirm documented commercial and service objectives", "Review open service work with the client"], "risks": [f"{metrics['open_tickets']} open tickets" if metrics["open_tickets"] else "No open tickets are recorded", "No verified renewal prediction is available"], "opportunities": [{"title": item["title"], "value": None} for item in coverage["opportunities"]], "people": [], "next_actions": ["Schedule a client review", "Confirm the primary decision maker", "Price any approved coverage gaps from the rate card"], "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", ""), "generation_mode": "evidence_seed", "generated_by_ai": False, "client_name": client.get("name", "Client")}
-    await db.client_account_plans.update_one({"client_id": client_id}, {"$set": plan}, upsert=True)
+    plan["tenant_id"] = platform_tenant_id(current_user)
+    await db.client_account_plans.update_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"$set": plan}, upsert=True)
+    await _write_client_studio_audit(
+        current_user,
+        "client_account_plan_generated",
+        client_id=client_id,
+        entity_type="client_account_plan",
+        entity_id=client_id,
+        metadata={"generation_mode": plan["generation_mode"], "generated_by_ai": False},
+    )
     return plan
 
 
 @router.get("/client-studio/{client_id}/stakeholders")
 async def list_stakeholders(client_id: str, current_user: dict = Depends(get_current_user)):
-    return await db.client_stakeholders.find({"client_id": client_id}, {"_id": 0}).to_list(100)
+    return await db.client_stakeholders.find(
+        tenant_scoped_query(current_user, {"client_id": client_id}),
+        {"_id": 0},
+    ).to_list(100)
 
 
-@router.post("/client-studio/{client_id}/stakeholders")
-async def create_stakeholder(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    await _client_or_404(client_id)
-    if not str((data or {}).get("name") or "").strip():
-        raise HTTPException(status_code=400, detail="name required")
-    strength = max(0, min(100, int(data.get("relationship_strength", 50))))
-    sentiment = _number(data.get("sentiment"))
-    stakeholder = {"id": str(uuid.uuid4()), "client_id": client_id, "name": str(data["name"]).strip(), "title": data.get("title", ""), "email": data.get("email", ""), "phone": data.get("phone", ""), "role": data.get("role", "influencer"), "relationship_strength": strength, "sentiment": sentiment, "notes": data.get("notes", ""), "source": "manual", "created_at": _now(), "created_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
+@router.post(
+    "/client-studio/{client_id}/stakeholders",
+    dependencies=[Depends(require_action("client.account.manage"))],
+)
+async def create_stakeholder(
+    client_id: str,
+    data: StakeholderCreatePayload,
+    current_user: dict = Depends(get_current_user),
+):
+    await _client_or_404(client_id, current_user)
+    values = data.model_dump()
+    stakeholder = {
+        "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(current_user),
+        "client_id": client_id,
+        **values,
+        "source": "manual",
+        "created_at": _now(),
+        "created_by": current_user.get("name") or current_user.get("email") or current_user.get("id", ""),
+    }
     await db.client_stakeholders.insert_one(stakeholder)
+    await _write_client_studio_audit(
+        current_user,
+        "client_stakeholder_created",
+        client_id=client_id,
+        entity_type="client_stakeholder",
+        entity_id=stakeholder["id"],
+        metadata={"role": stakeholder["role"]},
+    )
     return stakeholder
 
 
-@router.put("/client-studio/stakeholders/{sid}")
-async def update_stakeholder(sid: str, data: dict, current_user: dict = Depends(get_current_user)):
-    allowed = {key: value for key, value in (data or {}).items() if key in {"name", "title", "email", "phone", "role", "relationship_strength", "sentiment", "notes"}}
-    if "relationship_strength" in allowed:
-        allowed["relationship_strength"] = max(0, min(100, int(allowed["relationship_strength"])))
-    if "sentiment" in allowed:
-        allowed["sentiment"] = _number(allowed["sentiment"])
+@router.put(
+    "/client-studio/stakeholders/{sid}",
+    dependencies=[Depends(require_action("client.account.manage"))],
+)
+async def update_stakeholder(
+    sid: str,
+    data: StakeholderUpdatePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    stakeholder = await assert_tenant_record_scope(
+        current_user,
+        db.client_stakeholders,
+        sid,
+        request=request,
+        operation="client_studio.stakeholder.update",
+        resource_name="Stakeholder",
+    )
+    allowed = data.model_dump(exclude_unset=True)
+    if not allowed:
+        raise HTTPException(status_code=422, detail="At least one stakeholder field is required")
     allowed.update({"updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")})
-    result = await db.client_stakeholders.update_one({"id": sid}, {"$set": allowed})
+    result = await db.client_stakeholders.update_one(
+        tenant_scoped_query(current_user, {"id": sid, "client_id": stakeholder.get("client_id")}),
+        {"$set": allowed},
+    )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Stakeholder not found")
+    await _write_client_studio_audit(
+        current_user,
+        "client_stakeholder_updated",
+        client_id=stakeholder.get("client_id"),
+        entity_type="client_stakeholder",
+        entity_id=sid,
+        metadata={"changed_fields": sorted(key for key in allowed if key not in {"updated_at", "updated_by"})},
+    )
     return {"updated": True}
 
 
-@router.delete("/client-studio/stakeholders/{sid}")
-async def delete_stakeholder(sid: str, current_user: dict = Depends(get_current_user)):
-    result = await db.client_stakeholders.delete_one({"id": sid})
+@router.delete(
+    "/client-studio/stakeholders/{sid}",
+    dependencies=[Depends(require_action("client.account.manage"))],
+)
+async def delete_stakeholder(sid: str, request: Request, current_user: dict = Depends(get_current_user)):
+    stakeholder = await assert_tenant_record_scope(
+        current_user,
+        db.client_stakeholders,
+        sid,
+        request=request,
+        operation="client_studio.stakeholder.delete",
+        resource_name="Stakeholder",
+    )
+    result = await db.client_stakeholders.delete_one(
+        tenant_scoped_query(current_user, {"id": sid, "client_id": stakeholder.get("client_id")}),
+    )
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Stakeholder not found")
+    await _write_client_studio_audit(
+        current_user,
+        "client_stakeholder_deleted",
+        client_id=stakeholder.get("client_id"),
+        entity_type="client_stakeholder",
+        entity_id=sid,
+    )
     return {"deleted": True}
 
 
 @router.get("/client-studio/{client_id}/achievements")
 async def achievements(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await _client_or_404(client_id)
+    client = await _client_or_404(client_id, current_user)
     achievements_list = []
     created = _date(client.get("created_at"))
     if created:
         years = (datetime.now(timezone.utc) - created).days // 365
         if years >= 1:
             achievements_list.append({"id": "anniversary", "title": f"{years} year anniversary", "icon": "\\U0001F389", "earned_at": (created + timedelta(days=365 * years)).isoformat()})
-    closed = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["closed", "resolved"]}})
+    closed = await db.tickets.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "status": {"$in": ["closed", "resolved"]}}))
     if closed >= 100:
         achievements_list.append({"id": "resolved-100", "title": "100+ tickets resolved", "icon": "\\U0001F3C6"})
-    devices = await db.devices.count_documents({"client_id": client_id})
+    devices = await db.devices.count_documents(tenant_scoped_query(current_user, {"client_id": client_id}))
     if devices >= 50:
         achievements_list.append({"id": "fleet-50", "title": f"{devices}-device fleet", "icon": "\\U0001F5A5"})
     if client.get("vip"):
@@ -327,17 +537,17 @@ async def achievements(client_id: str, current_user: dict = Depends(get_current_
 
 @router.get("/client-studio/{client_id}/lifecycle")
 async def lifecycle(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await _client_or_404(client_id)
+    client = await _client_or_404(client_id, current_user)
     milestones = []
     if client.get("created_at"):
         milestones.append({"id": "account-created", "label": "Account created", "icon": "\U0001F331", "at": client["created_at"]})
-    first_ticket = await db.tickets.find_one({"client_id": client_id}, {"_id": 0}, sort=[("created_at", 1)])
+    first_ticket = await db.tickets.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}, sort=[("created_at", 1)])
     if first_ticket:
         milestones.append({"id": "first-ticket", "label": "First ticket logged", "icon": "\U0001F3AB", "at": first_ticket.get("created_at")})
-    first_invoice = await db.invoices.find_one({"client_id": client_id}, {"_id": 0}, sort=[("issue_date", 1)])
+    first_invoice = await db.invoices.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}, sort=[("issue_date", 1)])
     if first_invoice:
         milestones.append({"id": "first-invoice", "label": "First invoice issued", "icon": "\\U0001F9FE", "at": first_invoice.get("issue_date")})
-    contract = await db.contracts.find_one({"client_id": client_id, "status": "active"}, {"_id": 0})
+    contract = await db.contracts.find_one(tenant_scoped_query(current_user, {"client_id": client_id, "status": "active"}), {"_id": 0})
     if contract:
         milestones.append({"id": "active-contract", "label": "Active contract", "icon": "\U0001F4C4", "at": contract.get("start_date") or contract.get("created_at")})
         renewal = contract.get("renewal_date") or contract.get("end_date")
@@ -348,9 +558,9 @@ async def lifecycle(client_id: str, current_user: dict = Depends(get_current_use
 
 @router.get("/client-studio/{client_id}/churn-radar")
 async def churn_radar(client_id: str, current_user: dict = Depends(get_current_user)):
-    await _client_or_404(client_id)
-    metrics = await compute_client_metrics(client_id)
-    sentiment = await _sentiment(client_id)
+    await _client_or_404(client_id, current_user)
+    metrics = await compute_client_metrics(client_id, current_user)
+    sentiment = await _sentiment(client_id, current_user)
     axes = []
     if sentiment is not None:
         axes.append({"axis": "Sentiment", "value": sentiment, "source": "recorded_sentiment"})
@@ -362,10 +572,11 @@ async def churn_radar(client_id: str, current_user: dict = Depends(get_current_u
 
 @router.get("/client-studio/{client_id}/activity-heatmap")
 async def activity_heatmap(client_id: str, days: int = 90, current_user: dict = Depends(get_current_user)):
+    await _client_or_404(client_id, current_user)
     days = max(1, min(days, 365))
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     buckets: dict[str, int] = {}
-    async for ticket in db.tickets.find({"client_id": client_id, "created_at": {"$gte": cutoff.isoformat()}}, {"_id": 0, "created_at": 1}):
+    async for ticket in db.tickets.find(tenant_scoped_query(current_user, {"client_id": client_id, "created_at": {"$gte": cutoff.isoformat()}}), {"_id": 0, "created_at": 1}):
         stamp = str(ticket.get("created_at") or "")[:10]
         if stamp:
             buckets[stamp] = buckets.get(stamp, 0) + 1
@@ -376,11 +587,12 @@ async def activity_heatmap(client_id: str, days: int = 90, current_user: dict = 
 
 @router.get("/client-studio/{client_id}/hours-burndown")
 async def hours_burndown(client_id: str, current_user: dict = Depends(get_current_user)):
-    contract = await db.contracts.find_one({"client_id": client_id, "status": "active", "$or": [{"type": "retainer"}, {"hours_block": {"$gt": 0}}]}, {"_id": 0})
+    await _client_or_404(client_id, current_user)
+    contract = await db.contracts.find_one(tenant_scoped_query(current_user, {"client_id": client_id, "status": "active", "$or": [{"type": "retainer"}, {"hours_block": {"$gt": 0}}]}), {"_id": 0})
     purchased = _number((contract or {}).get("hours_block"))
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     daily_map: dict[str, float] = {}
-    async for entry in db.time_entries.find({"client_id": client_id, "started_at": {"$gte": cutoff.isoformat()}, "billable": True}, {"_id": 0, "started_at": 1, "minutes": 1, "hours": 1}):
+    async for entry in db.time_entries.find(tenant_scoped_query(current_user, {"client_id": client_id, "started_at": {"$gte": cutoff.isoformat()}, "billable": True}), {"_id": 0, "started_at": 1, "minutes": 1, "hours": 1}):
         stamp = str(entry.get("started_at") or "")[:10]
         hours = _number(entry.get("hours"))
         if hours is None:
@@ -395,7 +607,8 @@ async def hours_burndown(client_id: str, current_user: dict = Depends(get_curren
 
 @router.get("/client-studio/{client_id}/contracts")
 async def contract_watch(client_id: str, current_user: dict = Depends(get_current_user)):
-    contracts = await db.contracts.find({"client_id": client_id}, {"_id": 0}).to_list(50)
+    await _client_or_404(client_id, current_user)
+    contracts = await db.contracts.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).to_list(50)
     now = datetime.now(timezone.utc)
     values = []
     for contract in contracts:
@@ -406,17 +619,18 @@ async def contract_watch(client_id: str, current_user: dict = Depends(get_curren
 
 @router.get("/client-studio/{client_id}/scorecard")
 async def scorecard(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await _client_or_404(client_id)
-    metrics = await compute_client_metrics(client_id)
-    sentiment = await _sentiment(client_id)
+    client = await _client_or_404(client_id, current_user)
+    metrics = await compute_client_metrics(client_id, current_user)
+    sentiment = await _sentiment(client_id, current_user)
     health = _health(metrics, sentiment)
-    closed = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["closed", "resolved"]}})
+    closed = await db.tickets.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "status": {"$in": ["closed", "resolved"]}}))
     return {"client_id": client_id, "client_name": client.get("name", "Client"), "generated_at": _now(), "metrics": [{"label": "Health Score", "value": f"{health}/100" if health is not None else "Not assessed"}, {"label": "Recorded MRR", "value": f"${metrics['mrr']:,.0f}"}, {"label": "Active Devices", "value": metrics["devices"]}, {"label": "Open Tickets", "value": metrics["open_tickets"]}, {"label": "Resolved Tickets", "value": closed}, {"label": "Sentiment", "value": f"{sentiment:g}/100" if sentiment is not None else "Not assessed"}, {"label": "Subscriptions", "value": metrics["subscriptions"]}]}
 
 
 @router.get("/client-studio/{client_id}/compliance")
 async def compliance(client_id: str, current_user: dict = Depends(get_current_user)):
-    scans = await db.compliance_reports.find({"client_id": client_id}, {"_id": 0}).sort("scanned_at", -1).to_list(200)
+    await _client_or_404(client_id, current_user)
+    scans = await db.compliance_reports.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).sort("scanned_at", -1).to_list(200)
     latest: dict[str, dict] = {}
     for scan in scans:
         framework = str(scan.get("framework_name") or scan.get("framework") or "")
@@ -427,21 +641,44 @@ async def compliance(client_id: str, current_user: dict = Depends(get_current_us
     return {"frameworks": frameworks, "overall_score": round(sum(numeric_scores) / len(numeric_scores)) if numeric_scores else None, "evidence_state": "assessed" if numeric_scores else "not_assessed"}
 
 
-@router.post("/client-studio/{client_id}/vip")
+@router.post(
+    "/client-studio/{client_id}/vip",
+    dependencies=[Depends(require_action("client.account.manage"))],
+)
 async def toggle_vip(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.clients.update_one({"id": client_id}, {"$set": {"vip": bool((data or {}).get("vip")), "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}})
+    await _client_or_404(client_id, current_user)
+    result = await db.clients.update_one(tenant_scoped_query(current_user, {"id": client_id}), {"$set": {"vip": bool((data or {}).get("vip")), "updated_at": _now(), "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
+    await _write_client_studio_audit(
+        current_user,
+        "client_vip_updated",
+        client_id=client_id,
+        entity_type="client",
+        entity_id=client_id,
+        metadata={"vip": bool((data or {}).get("vip"))},
+    )
     return {"id": client_id, "vip": bool((data or {}).get("vip"))}
 
 
-@router.post("/client-studio/recompute-tiers")
+@router.post(
+    "/client-studio/recompute-tiers",
+    dependencies=[Depends(require_action("client.portfolio.recalculate"))],
+)
 async def recompute_tiers(current_user: dict = Depends(get_current_user)):
     """Record suggested tiers without overwriting a technician-managed client type."""
-    clients = await db.clients.find({}, {"_id": 0, "id": 1}).to_list(2000)
+    clients = await db.clients.find(tenant_scoped_query(current_user), {"_id": 0, "id": 1}).to_list(2000)
     updated = 0
     for client in clients:
-        metrics = await compute_client_metrics(client["id"])
-        result = await db.clients.update_one({"id": client["id"]}, {"$set": {"computed_tier": derive_tier(metrics["mrr"], metrics["subscriptions"]), "tier_recomputed_at": _now()}})
+        metrics = await compute_client_metrics(client["id"], current_user)
+        result = await db.clients.update_one(tenant_scoped_query(current_user, {"id": client["id"]}), {"$set": {"computed_tier": derive_tier(metrics["mrr"], metrics["subscriptions"]), "tier_recomputed_at": _now()}})
         updated += int(bool(getattr(result, "matched_count", 0)))
+    await _write_client_studio_audit(
+        current_user,
+        "client_portfolio_tiers_recalculated",
+        client_id=None,
+        entity_type="client_portfolio",
+        entity_id="all-clients",
+        metadata={"updated": updated, "evaluated": len(clients), "mode": "suggested_tier_only"},
+    )
     return {"updated": updated, "total": len(clients), "mode": "suggested_tier_only"}

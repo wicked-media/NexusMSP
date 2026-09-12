@@ -23,7 +23,7 @@ class TestAuthentication:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -44,7 +44,7 @@ class TestDeviceDiskHealth:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         return response.json()["token"]
@@ -106,84 +106,57 @@ class TestDeviceDiskHealth:
         assert len(disks) >= 1
     
     def test_get_device_disks_nonexistent_device(self, auth_token):
-        """Test GET /api/devices/nonexistent/disks returns empty list"""
+        """Foreign or unknown device IDs must not be enumerable through disk evidence."""
         response = requests.get(
             f"{BASE_URL}/api/devices/nonexistent-device/disks",
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        # Should return 200 with empty list (not 404)
-        assert response.status_code == 200
-        disks = response.json()
-        assert isinstance(disks, list)
-        assert len(disks) == 0
+        assert response.status_code == 404
 
 
-class TestDeviceAgentScripts:
-    """Device agent script generation tests"""
+class TestLegacyDeviceAgentRoutes:
+    """Legacy shared-key bootstrap/report routes must remain retired."""
     
     @pytest.fixture(scope="class")
     def auth_token(self):
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         return response.json()["token"]
     
     def test_get_windows_agent_script(self, auth_token):
-        """Test GET /api/devices/dev-001/agent-script?os_type=windows returns PowerShell script"""
+        """The historical shared-key PowerShell bootstrap is permanently retired."""
         response = requests.get(
             f"{BASE_URL}/api/devices/dev-001/agent-script?os_type=windows",
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        assert response.status_code == 200
-        
-        # Check content type
-        assert "text/plain" in response.headers.get("content-type", "")
-        
-        # Check script content
-        script = response.text
-        assert "# NexusOps Agent - Windows PowerShell" in script
-        assert "Device ID: dev-001" in script
-        assert "$NexusOpsAPI" in script
-        assert "Get-SystemInfo" in script
-        assert "Get-DiskHealth" in script
-        assert "Send-Report" in script
+        assert response.status_code == 410
     
     def test_get_linux_agent_script(self, auth_token):
-        """Test GET /api/devices/dev-001/agent-script?os_type=linux returns Bash script"""
+        """The historical shared-key shell bootstrap is permanently retired."""
         response = requests.get(
             f"{BASE_URL}/api/devices/dev-001/agent-script?os_type=linux",
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        assert response.status_code == 200
-        
-        # Check content type
-        assert "text/plain" in response.headers.get("content-type", "")
-        
-        # Check script content
-        script = response.text
-        assert "#!/bin/bash" in script
-        assert "# NexusOps Agent - Linux/macOS" in script
-        assert "Device ID: dev-001" in script
-        assert "NEXUSOPS_API=" in script
-        assert "send_report()" in script
+        assert response.status_code == 410
     
     def test_get_agent_script_nonexistent_device(self, auth_token):
-        """Test GET /api/devices/nonexistent/agent-script returns 404"""
+        """Retirement occurs before an ID can reveal device existence."""
         response = requests.get(
             f"{BASE_URL}/api/devices/nonexistent-device/agent-script?os_type=windows",
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        assert response.status_code == 404
+        assert response.status_code == 410
 
 
-class TestAgentReport:
-    """Agent report endpoint tests"""
+class TestLegacyAgentReport:
+    """Unsigned report payloads must never change device evidence."""
     
     def test_agent_report_success(self):
-        """Test POST /api/devices/agent/report accepts system report"""
+        """A plausible old report must be rejected instead of recorded."""
         response = requests.post(
             f"{BASE_URL}/api/devices/agent/report",
             json={
@@ -207,15 +180,10 @@ class TestAgentReport:
                 ]
             }
         )
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert data["status"] == "ok"
-        assert "device_status" in data
-        assert "next_report_seconds" in data
+        assert response.status_code == 410
     
     def test_agent_report_missing_device_id(self):
-        """Test POST /api/devices/agent/report without device_id returns 400"""
+        """Retirement is independent of payload shape."""
         response = requests.post(
             f"{BASE_URL}/api/devices/agent/report",
             json={
@@ -223,10 +191,10 @@ class TestAgentReport:
                 "cpu_usage": 45
             }
         )
-        assert response.status_code == 400
+        assert response.status_code == 410
     
     def test_agent_report_nonexistent_device(self):
-        """Test POST /api/devices/agent/report with nonexistent device returns 404"""
+        """Retirement does not reveal device existence."""
         response = requests.post(
             f"{BASE_URL}/api/devices/agent/report",
             json={
@@ -234,7 +202,7 @@ class TestAgentReport:
                 "agent_key": "test-key"
             }
         )
-        assert response.status_code == 404
+        assert response.status_code == 410
 
 
 class TestRustDeskIntegration:
@@ -245,7 +213,7 @@ class TestRustDeskIntegration:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         return response.json()["token"]
@@ -299,7 +267,7 @@ class TestDeviceStatusRemoteAccess:
         """Get authentication token"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         return response.json()["token"]

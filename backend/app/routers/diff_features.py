@@ -2,7 +2,7 @@
   â€¢ POST /api/ai/why-on-fire/{entity_type}/{entity_id} â€” AI senior-engineer triage
   â€¢ POST /api/tickets/{ticket_id}/auto-quote        â€” Conversation -> quote draft
   â€¢ GET  /api/threat-radar                          â€” MSP-wide threat ticker
-  â€¢ GET  /api/clients/{client_id}/health-certificate.pdf?token=  â€” printable cert
+  â€¢ GET  /api/clients/{client_id}/health-certificate.pdf  â€” printable cert
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -15,6 +15,7 @@ import jwt
 
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_tenant_record_scope
 
 router = APIRouter()
 
@@ -268,10 +269,21 @@ def _safe_pdf(text) -> str:
 
 
 @router.get("/clients/{client_id}/health-certificate.pdf")
-async def health_certificate_pdf(client_id: str, user: dict = Depends(_user_from_qtoken)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not client:
-        raise HTTPException(404, "Client not found")
+async def health_certificate_pdf(client_id: str, current_user: dict = Depends(get_current_user)):
+    """Return a certificate through the normal authenticated client boundary.
+
+    Browser navigation cannot safely attach an Authorization header, so callers
+    must fetch this endpoint with the normal bearer header and handle the PDF
+    as a response blob.  Tokens never belong in a URL.
+    """
+    client = await assert_tenant_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        client_field="id",
+        operation="client.health_certificate.read",
+        resource_name="Client",
+    )
     branding_doc = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
     branding = branding_doc.get("value") or branding_doc or {}
     company = branding.get("company_name") or "NexusOps"

@@ -26,7 +26,7 @@ class TestClientHealthDashboard:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_response.status_code == 200, f"Login failed: {login_response.text}"
         self.token = login_response.json().get("token")

@@ -26,7 +26,7 @@ class TestRustDeskConfig:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_response.status_code == 200:
             token = login_response.json().get("token")
@@ -94,7 +94,7 @@ class TestRustDeskQuickConnect:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_response.status_code == 200:
             token = login_response.json().get("token")
@@ -171,7 +171,7 @@ class TestRustDeskDeviceConnect:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_response.status_code == 200:
             token = login_response.json().get("token")
@@ -272,7 +272,7 @@ class TestRustDeskAllDevices:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_response.status_code == 200:
             token = login_response.json().get("token")
@@ -309,7 +309,7 @@ class TestRemoteProviders:
         # Login to get token
         login_response = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_response.status_code == 200:
             token = login_response.json().get("token")

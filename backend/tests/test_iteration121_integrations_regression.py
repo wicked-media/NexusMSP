@@ -21,7 +21,7 @@ def auth_token():
     """Get authentication token for admin user"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -39,14 +39,14 @@ class TestCippStatus:
     """Test CIPP status endpoint"""
     
     def test_cipp_status_returns_expected_fields(self, headers):
-        """GET /api/cipp/status returns {configured, base_url, api_key_preview, last_test_status, last_synced_at}"""
+        """GET /api/cipp/status returns safe connection metadata only."""
         response = requests.get(f"{BASE_URL}/api/cipp/status", headers=headers)
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         
         data = response.json()
         assert "configured" in data, "Missing 'configured' field"
         assert "base_url" in data, "Missing 'base_url' field"
-        assert "api_key_preview" in data, "Missing 'api_key_preview' field"
+        assert "api_key_preview" not in data, "Credential previews must never be returned"
         assert "last_test_status" in data, "Missing 'last_test_status' field"
         assert "last_synced_at" in data or "last_tested_at" in data, "Missing timestamp field"
         print(f"PASS: CIPP status returns all expected fields, configured={data.get('configured')}")

@@ -12,11 +12,25 @@ import uuid
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.module_permissions import require_module_permission
+from app.services.scope_permissions import assert_global_scope
 
 router = APIRouter()
 
 HUNTRESS_BASE_URL = "https://api.huntress.io"
 SETTINGS_KEY = "huntress"
+
+
+async def _require_global_huntress_access(current_user: dict, operation: str) -> None:
+    """Huntress currently exposes a tenant-wide provider account only.
+
+    Nexus cannot yet prove a provider organisation maps to one allowed Nexus
+    customer, so returning raw provider telemetry to a restricted technician
+    would breach client isolation.  Keep the integration global until that
+    explicit mapping exists.
+    """
+    await assert_global_scope(current_user, operation=operation)
 
 # --- credentials helpers ---------------------------------------------------
 
@@ -48,17 +62,20 @@ async def _get(path: str, params: Optional[dict] = None) -> dict:
     except httpx.TimeoutException:
         raise HTTPException(504, "Huntress API timeout")
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"Huntress error: {e.response.text[:200]}")
+        # Provider response bodies can contain account-specific diagnostic
+        # material.  Preserve the useful status without reflecting it to the
+        # browser or application logs.
+        raise HTTPException(e.response.status_code, f"Huntress returned HTTP {e.response.status_code}")
 
 
 # --- settings endpoints ----------------------------------------------------
 
 @router.get("/huntress/status")
 async def huntress_status(current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.status.view")
     doc = await db.settings.find_one({"type": SETTINGS_KEY}, {"_id": 0})
     return {
         "configured": bool(doc and doc.get("api_key") and doc.get("secret_key")),
-        "api_key_preview": (doc.get("api_key", "")[:6] + "…" + doc.get("api_key", "")[-4:]) if doc and doc.get("api_key") else None,
         "last_test_status": (doc or {}).get("last_test_status"),
         "last_tested_at": (doc or {}).get("last_tested_at"),
         "last_synced_at": (doc or {}).get("last_synced_at"),
@@ -69,6 +86,8 @@ async def huntress_status(current_user: dict = Depends(get_current_user)):
 
 @router.post("/huntress/settings")
 async def save_huntress_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.settings.manage")
+    await require_module_permission(current_user, "settings", "edit")
     api_key = (data or {}).get("api_key", "").strip()
     secret_key = (data or {}).get("secret_key", "").strip()
     if not api_key or not secret_key:
@@ -90,12 +109,16 @@ async def save_huntress_settings(data: dict, current_user: dict = Depends(get_cu
 
 @router.delete("/huntress/settings")
 async def clear_huntress_settings(current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.settings.manage")
+    await require_module_permission(current_user, "settings", "edit")
     await db.settings.delete_one({"type": SETTINGS_KEY})
     return {"message": "Huntress credentials removed"}
 
 
 @router.get("/huntress/test-connection")
 async def huntress_test_connection(current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.settings.test")
+    await require_module_permission(current_user, "settings", "edit")
     creds = await _get_creds()
     if not creds:
         return {"success": False, "message": "Not configured — enter API key & secret first"}
@@ -104,7 +127,6 @@ async def huntress_test_connection(current_user: dict = Depends(get_current_user
             r = await c.get(f"{HUNTRESS_BASE_URL}/v1/account")
         now = datetime.now(timezone.utc).isoformat()
         success = r.status_code == 200
-        account_info = r.json() if success and r.content else {}
         await db.settings.update_one(
             {"type": SETTINGS_KEY},
             {"$set": {
@@ -113,20 +135,21 @@ async def huntress_test_connection(current_user: dict = Depends(get_current_user
             }},
         )
         if success:
-            return {"success": True, "message": "Connected to Huntress", "account": account_info.get("account") or account_info}
-        return {"success": False, "message": f"Huntress returned {r.status_code}: {r.text[:200]}"}
-    except Exception as e:
+            return {"success": True, "message": "Connected to Huntress"}
+        return {"success": False, "message": f"Huntress returned HTTP {r.status_code}"}
+    except Exception:
         await db.settings.update_one(
             {"type": SETTINGS_KEY},
-            {"$set": {"last_test_status": f"error: {str(e)[:100]}", "last_tested_at": datetime.now(timezone.utc).isoformat()}},
+            {"$set": {"last_test_status": "error", "last_tested_at": datetime.now(timezone.utc).isoformat()}},
         )
-        return {"success": False, "message": str(e)[:300]}
+        return {"success": False, "message": "Huntress connection test could not be completed"}
 
 
 # --- data pull endpoints ---------------------------------------------------
 
 @router.get("/huntress/organizations")
 async def list_organizations(current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.organizations.view")
     data = await _get("/v1/organizations", {"limit": 500})
     return data.get("organizations", data) if isinstance(data, dict) else data
 
@@ -139,6 +162,7 @@ async def list_agents(
     limit: int = 500,
     current_user: dict = Depends(get_current_user),
 ):
+    await _require_global_huntress_access(current_user, "huntress.agents.view")
     params = {"limit": min(max(1, limit), 500)}
     if status:
         params["status"] = status
@@ -157,6 +181,7 @@ async def list_incident_reports(
     limit: int = 500,
     current_user: dict = Depends(get_current_user),
 ):
+    await _require_global_huntress_access(current_user, "huntress.incidents.view")
     params = {"limit": min(max(1, limit), 500)}
     if severity:
         params["severity"] = severity
@@ -168,6 +193,7 @@ async def list_incident_reports(
 
 @router.get("/huntress/signals")
 async def list_signals(limit: int = 200, current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.signals.view")
     try:
         data = await _get("/v1/signals", {"limit": min(max(1, limit), 500)})
         return data.get("signals", data) if isinstance(data, dict) else data
@@ -190,14 +216,14 @@ async def _post(path: str, payload: Optional[dict] = None) -> dict:
 
 
 async def _try_paths(paths: list, payload: Optional[dict] = None) -> dict:
-    """Try a list of candidate paths; return first 2xx or the last non-2xx response."""
+    """Try candidate provider paths without returning provider payloads to the UI."""
     last = None
     for p in paths:
         try:
             res = await _post(p, payload)
             last = res
             if 200 <= res["status_code"] < 300:
-                return {"success": True, "path": p, "status_code": res["status_code"], "response": res.get("json") or res.get("text")}
+                return {"success": True, "status_code": res["status_code"], "message": "Huntress accepted the action"}
         except HTTPException:
             raise
         except Exception as e:
@@ -207,12 +233,12 @@ async def _try_paths(paths: list, payload: Optional[dict] = None) -> dict:
     return {
         "success": False,
         "status_code": last.get("status_code"),
-        "message": (last.get("text") or "")[:500] or "Huntress rejected the action",
+        "message": "Huntress did not accept the action",
         "hint": "Huntress may not expose this action on your plan/beta. Check feedback.huntress.com/changelog for response-API status.",
     }
 
 
-@router.post("/huntress/incident-reports/{incident_id}/action")
+@router.post("/huntress/incident-reports/{incident_id}/action", dependencies=[Depends(require_action("security.containment.approve"))])
 async def incident_action(
     incident_id: str,
     data: dict,
@@ -222,6 +248,7 @@ async def incident_action(
     action: close | resolve | assign | comment | acknowledge
     body: { action, assignee, note }
     """
+    await _require_global_huntress_access(current_user, "huntress.incident.action")
     action = (data or {}).get("action", "").lower()
     note = (data or {}).get("note", "")
     assignee = (data or {}).get("assignee", "")
@@ -256,7 +283,8 @@ async def incident_action(
 
     result = await _try_paths(path_map[action], payload=payload)
 
-    # Mirror the action locally so the dashboard reflects it even if Huntress silently rejects
+    # Retain the attempted action locally.  This audit record is never used to
+    # imply the provider accepted or completed the external action.
     now = datetime.now(timezone.utc).isoformat()
     await db.huntress_actions.insert_one({
         "incident_id": incident_id,
@@ -281,8 +309,9 @@ async def incident_action(
     return result
 
 
-@router.post("/huntress/agents/{agent_id}/isolate")
+@router.post("/huntress/agents/{agent_id}/isolate", dependencies=[Depends(require_action("security.containment.approve"))])
 async def agent_isolate(agent_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.agent.isolate")
     note = (data or {}).get("note", "") if data else ""
     if len(note.strip()) < 8:
         raise HTTPException(400, "Record a containment reason of at least 8 characters")
@@ -306,8 +335,9 @@ async def agent_isolate(agent_id: str, data: Optional[dict] = None, current_user
     return result
 
 
-@router.post("/huntress/agents/{agent_id}/release")
+@router.post("/huntress/agents/{agent_id}/release", dependencies=[Depends(require_action("security.containment.approve"))])
 async def agent_release(agent_id: str, data: Optional[dict] = None, current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.agent.release")
     note = (data or {}).get("note", "") if data else ""
     if len(note.strip()) < 8:
         raise HTTPException(400, "Record a release reason of at least 8 characters")
@@ -333,6 +363,7 @@ async def agent_release(agent_id: str, data: Optional[dict] = None, current_user
 
 @router.get("/huntress/actions")
 async def list_actions(limit: int = 50, current_user: dict = Depends(get_current_user)):
+    await _require_global_huntress_access(current_user, "huntress.actions.view")
     rows = await db.huntress_actions.find({}, {"_id": 0}).sort("timestamp", -1).to_list(max(1, min(200, limit)))
     return rows
 
@@ -342,6 +373,7 @@ async def list_actions(limit: int = 50, current_user: dict = Depends(get_current
 @router.get("/huntress/summary")
 async def huntress_summary(current_user: dict = Depends(get_current_user)):
     """Aggregated security telemetry powering Security module dashboards."""
+    await _require_global_huntress_access(current_user, "huntress.summary.view")
     creds = await _get_creds()
     if not creds:
         return {

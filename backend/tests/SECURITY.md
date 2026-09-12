@@ -8,6 +8,7 @@ $env:NEXUS_TEST_ADMIN_EMAIL = "admin@example.com"
 $env:NEXUS_TEST_ADMIN_PASSWORD = "use-a-test-only-secret"
 ```
 
-Use `from credentials import admin_credentials` in test files, then pass the
-returned mapping to the login request. Do not commit passwords, tokens, or
-tenant secrets.
+New tests should use `from credentials import admin_credentials` and pass the
+returned mapping to the login request. Existing fixtures are progressively
+being standardised on the same environment variables. Do not commit passwords,
+tokens, or tenant secrets.

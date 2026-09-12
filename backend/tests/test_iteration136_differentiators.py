@@ -16,7 +16,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -379,9 +379,9 @@ class TestRegressionIteration135:
         assert "items" in data
         assert "generated_at" in data
     
-    def test_health_certificate_endpoint(self, headers, auth_token):
+    def test_health_certificate_endpoint(self, headers):
         """Health certificate PDF endpoint still works"""
-        response = requests.get(f"{BASE_URL}/api/clients/client-001/health-certificate.pdf?token={auth_token}")
+        response = requests.get(f"{BASE_URL}/api/clients/client-001/health-certificate.pdf", headers=headers)
         assert response.status_code == 200
         assert "application/pdf" in response.headers.get("Content-Type", "")
 

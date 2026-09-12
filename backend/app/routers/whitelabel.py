@@ -20,9 +20,12 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 @router.get("/settings/branding")
 async def get_branding(current_user: dict = Depends(get_current_user)):
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    result = branding or _default_branding()
+    # Existing tenants may have saved branding before newer document controls
+    # were introduced. Merge defaults so every supported setting remains a
+    # controlled value rather than an undefined browser field.
+    result = {**_default_branding(), **(branding or {})}
     # Validate logo URLs to filter out test placeholders
-    for key in ["company_logo_url", "company_icon_url", "invoice_logo_url", "letterhead_logo_url", "favicon_url"]:
+    for key in ["company_logo_url", "company_icon_url", "invoice_logo_url", "contract_logo_url", "letterhead_logo_url", "favicon_url"]:
         if key in result:
             result[key] = _validate_logo_url(result.get(key, ""))
     return result
@@ -82,6 +85,9 @@ def _default_branding():
         "invoice_logo_url": "",
         "invoice_header_text": "",
         "invoice_footer_text": "",
+        "contract_logo_url": "",
+        "contract_header_text": "",
+        "contract_footer_text": "",
         "document_theme": "executive",
         "report_header_text": "Managed service evidence and operational assurance",
         "report_footer_text": "Confidential - prepared for the intended recipient.",

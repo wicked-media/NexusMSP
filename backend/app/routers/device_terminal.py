@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.routers.nexus_agent import queue_command_for_device, require_agent_operator
 from app.services.activity import log_activity
+from app.services.scope_permissions import assert_record_scope
 
 
 router = APIRouter()
@@ -56,15 +57,20 @@ async def create_terminal_session(data: dict, current_user: dict = Depends(requi
         raise HTTPException(400, "device_id required")
     if shell not in VALID_SHELLS:
         raise HTTPException(400, "Choose PowerShell or CMD for the Nexus Agent command console")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(404, "Managed asset not found")
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="device_terminal.session.create",
+        resource_name="Managed asset",
+    )
     if not device.get("nexus_agent_id"):
         raise HTTPException(409, "Nexus Agent is not enrolled on this asset")
 
     session = {
         "id": f"term-{uuid.uuid4().hex[:12]}",
         "device_id": device_id,
+        "client_id": device.get("client_id"),
         "agent_id": device["nexus_agent_id"],
         "device_name": device.get("name") or "Managed asset",
         "client_name": device.get("client_name") or "",
@@ -94,8 +100,14 @@ async def execute_command(session_id: str, data: dict, current_user: dict = Depe
     if len(command) > 12000:
         raise HTTPException(400, "Command exceeds the 12,000 character limit")
 
-    device = await db.devices.find_one({"id": session["device_id"]}, {"_id": 0})
-    if not device or device.get("nexus_agent_id") != session.get("agent_id"):
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        session["device_id"],
+        operation="device_terminal.session.execute",
+        resource_name="Managed asset",
+    )
+    if device.get("nexus_agent_id") != session.get("agent_id"):
         raise HTTPException(409, "The asset's Nexus Agent association has changed; open a new command session")
 
     command_id = await queue_command_for_device(

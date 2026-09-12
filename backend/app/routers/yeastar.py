@@ -931,10 +931,16 @@ async def _cache_voice_extensions(pbx: dict, extensions: list[dict], captured_at
 @router.get("/yeastar/voice-workspace")
 async def yeastar_voice_workspace(current_user: dict = Depends(get_current_user)):
     client_scope = scope_query(current_user)
-    sync_history = await db.yeastar_sync_history.find({}, {"_id": 0}).sort("started_at", -1).to_list(30)
-    billing_history = await db.yeastar_billing_snapshots.find({}, {"_id": 0}).sort("created_at", -1).to_list(24)
+    # Client-linked Voice history is not a global operations feed. Scope every
+    # collection query here; older unscoped aggregate documents deliberately
+    # remain visible only to explicitly global users.
+    sync_history = await db.yeastar_sync_history.find(client_scope, {"_id": 0}).sort("started_at", -1).to_list(30)
+    billing_history = await db.yeastar_billing_snapshots.find(client_scope, {"_id": 0}).sort("created_at", -1).to_list(24)
     activity = await db.activity_logs.find(
-        {"entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing", "voice_provider"]}},
+        {
+            "entity_type": {"$in": ["voice_pbx", "voice_extension", "voice_billing", "voice_provider"]},
+            **scope_query(current_user, field="metadata.client_id"),
+        },
         {"_id": 0},
     ).sort("created_at", -1).to_list(50)
     last_success = next((entry for entry in sync_history if entry.get("status") == "success"), None)
@@ -1216,7 +1222,12 @@ async def sync_yeastar_workspace(data: dict = Body(default={}), current_user: di
 
 @router.post("/yeastar/billing/recalculate")
 async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_user)):
-    pbx_records = await db.yeastar_pbxs.find({}, {"_id": 0}).to_list(500)
+    # Billing snapshots are customer-scoped operational data. A restricted
+    # technician may recalculate only the PBXs they can access; a global user
+    # retains the approved whole-fleet operation. Do not rely on the UI client
+    # selector for this boundary.
+    client_scope = scope_query(current_user)
+    pbx_records = await db.yeastar_pbxs.find(client_scope, {"_id": 0}).to_list(500)
     captured_at = datetime.now(timezone.utc).isoformat()
     per_pbx = []
     all_extensions = []
@@ -1228,7 +1239,7 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
         all_extensions.extend(extensions)
         quantity = len([extension for extension in extensions if extension.get("included_in_billing")])
         previous = await db.yeastar_billing_snapshots.find_one(
-            {"pbx_id": pbx_id}, {"_id": 0, "billable_quantity": 1}, sort=[("created_at", -1)]
+            {"pbx_id": pbx_id, **client_scope}, {"_id": 0, "billable_quantity": 1}, sort=[("created_at", -1)]
         )
         snapshot = {
             "id": str(uuid.uuid4()), "created_at": captured_at, "billable_quantity": quantity,
@@ -1246,7 +1257,20 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
 
     quantity = len([extension for extension in all_extensions if extension.get("included_in_billing")])
     summary = {"id": str(uuid.uuid4()), "created_at": captured_at, "billable_quantity": quantity, "pbx_count": len(per_pbx), "source": "manual_recalculate_summary", "created_by": current_user.get("email", "system")}
-    await db.yeastar_billing_snapshots.insert_one(dict(summary))
+    # Aggregate summary documents intentionally have no single client owner.
+    # Only explicitly global users can create them. Restricted callers still
+    # receive their scoped result and per-PBX snapshots, without creating a
+    # document that could later be mistaken for a whole-fleet billing total.
+    if not client_scope:
+        await db.yeastar_billing_snapshots.insert_one(dict(summary))
+    activity_metadata = {"billable_quantity": quantity, "pbx_count": len(per_pbx)}
+    recalculated_client_ids = {str(snapshot.get("client_id") or "") for snapshot in per_pbx}
+    recalculated_client_ids.discard("")
+    # One client can be safely attributed in the shared activity ledger. A
+    # multi-client/global aggregate deliberately remains global rather than
+    # being exposed to a technician who can see only one constituent client.
+    if len(recalculated_client_ids) == 1:
+        activity_metadata["client_id"] = recalculated_client_ids.pop()
     await log_activity(
         current_user,
         "voice_billing_snapshot_captured",
@@ -1254,7 +1278,7 @@ async def recalculate_yeastar_billing(current_user: dict = Depends(get_current_u
         summary["id"],
         "Voice billing snapshot",
         f"Captured {quantity} billable extensions across {len(per_pbx)} PBX connections.",
-        metadata={"billable_quantity": quantity, "pbx_count": len(per_pbx)},
+        metadata=activity_metadata,
     )
     return {**summary, "by_pbx": per_pbx}
 
@@ -1383,10 +1407,34 @@ async def link_yeastar_billing_to_recurring(client_id: str, data: dict | None = 
 
 @router.put("/yeastar/extensions/{extension_number}/override")
 async def update_yeastar_extension_override(extension_number: str, data: dict, current_user: dict = Depends(get_current_user)):
-    extension_key = str(data.get("extension_key") or extension_number)
+    extension_number = str(extension_number or "").strip()
+    extension_key = str(data.get("extension_key") or "").strip()
+    pbx_id, separator, keyed_extension_number = extension_key.partition(":")
+    if (
+        not pbx_id
+        or not separator
+        or not keyed_extension_number
+        or ":" in keyed_extension_number
+        or keyed_extension_number != extension_number
+    ):
+        raise HTTPException(status_code=400, detail="Extension key must match the selected PBX and extension number")
+
+    # The extension key is caller-controlled. Resolve its parent PBX and prove
+    # the PBX client is in scope before reading an existing override or making
+    # any mutation. A bare extension number cannot safely establish ownership.
+    pbx = await db.yeastar_pbxs.find_one(
+        {"id": pbx_id}, {"_id": 0, "id": 1, "name": 1, "client_id": 1}
+    )
+    if not pbx:
+        raise HTTPException(status_code=404, detail="PBX not found")
+    await assert_client_scope(
+        current_user,
+        pbx.get("client_id"),
+        operation="voice.extension.override.update",
+        mask_not_found=True,
+    )
+
     existing = await db.yeastar_extension_overrides.find_one({"extension_key": extension_key}, {"_id": 0}) or {}
-    if not existing and ":" not in extension_key:
-        existing = await db.yeastar_extension_overrides.find_one({"extension_number": extension_number}, {"_id": 0}) or {}
     next_enabled = bool(data.get("enabled", existing.get("enabled", True)))
     next_excluded = bool(data.get("exclude_from_billing", existing.get("exclude_from_billing", False)))
     previous_enabled = bool(existing.get("enabled", True))
@@ -1398,6 +1446,9 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
     record = {
         "extension_key": extension_key,
         "extension_number": extension_number,
+        "pbx_id": pbx_id,
+        "pbx_name": pbx.get("name") or "Yeastar PBX",
+        "client_id": pbx.get("client_id") or "",
         "enabled": next_enabled,
         "exclude_from_billing": next_excluded,
         "exclusion_reason": data.get("exclusion_reason", existing.get("exclusion_reason", "")),
@@ -1408,8 +1459,6 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
     }
     await db.yeastar_extension_overrides.update_one({"extension_key": extension_key}, {"$set": record}, upsert=True)
     if changed:
-        pbx_id = extension_key.split(":", 1)[0] if ":" in extension_key else ""
-        pbx = await db.yeastar_pbxs.find_one({"id": pbx_id}, {"_id": 0, "name": 1, "client_id": 1}) if pbx_id else None
         await log_activity(
             current_user,
             "voice_extension_override_updated",
@@ -1424,7 +1473,11 @@ async def update_yeastar_extension_override(extension_number: str, data: dict, c
                     "after": next_enabled and not next_excluded,
                 },
             },
-            metadata={"client_id": (pbx or {}).get("client_id", ""), "pbx_id": pbx_id, "pbx_name": (pbx or {}).get("name", "")},
+            metadata={
+                "client_id": pbx.get("client_id", ""),
+                "pbx_id": pbx_id,
+                "pbx_name": pbx.get("name", ""),
+            },
         )
     return record
 

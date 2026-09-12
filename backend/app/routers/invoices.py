@@ -3,20 +3,47 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
+import base64
+import hashlib
+import hmac
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
+from app.services.integration_security import redact_connection_settings
+from app.services.public_url import configured_public_base_url
 from app.services.finance_integrity import (
     begin_idempotent_operation,
     complete_idempotent_operation,
     fail_idempotent_operation,
     normalise_invoice_document,
 )
+from app.services.commercial_documents import (
+    freeze_commercial_document_snapshot,
+    normalise_document_customisation,
+)
 from app.models import *
 
 router = APIRouter()
+
+
+async def _commercial_document_branding() -> dict:
+    """Load the existing organisation branding without introducing a new owner."""
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    if not branding:
+        legacy = await db.settings.find_one({"key": "whitelabel_options"}, {"_id": 0}) or {}
+        branding = legacy.get("value") if isinstance(legacy.get("value"), dict) else legacy
+    return branding or {}
+
+
+def verify_xero_webhook_signature(raw_body: bytes, signature: str, webhook_key: str | None = None) -> bool:
+    """Verify Xero's base64-encoded HMAC-SHA256 webhook signature."""
+    key = webhook_key if webhook_key is not None else os.getenv("XERO_WEBHOOK_KEY", "")
+    if not key or not signature:
+        return False
+    expected = base64.b64encode(hmac.new(key.encode("utf-8"), raw_body, hashlib.sha256).digest()).decode("ascii")
+    return hmac.compare_digest(expected, signature.strip())
 
 
 async def _resolve_invoice_ticket_link(ticket_id: Optional[str], client_id: Optional[str]) -> dict:
@@ -172,6 +199,9 @@ async def create_invoice(invoice_data: InvoiceCreate, request: Request, current_
         raise HTTPException(status_code=422, detail="Tax rate must be between 0 and 100")
     if not 0 <= float(invoice_data.discount_pct or 0) <= 100:
         raise HTTPException(status_code=422, detail="Discount percentage must be between 0 and 100")
+    document_customisation = await normalise_document_customisation(
+        invoice_data.model_dump(), "invoice", database=db
+    )
     client_name = client['name'] if client else None
     ticket_link = await _resolve_invoice_ticket_link(invoice_data.ticket_id, invoice_data.client_id)
 
@@ -266,6 +296,9 @@ async def create_invoice(invoice_data: InvoiceCreate, request: Request, current_
         contract_id=invoice_data.contract_id,
         **ticket_link,
         invoice_name=(invoice_data.invoice_name or "").strip() or None,
+        document_label=document_customisation.get("document_label"),
+        document_terms=document_customisation.get("document_terms"),
+        document_template_id=document_customisation.get("document_template_id"),
         due_date=invoice_data.due_date,
         notes=invoice_data.notes,
         line_items=enriched_lines,
@@ -322,7 +355,7 @@ async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, 
         operation="billing.invoice.modify",
         request=request,
     )
-    allowed = {"client_id", "client_name", "contract_id", "ticket_id", "invoice_name", "due_date", "notes", "line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total", "is_recurring", "recurring_interval", "recurring_start_date", "recurring_end_date", "status"}
+    allowed = {"client_id", "client_name", "contract_id", "ticket_id", "invoice_name", "document_label", "document_terms", "document_template_id", "due_date", "notes", "line_items", "tax_rate", "discount_pct", "discount_amount", "subtotal", "tax", "total", "is_recurring", "recurring_interval", "recurring_start_date", "recurring_end_date", "status"}
     update = {key: value for key, value in invoice_data.items() if key in allowed}
     if update.get("client_id") and update.get("client_id") != old_inv.get("client_id"):
         await assert_client_scope(
@@ -335,6 +368,15 @@ async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, 
         update["invoice_name"] = str(update["invoice_name"] or "").strip()
         if len(update["invoice_name"]) > 160:
             raise HTTPException(status_code=422, detail="Invoice name must be 160 characters or fewer")
+    document_fields = {"document_label", "document_terms", "document_template_id"}
+    if document_fields.intersection(update):
+        if old_inv.get("status") != "draft":
+            raise HTTPException(
+                status_code=409,
+                detail="Document appearance can only be changed while an invoice is a draft",
+            )
+        update.update(await normalise_document_customisation(update, "invoice", database=db))
+    freeze_document_snapshot = False
     if "status" in update:
         requested_status = str(update["status"] or "").strip().lower()
         if requested_status not in {"draft", "pending_approval", "sent"}:
@@ -344,6 +386,7 @@ async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, 
         update["status"] = requested_status
         if requested_status == "sent" and old_inv.get("status") != "sent":
             update["sent_at"] = datetime.now(timezone.utc).isoformat()
+            freeze_document_snapshot = True
     old_ticket_id = old_inv.get("ticket_id", "")
     should_refresh_ticket_link = "ticket_id" in update or ("client_id" in update and old_ticket_id)
     if should_refresh_ticket_link:
@@ -422,10 +465,21 @@ async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, 
             "tax": tax,
             "total": round(discounted_subtotal + tax, 2),
         })
+    if freeze_document_snapshot:
+        # Freeze only after every server-side validation and total
+        # recalculation has completed.  That makes the retained render
+        # evidence match the document that has actually been issued.
+        rendered_record = {**old_inv, **update}
+        update["document_snapshot"] = await freeze_commercial_document_snapshot(
+            "invoice",
+            rendered_record,
+            await _commercial_document_branding(),
+            database=db,
+        )
     version = old_inv.get("version")
     version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
     result = await db.invoices.update_one(
-        {"id": invoice_id, **version_filter},
+        {"id": invoice_id, "client_id": old_inv.get("client_id"), **version_filter},
         {"$set": update, "$inc": {"version": 1}},
     )
     if result.matched_count == 0:
@@ -434,7 +488,10 @@ async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, 
         change_dict = {}
         for k, v in update.items():
             if old_inv.get(k) != v:
-                change_dict[k] = {"old": str(old_inv.get(k)), "new": str(v)}
+                if k == "document_snapshot":
+                    change_dict[k] = {"old": "not frozen" if not old_inv.get(k) else "frozen", "new": "frozen commercial render evidence"}
+                else:
+                    change_dict[k] = {"old": str(old_inv.get(k)), "new": str(v)}
         if change_dict:
             await log_activity(current_user, "updated", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Updated invoice fields: {', '.join(change_dict.keys())}", changes=change_dict)
         if should_refresh_ticket_link and old_ticket_id != update.get("ticket_id", ""):
@@ -446,7 +503,12 @@ async def update_invoice(invoice_id: str, invoice_data: dict, request: Request, 
 
 
 @router.post("/invoices/{invoice_id}/split-billing", dependencies=[Depends(require_action("billing.invoice.modify"))])
-async def create_split_billing_invoices(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+async def create_split_billing_invoices(
+    invoice_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Replace one unpaid draft with auditable payer-specific invoices.
 
     Each payer allocation is a gross (tax-inclusive) amount. The source remains
@@ -456,6 +518,13 @@ async def create_split_billing_invoices(invoice_id: str, data: dict, current_use
     source = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        source.get("client_id"),
+        operation="billing.invoice.split_billing.create",
+        request=request,
+        mask_not_found=True,
+    )
     if source.get("is_split_parent") or source.get("is_split_child"):
         raise HTTPException(status_code=409, detail="This invoice is already part of a split-billing workflow")
     if source.get("status") not in {"draft", "pending_approval"}:
@@ -481,6 +550,15 @@ async def create_split_billing_invoices(invoice_id: str, data: dict, current_use
             raise HTTPException(status_code=422, detail=f"Allocation {index} needs a valid amount")
         if not payer_client_id or amount <= 0:
             raise HTTPException(status_code=422, detail=f"Allocation {index} needs a customer and a positive amount")
+        # A split can create invoices for several clients.  Prove the actor may
+        # operate on every payer before loading names or inserting any records.
+        await assert_client_scope(
+            current_user,
+            payer_client_id,
+            operation="billing.invoice.split_billing.allocate",
+            request=request,
+            mask_not_found=True,
+        )
         client = await db.clients.find_one({"id": payer_client_id}, {"_id": 0, "id": 1, "name": 1, "email": 1})
         if not client:
             raise HTTPException(status_code=422, detail=f"The customer selected for allocation {index} could not be found")
@@ -588,13 +666,18 @@ async def create_split_billing_invoices(invoice_id: str, data: dict, current_use
         "allocations": normalized,
         "child_invoice_ids": [item["id"] for item in payer_invoices],
     }
-    await db.invoices.update_one({"id": source["id"]}, {"$set": {
+    parent_update = await db.invoices.update_one({
+        "id": source["id"],
+        "client_id": source.get("client_id"),
+    }, {"$set": {
         "status": "split_billed",
         "payment_status": "split",
         "is_split_parent": True,
         "split_billing": split_billing,
         "split_billed_at": now.isoformat(),
     }})
+    if parent_update.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Invoice ownership changed while split billing was being created; refresh and retry")
     parent = await db.invoices.find_one({"id": source["id"]}, {"_id": 0})
     await log_activity(
         current_user,
@@ -609,23 +692,51 @@ async def create_split_billing_invoices(invoice_id: str, data: dict, current_use
         await ticket_audit(source["ticket_id"], current_user, "invoice_split_billing", f"Invoice {parent_number} was split into {len(payer_invoices)} payer invoices for auditable billing.")
     return {"message": "Split-billing payer invoices created", "parent": parent, "payer_invoices": payer_invoices}
 
-@router.delete("/invoices/{invoice_id}")
+@router.delete(
+    "/invoices/{invoice_id}",
+    dependencies=[Depends(require_action("billing.invoice.void"))],
+)
 async def delete_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
     old_inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if old_inv and (old_inv.get("payment_status") in {"paid", "partial"} or old_inv.get("status") not in {"draft", "pending_approval"}):
+    if not old_inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        old_inv.get("client_id"),
+        operation="billing.invoice.delete",
+        mask_not_found=True,
+    )
+    if old_inv.get("payment_status") in {"paid", "partial"} or old_inv.get("status") not in {"draft", "pending_approval"}:
         raise HTTPException(status_code=409, detail="Only unpaid draft invoices can be deleted; use a credit note or void workflow instead")
-    result = await db.invoices.delete_one({"id": invoice_id})
+    version = old_inv.get("version")
+    version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
+    result = await db.invoices.delete_one({
+        "id": invoice_id,
+        "client_id": old_inv.get("client_id"),
+        **version_filter,
+    })
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    if old_inv:
-        await log_activity(current_user, "deleted", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Deleted invoice {old_inv.get('invoice_number', '')}")
+    await log_activity(current_user, "deleted", "invoice", invoice_id, old_inv.get("invoice_number", ""), f"Deleted invoice {old_inv.get('invoice_number', '')}")
     return {"message": "Invoice deleted"}
 
 @router.post("/invoices/{invoice_id}/generate-from-contract", dependencies=[Depends(require_action("billing.invoice.create"))])
-async def generate_invoice_from_contract(invoice_id: str, contract_id: str, current_user: dict = Depends(get_current_user)):
+async def generate_invoice_from_contract(
+    invoice_id: str,
+    contract_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
     if not contract:
         raise HTTPException(status_code=404, detail="Contract not found")
+    await assert_client_scope(
+        current_user,
+        contract.get("client_id"),
+        operation="billing.invoice.create_from_contract",
+        request=request,
+        mask_not_found=True,
+    )
     
     line_items = await db.line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(100)
     
@@ -660,14 +771,27 @@ async def generate_invoice_from_contract(invoice_id: str, contract_id: str, curr
 
 # ============== STRIPE PAYMENT ENDPOINTS ==============
 
-@router.post("/invoices/{invoice_id}/pay")
-async def create_invoice_payment(invoice_id: str, request_data: dict, current_user: dict = Depends(get_current_user)):
-    from fastapi import Request
+@router.post("/invoices/{invoice_id}/pay", dependencies=[Depends(require_action("billing.payment.record"))])
+async def create_invoice_payment(
+    invoice_id: str,
+    request_data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.payment.checkout.create",
+        request=request,
+        mask_not_found=True,
+    )
     if invoice.get("is_split_parent"):
         raise HTTPException(status_code=409, detail="Use the generated payer invoices for payment collection")
+    if invoice.get("status") in {"cancelled", "voided"}:
+        raise HTTPException(status_code=409, detail="Cannot collect payment for a voided invoice")
     if invoice.get("payment_status") == "paid":
         raise HTTPException(status_code=400, detail="Invoice already paid")
 
@@ -681,39 +805,88 @@ async def create_invoice_payment(invoice_id: str, request_data: dict, current_us
         raise HTTPException(status_code=500, detail="Stripe not configured. Go to Settings to add your Stripe API key.")
 
     from app.services.stripe_checkout import StripeCheckout, CheckoutSessionRequest
-    origin_url = request_data.get("origin_url", "")
-    webhook_url = f"{origin_url}/api/webhook/stripe"
-    stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url=webhook_url)
+    public_base = configured_public_base_url()
+    stripe_checkout = StripeCheckout(api_key=stripe_key)
 
-    success_url = f"{origin_url}/invoices?payment_success=true&session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{origin_url}/invoices?payment_cancelled=true"
+    success_url = f"{public_base}/invoices?payment_success=true&session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{public_base}/invoices?payment_cancelled=true"
 
     amount = float(invoice.get("total", 0)) - float(invoice.get("amount_paid", 0))
+    if amount <= 0:
+        raise HTTPException(status_code=409, detail="Invoice has no outstanding balance")
     checkout_req = CheckoutSessionRequest(
         amount=round(amount, 2),
-        currency="usd",
+        currency=str(invoice.get("currency") or "AUD").strip().lower(),
         success_url=success_url,
         cancel_url=cancel_url,
         metadata={"invoice_id": invoice_id, "invoice_number": invoice.get("invoice_number", "")}
     )
-    session = await stripe_checkout.create_checkout_session(checkout_req)
+    # One unchanged invoice balance gets one provider-idempotent checkout.
+    # A browser retry cannot create a second chargeable session merely because
+    # the first response was lost in transit.
+    version = invoice.get("version", 0)
+    idempotency_material = f"nexus-invoice-checkout:v1:{invoice_id}:{invoice.get('client_id')}:{version}:{round(amount, 2)}:{checkout_req.currency}"
+    checkout_idempotency_key = hashlib.sha256(idempotency_material.encode("utf-8")).hexdigest()
+    session = await stripe_checkout.create_checkout_session(
+        checkout_req,
+        idempotency_key=checkout_idempotency_key,
+    )
 
-    await db.payment_transactions.insert_one({
-        "id": str(uuid.uuid4()),
-        "invoice_id": invoice_id,
-        "session_id": session.session_id,
-        "amount": amount,
-        "currency": "usd",
-        "payment_status": "initiated",
-        "user_id": current_user["id"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
-    await db.invoices.update_one({"id": invoice_id}, {"$set": {"stripe_session_id": session.session_id}})
+    existing_transaction = await db.payment_transactions.find_one(
+        {"invoice_id": invoice_id, "session_id": session.session_id},
+        {"_id": 0, "id": 1},
+    )
+    if not existing_transaction:
+        await db.payment_transactions.insert_one({
+            "id": str(uuid.uuid4()),
+            "invoice_id": invoice_id,
+            "invoice_collection": "invoices",
+            "session_id": session.session_id,
+            "amount": amount,
+            "amount_cents": int(round(amount * 100)),
+            "currency": checkout_req.currency,
+            "payment_status": "initiated",
+            "source": "invoice_checkout",
+            "idempotency_key": checkout_idempotency_key,
+            "user_id": current_user["id"],
+            "client_id": invoice.get("client_id"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    await db.invoices.update_one(
+        {"id": invoice_id, "client_id": invoice.get("client_id")},
+        {"$set": {"stripe_session_id": session.session_id}},
+    )
 
     return {"url": session.url, "session_id": session.session_id}
 
-@router.get("/invoices/{invoice_id}/payment-status")
-async def check_payment_status(invoice_id: str, session_id: str, current_user: dict = Depends(get_current_user)):
+@router.get("/invoices/{invoice_id}/payment-status", dependencies=[Depends(require_action("billing.payment.record"))])
+async def check_payment_status(
+    invoice_id: str,
+    session_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.payment.checkout.status",
+        request=request,
+        mask_not_found=True,
+    )
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        raise HTTPException(status_code=422, detail="Payment session ID is required")
+    transaction = await db.payment_transactions.find_one(
+        {"invoice_id": invoice_id, "session_id": clean_session_id},
+        {"_id": 0},
+    )
+    if not transaction:
+        # The caller must not be able to apply a checkout session created for
+        # another invoice, even when both invoice IDs are in its client scope.
+        raise HTTPException(status_code=404, detail="Payment session not found")
     stripe_key = None
     stripe_setting = await db.settings.find_one({"type": "stripe"}, {"_id": 0})
     if stripe_setting and stripe_setting.get("api_key"):
@@ -725,37 +898,19 @@ async def check_payment_status(invoice_id: str, session_id: str, current_user: d
 
     from app.services.stripe_checkout import StripeCheckout
     stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
-    status = await stripe_checkout.get_checkout_status(session_id)
+    status = await stripe_checkout.get_checkout_status(clean_session_id)
 
-    existing = await db.payment_transactions.find_one({"session_id": session_id, "payment_status": "paid"})
+    existing = await db.payment_transactions.find_one({
+        "invoice_id": invoice_id,
+        "session_id": clean_session_id,
+        "payment_status": "paid",
+    })
     if existing:
         return {"payment_status": "paid", "already_processed": True}
 
-    if status.payment_status == "paid":
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"payment_status": "paid", "updated_at": datetime.now(timezone.utc).isoformat()}}
-        )
-        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-        new_paid = float(invoice.get("amount_paid", 0)) + float(status.amount_total / 100)
-        new_payment_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
-        payment_record = {
-            "amount": status.amount_total / 100,
-            "method": "stripe",
-            "date": datetime.now(timezone.utc).isoformat(),
-            "session_id": session_id,
-        }
-        await db.invoices.update_one({"id": invoice_id}, {
-            "$set": {
-                "payment_status": new_payment_status,
-                "amount_paid": new_paid,
-                "status": "paid" if new_payment_status == "paid" else invoice.get("status"),
-                "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if new_payment_status == "paid" else None,
-            },
-            "$push": {"payments": payment_record}
-        })
-        await _sync_split_billing_parent_payment(invoice, new_paid, new_payment_status, current_user)
-
+    # The signed Stripe webhook is the only settlement authority.  Status
+    # polling is deliberately read-only so a browser request cannot race or
+    # bypass the provider callback's transaction/invoice binding checks.
     return {"payment_status": status.payment_status, "amount_total": status.amount_total, "currency": status.currency}
 
 @router.post("/invoices/{invoice_id}/record-payment", dependencies=[Depends(require_action("billing.payment.record"))])
@@ -768,6 +923,7 @@ async def record_manual_payment(invoice_id: str, data: dict, request: Request, c
         invoice.get("client_id"),
         operation="billing.payment.record",
         request=request,
+        mask_not_found=True,
     )
     if invoice.get("is_split_parent"):
         raise HTTPException(status_code=409, detail="Record payments against the generated payer invoices, not the split-billing source record")
@@ -826,7 +982,7 @@ async def record_manual_payment(invoice_id: str, data: dict, request: Request, c
         return {**replay, "replayed": True}
     version = invoice.get("version")
     version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
-    result = await db.invoices.update_one({"id": invoice_id, **version_filter}, {
+    result = await db.invoices.update_one({"id": invoice_id, "client_id": invoice.get("client_id"), **version_filter}, {
         "$set": {"payment_status": new_status, "amount_paid": new_paid,
                  "status": "paid" if new_status == "paid" else invoice.get("status"),
                  "paid_date": payment_date if new_status == "paid" else invoice.get("paid_date")},
@@ -856,7 +1012,14 @@ async def record_manual_payment(invoice_id: str, data: dict, request: Request, c
 @router.get("/billing/reconciliation/summary")
 async def get_reconciliation_summary(current_user: dict = Depends(get_current_user)):
     """Finance-safe payment worklist. Manual payments remain pending until matched in Xero."""
-    invoices = await db.invoices.find({"status": {"$nin": ["cancelled", "voided"]}, "is_split_parent": {"$ne": True}}, {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1, "payments": 1}).to_list(5000)
+    invoices = await db.invoices.find(
+        scoped_query(
+            current_user,
+            {"status": {"$nin": ["cancelled", "voided"]}, "is_split_parent": {"$ne": True}},
+            site_field=None,
+        ),
+        {"_id": 0, "id": 1, "invoice_number": 1, "client_name": 1, "payments": 1},
+    ).to_list(5000)
     pending, methods = [], {}
     for invoice in invoices:
         for payment in invoice.get("payments", []) or []:
@@ -873,8 +1036,11 @@ async def get_reconciliation_summary(current_user: dict = Depends(get_current_us
 
 
 @router.post("/billing/reconciliation/settlements", dependencies=[Depends(require_action("billing.payment.record"))])
-async def close_payment_settlement(data: dict, current_user: dict = Depends(get_current_user)):
+async def close_payment_settlement(data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     """Closes a daily EFTPOS/cash batch without claiming it has been matched in Xero."""
+    # A settlement changes every matching client payment for a date/method.
+    # It must never silently become a restricted technician's partial batch.
+    await assert_global_scope(current_user, operation="billing.reconciliation.settlement.close", request=request)
     method = str(data.get("method", "") or "").strip().lower()
     date = str(data.get("date", "") or "").strip()
     reference = str(data.get("reference", "") or "").strip()
@@ -906,15 +1072,33 @@ async def get_client_billing_profile(client_id: str, current_user: dict = Depend
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    await assert_client_scope(
+        current_user,
+        client_id,
+        operation="billing.client_profile.read",
+        mask_not_found=True,
+    )
     profile = client.get("billing_profile") or {}
     return {"client_id": client_id, "client_name": client.get("name"), "billing_email": profile.get("billing_email") or client.get("billing_email") or client.get("email", ""), "payment_terms_days": profile.get("payment_terms_days", 30), "purchase_order_required": bool(profile.get("purchase_order_required", False)), "default_payment_method": profile.get("default_payment_method", "bank_transfer"), "xero_contact_id": profile.get("xero_contact_id", "")}
 
 
-@router.put("/clients/{client_id}/billing-profile")
-async def update_client_billing_profile(client_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.put("/clients/{client_id}/billing-profile", dependencies=[Depends(require_action("billing.invoice.modify"))])
+async def update_client_billing_profile(
+    client_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    await assert_client_scope(
+        current_user,
+        client_id,
+        operation="billing.client_profile.update",
+        request=request,
+        mask_not_found=True,
+    )
     terms = int(data.get("payment_terms_days", 30) or 30)
     if not 0 <= terms <= 365:
         raise HTTPException(status_code=422, detail="Payment terms must be between 0 and 365 days")
@@ -925,16 +1109,39 @@ async def update_client_billing_profile(client_id: str, data: dict, current_user
 
 # Move invoice to different client
 @router.post("/invoices/{invoice_id}/move-client", dependencies=[Depends(require_action("billing.invoice.modify"))])
-async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+async def move_invoice_to_client(
+    invoice_id: str,
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.invoice.move-client",
+        request=request,
+        mask_not_found=True,
+    )
     new_client_id = data.get("client_id")
     if not new_client_id:
         raise HTTPException(status_code=400, detail="New client_id required")
+    await assert_client_scope(
+        current_user,
+        new_client_id,
+        operation="billing.invoice.move-client.target",
+        request=request,
+        mask_not_found=True,
+    )
     new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0})
     if not new_client:
         raise HTTPException(status_code=404, detail="Target client not found")
+    if invoice.get("is_split_parent") or invoice.get("is_split_child"):
+        raise HTTPException(status_code=409, detail="Split-billing records cannot be moved; correct or recreate the payer invoices instead")
+    if invoice.get("status") not in {"draft", "pending_approval"} or invoice.get("payment_status") not in {"unpaid", None}:
+        raise HTTPException(status_code=409, detail="Only unpaid draft invoices can be moved; use a credit note, void, or reissue workflow instead")
     if invoice.get("ticket_id"):
         linked_ticket = await db.tickets.find_one({"id": invoice["ticket_id"]}, {"_id": 0, "id": 1, "client_id": 1, "ticket_number": 1})
         if linked_ticket and linked_ticket.get("client_id") != new_client_id:
@@ -942,13 +1149,24 @@ async def move_invoice_to_client(invoice_id: str, data: dict, current_user: dict
                 status_code=409,
                 detail=f"Invoice is linked to ticket {linked_ticket.get('ticket_number') or linked_ticket['id']}. Unlink or relink that ticket before moving the invoice to another client.",
             )
+    if invoice.get("contract_id"):
+        linked_contract = await db.contracts.find_one({"id": invoice["contract_id"]}, {"_id": 0, "id": 1, "client_id": 1, "name": 1})
+        if not linked_contract or linked_contract.get("client_id") != new_client_id:
+            raise HTTPException(
+                status_code=409,
+                detail="Invoice is linked to a contract for another client. Unlink or replace that contract before moving the invoice.",
+            )
     old_client_name = invoice.get("client_name", "Unknown")
-    await db.invoices.update_one({"id": invoice_id}, {"$set": {
+    version = invoice.get("version")
+    version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
+    result = await db.invoices.update_one({"id": invoice_id, "client_id": invoice.get("client_id"), **version_filter}, {"$set": {
         "client_id": new_client_id, "client_name": new_client["name"],
-    }, "$push": {"audit_trail": {
+    }, "$inc": {"version": 1}, "$push": {"audit_trail": {
         "action": "moved_client", "from_client": old_client_name, "to_client": new_client["name"],
         "by": current_user.get("name", ""), "date": datetime.now(timezone.utc).isoformat()
     }}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Invoice ownership changed while it was being moved; refresh and retry")
     await log_activity(current_user, "moved_client", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Moved invoice from {old_client_name} to {new_client['name']}", changes={"client": {"old": old_client_name, "new": new_client["name"]}})
     return {"message": f"Invoice moved to {new_client['name']}", "new_client_name": new_client["name"]}
 
@@ -963,6 +1181,7 @@ async def void_invoice(invoice_id: str, request: Request, data: dict = {}, curre
         invoice.get("client_id"),
         operation="billing.invoice.void",
         request=request,
+        mask_not_found=True,
     )
     if invoice.get("status") not in {"draft", "pending_approval"} or invoice.get("payment_status") not in {"unpaid", None}:
         raise HTTPException(
@@ -974,26 +1193,29 @@ async def void_invoice(invoice_id: str, request: Request, data: dict = {}, curre
     if invoice.get("status") in {"cancelled", "voided"}:
         raise HTTPException(status_code=409, detail="Invoice is already voided")
     reason = data.get("reason", "")
-    await db.invoices.update_one({"id": invoice_id}, {"$set": {
+    result = await db.invoices.update_one({"id": invoice_id, "client_id": invoice.get("client_id")}, {"$set": {
         "status": "cancelled", "void_reason": reason,
     }, "$push": {"audit_trail": {
         "action": "voided", "reason": reason,
         "by": current_user.get("name", ""), "date": datetime.now(timezone.utc).isoformat()
     }}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Invoice ownership changed while it was being voided; refresh and retry")
     await log_activity(current_user, "voided", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Voided invoice. Reason: {reason}")
     return {"message": "Invoice voided"}
 
 # Xero integration endpoints
 @router.get("/settings/xero")
-async def get_xero_settings(current_user: dict = Depends(get_current_user)):
+async def get_xero_settings(request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("billing.integration.manage"))):
+    await assert_global_scope(current_user, operation="billing.integration.xero.read", request=request)
     settings_doc = await db.settings.find_one({"type": "xero"}, {"_id": 0})
     if not settings_doc:
-        return {"type": "xero", "connected": False, "client_id": "", "tenant_name": ""}
-    settings_doc.pop("client_secret", None)
-    return settings_doc
+        return {"type": "xero", "configured": False, "connected": False, "client_id": "", "tenant_name": ""}
+    return {**redact_connection_settings(settings_doc), "configured": bool(settings_doc.get("client_id"))}
 
 @router.put("/settings/xero")
-async def update_xero_settings(data: dict, current_user: dict = Depends(get_current_user)):
+async def update_xero_settings(data: dict, request: Request, current_user: dict = Depends(get_current_user), _permission: dict = Depends(require_action("billing.integration.manage"))):
+    await assert_global_scope(current_user, operation="billing.integration.xero.update", request=request)
     await db.settings.update_one({"type": "xero"}, {"$set": {
         "type": "xero", "client_id": data.get("client_id", ""),
         "client_secret": data.get("client_secret", ""),
@@ -1001,15 +1223,28 @@ async def update_xero_settings(data: dict, current_user: dict = Depends(get_curr
         "connected": data.get("connected", False),
         "tenant_name": data.get("tenant_name", ""),
         "tenant_id": data.get("tenant_id", ""),
+        "configured": bool(data.get("client_id")),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }}, upsert=True)
+    await log_activity(current_user, "xero_settings_updated", "integration", "xero", "Xero accounting connection")
     return {"message": "Xero settings updated"}
 
-@router.post("/xero/sync-invoice/{invoice_id}")
-async def sync_invoice_to_xero(invoice_id: str, current_user: dict = Depends(get_current_user)):
+@router.post("/xero/sync-invoice/{invoice_id}", dependencies=[Depends(require_action("billing.invoice.modify"))])
+async def sync_invoice_to_xero(
+    invoice_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.invoice.xero_sync",
+        request=request,
+        mask_not_found=True,
+    )
     xero_settings = await db.settings.find_one({"type": "xero"}, {"_id": 0})
     if not xero_settings or not xero_settings.get("connected"):
         raise HTTPException(status_code=400, detail="Xero not connected. Configure in Settings.")
@@ -1027,9 +1262,35 @@ async def sync_invoice_to_xero(invoice_id: str, current_user: dict = Depends(get
     )
 
 @router.post("/xero/webhook")
-async def xero_webhook(data: dict):
-    events = data.get("events", [])
+async def xero_webhook(request: Request):
+    """Receive a signed Xero callback without trusting browser/session data."""
+    webhook_key = os.getenv("XERO_WEBHOOK_KEY", "")
+    if not webhook_key:
+        raise HTTPException(status_code=503, detail="Xero webhook service identity is not configured")
+    raw_body = await request.body()
+    signature = request.headers.get("x-xero-signature", "")
+    if not verify_xero_webhook_signature(raw_body, signature, webhook_key):
+        raise HTTPException(status_code=401, detail="Invalid Xero webhook signature")
+    try:
+        data = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Xero webhook payload must be valid JSON") from exc
+    events = data.get("events", []) if isinstance(data, dict) else []
+    if not isinstance(events, list):
+        raise HTTPException(status_code=400, detail="Xero webhook events must be a list")
+    processed = 0
     for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_id = str(event.get("eventId") or event.get("id") or "").strip()
+        if event_id:
+            received = await db.xero_webhook_events.update_one(
+                {"event_id": event_id},
+                {"$setOnInsert": {"event_id": event_id, "received_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True,
+            )
+            if not received.upserted_id:
+                continue
         if event.get("eventType") == "INVOICES.UPDATE":
             xero_id = event.get("resourceId")
             invoice = await db.invoices.find_one({"xero_invoice_id": xero_id}, {"_id": 0})
@@ -1044,7 +1305,8 @@ async def xero_webhook(data: dict):
                         "amount": invoice.get("total", 0), "method": "xero",
                         "date": datetime.now(timezone.utc).isoformat(), "reference": xero_id,
                     }}})
-    return {"status": "received"}
+                processed += 1
+    return {"status": "received", "processed": processed}
 
 # ============== NO-NOTES ESCALATION SETTINGS ==============
 
@@ -1106,36 +1368,15 @@ async def check_no_notes_escalation(current_user: dict = Depends(get_current_use
             escalated += 1
     return {"escalated": escalated, "threshold_hours": threshold_hours}
 
-# ============== XERO INTEGRATION SETTINGS ==============
-
-@router.get("/settings/xero")
-async def get_xero_settings(current_user: dict = Depends(get_current_user)):
-    setting = await db.settings.find_one({"type": "xero"}, {"_id": 0})
-    if not setting:
-        return {"configured": False, "client_id": "", "connected": False}
-    return {**setting, "client_secret": "***" if setting.get("client_secret") else ""}
-
-@router.put("/settings/xero")
-async def update_xero_settings(data: dict, current_user: dict = Depends(get_current_user)):
-    await db.settings.update_one(
-        {"type": "xero"},
-        {"$set": {
-            "type": "xero",
-            "client_id": data.get("client_id", ""),
-            "client_secret": data.get("client_secret", ""),
-            "redirect_uri": data.get("redirect_uri", ""),
-            "connected": data.get("connected", False),
-            "configured": bool(data.get("client_id")),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
-        upsert=True
-    )
-    return {"message": "Xero settings saved"}
-
 # ============== STRIPE SETTINGS ==============
 
 @router.get("/settings/stripe")
-async def get_stripe_settings(current_user: dict = Depends(get_current_user)):
+async def get_stripe_settings(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    _permission: dict = Depends(require_action("billing.integration.manage")),
+):
+    await assert_global_scope(current_user, operation="billing.integration.stripe.read", request=request)
     setting = await db.settings.find_one({"type": "stripe"}, {"_id": 0})
     env_key = os.environ.get("STRIPE_API_KEY", "")
     if setting:
@@ -1143,7 +1384,13 @@ async def get_stripe_settings(current_user: dict = Depends(get_current_user)):
     return {"api_key": "***" + env_key[-4:] if env_key else "", "configured": bool(env_key)}
 
 @router.put("/settings/stripe")
-async def update_stripe_settings(data: dict, current_user: dict = Depends(get_current_user)):
+async def update_stripe_settings(
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    _permission: dict = Depends(require_action("billing.integration.manage")),
+):
+    await assert_global_scope(current_user, operation="billing.integration.stripe.update", request=request)
     api_key = data.get("api_key", "")
     if not api_key or api_key.startswith("***"):
         return {"message": "No changes (masked key ignored)"}
@@ -1159,6 +1406,7 @@ async def update_stripe_settings(data: dict, current_user: dict = Depends(get_cu
     )
     # Also update the env var in memory for immediate use
     os.environ["STRIPE_API_KEY"] = api_key
+    await log_activity(current_user, "stripe_settings_updated", "integration", "stripe", "Stripe payment connection")
     return {"message": "Stripe API key saved"}
 
 # ============== ENHANCED DASHBOARD ==============

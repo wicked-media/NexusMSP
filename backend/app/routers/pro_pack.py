@@ -14,6 +14,11 @@ import uuid, io, zipfile, secrets, base64, hashlib, hmac, struct, time, httpx
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
+from app.services.notification_channels import (
+    normalise_notification_channel_input,
+    public_notification_channel,
+    resolve_notification_webhook_url,
+)
 
 router = APIRouter()
 
@@ -136,40 +141,15 @@ async def triage_queue(current_user: dict = Depends(get_current_user)):
 
 @router.post("/pro-pack/tickets/{ticket_id}/merge")
 async def merge_tickets(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    """Body: {merge_into_ids: ['t-xxx',...]}. Closes the source, copies comments to primary."""
-    primary = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not primary:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    """Legacy endpoint delegating to the canonical scope-safe ticket merge service."""
     merge_ids = data.get("merge_into_ids") or []
-    merged = []
-    for mid in merge_ids:
-        if mid == ticket_id:
-            continue
-        src = await db.tickets.find_one({"id": mid}, {"_id": 0})
-        if not src:
-            continue
-        # Copy comments
-        comments = await db.ticket_comments.find({"ticket_id": mid}, {"_id": 0}).to_list(500)
-        for c in comments:
-            c["ticket_id"] = ticket_id
-            c["id"] = str(uuid.uuid4())
-            c["merged_from_ticket"] = mid
-            await db.ticket_comments.insert_one(c)
-        await db.tickets.update_one(
-            {"id": mid},
-            {"$set": {
-                "status": "closed",
-                "closed_at": datetime.now(timezone.utc).isoformat(),
-                "closed_reason": f"Merged into {primary.get('ticket_number') or ticket_id}",
-                "merged_into": ticket_id,
-            }}
-        )
-        merged.append(mid)
-    await db.tickets.update_one(
-        {"id": ticket_id},
-        {"$push": {"merged_from": {"$each": merged}}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}}
+    from app.services.ticket_merging import merge_tickets as merge_ticket_records
+    result = await merge_ticket_records(
+        primary_ticket_id=ticket_id,
+        secondary_ticket_ids=merge_ids,
+        current_user=current_user,
     )
-    return {"merged": merged, "primary": ticket_id}
+    return {"merged": result["merged_ticket_ids"], "primary": ticket_id, **result}
 
 @router.post("/pro-pack/tickets/{ticket_id}/split")
 async def split_ticket(ticket_id: str, data: dict, current_user: dict = Depends(get_current_user)):
@@ -226,45 +206,102 @@ async def qtc_pipeline(current_user: dict = Depends(get_current_user)):
 # 5. TEAMS / SLACK WEBHOOK NOTIFICATIONS
 # ============================================================================
 
+async def _require_notify_channel_admin(current_user: dict) -> None:
+    """Only administrators may configure bearer-style delivery destinations."""
+    caller_id = current_user.get("id") if isinstance(current_user, dict) else None
+    caller = await db.users.find_one(
+        {"id": caller_id}, {"_id": 0, "role": 1, "is_admin": 1}
+    ) if caller_id else None
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required to manage notification delivery")
+
+
 @router.get("/pro-pack/notify-channels")
 async def list_channels(current_user: dict = Depends(get_current_user)):
+    await _require_notify_channel_admin(current_user)
     items = await db.notify_channels.find({}, {"_id": 0}).to_list(50)
-    return items
+    return [public_notification_channel(item) for item in items]
 
 @router.post("/pro-pack/notify-channels")
 async def create_channel(data: dict, current_user: dict = Depends(get_current_user)):
+    await _require_notify_channel_admin(current_user)
+    try:
+        channel = normalise_notification_channel_input(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     doc = {
         "id": str(uuid.uuid4()),
-        "name": data.get("name", "").strip() or "New channel",
-        "kind": data.get("kind", "slack"),  # slack | teams | discord
-        "webhook_url": (data.get("webhook_url") or "").strip(),
-        "events": data.get("events", ["ticket_created", "sla_breach", "invoice_paid"]),
+        **channel,
         "is_active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    if not doc["webhook_url"].startswith("http"):
-        raise HTTPException(status_code=400, detail="Valid webhook_url required")
     await db.notify_channels.insert_one(doc.copy())
-    return doc
+    await log_activity(
+        current_user,
+        "created",
+        "notification_channel",
+        doc["id"],
+        doc["name"],
+        "Created secure notification delivery channel",
+        metadata={"kind": doc["kind"], "events": doc["events"]},
+    )
+    return public_notification_channel(doc)
 
 @router.delete("/pro-pack/notify-channels/{cid}")
 async def delete_channel(cid: str, current_user: dict = Depends(get_current_user)):
+    await _require_notify_channel_admin(current_user)
+    existing = await db.notify_channels.find_one({"id": cid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Notification channel not found")
     await db.notify_channels.delete_one({"id": cid})
+    await log_activity(
+        current_user,
+        "deleted",
+        "notification_channel",
+        cid,
+        existing.get("name") or "Notification channel",
+        "Removed notification delivery channel",
+        metadata={"kind": existing.get("kind"), "events": existing.get("events") or []},
+    )
     return {"message": "deleted"}
 
 @router.post("/pro-pack/notify-channels/{cid}/test")
 async def test_channel(cid: str, current_user: dict = Depends(get_current_user)):
+    await _require_notify_channel_admin(current_user)
     ch = await db.notify_channels.find_one({"id": cid}, {"_id": 0})
     if not ch:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise HTTPException(status_code=404, detail="Notification channel not found")
+    webhook_url = await resolve_notification_webhook_url(ch)
+    if not webhook_url:
+        raise HTTPException(status_code=422, detail="This channel has no usable secure webhook destination")
     text = f"NexusOps test message — channel '{ch['name']}' is wired up correctly. Sent {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
     payload = {"slack": {"text": text}, "teams": {"text": text}, "discord": {"content": text}}.get(ch["kind"], {"text": text})
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.post(ch["webhook_url"], json=payload)
-            return {"status_code": r.status_code, "ok": r.status_code < 300}
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Send failed: {e}")
+            response = await c.post(webhook_url, json=payload)
+        status_code = response.status_code
+        await db.notify_channels.update_one(
+            {"id": cid},
+            {"$set": {
+                "last_test_at": datetime.now(timezone.utc).isoformat(),
+                "last_test_status": status_code,
+            }},
+        )
+        await log_activity(
+            current_user,
+            "tested",
+            "notification_channel",
+            cid,
+            ch.get("name") or "Notification channel",
+            "Sent notification delivery test",
+            metadata={"kind": ch.get("kind"), "status_code": status_code},
+        )
+        return {"status_code": status_code, "ok": status_code < 300}
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The webhook destination did not accept the test message",
+        ) from exc
 
 
 # ============================================================================

@@ -1,10 +1,10 @@
 import os
+
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import httpx
-import os
 from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
@@ -16,6 +16,11 @@ from app.services.scope_permissions import (
 )
 from app.services.secret_store import decrypt_secret, encrypt_secret
 from app.services.activity import log_activity
+from app.services.rustdesk_provider_security import (
+    is_masked_secret as _is_masked_secret,
+    normalise_rustdesk_server_url as _normalise_rustdesk_server_url,
+    redact_provider_payload as _redact_provider_payload,
+)
 
 router = APIRouter()
 
@@ -25,8 +30,40 @@ _RUSTDESK_EDITABLE_FIELDS = {
     "rustdesk_password",
     "os",
     "notes",
-    "linked_device_id",
 }
+
+_RUSTDESK_CONFIG_EDITABLE_FIELDS = {
+    "server_url",
+    "api_key",
+    "relay_server",
+    "enabled",
+    "auto_sync",
+    "default_password_length",
+}
+
+_RUSTDESK_CONFIG_RESPONSE_FIELDS = {
+    "server_url",
+    "relay_server",
+    "enabled",
+    "auto_sync",
+    "default_password_length",
+    "last_sync",
+    "last_sync_peers",
+    "last_auto_sync",
+    "last_auto_sync_peers",
+}
+
+def _public_rustdesk_config(value: dict) -> dict:
+    """Expose only provider state required by the administrator UI."""
+    public = {key: value.get(key) for key in _RUSTDESK_CONFIG_RESPONSE_FIELDS if key in value}
+    secret = decrypt_secret(value.get("api_key_encrypted")) or str(value.get("api_key") or "")
+    if secret:
+        public["api_key"] = "********"
+        public["api_key_configured"] = True
+    else:
+        public["api_key"] = ""
+        public["api_key_configured"] = False
+    return public
 
 
 def _credential_configured(record: dict) -> bool:
@@ -34,11 +71,15 @@ def _credential_configured(record: dict) -> bool:
 
 
 def _public_rustdesk_device(record: dict) -> dict:
-    """Return registry metadata without leaking unattended credentials."""
+    """Return registry metadata without leaking provider secrets or raw payloads."""
     public = dict(record)
     public.pop("_id", None)
     public.pop("rustdesk_password", None)
     public.pop("rustdesk_password_encrypted", None)
+    # Raw provider payloads are flexible by design and may contain fields we
+    # have not yet classified. They are retained only as server-side evidence,
+    # never returned through the client-facing registry API.
+    public.pop("raw", None)
     public["credential_configured"] = _credential_configured(record)
     return public
 
@@ -68,16 +109,12 @@ async def _read_remote_password(record: dict) -> str:
 # ============== RUSTDESK REMOTE ACCESS MANAGEMENT ==============
 
 async def _get_rustdesk_config():
-    """Get RustDesk server config from DB."""
+    """Get the validated, server-owned RustDesk provider configuration."""
     config = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
-    value = config.get("value", {}) if config else {}
+    value = dict(config.get("value") or {}) if config else {}
     if value.get("api_key_encrypted"):
         value["api_key"] = decrypt_secret(value.get("api_key_encrypted"))
-    # Normalize server_url — ensure it has a protocol
-    url = value.get("server_url", "").strip().rstrip("/")
-    if url and not url.startswith("http"):
-        url = f"https://{url}"
-    value["server_url"] = url
+    value["server_url"] = _normalise_rustdesk_server_url(value.get("server_url"))
     return value
 
 async def _rustdesk_api_request(method: str, path: str, data: dict = None):
@@ -132,16 +169,79 @@ async def sync_rustdesk_devices(
     payload = response.json()
     devices = payload.get("data") or []
     linked = 0
+    skipped_unowned = 0
+    skipped_ambiguous = 0
     for item in devices:
         info = item.get("info") or {}
         hostname = str(info.get("hostname") or info.get("name") or item.get("id") or "").strip()
-        doc = {"id": str(uuid.uuid4()), "rustdesk_guid": item.get("guid"), "rustdesk_id": item.get("id"), "hostname": hostname, "status": item.get("status"), "last_online": item.get("last_online"), "raw": item, "synced_at": datetime.now(timezone.utc).isoformat()}
-        await db.rustdesk_devices.update_one({"rustdesk_guid": item.get("guid")}, {"$set": doc}, upsert=True)
-        local = await db.devices.find_one({"hostname": hostname}, {"_id": 0, "id": 1})
-        if local and item.get("id"):
-            await db.devices.update_one({"id": local["id"]}, {"$set": {"rustdesk_id": str(item["id"]), "rustdesk_guid": item.get("guid"), "remote_access_updated_at": datetime.now(timezone.utc).isoformat()}})
-            linked += 1
-    return {"success": True, "synced": len(devices), "linked": linked, "total": payload.get("total", len(devices))}
+        rustdesk_id = str(item.get("id") or "").strip()
+        if not rustdesk_id:
+            skipped_unowned += 1
+            continue
+
+        # A provider payload carries no Nexus client ownership.  Only bind it
+        # when one canonical Nexus asset can establish that ownership.
+        candidates = await db.devices.find(
+            {"rustdesk_id": rustdesk_id},
+            {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "name": 1, "hostname": 1, "os": 1},
+        ).to_list(2)
+        if not candidates and hostname:
+            candidates = await db.devices.find(
+                {"$or": [{"hostname": hostname}, {"name": hostname}]},
+                {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "name": 1, "hostname": 1, "os": 1},
+            ).to_list(2)
+        if len(candidates) != 1:
+            skipped_ambiguous += 1 if candidates else 0
+            skipped_unowned += 1 if not candidates else 0
+            continue
+
+        local = candidates[0]
+        client_id = str(local.get("client_id") or "").strip()
+        if not client_id:
+            skipped_unowned += 1
+            continue
+
+        now = datetime.now(timezone.utc).isoformat()
+        existing = await db.rustdesk_devices.find_one({"linked_device_id": local["id"]}, {"_id": 0})
+        if existing and str(existing.get("client_id") or "").strip() not in {"", client_id}:
+            skipped_ambiguous += 1
+            continue
+        entry_id = str((existing or {}).get("id") or uuid.uuid4())
+        doc = {
+            "id": entry_id,
+            "client_id": client_id,
+            "client_name": local.get("client_name") or "",
+            "linked_device_id": local["id"],
+            "device_name": local.get("name") or local.get("hostname") or hostname,
+            "rustdesk_guid": item.get("guid"),
+            "rustdesk_id": rustdesk_id,
+            "os": local.get("os") or "",
+            "status": item.get("status"),
+            "last_online": item.get("last_online"),
+            "raw": _redact_provider_payload(item),
+            "synced_at": now,
+            "updated_at": now,
+        }
+        if not existing:
+            doc.update({"created_at": now, "created_by": current_user["id"]})
+        await db.rustdesk_devices.update_one(
+            {"id": entry_id} if existing and existing.get("id") else {"linked_device_id": local["id"]},
+            {"$set": doc},
+            upsert=not bool(existing),
+        )
+        await db.devices.update_one(
+            {"id": local["id"]},
+            {"$set": {"rustdesk_id": rustdesk_id, "rustdesk_guid": item.get("guid"), "remote_access_updated_at": now}},
+        )
+        linked += 1
+    return {
+        "success": True,
+        "synced": len(devices),
+        "linked": linked,
+        "skipped_unowned": skipped_unowned,
+        "skipped_ambiguous": skipped_ambiguous,
+        "total": payload.get("total", len(devices)),
+    }
 
 @router.get(
     "/rustdesk/config",
@@ -169,13 +269,7 @@ async def get_rustdesk_global_config(
                 "default_password_length": 8,
             }
         }
-    value = dict(config.get("value") or {})
-    secret = decrypt_secret(value.get("api_key_encrypted")) or str(value.get("api_key") or "")
-    value.pop("api_key_encrypted", None)
-    if secret:
-        value["api_key"] = f"********{secret[-4:]}" if len(secret) > 4 else "********"
-        value["api_key_configured"] = True
-    return {**config, "value": value}
+    return {"key": "rustdesk_config", "value": _public_rustdesk_config(dict(config.get("value") or {}))}
 
 @router.post(
     "/rustdesk/config",
@@ -194,13 +288,16 @@ async def save_rustdesk_global_config(
     )
     existing = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
     current_value = existing.get("value") if isinstance(existing.get("value"), dict) else {}
-    incoming = dict(data)
+    incoming = {key: data[key] for key in _RUSTDESK_CONFIG_EDITABLE_FIELDS if key in data}
+    if "server_url" in incoming:
+        incoming["server_url"] = _normalise_rustdesk_server_url(incoming["server_url"])
     incoming_key = str(incoming.get("api_key") or "")
-    if incoming_key.startswith("********") or incoming_key.startswith("••••"):
-        incoming["api_key"] = current_value.get("api_key", "")
+    if _is_masked_secret(incoming_key):
+        incoming.pop("api_key", None)
     value = {**current_value, **incoming}
+    value["server_url"] = _normalise_rustdesk_server_url(value.get("server_url"))
     api_key = str(value.get("api_key") or "")
-    if api_key and not api_key.startswith("********"):
+    if api_key and not _is_masked_secret(api_key):
         value["api_key_encrypted"] = encrypt_secret(api_key)
     value.pop("api_key", None)
     await db.settings.update_one(
@@ -247,6 +344,31 @@ async def add_rustdesk_device(
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 
+    linked_device_id = str(data.get("linked_device_id") or "").strip()
+    if linked_device_id:
+        linked_device = await assert_record_scope(
+            current_user,
+            db.devices,
+            linked_device_id,
+            operation="device.remote.configure",
+            request=request,
+            resource_name="Managed asset",
+        )
+        if str(linked_device.get("client_id") or "").strip() != client_id:
+            raise HTTPException(
+                status_code=409,
+                detail="A RustDesk record can only link to an asset owned by the selected client",
+            )
+        existing_link = await db.rustdesk_devices.find_one(
+            {"linked_device_id": linked_device_id},
+            {"_id": 0, "id": 1, "rustdesk_id": 1},
+        )
+        if existing_link:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This asset is already linked to RustDesk ID {existing_link.get('rustdesk_id')}",
+            )
+
     device_entry = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
@@ -258,7 +380,7 @@ async def add_rustdesk_device(
         "status": "configured",
         "last_connected": None,
         "notes": data.get("notes", ""),
-        "linked_device_id": data.get("linked_device_id", ""),
+        "linked_device_id": linked_device_id,
         "created_by": current_user["id"],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -323,62 +445,17 @@ async def initiate_rustdesk_connection(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    """Initiate a remote connection to a RustDesk device"""
-    device = await assert_record_scope(
-        current_user,
-        db.rustdesk_devices,
-        device_id,
-        operation="device.remote.start",
-        request=request,
-        resource_name="RustDesk device",
+    """Retired legacy connection path.
+
+    This route returned unattended credentials to the browser and did not use
+    the governed remote-session lifecycle.  Keep the URL as an explicit
+    failure so old clients cannot silently downgrade a session's consent,
+    ticket, time and audit evidence.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy RustDesk connection is retired. Start a governed remote session from the managed asset or work session.",
     )
-
-    config = await _get_rustdesk_config()
-
-    # Update last connected timestamp
-    await db.rustdesk_devices.update_one(
-        {"id": device_id},
-        {"$set": {"last_connected": datetime.now(timezone.utc).isoformat(), "status": "connected"}}
-    )
-
-    # Log the connection
-    await db.rustdesk_sessions.insert_one({
-        "id": str(uuid.uuid4()),
-        "device_id": device_id,
-        "client_id": device.get("client_id"),
-        "rustdesk_id": device.get("rustdesk_id"),
-        "user_id": current_user["id"],
-        "user_name": current_user["name"],
-        "status": "initiated",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "ended_at": None,
-    })
-
-    rd_id = device.get("rustdesk_id", "")
-    relay = config.get("relay_server", "").strip()
-    server_url = config.get("server_url", "").strip().rstrip("/")
-
-    # Build correct RustDesk URI
-    server_host = ""
-    if relay:
-        server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    elif server_url:
-        server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    
-    if server_host:
-        connection_url = f"rustdesk://{rd_id}@{server_host}"
-    else:
-        connection_url = f"rustdesk://{rd_id}"
-
-    return {
-        "message": "Connection initiated",
-        "rustdesk_id": rd_id,
-        "rustdesk_password": await _read_remote_password(device),
-        "connection_url": connection_url,
-        "relay_server": relay or server_host,
-        "server_url": server_url,
-        "web_client_url": f"{server_url}" if server_url else None,
-    }
 
 @router.get("/rustdesk/sessions")
 async def get_rustdesk_sessions(
@@ -498,12 +575,28 @@ async def assign_rustdesk_id(
         request=request,
         resource_name="Device",
     )
+    device_client_id = str(device.get("client_id") or "").strip()
+    if not device_client_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Link the managed asset to a client before assigning a RustDesk identity",
+        )
     await db.devices.update_one({"id": device_id}, {"$set": {"rustdesk_id": rd_id}})
 
     # Upsert a rustdesk_devices entry linked to this device
     existing = await db.rustdesk_devices.find_one({"linked_device_id": device_id}, {"_id": 0})
     if existing:
+        existing_client_id = str(existing.get("client_id") or "").strip()
+        if existing_client_id and existing_client_id != device_client_id:
+            raise HTTPException(status_code=409, detail="RustDesk registry ownership conflicts with the selected managed asset")
         updates = {"rustdesk_id": rd_id, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if not existing_client_id:
+            updates.update({
+                "client_id": device_client_id,
+                "client_name": device.get("client_name", ""),
+                "device_name": device.get("name") or device.get("hostname") or "",
+                "os": device.get("os", ""),
+            })
         if rd_password_supplied:
             updates.update(_password_update(rd_password))
         await db.rustdesk_devices.update_one(
@@ -512,7 +605,7 @@ async def assign_rustdesk_id(
         )
     else:
         entry = {
-            "id": str(uuid.uuid4()), "client_id": device.get("client_id", ""),
+            "id": str(uuid.uuid4()), "client_id": device_client_id,
             "client_name": device.get("client_name", ""), "device_name": device.get("name", ""),
             "rustdesk_id": rd_id, **_password_update(rd_password), "os": device.get("os", ""),
             "status": "configured", "last_connected": None, "notes": "",
@@ -541,20 +634,32 @@ async def link_rustdesk_registry_entry(
     if not managed_device_id:
         raise HTTPException(status_code=422, detail="Choose a managed asset")
 
-    registry_entry = await db.rustdesk_devices.find_one({"id": entry_id}, {"_id": 0})
-    if not registry_entry:
-        raise HTTPException(status_code=404, detail="RustDesk provider record not found")
-
-    device = await db.devices.find_one({"id": managed_device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Managed asset not found")
-    await assert_client_scope(
+    registry_entry = await assert_record_scope(
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
+        db.rustdesk_devices,
+        entry_id,
         operation="device.remote.configure",
         request=request,
+        resource_name="RustDesk provider record",
     )
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        managed_device_id,
+        operation="device.remote.configure",
+        request=request,
+        resource_name="Managed asset",
+    )
+
+    registry_client_id = str(registry_entry.get("client_id") or "").strip()
+    device_client_id = str(device.get("client_id") or "").strip()
+    if not device_client_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Link the managed asset to a client before attaching a RustDesk provider record",
+        )
+    if registry_client_id and registry_client_id != device_client_id:
+        raise HTTPException(status_code=409, detail="RustDesk provider record belongs to a different client")
 
     existing_link = await db.rustdesk_devices.find_one(
         {"linked_device_id": managed_device_id, "id": {"$ne": entry_id}},
@@ -613,47 +718,16 @@ async def quick_connect(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    """Quick connect by RustDesk ID — logs session without requiring device registration"""
-    await assert_global_scope(
-        current_user,
-        operation="device.remote.start",
-        request=request,
+    """Retired unlinked remote-connect path.
+
+    Nexus must have a managed asset, client boundary and session workflow
+    before it launches remote access.  An arbitrary RustDesk ID cannot supply
+    those controls, even for a globally scoped operator.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="Unlinked quick connect is retired. Select a managed asset and start a governed remote session instead.",
     )
-    rd_id = data.get("rustdesk_id", "").strip()
-    if not rd_id:
-        raise HTTPException(status_code=400, detail="RustDesk ID required")
-
-    config = await _get_rustdesk_config()
-    relay = config.get("relay_server", "").strip()
-    server_url = config.get("server_url", "").strip().rstrip("/")
-
-    # Log the session
-    await db.rustdesk_sessions.insert_one({
-        "id": str(uuid.uuid4()), "device_id": None, "client_id": None,
-        "rustdesk_id": rd_id, "user_id": current_user["id"], "user_name": current_user["name"],
-        "status": "initiated", "started_at": datetime.now(timezone.utc).isoformat(), "ended_at": None,
-    })
-
-    # Build correct RustDesk URI
-    server_host = ""
-    if relay:
-        server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    elif server_url:
-        server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    
-    if server_host:
-        connection_url = f"rustdesk://{rd_id}@{server_host}"
-    else:
-        connection_url = f"rustdesk://{rd_id}"
-
-    return {
-        "message": "Connection initiated",
-        "rustdesk_id": rd_id,
-        "connection_url": connection_url,
-        "relay_server": relay or server_host,
-        "server_url": server_url,
-        "web_client_url": f"{server_url}" if server_url else None,
-    }
 
 
 # ─── Patch Agent Deployment via RustDesk ───
@@ -767,24 +841,23 @@ async def get_agent_deployments(current_user: dict = Depends(get_current_user)):
 
 # ─── Live RustDesk Server API Integration ───
 
-@router.get("/rustdesk/live/test-connection")
+@router.get(
+    "/rustdesk/live/test-connection",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
 async def test_rustdesk_connection(
-    server_url: Optional[str] = None,
-    api_key: Optional[str] = None,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Test connectivity to a RustDesk server. Uses query params if provided, otherwise falls back to saved config."""
+    """Test the administrator-approved RustDesk provider configuration only."""
+    await assert_global_scope(
+        current_user,
+        operation="device.remote.configure",
+        request=request,
+    )
     saved_config = await _get_rustdesk_config()
-    if server_url:
-        # Normalize URL from query param
-        server_url = server_url.strip().rstrip("/")
-        if not server_url.startswith("http"):
-            server_url = f"https://{server_url}"
-        if not api_key or str(api_key).startswith("********") or str(api_key).startswith("••••"):
-            api_key = saved_config.get("api_key", "")
-    else:
-        server_url = saved_config.get("server_url", "").rstrip("/")
-        api_key = saved_config.get("api_key", "")
+    server_url = saved_config.get("server_url", "").rstrip("/")
+    api_key = saved_config.get("api_key", "")
     
     if not server_url:
         return {"connected": False, "message": "No server URL configured"}
@@ -844,13 +917,14 @@ async def test_rustdesk_connection(
         if not results["connected"]:
             # Try raw TCP to see if server is reachable
             try:
-                resp = await httpx.AsyncClient(timeout=5.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true').get(server_url)
+                async with httpx.AsyncClient(timeout=5.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
+                    resp = await client.get(server_url)
                 results["connected"] = True
                 results["message"] = f"Server reachable (HTTP {resp.status_code}) but API endpoints not accessible. Check API key permissions."
             except Exception:
                 results["message"] = "Cannot reach server. Check URL and firewall rules."
-    except Exception as e:
-        results["message"] = f"Connection error: {str(e)}"
+    except Exception:
+        results["message"] = "Connection test failed. Check the saved server configuration and connectivity."
     
     if results["authorized"]:
         results["message"] = f"Connected and authorised. {len(results['endpoints_available'])} API endpoint(s) responded."
@@ -860,9 +934,20 @@ async def test_rustdesk_connection(
     return results
 
 
-@router.get("/rustdesk/live/peers")
-async def get_live_peers(current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/rustdesk/live/peers",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def get_live_peers(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Fetch live peer data from the RustDesk server. Tries multiple API patterns."""
+    await assert_global_scope(
+        current_user,
+        operation="device.remote.configure",
+        request=request,
+    )
     config = await _get_rustdesk_config()
     server_url = config.get("server_url", "").rstrip("/")
     api_key = config.get("api_key", "")
@@ -900,8 +985,8 @@ async def get_live_peers(current_user: dict = Depends(get_current_user)):
                                 break
                 except Exception:
                     continue
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to reach RustDesk server: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Failed to reach the configured RustDesk server") from None
     
     # Normalize peer data
     normalized = []
@@ -917,14 +1002,36 @@ async def get_live_peers(current_user: dict = Depends(get_current_user)):
             "ip": p.get("ip") or "",
             "tags": p.get("tags") or p.get("Tags") or [],
             "alias": p.get("alias") or p.get("note") or "",
-            "raw": p,
         })
     
     return {"peers": normalized, "count": len(normalized), "source": source, "server_url": server_url}
 
 
-@router.get("/rustdesk/live/status-map")
-async def get_live_status_map(current_user: dict = Depends(get_current_user)):
+async def _scoped_rustdesk_ids(current_user: dict) -> set[str]:
+    """Return only RustDesk identities attached to assets the user may see."""
+    managed = await db.devices.find(
+        scoped_query(current_user, {"rustdesk_id": {"$exists": True, "$ne": ""}}),
+        {"_id": 0, "rustdesk_id": 1},
+    ).to_list(2000)
+    registry = await db.rustdesk_devices.find(
+        scoped_query(current_user, {"rustdesk_id": {"$exists": True, "$ne": ""}}),
+        {"_id": 0, "rustdesk_id": 1},
+    ).to_list(2000)
+    return {
+        str(row.get("rustdesk_id") or "").strip()
+        for row in [*managed, *registry]
+        if str(row.get("rustdesk_id") or "").strip()
+    }
+
+
+@router.get(
+    "/rustdesk/live/status-map",
+    dependencies=[Depends(require_action("device.remote.start"))],
+)
+async def get_live_status_map(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Lightweight endpoint: returns {rd_id: online/offline} map for all known peers.
     Used for polling connection status indicators on Devices pages."""
     config = await _get_rustdesk_config()
@@ -938,6 +1045,7 @@ async def get_live_status_map(current_user: dict = Depends(get_current_user)):
     if api_key:
         headers_dict["Authorization"] = f"Bearer {api_key}"
     
+    allowed_ids = await _scoped_rustdesk_ids(current_user)
     status_map = {}
     try:
         async with httpx.AsyncClient(timeout=8.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()!='true') as client:
@@ -950,7 +1058,7 @@ async def get_live_status_map(current_user: dict = Depends(get_current_user)):
                         if isinstance(peers, list):
                             for p in peers:
                                 rd_id = str(p.get("id") or p.get("Id") or p.get("peer_id") or "")
-                                if rd_id:
+                                if rd_id and rd_id in allowed_ids:
                                     is_online = p.get("online", False) if isinstance(p.get("online"), bool) else str(p.get("online", "")).lower() in ["true", "1", "yes"]
                                     status_map[rd_id] = "online" if is_online else "offline"
                             break
@@ -963,13 +1071,24 @@ async def get_live_status_map(current_user: dict = Depends(get_current_user)):
 
 
 
-@router.post("/rustdesk/live/sync")
-async def sync_rustdesk_peers(current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/rustdesk/live/sync",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def sync_rustdesk_peers(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Sync live RustDesk peers into the NexusOps device/rustdesk_devices collections.
     - Matches by RustDesk ID to existing devices
     - Updates online/offline status
-    - Creates new rustdesk_devices entries for unmatched peers
+    - Creates registry entries only after a canonical Nexus asset establishes ownership
     """
+    await assert_global_scope(
+        current_user,
+        operation="device.remote.configure",
+        request=request,
+    )
     config = await _get_rustdesk_config()
     server_url = config.get("server_url", "").rstrip("/")
     if not server_url:
@@ -998,8 +1117,8 @@ async def sync_rustdesk_peers(current_user: dict = Depends(get_current_user)):
                                 peers = data["peers"]; break
                 except Exception:
                     continue
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Cannot reach RustDesk server: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Cannot reach the configured RustDesk server") from None
     
     if not peers:
         return {"message": "No peers found on server or API not accessible", "synced": 0, "created": 0, "updated": 0}
@@ -1020,59 +1139,95 @@ async def sync_rustdesk_peers(current_user: dict = Depends(get_current_user)):
                 "alias": p.get("alias") or p.get("note") or "",
             })
     
-    # Load existing data
+    # Provider payloads do not carry Nexus client ownership.  Treat a peer as
+    # actionable only when exactly one canonical managed asset claims its ID.
     existing_rd = await db.rustdesk_devices.find({}, {"_id": 0}).to_list(1000)
-    existing_devices = await db.devices.find({"rustdesk_id": {"$exists": True, "$ne": ""}}, {"_id": 0, "id": 1, "rustdesk_id": 1}).to_list(1000)
-    
-    rd_by_id = {r.get("rustdesk_id"): r for r in existing_rd if r.get("rustdesk_id")}
-    dev_by_rd = {d.get("rustdesk_id"): d for d in existing_devices if d.get("rustdesk_id")}
+    existing_devices = await db.devices.find(
+        {"rustdesk_id": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "name": 1, "hostname": 1, "os": 1, "rustdesk_id": 1},
+    ).to_list(1000)
+
+    devices_by_rd: dict[str, list[dict]] = {}
+    for device in existing_devices:
+        rustdesk_id = str(device.get("rustdesk_id") or "").strip()
+        if rustdesk_id:
+            devices_by_rd.setdefault(rustdesk_id, []).append(device)
+    registry_by_rd: dict[str, list[dict]] = {}
+    for entry in existing_rd:
+        rustdesk_id = str(entry.get("rustdesk_id") or "").strip()
+        if rustdesk_id:
+            registry_by_rd.setdefault(rustdesk_id, []).append(entry)
     
     created = 0
     updated = 0
+    skipped_unowned = 0
+    skipped_ambiguous = 0
     now = datetime.now(timezone.utc).isoformat()
     
     for peer in normalized:
         rd_id = peer["rd_id"]
         status = "online" if peer["online"] else "offline"
         
-        # Update existing device status
-        if rd_id in dev_by_rd:
-            await db.devices.update_one(
-                {"rustdesk_id": rd_id},
-                {"$set": {"status": status, "rd_last_seen": now, "rd_hostname": peer["hostname"], "rd_version": peer["version"]}}
-            )
-            updated += 1
-        
-        # Update or create rustdesk_devices entry
-        if rd_id in rd_by_id:
-            await db.rustdesk_devices.update_one(
-                {"rustdesk_id": rd_id},
-                {"$set": {"status": status, "os": peer["os"] or rd_by_id[rd_id].get("os", ""), "last_online": now if peer["online"] else rd_by_id[rd_id].get("last_online"), "rd_version": peer["version"], "rd_hostname": peer["hostname"]}}
-            )
-            updated += 1
+        device_candidates = devices_by_rd.get(rd_id, [])
+        if len(device_candidates) != 1:
+            skipped_ambiguous += 1 if device_candidates else 0
+            skipped_unowned += 1 if not device_candidates else 0
+            continue
+        device = device_candidates[0]
+        client_id = str(device.get("client_id") or "").strip()
+        if not client_id:
+            skipped_unowned += 1
+            continue
+
+        registry_candidates = registry_by_rd.get(rd_id, [])
+        conflicting_registry = [
+            entry
+            for entry in registry_candidates
+            if str(entry.get("client_id") or "").strip() not in {"", client_id}
+        ]
+        eligible_registry = [
+            entry
+            for entry in registry_candidates
+            if str(entry.get("client_id") or "").strip() in {"", client_id}
+            and str(entry.get("linked_device_id") or "").strip() in {"", str(device["id"])}
+        ]
+        if conflicting_registry or len(eligible_registry) > 1:
+            skipped_ambiguous += 1
+            continue
+
+        await db.devices.update_one(
+            {"id": device["id"]},
+            {"$set": {"status": status, "rd_last_seen": now, "rd_hostname": peer["hostname"], "rd_version": peer["version"]}},
+        )
+
+        registry_entry = eligible_registry[0] if eligible_registry else None
+        entry_id = str((registry_entry or {}).get("id") or uuid.uuid4())
+        registry_update = {
+            "id": entry_id,
+            "client_id": client_id,
+            "client_name": device.get("client_name") or "",
+            "device_name": device.get("name") or device.get("hostname") or peer["alias"] or peer["hostname"] or f"RustDesk-{rd_id}",
+            "rustdesk_id": rd_id,
+            "rustdesk_password": "",
+            "rustdesk_password_encrypted": str((registry_entry or {}).get("rustdesk_password_encrypted") or "") or encrypt_secret(str((registry_entry or {}).get("rustdesk_password") or "")),
+            "os": peer["os"] or device.get("os") or (registry_entry or {}).get("os", ""),
+            "status": status,
+            "last_connected": now if peer["online"] else (registry_entry or {}).get("last_connected"),
+            "last_online": now if peer["online"] else (registry_entry or {}).get("last_online"),
+            "rd_version": peer["version"],
+            "rd_hostname": peer["hostname"],
+            "notes": (registry_entry or {}).get("notes") or "Auto-synced from RustDesk server",
+            "linked_device_id": device["id"],
+            "updated_at": now,
+        }
+        if registry_entry:
+            await db.rustdesk_devices.update_one({"id": entry_id}, {"$set": registry_update})
+            updated += 2
         else:
-            # New peer - create rustdesk_devices entry
-            entry = {
-                "id": str(uuid.uuid4()),
-                "client_id": "",
-                "client_name": "",
-                "device_name": peer["alias"] or peer["hostname"] or f"RustDesk-{rd_id}",
-                "rustdesk_id": rd_id,
-                "rustdesk_password": "",
-                "os": peer["os"],
-                "status": status,
-                "last_connected": now if peer["online"] else None,
-                "last_online": now if peer["online"] else None,
-                "rd_version": peer["version"],
-                "rd_hostname": peer["hostname"],
-                "notes": f"Auto-synced from RustDesk server",
-                "linked_device_id": "",
-                "created_by": current_user["id"],
-                "created_at": now,
-                "updated_at": now,
-            }
-            await db.rustdesk_devices.insert_one(entry)
+            registry_update.update({"created_by": current_user["id"], "created_at": now})
+            await db.rustdesk_devices.insert_one(registry_update)
             created += 1
+            updated += 1
     
     # Update sync timestamp
     await db.settings.update_one(
@@ -1080,12 +1235,30 @@ async def sync_rustdesk_peers(current_user: dict = Depends(get_current_user)):
         {"$set": {"value.last_sync": now, "value.last_sync_peers": len(normalized)}}
     )
     
-    return {"message": f"Synced {len(normalized)} peers from RustDesk server", "synced": len(normalized), "created": created, "updated": updated}
+    return {
+        "message": f"Synced {len(normalized)} trusted peers from RustDesk server",
+        "synced": len(normalized),
+        "created": created,
+        "updated": updated,
+        "skipped_unowned": skipped_unowned,
+        "skipped_ambiguous": skipped_ambiguous,
+    }
 
 
-@router.get("/rustdesk/live/audit")
-async def get_live_audit_logs(current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/rustdesk/live/audit",
+    dependencies=[Depends(require_action("device.remote.configure"))],
+)
+async def get_live_audit_logs(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Fetch live session audit logs from the RustDesk server."""
+    await assert_global_scope(
+        current_user,
+        operation="device.remote.configure",
+        request=request,
+    )
     config = await _get_rustdesk_config()
     server_url = config.get("server_url", "").rstrip("/")
     if not server_url:
@@ -1107,45 +1280,70 @@ async def get_live_audit_logs(current_user: dict = Depends(get_current_user)):
                         data = resp.json()
                         if isinstance(data, list):
                             logs = data; source = path; break
-                        elif isinstance(data, dict) and "data" in data:
+                        elif isinstance(data, dict) and isinstance(data.get("data"), list):
                             logs = data["data"]; source = path; break
                 except Exception:
                     continue
     except Exception:
         pass
     
-    return {"logs": logs[:100], "count": len(logs), "source": source}
+    redacted_logs = [_redact_provider_payload(item) for item in logs[:100] if isinstance(item, dict)]
+    return {"logs": redacted_logs, "count": len(redacted_logs), "source": source}
 
 
 
-# ============== REMOTE SESSION AUDIT RECORDS (Admin) ==============
+# ============== REMOTE SESSION AUDIT RECORDS ==============
 
-@router.get("/remote-session-records")
+@router.get(
+    "/remote-session-records",
+    dependencies=[Depends(require_action("device.remote.start"))],
+)
 async def admin_list_remote_session_records(
+    request: Request,
     client_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 200,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    """Admin endpoint — list all client-portal remote session audit records."""
+    """List client-portal remote session audit records within the caller's scope."""
     query = {}
     if client_id:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="device.remote.start",
+            request=request,
+        )
         query["client_id"] = client_id
     if status:
         query["status"] = status
-    recs = await db.remote_session_records.find(query, {"_id": 0}).sort("started_at", -1).to_list(limit)
+    recs = await db.remote_session_records.find(
+        scoped_query(current_user, query),
+        {"_id": 0},
+    ).sort("started_at", -1).to_list(max(1, min(int(limit), 500)))
     return recs
 
 
-@router.get("/remote-session-records/{session_id}/pdf")
-async def admin_remote_session_pdf(session_id: str, current_user: dict = Depends(get_current_user)):
-    """Admin-side download of a portal remote-session audit PDF."""
+@router.get(
+    "/remote-session-records/{session_id}/pdf",
+    dependencies=[Depends(require_action("device.remote.start"))],
+)
+async def admin_remote_session_pdf(
+    session_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Download a client-portal remote-session audit PDF within caller scope."""
+    rec = await assert_record_scope(
+        current_user,
+        db.remote_session_records,
+        session_id,
+        operation="device.remote.start",
+        request=request,
+        resource_name="Remote session record",
+    )
     from fpdf import FPDF
     from fastapi.responses import Response
-
-    rec = await db.remote_session_records.find_one({"id": session_id}, {"_id": 0})
-    if not rec:
-        raise HTTPException(status_code=404, detail="Remote session record not found")
 
     branding = await db.settings.find_one({"key": "branding"}, {"_id": 0}) or {}
     msp_name = (branding.get("value", {}) or {}).get("company_name") or "NexusOps"

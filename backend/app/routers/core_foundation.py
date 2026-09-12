@@ -20,7 +20,7 @@ from app.services.nexus_ideas import create_idea, ideas_snapshot, update_idea
 from app.services.nexus_objects import build_object_story
 from app.services.nexus_timeline import build_client_timeline
 from app.services.platform_foundation import emit_platform_event, request_correlation_id
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, assert_record_scope
 
 
 router = APIRouter()
@@ -116,16 +116,18 @@ async def revise_nexus_idea(idea_id: str, payload: IdeaUpdate, request: Request,
 
 @router.get("/core/clients/{client_id}/graph")
 async def get_client_core_graph(client_id: str, request: Request, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    await assert_client_scope(
+    # Use the record-aware guard so an out-of-scope client is indistinguishable
+    # from a missing one. Checking existence first would let a restricted
+    # technician enumerate customer IDs through 403 vs 404 responses.
+    client = await assert_record_scope(
         current_user,
+        db.clients,
         client_id,
+        resource_name="Client",
         operation="platform.core.graph.read",
         request=request,
     )
-    return {"client": client, **(await client_core_graph(client_id))}
+    return {"client": {"id": client["id"], "name": client.get("name")}, **(await client_core_graph(client_id))}
 
 
 @router.get("/core/clients/{client_id}/context-relationships")
@@ -192,16 +194,17 @@ async def record_context_relationship(payload: ContextRelationshipCreate, reques
 @router.get("/core/clients/{client_id}/fabric")
 async def get_client_fabric(client_id: str, request: Request, current_user: dict = Depends(get_current_user)):
     """Return the evidence-backed client relationship explorer read model."""
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1})
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    await assert_client_scope(
+    # Keep the fabric explorer on the same non-enumerating client boundary as
+    # the graph endpoint above.
+    client = await assert_record_scope(
         current_user,
+        db.clients,
         client_id,
+        resource_name="Client",
         operation="platform.core.fabric.read",
         request=request,
     )
-    graph = {"client": client, **(await client_core_graph(client_id))}
+    graph = {"client": {"id": client["id"], "name": client.get("name")}, **(await client_core_graph(client_id))}
     return build_client_fabric(graph)
 
 

@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.routers import approval_workflows, asset_depreciation, assets, backup_center, change_management, client_portal, client_reports, clients_contacts, contract_profit, contracts, control_plane, estimates, infrastructure, invoice_smart, invoices, mega_features, mission_control, nexus_agent, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, web_studio, workflow_automation, yeastar
+from app import auth as auth_service
+from app.routers import admin, approval_workflows, asset_depreciation, assets, auth, backup_center, change_management, client_360, client_portal, client_reports, clients_contacts, client_studio, client_war_room, contract_profit, contracts, control_plane, core_foundation, estimates, event_bus, infrastructure, invoice_pdf, invoice_smart, invoices, mega_features, mission_control, nexus_agent, nexus_verify, permission_elevation, po_enhanced, profitability_heatmap, projects, purchase_orders, remote, time_entries, web_studio, workflow_automation, yeastar
 from app.services import scope_permissions
+from app.services.action_permissions import ACTION_PERMISSION_IDS
 
 
 class _InsertCollection:
@@ -23,9 +25,23 @@ class _RecordCollection:
         self.record = record
 
     async def find_one(self, query, projection):
-        if self.record and self.record.get("id") == query.get("id"):
+        if self.record and self._matches(query, self.record):
             return dict(self.record)
         return None
+
+    @classmethod
+    def _matches(cls, query, record):
+        if "$and" in query:
+            return all(cls._matches(clause, record) for clause in query["$and"])
+        if "$or" in query:
+            return any(cls._matches(clause, record) for clause in query["$or"])
+        for field, expected in query.items():
+            if isinstance(expected, dict) and "$exists" in expected:
+                if (field in record) != expected["$exists"]:
+                    return False
+            elif record.get(field) != expected:
+                return False
+        return True
 
 
 class _ListCursor:
@@ -40,6 +56,29 @@ class _ListCursor:
 
     async def to_list(self, _limit):
         return list(self.rows)
+
+
+def test_administrative_audit_log_list_requires_explicit_global_scope(monkeypatch):
+    calls = {}
+
+    class AuditLogs:
+        def find(self, query, _projection):
+            calls["query"] = query
+            return _ListCursor([])
+
+    async def global_scope(user, **kwargs):
+        calls["scope"] = {"user": user, **kwargs}
+        return {"mode": "all"}
+
+    monkeypatch.setattr(admin, "assert_global_scope", global_scope)
+    monkeypatch.setattr(admin, "db", type("DB", (), {"audit_logs": AuditLogs()})())
+    result = asyncio.run(admin.get_audit_logs(
+        request=None,
+        current_user={"id": "admin-1", "role": "admin"},
+    ))
+
+    assert result == []
+    assert calls["scope"]["operation"] == "platform.audit.read"
 
 
 def test_missing_scope_configuration_fails_closed():
@@ -60,6 +99,170 @@ def test_administrator_and_explicit_all_scope_remain_supported():
 
     assert admin["mode"] == "all"
     assert service_manager["mode"] == "all"
+
+
+def test_explicitly_disabled_technician_accounts_are_not_active():
+    assert auth_service.user_is_active({"id": "legacy-active"})
+    assert not auth_service.user_is_active({"id": "disabled", "is_active": False})
+    assert not auth_service.user_is_active({"id": "suspended", "status": "suspended"})
+
+
+def test_technicians_cannot_update_another_technician_profile():
+    assert auth._can_manage_user_profile({"id": "tech-a", "role": "technician"}, "tech-a")
+    assert not auth._can_manage_user_profile({"id": "tech-a", "role": "technician"}, "tech-b")
+    assert auth._can_manage_user_profile({"id": "admin-a", "role": "admin"}, "tech-b")
+
+
+def test_event_backbone_permissions_are_explicitly_registered():
+    assert {"platform.events.view", "platform.events.publish"}.issubset(ACTION_PERMISSION_IDS)
+
+
+def test_portal_privileged_action_permissions_are_explicitly_registered():
+    assert {
+        "portal.audit.view",
+        "portal.configuration.manage",
+        "portal.link.manage",
+        "portal.user.manage",
+    }.issubset(ACTION_PERMISSION_IDS)
+
+
+def test_portal_bearer_link_expiry_is_bounded():
+    assert client_portal._portal_link_expiry_days(None) == 90
+    assert client_portal._portal_link_expiry_days("30") == 30
+    for invalid in (0, 366, "not-a-number"):
+        with pytest.raises(HTTPException) as exc:
+            client_portal._portal_link_expiry_days(invalid)
+        assert exc.value.status_code == 422
+
+
+def test_event_publish_resolves_to_authenticated_tenant_and_client_scope(monkeypatch):
+    calls = {}
+
+    async def client_scope(user, client_id, **kwargs):
+        calls.update({"user": user, "client_id": client_id, **kwargs})
+
+    monkeypatch.setattr(event_bus, "assert_client_scope", client_scope)
+    payload, client_id, tenant_id = asyncio.run(event_bus._resolve_publish_scope(
+        {"client_id": "client-a", "tenant_id": "tenant-a", "payload": {"message": "safe"}},
+        {"id": "tech-1", "tenant_id": "tenant-a"},
+        request=None,
+    ))
+
+    assert payload == {"message": "safe"}
+    assert client_id == "client-a"
+    assert tenant_id == "tenant-a"
+    assert calls["client_id"] == "client-a"
+    assert calls["operation"] == "platform.events.publish"
+
+
+def test_event_publish_rejects_conflicting_client_and_payload_scope():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(event_bus._resolve_publish_scope(
+            {"client_id": "client-a", "payload": {"client_id": "client-b"}},
+            {"id": "admin-1", "role": "admin"},
+            request=None,
+        ))
+
+    assert exc.value.status_code == 422
+
+
+def test_event_publish_rejects_cross_tenant_override(monkeypatch):
+    async def global_scope(*_args, **_kwargs):
+        return {"mode": "all"}
+
+    monkeypatch.setattr(event_bus, "assert_global_scope", global_scope)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(event_bus._resolve_publish_scope(
+            {"tenant_id": "tenant-b", "payload": {}},
+            {"id": "admin-1", "role": "admin", "tenant_id": "tenant-a"},
+            request=None,
+        ))
+
+    assert exc.value.status_code == 403
+
+
+def test_realtime_event_stream_filters_events_to_the_subscriber_client_scope(monkeypatch):
+    restricted_queue = asyncio.Queue()
+    admin_queue = asyncio.Queue()
+    monkeypatch.setattr(event_bus, "_event_subscribers", {
+        "restricted": {
+            "queue": restricted_queue,
+            "user": {
+                "id": "tech-1",
+                "role": "technician",
+                "client_scope_mode": "restricted",
+                "client_scope_ids": ["client-a"],
+            },
+        },
+        "admin": {"queue": admin_queue, "user": {"id": "admin-1", "role": "admin"}},
+    })
+
+    event_bus._broadcast_scoped_event({"type": "ticket_viewing", "client_id": "client-b", "payload": {}})
+
+    assert restricted_queue.empty()
+    assert admin_queue.get_nowait()["client_id"] == "client-b"
+
+
+def test_realtime_event_stream_does_not_send_global_events_to_restricted_users(monkeypatch):
+    restricted_queue = asyncio.Queue()
+    monkeypatch.setattr(event_bus, "_event_subscribers", {
+        "restricted": {
+            "queue": restricted_queue,
+            "user": {
+                "id": "tech-1",
+                "role": "technician",
+                "client_scope_mode": "restricted",
+                "client_scope_ids": ["client-a"],
+            },
+        },
+    })
+
+    event_bus._broadcast_scoped_event({"type": "platform_notice", "payload": {}})
+
+    assert restricted_queue.empty()
+
+
+def test_ticket_viewer_presence_proves_ticket_scope_before_broadcast(monkeypatch):
+    calls = {}
+
+    async def ticket_scope(user, collection, ticket_id, **kwargs):
+        calls.update({"user": user, "collection": collection, "ticket_id": ticket_id, **kwargs})
+        return {"id": ticket_id, "client_id": "client-a"}
+
+    monkeypatch.setattr(event_bus, "assert_record_scope", ticket_scope)
+    monkeypatch.setattr(event_bus, "_ticket_viewers", {})
+    monkeypatch.setattr(event_bus, "_event_subscribers", {})
+
+    asyncio.run(event_bus.mark_viewing_ticket(
+        "ticket-a",
+        request=None,
+        current_user={"id": "tech-1", "name": "Scoped Technician"},
+    ))
+
+    assert calls["collection"].name == "tickets"
+    assert calls["ticket_id"] == "ticket-a"
+    assert calls["operation"] == "ticket.viewer.presence"
+
+
+def test_commercial_pdf_loader_proves_client_scope_and_masks_foreign_documents(monkeypatch):
+    calls = {}
+
+    async def scoped(user, collection, record_id, **kwargs):
+        calls.update({"user": user, "collection": collection, "record_id": record_id, **kwargs})
+        return {"id": record_id, "client_id": "client-a", "invoice_number": "INV-1"}
+
+    monkeypatch.setattr(invoice_pdf, "assert_record_scope", scoped)
+    record = asyncio.run(invoice_pdf._load_scoped_document(
+        {"id": "tech-1"},
+        "invoice-a",
+        (_RecordCollection({"id": "invoice-a", "client_id": "client-a"}),),
+        resource_name="Invoice",
+    ))
+
+    assert record["id"] == "invoice-a"
+    assert calls["record_id"] == "invoice-a"
+    assert calls["operation"] == "commercial_document.pdf.read"
+    assert calls["resource_name"] == "Invoice"
 
 
 def test_scoped_query_intersects_filters_instead_of_overwriting_them():
@@ -190,6 +393,28 @@ def test_foreign_record_is_masked_and_denial_is_audited(monkeypatch):
     assert denials.rows[0]["operation"] == "ticket.read"
 
 
+def test_missing_record_uses_the_same_generic_response_as_a_foreign_custom_named_record(monkeypatch):
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", _InsertCollection())
+    user = {
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(scope_permissions.assert_record_scope(
+            user,
+            _RecordCollection(None),
+            "missing-device",
+            operation="device.read",
+            resource_name="Device",
+        ))
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Resource not found"
+
+
 def test_allowed_record_returns_owned_document(monkeypatch):
     monkeypatch.setattr(scope_permissions.db, "scope_denials", _InsertCollection())
     user = {
@@ -209,6 +434,214 @@ def test_allowed_record_returns_owned_document(monkeypatch):
     ))
 
     assert record["name"] == "Reception"
+
+
+def test_core_client_graph_uses_masked_record_scope_before_loading_graph(monkeypatch):
+    """Core graph reads must not reveal a foreign client through response shape."""
+    calls = {}
+
+    async def denied_scope(user, collection, record_id, **kwargs):
+        calls.update({"user": user, "collection": collection, "record_id": record_id, **kwargs})
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    async def graph_should_not_run(_client_id):
+        raise AssertionError("foreign client graph must not be loaded")
+
+    monkeypatch.setattr(core_foundation, "assert_record_scope", denied_scope)
+    monkeypatch.setattr(core_foundation, "client_core_graph", graph_should_not_run)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(core_foundation.get_client_core_graph(
+            "client-b",
+            request=None,
+            current_user={"id": "tech-1", "role": "technician"},
+        ))
+
+    assert exc.value.status_code == 404
+    assert calls["collection"].name == "clients"
+    assert calls["record_id"] == "client-b"
+    assert calls["resource_name"] == "Client"
+    assert calls["operation"] == "platform.core.graph.read"
+
+
+def test_core_client_fabric_uses_masked_record_scope_before_loading_graph(monkeypatch):
+    """Fabric follows the same non-enumerating ownership boundary as graph."""
+    calls = {}
+
+    async def denied_scope(user, collection, record_id, **kwargs):
+        calls.update({"collection": collection, "record_id": record_id, **kwargs})
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    async def graph_should_not_run(_client_id):
+        raise AssertionError("foreign client fabric must not be loaded")
+
+    monkeypatch.setattr(core_foundation, "assert_record_scope", denied_scope)
+    monkeypatch.setattr(core_foundation, "client_core_graph", graph_should_not_run)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(core_foundation.get_client_fabric(
+            "client-b",
+            request=None,
+            current_user={"id": "tech-1", "role": "technician"},
+        ))
+
+    assert exc.value.status_code == 404
+    assert calls["collection"].name == "clients"
+    assert calls["record_id"] == "client-b"
+    assert calls["resource_name"] == "Client"
+    assert calls["operation"] == "platform.core.fabric.read"
+
+
+def test_client_360_router_enforces_masked_client_scope(monkeypatch):
+    """Every Client 360 aggregate inherits the record-level client boundary."""
+    calls = {}
+
+    async def scoped(user, collection, record_id, **kwargs):
+        calls.update({"user": user, "collection": collection, "record_id": record_id, **kwargs})
+        return {"id": record_id, "name": "Allowed client"}
+
+    class Request:
+        path_params = {"client_id": "client-a"}
+        method = "GET"
+
+    monkeypatch.setattr(client_360, "assert_record_scope", scoped)
+    asyncio.run(client_360._enforce_client_360_scope(
+        Request(),
+        current_user={"id": "tech-1", "role": "technician"},
+    ))
+
+    assert calls["collection"].name == "clients"
+    assert calls["record_id"] == "client-a"
+    assert calls["resource_name"] == "Client"
+    assert calls["operation"] == "client_360:get"
+
+
+def test_client_war_room_router_enforces_masked_client_scope(monkeypatch):
+    """War Room operations cannot expose another customer's live context."""
+    calls = {}
+
+    async def scoped(user, collection, record_id, **kwargs):
+        calls.update({"collection": collection, "record_id": record_id, **kwargs})
+        return {"id": record_id}
+
+    class Request:
+        path_params = {"client_id": "client-a"}
+        method = "GET"
+
+    monkeypatch.setattr(client_war_room, "assert_record_scope", scoped)
+    asyncio.run(client_war_room._enforce_war_room_scope(
+        Request(),
+        current_user={"id": "tech-1", "role": "technician"},
+    ))
+
+    assert calls["collection"].name == "clients"
+    assert calls["record_id"] == "client-a"
+    assert calls["resource_name"] == "Client"
+    assert calls["operation"] == "client_war_room:get"
+
+
+def test_client_studio_router_scopes_client_views_and_reserves_portfolio_views(monkeypatch):
+    client_calls, global_calls = {}, {}
+
+    async def scoped(user, collection, record_id, **kwargs):
+        client_calls.update({"collection": collection, "record_id": record_id, **kwargs})
+        return {"id": record_id}
+
+    async def global_scope(user, **kwargs):
+        global_calls.update(kwargs)
+        return {"mode": "all"}
+
+    class ClientRequest:
+        path_params = {"client_id": "client-a"}
+        method = "GET"
+
+        class url:
+            path = "/client-studio/client-a/360-context"
+
+    class PortfolioRequest:
+        path_params = {}
+        method = "GET"
+
+        class url:
+            path = "/client-studio/universe"
+
+    monkeypatch.setattr(client_studio, "assert_tenant_record_scope", scoped)
+    monkeypatch.setattr(client_studio, "assert_global_scope", global_scope)
+    user = {"id": "admin-1", "role": "admin"}
+
+    asyncio.run(client_studio._enforce_client_studio_scope(ClientRequest(), current_user=user))
+    asyncio.run(client_studio._enforce_client_studio_scope(PortfolioRequest(), current_user=user))
+
+    assert client_calls["collection"].name == "clients"
+    assert client_calls["record_id"] == "client-a"
+    assert client_calls["operation"] == "client_studio:get"
+    assert global_calls["operation"] == "client_studio:get"
+
+
+def test_client_studio_my_accounts_intersects_assignment_with_client_scope(monkeypatch):
+    captured = {}
+
+    class Clients:
+        def find(self, query, _projection):
+            captured["query"] = query
+            return _ListCursor([])
+
+    monkeypatch.setattr(client_studio, "db", type("DB", (), {"clients": Clients()})())
+    result = asyncio.run(client_studio.my_accounts({
+        "id": "tech-1",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }))
+
+    assert result == {"accounts": [], "count": 0}
+    assert captured["query"] == {
+        "$and": [
+            {
+                "$and": [
+                    {"$or": [{"assigned_to": "tech-1"}, {"account_manager_id": "tech-1"}, {"owner_id": "tech-1"}]},
+                    {"id": {"$in": ["client-a"]}},
+                ]
+            },
+            {
+                "$or": [
+                    {"tenant_id": "nexus-local"},
+                    {"tenant_id": {"$exists": False}},
+                    {"tenant_id": None},
+                    {"tenant_id": ""},
+                ]
+            },
+        ]
+    }
+
+
+def test_client_studio_write_actions_have_stable_permission_subjects():
+    assert "client.account.manage" in ACTION_PERMISSION_IDS
+    assert "client.portfolio.recalculate" in ACTION_PERMISSION_IDS
+    assert "platform.audit.view" in ACTION_PERMISSION_IDS
+
+
+def test_client_studio_write_audit_keeps_actor_and_client_scope(monkeypatch):
+    rows = []
+
+    class AuditLogs:
+        async def insert_one(self, row):
+            rows.append(dict(row))
+
+    monkeypatch.setattr(client_studio, "db", type("DB", (), {"audit_logs": AuditLogs()})())
+    asyncio.run(client_studio._write_client_studio_audit(
+        {"id": "tech-1", "name": "Scoped Technician"},
+        "client_account_plan_saved",
+        client_id="client-a",
+        entity_type="client_account_plan",
+        entity_id="client-a",
+        metadata={"fields": ["goals"]},
+    ))
+
+    assert rows[0]["action"] == "client_account_plan_saved"
+    assert rows[0]["client_id"] == "client-a"
+    assert rows[0]["user_id"] == "tech-1"
+    assert rows[0]["metadata"] == {"fields": ["goals"]}
 
 
 def test_allowed_client_with_foreign_site_is_denied_and_audited(monkeypatch):
@@ -499,6 +932,9 @@ def test_microsoft_tenant_registry_only_reads_allowed_client_records(monkeypatch
             captured[self.name] = query
             return _ListCursor([])
 
+    async def visible_provider_tenants(*_args, **_kwargs):
+        return {"entra-a"}
+
     monkeypatch.setattr(
         control_plane,
         "db",
@@ -508,20 +944,41 @@ def test_microsoft_tenant_registry_only_reads_allowed_client_records(monkeypatch
             "m365_tenants": Collection("tenants"),
         })(),
     )
+    monkeypatch.setattr(
+        control_plane,
+        "visible_m365_provider_tenant_ids",
+        visible_provider_tenants,
+    )
     user = {
         "id": "tech-1",
         "role": "technician",
+        "tenant_id": "platform-a",
         "client_scope_mode": "restricted",
         "client_scope_ids": ["client-a"],
     }
 
     assert asyncio.run(control_plane._microsoft_tenant_registry({}, user)) == []
-    assert captured["clients"] == {"id": {"$in": ["client-a"]}}
-    assert captured["connections"] == {"client_id": {"$in": ["client-a"]}}
+    assert captured["clients"] == {
+        "$and": [
+            {"id": {"$in": ["client-a"]}},
+            {"tenant_id": "platform-a"},
+        ]
+    }
+    assert captured["connections"] == {
+        "$or": [
+            {"tenant_id": {"$in": ["entra-a"]}},
+            {"tenantId": {"$in": ["entra-a"]}},
+        ]
+    }
     assert captured["tenants"] == {
         "$and": [
             {"source": {"$in": ["m365_graph", "m365_partner_center"]}},
-            {"client_id": {"$in": ["client-a"]}},
+            {
+                "$or": [
+                    {"tenant_id": {"$in": ["entra-a"]}},
+                    {"id": {"$in": ["entra-a"]}},
+                ]
+            },
         ]
     }
 
@@ -563,8 +1020,12 @@ def test_control_plane_search_scopes_client_bearing_results(monkeypatch):
 
     assert result["count"] == 0
     assert captured["clients"]["$and"][1] == {"id": {"$in": ["client-a"]}}
-    for name in ("tickets", "devices", "m365_users", "invoices", "voice", "backups", "knowledge"):
+    for name in ("tickets", "devices", "invoices", "voice", "backups", "knowledge"):
         assert captured[name]["$and"][1] == {"client_id": {"$in": ["client-a"]}}
+    # The fixture deliberately has no client-to-Entra tenant mapping.  Microsoft
+    # evidence must therefore fail closed rather than fall back to a
+    # client-name or unscoped provider search.
+    assert captured["m365_users"]["$and"][1] == {"tenant_id": {"$in": []}}
 
 
 def test_generic_approval_list_is_limited_to_the_technicians_clients(monkeypatch):
@@ -740,6 +1201,39 @@ def test_nexus_verify_requires_an_independent_authorised_approver():
     assert not nexus_verify._may_approve_sensitive_request(record, requester)
     assert not nexus_verify._may_approve_sensitive_request(record, verifier)
     assert nexus_verify._may_approve_sensitive_request(record, independent_manager)
+
+
+def test_restricted_technician_cannot_enumerate_foreign_nexus_verify_request(monkeypatch):
+    denials = _InsertCollection()
+    monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
+    monkeypatch.setattr(
+        nexus_verify,
+        "db",
+        type(
+            "NexusVerifyDB",
+            (),
+            {
+                "nexus_verify_requests": _RecordCollection(
+                    {"id": "verify-b", "client_id": "client-b", "status": "awaiting_verification"}
+                ),
+            },
+        )(),
+    )
+    user = {
+        "id": "tech-1",
+        "name": "Restricted Tech",
+        "role": "technician",
+        "client_scope_mode": "restricted",
+        "client_scope_ids": ["client-a"],
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(nexus_verify._request_or_404("verify-b", user))
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Resource not found"
+    assert denials.rows[0]["client_id"] == "client-b"
+    assert denials.rows[0]["operation"] == "nexus_verify"
 
 
 def test_restricted_technician_cannot_send_a_remote_command_to_foreign_device(monkeypatch):

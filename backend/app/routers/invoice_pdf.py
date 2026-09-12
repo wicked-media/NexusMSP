@@ -1,32 +1,414 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import Response
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from hashlib import sha256
 import os
-import jwt
-from app.database import db, JWT_SECRET, JWT_ALGORITHM
-from app.auth import get_current_user
+import secrets
+import uuid
+from typing import Any, Literal
+from urllib.parse import quote, urlencode
+from pydantic import BaseModel, Field
+from app.database import db
+from app.auth import get_active_user_from_token, get_active_user_by_id
+from app.services.activity import log_activity
+from app.services.action_permissions import require_action
 from app.services.nexus_document_pdf import render_nexus_estimate_pdf, render_nexus_invoice_pdf, render_nexus_purchase_order_pdf
+from app.services.commercial_documents import resolve_commercial_document_render_context
+from app.services.scope_permissions import assert_global_scope, assert_record_scope
 from app.services.supabase_storage import archive_generated_pdf
 
 router = APIRouter()
 
 UPLOAD_DIR = "/app/backend/uploads/branding"
+_PDF_CAPABILITY_TTL = timedelta(minutes=5)
+_PDF_CAPABILITY_PREFIX = "pdfc_"
+_PDF_CAPABILITY_ACTION = "billing.portal.view"
+
+
+class DocumentPdfCapabilityRequest(BaseModel):
+    """Request an opaque, short-lived browser capability for one PDF object."""
+
+    document_type: Literal["invoice", "estimate", "contract", "purchase_order"]
+    document_id: str = Field(min_length=1, max_length=160)
+    download: bool = False
 
 
 async def _get_user_from_token(token: str = Query(None)):
-    """Authenticate via query param token (for PDF downloads opened in new tabs)"""
+    """Authenticate browser PDF navigation through the canonical token path."""
     if not token:
         raise HTTPException(status_code=401, detail="Token required")
+    return await get_active_user_from_token(token)
+
+
+async def _get_financial_document_pdf_user(
+    request: Request,
+    user: dict = Depends(_get_user_from_token),
+) -> dict:
+    """Give query-token document previews the same view-action boundary as APIs."""
+    await require_action("billing.portal.view")(request=request, current_user=user)
+    return user
+
+
+def _document_pdf_sources(document_type: str) -> tuple[tuple[str, Any], ...]:
+    """Return the allowed persistence source(s) for one commercial document type."""
+    sources = {
+        "invoice": (("xero_invoices", db.xero_invoices), ("invoices", db.invoices)),
+        "estimate": (("xero_estimates", db.xero_estimates), ("estimates", db.estimates)),
+        "contract": (("contracts", db.contracts),),
+        "purchase_order": (("purchase_orders", db.purchase_orders),),
+    }
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        return sources[document_type]
+    except KeyError as exc:  # Defensive only; request-model validation rejects this first.
+        raise HTTPException(status_code=404, detail="PDF capability unavailable") from exc
+
+
+def _capability_unavailable() -> HTTPException:
+    """Do not distinguish expired, revoked, malformed or mismatched capabilities."""
+    return HTTPException(status_code=404, detail="PDF capability unavailable")
+
+
+def _capability_hash(capability: str) -> str:
+    return sha256(capability.encode("utf-8")).hexdigest()
+
+
+def _normalise_capability(capability: str | None) -> str:
+    value = str(capability or "").strip()
+    if not value.startswith(_PDF_CAPABILITY_PREFIX) or not 32 <= len(value) <= 160:
+        raise _capability_unavailable()
+    return value
+
+
+def _parse_capability_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _stored_tenant_id(user: dict, document: dict | None = None) -> str:
+    """Resolve the stable platform tenant marker without mixing provider IDs.
+
+    Older local records do not carry a platform tenant yet.  They are kept in
+    the existing ``nexus-local`` tenant until a later, reviewed migration adds
+    explicit tenant IDs to all business records.
+    """
+    actor_tenant = str(user.get("tenant_id") or "").strip()
+    document_tenant = str((document or {}).get("tenant_id") or "").strip()
+    if actor_tenant and document_tenant and actor_tenant != document_tenant:
+        raise _capability_unavailable()
+    return document_tenant or actor_tenant or "nexus-local"
+
+
+def _explicit_actor_tenant_id(user: dict) -> str | None:
+    """Return an actor's explicit platform tenant when the account has one."""
+    tenant_id = str(user.get("tenant_id") or "").strip()
+    return tenant_id or None
+
+
+def _capability_path(document_type: str, document_id: str, *, download: bool, capability: str) -> str:
+    safe_id = quote(str(document_id), safe="")
+    if document_type == "invoice":
+        path = f"/api/invoices/{safe_id}/pdf/download" if download else f"/api/invoices/{safe_id}/pdf"
+        return f"{path}?{urlencode({'capability': capability})}"
+    if document_type == "estimate":
+        path = f"/api/estimates/{safe_id}/pdf/download" if download else f"/api/estimates/{safe_id}/pdf"
+        return f"{path}?{urlencode({'capability': capability})}"
+    if document_type == "contract":
+        path = f"/api/contracts/{safe_id}/pdf/download" if download else f"/api/contracts/{safe_id}/pdf"
+        return f"{path}?{urlencode({'capability': capability})}"
+    if document_type == "purchase_order":
+        return (
+            f"/api/purchase-orders/{safe_id}/pdf/preview?"
+            f"{urlencode({'capability': capability, 'download': str(download).lower()})}"
+        )
+    raise _capability_unavailable()
+
+
+async def _load_document_for_capability_issue(
+    user: dict,
+    document_type: str,
+    document_id: str,
+    *,
+    request: Request,
+) -> tuple[dict, str]:
+    """Resolve a capability target without guessing across mirrored collections."""
+    matches: list[tuple[str, Any]] = []
+    for source_name, collection in _document_pdf_sources(document_type):
+        if await collection.find_one({"id": document_id}, {"_id": 0}):
+            matches.append((source_name, collection))
+    if len(matches) != 1:
+        # An ID collision must be remediated before a capability can name an
+        # object.  Choosing a collection by order could expose the wrong PDF.
+        raise _capability_unavailable()
+    source_name, collection = matches[0]
+    document = await assert_record_scope(
+        user,
+        collection,
+        document_id,
+        operation="commercial_document.pdf.capability.issue",
+        request=request,
+        resource_name="Commercial document",
+    )
+    if not str(document.get("client_id") or "").strip():
+        # Financial documents must be client-bound before a browser bearer
+        # capability can be issued.  The legacy JWT URL remains available for
+        # reviewed global records while data ownership is completed.
+        raise _capability_unavailable()
+    return document, source_name
+
+
+async def _issue_document_pdf_capability(
+    request: Request,
+    payload: DocumentPdfCapabilityRequest,
+    user: dict,
+) -> dict:
+    document_id = str(payload.document_id).strip()
+    document, source_name = await _load_document_for_capability_issue(
+        user,
+        payload.document_type,
+        document_id,
+        request=request,
+    )
+    now = datetime.now(timezone.utc)
+    expires_at = now + _PDF_CAPABILITY_TTL
+    capability = f"{_PDF_CAPABILITY_PREFIX}{secrets.token_urlsafe(32)}"
+    record = {
+        "id": str(uuid.uuid4()),
+        "token_hash": _capability_hash(capability),
+        "document_type": payload.document_type,
+        "document_id": document_id,
+        "source_collection": source_name,
+        "delivery": "download" if payload.download else "preview",
+        "action": _PDF_CAPABILITY_ACTION,
+        "actor_id": str(user.get("id") or ""),
+        "tenant_id": _stored_tenant_id(user, document),
+        "client_id": str(document.get("client_id") or ""),
+        "site_id": str(document.get("site_id") or "") or None,
+        "created_at": now.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        # Keep a native UTC date alongside the display/audit ISO timestamp so
+        # MongoDB can retire an expired opaque-secret hash without a bespoke
+        # cleanup worker.  The document still checks ``expires_at`` on every
+        # use; TTL cleanup is retention, not the authorisation boundary.
+        "expiry_at": expires_at,
+        "revoked_at": None,
+        "last_used_at": None,
+        "use_count": 0,
+    }
+    if not record["actor_id"]:
+        raise _capability_unavailable()
+    await db.document_pdf_capabilities.insert_one(record)
+    # The opaque secret is intentionally excluded from activity evidence.
+    await log_activity(
+        user,
+        "pdf_capability_issued",
+        "commercial_document",
+        document_id,
+        document.get("invoice_number") or document.get("estimate_number") or document.get("name") or document_id,
+        "Issued a short-lived browser PDF capability",
+        metadata={
+            "capability_id": record["id"],
+            "document_type": payload.document_type,
+            "source_collection": source_name,
+            "client_id": record["client_id"],
+            "delivery": record["delivery"],
+            "expires_at": record["expires_at"],
+        },
+    )
+    return {
+        "capability_id": record["id"],
+        "pdf_path": _capability_path(
+            payload.document_type,
+            document_id,
+            download=payload.download,
+            capability=capability,
+        ),
+        "expires_at": record["expires_at"],
+    }
+
+
+async def ensure_document_pdf_capability_indexes() -> None:
+    """Keep opaque PDF capability lookups fast and expired hashes short-lived."""
+    await db.document_pdf_capabilities.create_index(
+        [("token_hash", 1)],
+        unique=True,
+        sparse=True,
+        name="unique_document_pdf_capability_hash",
+    )
+    await db.document_pdf_capabilities.create_index(
+        [("expiry_at", 1)],
+        expireAfterSeconds=0,
+        name="document_pdf_capability_expiry_ttl",
+    )
+    await db.document_pdf_capabilities.create_index(
+        [("actor_id", 1), ("expires_at", 1)],
+        name="document_pdf_capability_actor_expiry",
+    )
+
+
+@router.post("/document-pdf-capabilities")
+async def issue_document_pdf_capability(
+    payload: DocumentPdfCapabilityRequest,
+    request: Request,
+    current_user: dict = Depends(require_action(_PDF_CAPABILITY_ACTION)),
+):
+    """Issue a server-stored, object-bound browser PDF capability.
+
+    New callers should use this path instead of placing a full Nexus session
+    JWT in a browser URL.  It deliberately returns only an opaque, expiring
+    capability and a relative API path; it never returns a session credential.
+    """
+    return await _issue_document_pdf_capability(request, payload, current_user)
+
+
+async def _get_financial_document_pdf_access(
+    request: Request,
+    token: str | None = Query(None),
+    capability: str | None = Query(None),
+) -> dict:
+    """Accept the legacy JWT URL or the new opaque PDF capability.
+
+    The compatibility transport remains deliberately separate so existing
+    previews continue to work while callers transition to capability URLs.
+    Ambiguous URLs are refused rather than silently favouring one credential.
+    """
+    if capability and token:
+        raise HTTPException(status_code=400, detail="Use either a PDF capability or a session token")
+    if not capability:
+        user = await _get_user_from_token(token)
+        user = await _get_financial_document_pdf_user(request, user)
+        return {"user": user, "capability": None, "raw_capability": None}
+
+    raw_capability = _normalise_capability(capability)
+    record = await db.document_pdf_capabilities.find_one(
+        {"token_hash": _capability_hash(raw_capability)},
+        {"_id": 0},
+    )
+    expires_at = _parse_capability_time((record or {}).get("expires_at"))
+    if (
+        not record
+        or "revoked_at" not in record
+        or record.get("revoked_at") is not None
+        or record.get("action") != _PDF_CAPABILITY_ACTION
+        or not expires_at
+        or expires_at <= datetime.now(timezone.utc)
+        or not str(record.get("actor_id") or "").strip()
+    ):
+        raise _capability_unavailable()
+    try:
+        user = await get_active_user_by_id(str(record["actor_id"]))
+    except HTTPException as exc:
+        raise _capability_unavailable() from exc
+    actor_tenant = _explicit_actor_tenant_id(user)
+    if actor_tenant and actor_tenant != str(record.get("tenant_id") or ""):
+        raise _capability_unavailable()
+    await require_action(_PDF_CAPABILITY_ACTION)(request=request, current_user=user)
+    return {"user": user, "capability": record, "raw_capability": raw_capability}
+
+
+async def _mark_pdf_capability_used(capability: dict, raw_capability: str) -> None:
+    """Atomically record use only while the capability remains valid."""
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.document_pdf_capabilities.update_one(
+        {
+            "id": capability.get("id"),
+            "token_hash": _capability_hash(raw_capability),
+            "revoked_at": None,
+            "expires_at": {"$gt": now},
+        },
+        {"$set": {"last_used_at": now}, "$inc": {"use_count": 1}},
+    )
+    if getattr(result, "modified_count", 0) != 1:
+        raise _capability_unavailable()
+
+
+async def _load_financial_pdf_document(
+    access: dict,
+    document_type: str,
+    document_id: str,
+    *,
+    resource_name: str,
+    delivery: str,
+) -> tuple[dict, dict]:
+    """Load the requested document and prove an opaque capability still fits it."""
+    user = access["user"]
+    capability = access.get("capability")
+    if not capability:
+        collections = tuple(collection for _source, collection in _document_pdf_sources(document_type))
+        return user, await _load_scoped_document(user, document_id, collections, resource_name=resource_name)
+
+    if (
+        capability.get("document_type") != document_type
+        or capability.get("document_id") != document_id
+        or capability.get("delivery") != delivery
+    ):
+        raise _capability_unavailable()
+    source_name = str(capability.get("source_collection") or "")
+    collection = next(
+        (candidate for name, candidate in _document_pdf_sources(document_type) if name == source_name),
+        None,
+    )
+    if collection is None:
+        raise _capability_unavailable()
+    document = await _load_scoped_document(user, document_id, (collection,), resource_name=resource_name)
+    if (
+        str(document.get("client_id") or "") != str(capability.get("client_id") or "")
+        or (str(document.get("site_id") or "") or None) != capability.get("site_id")
+        or _stored_tenant_id(user, document) != str(capability.get("tenant_id") or "")
+    ):
+        raise _capability_unavailable()
+    await _mark_pdf_capability_used(capability, access["raw_capability"])
+    return user, document
+
+
+def _private_pdf_headers(content_disposition: str, **extra: str) -> dict[str, str]:
+    """Keep PDF responses private for both legacy and capability navigation.
+
+    Opaque capability URLs are now available for new callers, while legacy
+    query-token navigation remains temporarily compatible.  Neither response
+    may be cached or used as a referrer by a downstream browser request.
+    """
+    return {
+        "Cache-Control": "private, no-store, max-age=0",
+        "Pragma": "no-cache",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": content_disposition,
+        **extra,
+    }
+
+
+async def _load_scoped_document(
+    user: dict,
+    document_id: str,
+    collections: tuple,
+    *,
+    resource_name: str,
+) -> dict:
+    """Load a commercial document only after masking foreign-client access.
+
+    PDF previews use a query-token because browsers cannot attach the normal
+    bearer header to an iframe.  That alternate transport must retain exactly
+    the same server-side client boundary as every other Nexus document read.
+    """
+    for collection in collections:
+        document = await collection.find_one({"id": document_id}, {"_id": 0})
+        if not document:
+            continue
+        return await assert_record_scope(
+            user,
+            collection,
+            document_id,
+            operation="commercial_document.pdf.read",
+            resource_name=resource_name,
+        )
+    raise HTTPException(status_code=404, detail=f"{resource_name} not found")
 
 async def _get_branding():
     """Get branding config from correct collection key"""
@@ -498,7 +880,7 @@ def _generate_legacy_invoice_pdf(invoice, branding=None, theme_config=None, gene
     return pdf.output()
 
 
-def generate_invoice_pdf(invoice, branding=None, theme_config=None, generated_by=None):
+def generate_invoice_pdf(invoice, branding=None, theme_config=None, generated_by=None, document_profile=None):
     """Generate a polished invoice through the shared Nexus document system.
 
     ``theme_config`` remains accepted for API compatibility while invoices now
@@ -513,64 +895,91 @@ def generate_invoice_pdf(invoice, branding=None, theme_config=None, generated_by
         normalise_invoice_document(invoice) or {},
         branding=branding,
         generated_by=generated_by,
+        document_profile=document_profile,
     )
 
 
 @router.get("/invoices/{invoice_id}/pdf")
-async def get_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_from_token)):
+async def get_invoice_pdf(
+    invoice_id: str,
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Generate and return invoice as PDF for preview"""
-    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    user, invoice = await _load_financial_pdf_document(
+        access,
+        "invoice",
+        invoice_id,
+        resource_name="Invoice",
+        delivery="preview",
+    )
 
     branding = await _get_branding()
+    document_context = await resolve_commercial_document_render_context("invoice", invoice, branding, database=db)
     theme_config, _ = await _get_active_theme_config()
-    pdf_bytes = generate_invoice_pdf(invoice, branding, theme_config, user.get("name") or user.get("email"))
+    pdf_bytes = generate_invoice_pdf(
+        invoice,
+        document_context["branding"],
+        theme_config,
+        user.get("name") or user.get("email"),
+        document_context["profile"],
+    )
     inv_num = invoice.get("invoice_number", "invoice")
     artifact_path = await archive_generated_pdf("invoices", invoice.get("id") or invoice_id, bytes(pdf_bytes))
 
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="{inv_num}.pdf"',
-            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
-        }
+        headers=_private_pdf_headers(
+            f'inline; filename="{inv_num}.pdf"',
+            **{"X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only"},
+        ),
     )
 
 
 @router.get("/invoices/{invoice_id}/pdf/download")
-async def download_invoice_pdf(invoice_id: str, user: dict = Depends(_get_user_from_token)):
+async def download_invoice_pdf(
+    invoice_id: str,
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Download invoice as PDF attachment"""
-    invoice = await db.xero_invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    user, invoice = await _load_financial_pdf_document(
+        access,
+        "invoice",
+        invoice_id,
+        resource_name="Invoice",
+        delivery="download",
+    )
 
     branding = await _get_branding()
+    document_context = await resolve_commercial_document_render_context("invoice", invoice, branding, database=db)
     theme_config, _ = await _get_active_theme_config()
-    pdf_bytes = generate_invoice_pdf(invoice, branding, theme_config, user.get("name") or user.get("email"))
+    pdf_bytes = generate_invoice_pdf(
+        invoice,
+        document_context["branding"],
+        theme_config,
+        user.get("name") or user.get("email"),
+        document_context["profile"],
+    )
     inv_num = invoice.get("invoice_number", "invoice")
     artifact_path = await archive_generated_pdf("invoices", invoice.get("id") or invoice_id, bytes(pdf_bytes))
 
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{inv_num}.pdf"',
-            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
-        }
+        headers=_private_pdf_headers(
+            f'attachment; filename="{inv_num}.pdf"',
+            **{"X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only"},
+        ),
     )
 
 
 # ──────── INVOICE THEME PREVIEW ────────
 
 @router.get("/invoice-themes/{theme_id}/preview-pdf")
-async def preview_theme_pdf(theme_id: str, user: dict = Depends(_get_user_from_token)):
+async def preview_theme_pdf(theme_id: str, request: Request, user: dict = Depends(_get_user_from_token)):
     """Generate a sample invoice PDF using a specific theme for preview."""
+    await require_action("platform.configuration.manage")(request=request, current_user=user)
+    await assert_global_scope(user, operation="commercial_document.theme.preview", request=request)
     from app.routers.invoice_themes import BUILT_IN_THEMES
     theme_config = None
     for t in BUILT_IN_THEMES:
@@ -613,7 +1022,7 @@ async def preview_theme_pdf(theme_id: str, user: dict = Depends(_get_user_from_t
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": 'inline; filename="theme-preview.pdf"'}
+        headers=_private_pdf_headers('inline; filename="theme-preview.pdf"')
     )
 
 
@@ -835,13 +1244,18 @@ def generate_estimate_pdf(estimate, branding=None, theme_config=None, generated_
 
 
 @router.get("/estimates/{estimate_id}/pdf")
-async def get_estimate_pdf(estimate_id: str, user: dict = Depends(_get_user_from_token)):
+async def get_estimate_pdf(
+    estimate_id: str,
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Generate and return estimate as PDF for preview."""
-    estimate = await db.xero_estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not estimate:
-        estimate = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not estimate:
-        raise HTTPException(status_code=404, detail="Estimate not found")
+    user, estimate = await _load_financial_pdf_document(
+        access,
+        "estimate",
+        estimate_id,
+        resource_name="Estimate",
+        delivery="preview",
+    )
     branding = await _get_branding()
     theme_config, _ = await _get_active_theme_config()
     pdf_bytes = generate_estimate_pdf(estimate, branding, theme_config)
@@ -849,18 +1263,23 @@ async def get_estimate_pdf(estimate_id: str, user: dict = Depends(_get_user_from
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{est_num}.pdf"'}
+        headers=_private_pdf_headers(f'inline; filename="{est_num}.pdf"')
     )
 
 
 @router.get("/estimates/{estimate_id}/pdf/download")
-async def download_estimate_pdf(estimate_id: str, user: dict = Depends(_get_user_from_token)):
+async def download_estimate_pdf(
+    estimate_id: str,
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Download estimate as PDF attachment."""
-    estimate = await db.xero_estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not estimate:
-        estimate = await db.estimates.find_one({"id": estimate_id}, {"_id": 0})
-    if not estimate:
-        raise HTTPException(status_code=404, detail="Estimate not found")
+    user, estimate = await _load_financial_pdf_document(
+        access,
+        "estimate",
+        estimate_id,
+        resource_name="Estimate",
+        delivery="download",
+    )
     branding = await _get_branding()
     theme_config, _ = await _get_active_theme_config()
     pdf_bytes = generate_estimate_pdf(estimate, branding, theme_config)
@@ -868,7 +1287,7 @@ async def download_estimate_pdf(estimate_id: str, user: dict = Depends(_get_user
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{est_num}.pdf"'}
+        headers=_private_pdf_headers(f'attachment; filename="{est_num}.pdf"')
     )
 
 
@@ -892,7 +1311,7 @@ def generate_contract_pdf(contract, line_items, branding=None):
         company_name = branding.get("company_name", "NexusOps")
         primary_color = _hex_to_rgb(branding.get("primary_color", "#3B82F6"))
         accent_color = _hex_to_rgb(branding.get("accent_color", "#06B6D4"), (6, 182, 212))
-        for logo_key in ["company_logo_url", "invoice_logo_url"]:
+        for logo_key in ["contract_logo_url", "company_logo_url", "invoice_logo_url"]:
             logo_url = branding.get(logo_key, "")
             if logo_url:
                 if logo_url.startswith("/api/uploads/"):
@@ -925,6 +1344,11 @@ def generate_contract_pdf(contract, line_items, branding=None):
     pdf.set_font("Helvetica", "B", 18)
     pdf.set_xy(x_text, 7)
     pdf.cell(100, 10, cn)
+    contract_header = _safe_latin((branding or {}).get("contract_header_text", ""))
+    if contract_header:
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_xy(x_text, 18)
+        pdf.cell(92, 5, contract_header.replace("\n", " ")[:110])
     pdf.set_font("Helvetica", "", 26)
     pdf.set_xy(110, 4)
     pdf.cell(90, 14, "SERVICE CONTRACT", align="R")
@@ -1098,7 +1522,7 @@ def generate_contract_pdf(contract, line_items, branding=None):
     pdf.ln(3)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(140, 140, 140)
-    footer = _safe_latin(branding.get("invoice_footer_text", "") if branding else "")
+    footer = _safe_latin((branding or {}).get("contract_footer_text") or (branding or {}).get("invoice_footer_text", ""))
     if footer:
         pdf.cell(0, 4, footer[:120], ln=True, align="C")
     pdf.cell(0, 4, f"Generated by {cn} on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
@@ -1107,11 +1531,18 @@ def generate_contract_pdf(contract, line_items, branding=None):
 
 
 @router.get("/contracts/{contract_id}/pdf")
-async def get_contract_pdf(contract_id: str, user: dict = Depends(_get_user_from_token)):
+async def get_contract_pdf(
+    contract_id: str,
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Generate and return contract as PDF for preview."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    user, contract = await _load_financial_pdf_document(
+        access,
+        "contract",
+        contract_id,
+        resource_name="Contract",
+        delivery="preview",
+    )
     line_items = await db.contract_line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(100)
     branding = await _get_branding()
     pdf_bytes = generate_contract_pdf(contract, line_items, branding)
@@ -1119,16 +1550,23 @@ async def get_contract_pdf(contract_id: str, user: dict = Depends(_get_user_from
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{name}.pdf"'}
+        headers=_private_pdf_headers(f'inline; filename="{name}.pdf"')
     )
 
 
 @router.get("/contracts/{contract_id}/pdf/download")
-async def download_contract_pdf(contract_id: str, user: dict = Depends(_get_user_from_token)):
+async def download_contract_pdf(
+    contract_id: str,
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Download contract as PDF attachment."""
-    contract = await db.contracts.find_one({"id": contract_id}, {"_id": 0})
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
+    user, contract = await _load_financial_pdf_document(
+        access,
+        "contract",
+        contract_id,
+        resource_name="Contract",
+        delivery="download",
+    )
     line_items = await db.contract_line_items.find({"contract_id": contract_id}, {"_id": 0}).to_list(100)
     branding = await _get_branding()
     pdf_bytes = generate_contract_pdf(contract, line_items, branding)
@@ -1136,34 +1574,44 @@ async def download_contract_pdf(contract_id: str, user: dict = Depends(_get_user
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'}
+        headers=_private_pdf_headers(f'attachment; filename="{name}.pdf"')
     )
 
 
 # ──────── PO PDF (query-param token auth for iframe) ────────
 
 @router.get("/purchase-orders/{po_id}/pdf/preview")
-async def preview_po_pdf(po_id: str, download: bool = Query(False), user: dict = Depends(_get_user_from_token)):
+async def preview_po_pdf(
+    po_id: str,
+    download: bool = Query(False),
+    access: dict = Depends(_get_financial_document_pdf_access),
+):
     """Preview PO as inline PDF (query param auth for iframe)."""
-    po = await db.purchase_orders.find_one({"id": po_id}, {"_id": 0})
-    if not po:
-        raise HTTPException(status_code=404, detail="PO not found")
-    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    user, po = await _load_financial_pdf_document(
+        access,
+        "purchase_order",
+        po_id,
+        resource_name="Purchase order",
+        delivery="download" if download else "preview",
+    )
+    branding = await _get_branding()
+    document_context = await resolve_commercial_document_render_context("purchase_order", po, branding, database=db)
     actor = user.get("name") or user.get("email") or "NexusMSP"
     pdf_bytes = render_nexus_purchase_order_pdf(
         po,
-        branding=branding,
+        branding=document_context["branding"],
         generated_by=actor,
+        document_profile=document_context["profile"],
     )
     artifact_path = await archive_generated_pdf("purchase-orders", po.get("id") or po_id, pdf_bytes)
     disposition = "attachment" if download else "inline"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'{disposition}; filename="PO_{po.get("po_number", po_id)}.pdf"',
-            "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
-        },
+        headers=_private_pdf_headers(
+            f'{disposition}; filename="PO_{po.get("po_number", po_id)}.pdf"',
+            **{"X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only"},
+        ),
     )
 
     # Retained temporarily while deployments transition to the shared renderer.

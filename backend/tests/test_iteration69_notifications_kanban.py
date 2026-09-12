@@ -22,7 +22,7 @@ class TestAuth:
         """Get authentication token for admin user"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -33,7 +33,7 @@ class TestAuth:
         """Test standard login works"""
         assert auth_token is not None
         assert len(auth_token) > 0
-        print(f"✓ Login successful, token obtained")
+        print(f"Ã¢Å“â€œ Login successful, token obtained")
 
 
 class TestNotificationsAPI:
@@ -44,7 +44,7 @@ class TestNotificationsAPI:
         """Get auth headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -55,14 +55,14 @@ class TestNotificationsAPI:
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
         assert isinstance(data, list), "Response should be a list"
-        print(f"✓ GET /api/notifications returned {len(data)} notifications")
+        print(f"Ã¢Å“â€œ GET /api/notifications returned {len(data)} notifications")
         
         # If there are notifications, verify structure
         if len(data) > 0:
             notif = data[0]
             assert "id" in notif, "Notification should have id"
             assert "type" in notif, "Notification should have type"
-            print(f"✓ Notification structure verified: type={notif.get('type')}, message={notif.get('message', '')[:50]}")
+            print(f"Ã¢Å“â€œ Notification structure verified: type={notif.get('type')}, message={notif.get('message', '')[:50]}")
     
     def test_generate_notifications(self, auth_headers):
         """POST /api/notifications/generate creates notifications from system state"""
@@ -71,7 +71,7 @@ class TestNotificationsAPI:
         data = response.json()
         assert "message" in data, "Response should have message"
         assert "count" in data, "Response should have count"
-        print(f"✓ POST /api/notifications/generate: {data['message']}")
+        print(f"Ã¢Å“â€œ POST /api/notifications/generate: {data['message']}")
     
     def test_get_unread_count(self, auth_headers):
         """GET /api/notifications/unread-count returns count"""
@@ -79,7 +79,7 @@ class TestNotificationsAPI:
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
         assert "count" in data, "Response should have count"
-        print(f"✓ GET /api/notifications/unread-count: {data['count']} unread")
+        print(f"Ã¢Å“â€œ GET /api/notifications/unread-count: {data['count']} unread")
     
     def test_mark_all_read(self, auth_headers):
         """POST /api/notifications/mark-read without ids marks ALL as read"""
@@ -91,13 +91,13 @@ class TestNotificationsAPI:
         assert response.status_code == 200, f"Failed: {response.text}"
         data = response.json()
         assert "message" in data, "Response should have message"
-        print(f"✓ POST /api/notifications/mark-read (all): {data['message']}")
+        print(f"Ã¢Å“â€œ POST /api/notifications/mark-read (all): {data['message']}")
         
         # Verify unread count is 0
         count_response = requests.get(f"{BASE_URL}/api/notifications/unread-count", headers=auth_headers)
         count_data = count_response.json()
         assert count_data.get("count", 0) == 0, "Unread count should be 0 after marking all read"
-        print(f"✓ Verified unread count is now 0")
+        print(f"Ã¢Å“â€œ Verified unread count is now 0")
     
     def test_mark_specific_read(self, auth_headers):
         """POST /api/notifications/mark-read with ids marks specific notifications as read"""
@@ -114,9 +114,9 @@ class TestNotificationsAPI:
             response = requests.post(f"{BASE_URL}/api/notifications/mark-read", 
                                     json={"ids": [notif_id]}, headers=auth_headers)
             assert response.status_code == 200, f"Failed: {response.text}"
-            print(f"✓ POST /api/notifications/mark-read (specific id): success")
+            print(f"Ã¢Å“â€œ POST /api/notifications/mark-read (specific id): success")
         else:
-            print("⚠ No notifications to mark as read")
+            print("Ã¢Å¡Â  No notifications to mark as read")
     
     def test_delete_notifications(self, auth_headers):
         """POST /api/notifications/delete removes specified notifications"""
@@ -132,16 +132,16 @@ class TestNotificationsAPI:
             assert response.status_code == 200, f"Failed: {response.text}"
             data = response.json()
             assert "message" in data, "Response should have message"
-            print(f"✓ POST /api/notifications/delete: {data['message']}")
+            print(f"Ã¢Å“â€œ POST /api/notifications/delete: {data['message']}")
             
             # Verify notification is deleted
             get_response2 = requests.get(f"{BASE_URL}/api/notifications", headers=auth_headers)
             notifications2 = get_response2.json()
             deleted_ids = [n["id"] for n in notifications2]
             assert notif_id not in deleted_ids, "Deleted notification should not be in list"
-            print(f"✓ Verified notification {notif_id[:8]}... was deleted")
+            print(f"Ã¢Å“â€œ Verified notification {notif_id[:8]}... was deleted")
         else:
-            print("⚠ No notifications to delete")
+            print("Ã¢Å¡Â  No notifications to delete")
 
 
 class TestKanbanBoardAPI:
@@ -152,7 +152,7 @@ class TestKanbanBoardAPI:
         """Get auth headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -174,7 +174,7 @@ class TestKanbanBoardAPI:
         for expected in expected_columns:
             assert expected in column_ids, f"Column '{expected}' should exist"
         
-        print(f"✓ GET /api/kanban-tickets/board: {len(data['columns'])} columns, {data['total_tickets']} total tickets")
+        print(f"Ã¢Å“â€œ GET /api/kanban-tickets/board: {len(data['columns'])} columns, {data['total_tickets']} total tickets")
         
         # Print column ticket counts
         for col in data["columns"]:
@@ -197,7 +197,7 @@ class TestKanbanBoardAPI:
                 assert "id" in ticket, "Ticket should have id"
                 assert "title" in ticket, "Ticket should have title"
                 assert "priority" in ticket, "Ticket should have priority"
-                print(f"✓ Column '{col['title']}' ticket structure verified")
+                print(f"Ã¢Å“â€œ Column '{col['title']}' ticket structure verified")
     
     def test_move_ticket(self, auth_headers):
         """PUT /api/kanban-tickets/move changes ticket status"""
@@ -226,7 +226,7 @@ class TestKanbanBoardAPI:
             data = response.json()
             assert data.get("status") == "moved", "Response should indicate moved"
             assert data.get("new_status") == new_status, "New status should match"
-            print(f"✓ PUT /api/kanban-tickets/move: Moved ticket from '{original_status}' to '{new_status}'")
+            print(f"Ã¢Å“â€œ PUT /api/kanban-tickets/move: Moved ticket from '{original_status}' to '{new_status}'")
             
             # Verify ticket moved by fetching board again
             board_response2 = requests.get(f"{BASE_URL}/api/kanban-tickets/board", headers=auth_headers)
@@ -242,15 +242,15 @@ class TestKanbanBoardAPI:
                         break
             
             assert found_in_new, f"Ticket should be in '{new_status}' column after move"
-            print(f"✓ Verified ticket is now in '{new_status}' column")
+            print(f"Ã¢Å“â€œ Verified ticket is now in '{new_status}' column")
             
             # Move ticket back to original status
             requests.put(f"{BASE_URL}/api/kanban-tickets/move", 
                         json={"ticket_id": ticket_to_move["id"], "new_status": original_status},
                         headers=auth_headers)
-            print(f"✓ Moved ticket back to '{original_status}'")
+            print(f"Ã¢Å“â€œ Moved ticket back to '{original_status}'")
         else:
-            print("⚠ No tickets found to test move functionality")
+            print("Ã¢Å¡Â  No tickets found to test move functionality")
 
 
 class TestNotificationTypes:
@@ -261,7 +261,7 @@ class TestNotificationTypes:
         """Get auth headers"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         token = response.json().get("token")
         return {"Authorization": f"Bearer {token}"}
@@ -280,7 +280,7 @@ class TestNotificationTypes:
         for n in notifications:
             types_found.add(n.get("type"))
         
-        print(f"✓ Notification types found: {types_found}")
+        print(f"Ã¢Å“â€œ Notification types found: {types_found}")
         
         # Expected types (may not all be present depending on system state)
         expected_types = ["sla_breach", "sla_warning", "contract_renewal", "device_offline", 
@@ -288,7 +288,7 @@ class TestNotificationTypes:
         
         for t in types_found:
             if t in expected_types:
-                print(f"  ✓ Type '{t}' is a valid notification type")
+                print(f"  Ã¢Å“â€œ Type '{t}' is a valid notification type")
 
 
 if __name__ == "__main__":

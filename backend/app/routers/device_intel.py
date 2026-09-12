@@ -13,17 +13,108 @@ import os
 from app.database import db
 from app.routers.auth import get_current_user
 from app.services.activity import log_activity
+from app.services.scope_permissions import assert_record_scope, scoped_query
 from app.services.time_machine import compare_endpoint_states
 from app.services.platform_foundation import emit_platform_event
 
 router = APIRouter()
 logger = logging.getLogger("device_intel")
 
+# A device record can legitimately outlive its agent or another telemetry
+# source. Do not turn an old heartbeat into a current health assertion. This
+# is deliberately looser than the three-minute command-dispatch window: a
+# technician can still inspect a recent snapshot, but must verify it before
+# treating it as live operational evidence.
+HEALTH_EVIDENCE_MAX_AGE_SECONDS = 15 * 60
+
+
+def _numeric_device_value(device: dict, *fields: str) -> float:
+    """Return the first usable numeric device signal without double-counting aliases."""
+    for field in fields:
+        value = device.get(field)
+        if value in (None, ""):
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _device_attention_query() -> dict:
+    """Query every supported signal name emitted by the legacy and Nexus agents."""
+    return {
+        "$or": [
+            {"status": {"$in": ["warning", "critical", "needs_attention", "degraded"]}},
+            {"cpu_load": {"$gte": 90}},
+            {"cpu_usage": {"$gte": 90}},
+            {"memory_pct": {"$gte": 90}},
+            {"memory_usage": {"$gte": 90}},
+            {"disk_pct": {"$gte": 90}},
+            {"disk_usage": {"$gte": 90}},
+            {"checks_failing": {"$gt": 0}},
+        ]
+    }
+
+
+def _disk_at_risk_query() -> dict:
+    return {"$or": [{"disk_pct": {"$gte": 90}}, {"disk_usage": {"$gte": 90}}]}
+
+
+def _patches_pending_query() -> dict:
+    return {"$or": [{"patches_pending": {"$gte": 10}}, {"pending_patches": {"$gte": 10}}]}
+
 
 def _iso(dt):
     if isinstance(dt, datetime):
         return dt.isoformat()
     return dt
+
+
+def _telemetry_evidence(device: dict, *, now: datetime | None = None) -> dict:
+    """Describe whether the device's health inputs are fresh enough to assess.
+
+    ``status`` is a mutable convenience field and must not be used as evidence
+    on its own. Health, failure risk and technician guidance use the newest
+    recorded endpoint observation instead.
+    """
+    now = now or datetime.now(timezone.utc)
+    observations: list[datetime] = []
+    for field in ("last_heartbeat", "last_seen", "telemetry_at", "observed_at"):
+        value = device.get(field)
+        if not value:
+            continue
+        try:
+            observed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+            observations.append(observed.astimezone(timezone.utc))
+        except (TypeError, ValueError):
+            continue
+
+    if not observations:
+        return {
+            "state": "not_collected",
+            "observed_at": None,
+            "age_seconds": None,
+            "message": "Nexus has no timestamped endpoint telemetry to assess yet.",
+        }
+
+    observed_at = max(observations)
+    age_seconds = max(0, int((now - observed_at).total_seconds()))
+    if age_seconds > HEALTH_EVIDENCE_MAX_AGE_SECONDS:
+        return {
+            "state": "stale",
+            "observed_at": observed_at.isoformat(),
+            "age_seconds": age_seconds,
+            "message": "Endpoint telemetry is stale. Reconnect or refresh the agent before acting on health or failure risk.",
+        }
+    return {
+        "state": "observed",
+        "observed_at": observed_at.isoformat(),
+        "age_seconds": age_seconds,
+        "message": "Health is based on the latest timestamped endpoint observation.",
+    }
 
 
 def _time_machine_record(row: dict | None) -> dict | None:
@@ -51,12 +142,12 @@ async def device_time_machine(
     current_user: dict = Depends(get_current_user),
 ):
     """Return durable, agent-observed state history for one endpoint."""
-    device = await db.devices.find_one(
-        {"id": device_id},
-        {"_id": 0, "id": 1, "name": 1, "client_id": 1, "nexus_agent_id": 1},
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="device.time_machine.read",
     )
-    if not device:
-        raise HTTPException(404, "Device not found")
 
     rows = await db.device_state_snapshots.find(
         {"device_id": device_id},
@@ -95,9 +186,12 @@ async def compare_device_time_machine(
     current_user: dict = Depends(get_current_user),
 ):
     """Compare two persisted endpoint states by evidence category."""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "id": 1})
-    if not device:
-        raise HTTPException(404, "Device not found")
+    await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="device.time_machine.compare",
+    )
 
     if from_snapshot and to_snapshot and from_snapshot == to_snapshot:
         raise HTTPException(400, "Choose two different snapshots")
@@ -166,7 +260,7 @@ async def smart_inbox(current_user: dict = Depends(get_current_user)):
 
     # Failing checks (mocked from device.checks_failing or alerts)
     cursor = db.devices.find(
-        {"$or": [{"checks_failing": {"$gt": 0}}, {"alerts": {"$exists": True, "$ne": []}}]},
+        scoped_query(current_user, {"$or": [{"checks_failing": {"$gt": 0}}, {"alerts": {"$exists": True, "$ne": []}}]}),
         {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_id": 1, "client_name": 1, "checks_failing": 1, "alerts": 1, "status": 1},
     )
     async for d in cursor:
@@ -185,7 +279,7 @@ async def smart_inbox(current_user: dict = Depends(get_current_user)):
     # Offline 24h+
     cutoff = (now - timedelta(hours=24)).isoformat()
     cursor = db.devices.find(
-        {"status": "offline", "last_seen": {"$lt": cutoff}},
+        scoped_query(current_user, {"status": "offline", "last_seen": {"$lt": cutoff}}),
         {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "last_seen": 1},
     )
     async for d in cursor:
@@ -201,8 +295,8 @@ async def smart_inbox(current_user: dict = Depends(get_current_user)):
 
     # Disk-at-risk (>90%)
     cursor = db.devices.find(
-        {"disk_pct": {"$gte": 90}},
-        {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "disk_pct": 1},
+        scoped_query(current_user, _disk_at_risk_query()),
+        {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "disk_pct": 1, "disk_usage": 1},
     )
     async for d in cursor:
         items.append({
@@ -211,14 +305,14 @@ async def smart_inbox(current_user: dict = Depends(get_current_user)):
             "device_name": d.get("name") or d.get("hostname"),
             "client_name": d.get("client_name"),
             "severity": "critical",
-            "title": f"Disk {int(d['disk_pct'])}% — at risk",
+                "title": f"Disk {int(_numeric_device_value(d, 'disk_pct', 'disk_usage'))}% — at risk",
             "subtitle": "free space critical",
         })
 
     # Patches pending (>10)
     cursor = db.devices.find(
-        {"patches_pending": {"$gte": 10}},
-        {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "patches_pending": 1},
+        scoped_query(current_user, _patches_pending_query()),
+        {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "patches_pending": 1, "pending_patches": 1},
     )
     async for d in cursor:
         items.append({
@@ -227,7 +321,7 @@ async def smart_inbox(current_user: dict = Depends(get_current_user)):
             "device_name": d.get("name") or d.get("hostname"),
             "client_name": d.get("client_name"),
             "severity": "warning",
-            "title": f"{d['patches_pending']} patches pending",
+                "title": f"{int(_numeric_device_value(d, 'patches_pending', 'pending_patches'))} patches pending",
             "subtitle": "Windows updates queue",
         })
 
@@ -241,24 +335,18 @@ async def smart_inbox(current_user: dict = Depends(get_current_user)):
 @router.get("/devices/intel/stats")
 async def device_intel_stats(current_user: dict = Depends(get_current_user)):
     """Aggregated stats for the Command Center HeroTile strip."""
-    total = await db.devices.count_documents({})
-    online = await db.devices.count_documents({"status": "online"})
-    offline = await db.devices.count_documents({"status": "offline"})
-    warning = await db.devices.count_documents({
-        "$or": [
-            {"cpu_load": {"$gte": 90}},
-            {"memory_pct": {"$gte": 90}},
-            {"disk_pct": {"$gte": 90}},
-            {"checks_failing": {"$gt": 0}},
-        ]
-    })
+    scope = scoped_query(current_user)
+    total = await db.devices.count_documents(scope)
+    online = await db.devices.count_documents(scoped_query(current_user, {"status": "online"}))
+    offline = await db.devices.count_documents(scoped_query(current_user, {"status": "offline"}))
+    warning = await db.devices.count_documents(scoped_query(current_user, _device_attention_query()))
     patches = 0
-    cursor = db.devices.find({}, {"_id": 0, "patches_pending": 1})
+    cursor = db.devices.find(scope, {"_id": 0, "patches_pending": 1, "pending_patches": 1})
     async for d in cursor:
-        patches += int(d.get("patches_pending") or 0)
-    disk_at_risk = await db.devices.count_documents({"disk_pct": {"$gte": 90}})
+        patches += int(_numeric_device_value(d, "patches_pending", "pending_patches"))
+    disk_at_risk = await db.devices.count_documents(scoped_query(current_user, _disk_at_risk_query()))
     # Asset value — sum of `purchase_price` if present (fallback heuristic)
-    pipeline = [{"$group": {"_id": None, "v": {"$sum": "$purchase_price"}}}]
+    pipeline = [{"$match": scope}, {"$group": {"_id": None, "v": {"$sum": "$purchase_price"}}}]
     val = 0
     try:
         async for r in db.devices.aggregate(pipeline):
@@ -269,7 +357,7 @@ async def device_intel_stats(current_user: dict = Depends(get_current_user)):
     # MTTR (last 30d, on tickets that closed)
     thirty = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     closed = await db.tickets.find(
-        {"closed_at": {"$gte": thirty}},
+        scoped_query(current_user, {"closed_at": {"$gte": thirty}}),
         {"_id": 0, "created_at": 1, "closed_at": 1},
     ).to_list(500)
     deltas = []
@@ -383,16 +471,40 @@ def _failure_risk(d: dict) -> dict:
 @router.get("/devices/{device_id}/dossier")
 async def device_dossier(device_id: str, current_user: dict = Depends(get_current_user)):
     """Full intelligence dossier for a single device."""
-    d = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not d:
-        raise HTTPException(404, "Device not found")
+    d = await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="device.dossier.read",
+    )
+    evidence = _telemetry_evidence(d)
     score, commentary = _health_score(d)
     lifecycle = _lifecycle_band(d)
     risk = _failure_risk(d)
+    if evidence["state"] != "observed":
+        # A stale or missing check-in must remain uncertainty. Showing a 100
+        # score or 0% failure risk here would train technicians to trust a
+        # record that Nexus cannot presently substantiate.
+        score = None
+        commentary = evidence["message"]
+        risk = {
+            "risk_pct": None,
+            "verdict": "not_assessed",
+            "factors": [],
+            "message": "Failure risk needs a fresh endpoint observation.",
+        }
 
     # Recent open tickets
     tickets = await db.tickets.find(
-        {"$or": [{"device_id": device_id}, {"device_ids": device_id}], "status": {"$in": ["open", "in_progress", "pending"]}},
+        scoped_query(
+            current_user,
+            {
+                "client_id": d.get("client_id"),
+                "$or": [{"device_id": device_id}, {"device_ids": device_id}],
+                "status": {"$in": ["open", "in_progress", "pending"]},
+            },
+            site_field=None,
+        ),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "priority": 1, "status": 1, "created_at": 1},
     ).sort("created_at", -1).to_list(15)
 
@@ -474,6 +586,7 @@ async def device_dossier(device_id: str, current_user: dict = Depends(get_curren
     return {
         "device": d,
         "health_score": score,
+        "health_evidence": evidence,
         "commentary": commentary,
         "lifecycle": lifecycle,
         "failure_risk": risk,
@@ -487,19 +600,36 @@ async def device_dossier(device_id: str, current_user: dict = Depends(get_curren
 @router.post("/devices/compare")
 async def compare_devices(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
     """Body: { device_ids: [..., ...] } — returns side-by-side data for up to 4 devices."""
-    ids = list(payload.get("device_ids") or [])
+    requested_ids = payload.get("device_ids")
+    if not isinstance(requested_ids, list):
+        raise HTTPException(400, "device_ids must be a list of 1-4 managed asset IDs")
+    ids = list(dict.fromkeys(str(value).strip() for value in requested_ids if str(value).strip()))
     if not ids or len(ids) > 4:
         raise HTTPException(400, "Provide 1-4 device_ids")
     out = []
     for did in ids:
-        d = await db.devices.find_one({"id": did}, {"_id": 0})
-        if not d:
-            continue
+        # The compare view is fed by the scoped device list, but its request
+        # body remains attacker-controlled.  Resolve each requested asset
+        # through the same masked ownership guard as every other device action
+        # before exposing its inventory or correlated ticket count.
+        d = await assert_record_scope(
+            current_user,
+            db.devices,
+            did,
+            operation="device.compare",
+        )
         score, commentary = _health_score(d)
         lifecycle = _lifecycle_band(d)
         risk = _failure_risk(d)
         ticket_count = await db.tickets.count_documents(
-            {"$or": [{"device_id": did}, {"device_ids": did}]}
+            scoped_query(
+                current_user,
+                {
+                    "client_id": d.get("client_id"),
+                    "$or": [{"device_id": did}, {"device_ids": did}],
+                },
+                site_field=None,
+            )
         )
         out.append({
             "device": d,
@@ -556,8 +686,18 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
         if preview_actor and current_user.get("id") and preview_actor != current_user.get("id"):
             raise HTTPException(409, "Change Guardian preview belongs to another technician")
 
-    cursor = db.devices.find({"id": {"$in": ids}}, {"_id": 0})
-    targets = [d async for d in cursor]
+    # Scope every requested asset before any action starts.  A bulk request is
+    # all-or-nothing at the authorization boundary, so a hidden foreign ID
+    # cannot cause a partial fan-out or be used to target another client.
+    targets = []
+    for raw_device_id in dict.fromkeys(str(value).strip() for value in ids if str(value).strip()):
+        targets.append(await assert_record_scope(
+            current_user,
+            db.devices,
+            raw_device_id,
+            operation="device.bulk_action",
+            resource_name="Managed asset",
+        ))
 
     async def _run_one(d: dict) -> dict:
         name = d.get("name") or d.get("hostname") or d.get("id")
@@ -690,6 +830,7 @@ async def bulk_action(payload: dict = Body(...), current_user: dict = Depends(ge
 async def sites_map(current_user: dict = Depends(get_current_user)):
     """Aggregate devices by site/client for the geographic map view."""
     pipeline = [
+        {"$match": scoped_query(current_user)},
         {"$group": {
             "_id": "$client_id",
             "client_name": {"$first": "$client_name"},

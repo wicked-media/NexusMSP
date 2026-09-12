@@ -16,7 +16,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 # Test credentials
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASSWORD = "Lucky@2871$!"
+ADMIN_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +48,7 @@ def headers(auth_token):
     return {"Authorization": f"Bearer {auth_token}"}
 
 
-# ═══════════════════════ PRESENCE TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â PRESENCE TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestPresence:
     """Presence heartbeat and status tests"""
@@ -60,7 +60,7 @@ class TestPresence:
         data = response.json()
         assert data.get("ok") is True
         assert "ts" in data
-        print(f"✓ Heartbeat basic: ok={data['ok']}, ts={data['ts']}")
+        print(f"Ã¢Å“â€œ Heartbeat basic: ok={data['ok']}, ts={data['ts']}")
 
     def test_heartbeat_with_busy_state(self, headers):
         """POST /api/presence/heartbeat with busy_state"""
@@ -69,7 +69,7 @@ class TestPresence:
         assert response.status_code == 200
         data = response.json()
         assert data.get("ok") is True
-        print(f"✓ Heartbeat with busy_state: ok={data['ok']}")
+        print(f"Ã¢Å“â€œ Heartbeat with busy_state: ok={data['ok']}")
 
     def test_presence_list(self, headers):
         """GET /api/presence - list all users with LED status"""
@@ -83,7 +83,7 @@ class TestPresence:
             user = data["users"][0]
             assert "led" in user
             assert user["led"] in ["active", "busy", "dnd", "break", "away", "offline"]
-        print(f"✓ Presence list: {len(data['users'])} users, generated_at={data.get('generated_at')}")
+        print(f"Ã¢Å“â€œ Presence list: {len(data['users'])} users, generated_at={data.get('generated_at')}")
 
     def test_presence_status_set_dnd(self, headers):
         """POST /api/presence/status - set manual DND"""
@@ -92,7 +92,7 @@ class TestPresence:
         assert response.status_code == 200
         data = response.json()
         assert data.get("ok") is True
-        print("✓ Set status to DND")
+        print("Ã¢Å“â€œ Set status to DND")
 
     def test_presence_status_clear(self, headers):
         """POST /api/presence/status - clear manual state"""
@@ -101,17 +101,17 @@ class TestPresence:
         assert response.status_code == 200
         data = response.json()
         assert data.get("ok") is True
-        print("✓ Cleared manual status")
+        print("Ã¢Å“â€œ Cleared manual status")
 
     def test_presence_status_invalid(self, headers):
         """POST /api/presence/status - invalid state returns 400"""
         response = requests.post(f"{BASE_URL}/api/presence/status", 
                                  json={"manual_state": "invalid_state"}, headers=headers)
         assert response.status_code == 400
-        print("✓ Invalid status rejected with 400")
+        print("Ã¢Å“â€œ Invalid status rejected with 400")
 
 
-# ═══════════════════════ CHAT CHANNELS TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â CHAT CHANNELS TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestChatChannels:
     """Chat channels and messaging tests"""
@@ -125,7 +125,7 @@ class TestChatChannels:
         names = [ch["name"] for ch in data]
         assert "general" in names, "Default 'general' channel should exist"
         assert "random" in names, "Default 'random' channel should exist"
-        print(f"✓ Channels list: {len(data)} channels, includes general and random")
+        print(f"Ã¢Å“â€œ Channels list: {len(data)} channels, includes general and random")
         return data
 
     def test_create_channel(self, headers):
@@ -136,7 +136,7 @@ class TestChatChannels:
         data = response.json()
         assert data.get("name") == "test-channel-142"
         assert "id" in data
-        print(f"✓ Created channel: {data['name']} (id={data['id']})")
+        print(f"Ã¢Å“â€œ Created channel: {data['name']} (id={data['id']})")
         return data
 
     def test_send_message(self, headers):
@@ -153,7 +153,7 @@ class TestChatChannels:
         assert data.get("body") == "Test message from iteration 142"
         assert "id" in data
         assert "ts" in data
-        print(f"✓ Sent message: id={data['id']}")
+        print(f"Ã¢Å“â€œ Sent message: id={data['id']}")
         return data
 
     def test_send_message_with_mention(self, headers):
@@ -167,7 +167,7 @@ class TestChatChannels:
         data = response.json()
         assert "mentions" in data
         assert "aaron" in data["mentions"]
-        print(f"✓ Sent message with mention: mentions={data['mentions']}")
+        print(f"Ã¢Å“â€œ Sent message with mention: mentions={data['mentions']}")
 
     def test_get_messages(self, headers):
         """GET /api/chat/channels/{id}/messages - fetch messages"""
@@ -178,7 +178,7 @@ class TestChatChannels:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        print(f"✓ Got messages: {len(data)} messages in general")
+        print(f"Ã¢Å“â€œ Got messages: {len(data)} messages in general")
 
     def test_mark_read(self, headers):
         """POST /api/chat/channels/{id}/read - mark channel read"""
@@ -190,7 +190,7 @@ class TestChatChannels:
         assert response.status_code == 200
         data = response.json()
         assert data.get("ok") is True
-        print("✓ Marked channel as read")
+        print("Ã¢Å“â€œ Marked channel as read")
 
     def test_unread_counts(self, headers):
         """GET /api/chat/unread - get unread counts"""
@@ -198,7 +198,7 @@ class TestChatChannels:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, dict)
-        print(f"✓ Unread counts: {len(data)} channels tracked")
+        print(f"Ã¢Å“â€œ Unread counts: {len(data)} channels tracked")
 
     def test_react_to_message(self, headers):
         """POST /api/chat/messages/{msg_id}/react - toggle reaction"""
@@ -210,15 +210,15 @@ class TestChatChannels:
         
         # React with thumbs up
         response = requests.post(f"{BASE_URL}/api/chat/messages/{msg['id']}/react",
-                                 json={"emoji": "👍"}, headers=headers)
+                                 json={"emoji": "Ã°Å¸â€˜Â"}, headers=headers)
         assert response.status_code == 200
         data = response.json()
         assert "reactions" in data
-        assert "👍" in data["reactions"]
-        print(f"✓ Added reaction: {data['reactions']}")
+        assert "Ã°Å¸â€˜Â" in data["reactions"]
+        print(f"Ã¢Å“â€œ Added reaction: {data['reactions']}")
 
 
-# ═══════════════════════ DM TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DM TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestDirectMessages:
     """DM channel tests"""
@@ -228,16 +228,16 @@ class TestDirectMessages:
         my_id = user_info.get("id")
         response = requests.post(f"{BASE_URL}/api/chat/dm/{my_id}", json={}, headers=headers)
         assert response.status_code == 400
-        print("✓ Cannot DM yourself - 400 returned")
+        print("Ã¢Å“â€œ Cannot DM yourself - 400 returned")
 
     def test_create_dm_user_not_found(self, headers):
         """POST /api/chat/dm/{user_id} - 404 for non-existent user"""
         response = requests.post(f"{BASE_URL}/api/chat/dm/nonexistent-user-id", json={}, headers=headers)
         assert response.status_code == 404
-        print("✓ DM to non-existent user returns 404")
+        print("Ã¢Å“â€œ DM to non-existent user returns 404")
 
 
-# ═══════════════════════ SLASH COMMANDS TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â SLASH COMMANDS TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestSlashCommands:
     """Slash command tests"""
@@ -253,7 +253,7 @@ class TestSlashCommands:
         data = response.json()
         assert "body" in data
         assert "/assign" in data["body"] or "Slash commands" in data["body"]
-        print(f"✓ /help returned: {data['body'][:80]}...")
+        print(f"Ã¢Å“â€œ /help returned: {data['body'][:80]}...")
 
     def test_slash_assign_missing_args(self, headers):
         """POST /api/chat/slash - /assign with missing args"""
@@ -266,7 +266,7 @@ class TestSlashCommands:
         data = response.json()
         # Should return unknown command or help since args missing
         assert "body" in data
-        print(f"✓ /assign without args handled: {data['body'][:60]}...")
+        print(f"Ã¢Å“â€œ /assign without args handled: {data['body'][:60]}...")
 
     def test_slash_unknown_command(self, headers):
         """POST /api/chat/slash - unknown command"""
@@ -278,10 +278,10 @@ class TestSlashCommands:
         assert response.status_code == 200
         data = response.json()
         assert "Unknown command" in data.get("body", "")
-        print("✓ Unknown command handled gracefully")
+        print("Ã¢Å“â€œ Unknown command handled gracefully")
 
 
-# ═══════════════════════ ACHIEVEMENTS TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â ACHIEVEMENTS TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestAchievements:
     """Gamification achievements tests"""
@@ -298,10 +298,10 @@ class TestAchievements:
         assert "total_available" in data
         assert "completion_pct" in data
         assert data["total_available"] == 15, "Should have 15 total achievements defined"
-        print(f"✓ Achievements: {data['total_unlocked']}/{data['total_available']} ({data['completion_pct']}%)")
+        print(f"Ã¢Å“â€œ Achievements: {data['total_unlocked']}/{data['total_available']} ({data['completion_pct']}%)")
 
 
-# ═══════════════════════ TECH PROFILE TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â TECH PROFILE TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestTechProfile:
     """Tech profile page tests"""
@@ -319,10 +319,10 @@ class TestTechProfile:
         assert "achievements_total" in data
         assert "open_tickets" in data
         assert "closed_tickets" in data
-        print(f"✓ Tech profile: Level {data['level']}, {data['total_xp']} XP, {data['achievements_earned']} achievements")
+        print(f"Ã¢Å“â€œ Tech profile: Level {data['level']}, {data['total_xp']} XP, {data['achievements_earned']} achievements")
 
 
-# ═══════════════════════ DAILY QUESTS TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DAILY QUESTS TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestDailyQuests:
     """Daily quests tests"""
@@ -340,10 +340,10 @@ class TestDailyQuests:
             assert "title" in q
             assert "xp" in q
             assert "icon" in q
-        print(f"✓ Daily quests: {[q['key'] for q in data['quests']]}")
+        print(f"Ã¢Å“â€œ Daily quests: {[q['key'] for q in data['quests']]}")
 
 
-# ═══════════════════════ FRIDAY REEL TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â FRIDAY REEL TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestFridayReel:
     """Friday wrap-up reel tests"""
@@ -359,10 +359,10 @@ class TestFridayReel:
         assert "drills" in data["stats"]
         assert "runbooks" in data["stats"]
         # Storyboard may be None if AI not configured or no data
-        print(f"✓ Friday reel: stats={data['stats']}, has_storyboard={data.get('storyboard') is not None}")
+        print(f"Ã¢Å“â€œ Friday reel: stats={data['stats']}, has_storyboard={data.get('storyboard') is not None}")
 
 
-# ═══════════════════════ TRADING CARD TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â TRADING CARD TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestTradingCard:
     """Client trading card tests"""
@@ -382,10 +382,10 @@ class TestTradingCard:
         assert "devices" in data["stats"]
         assert "years_partnered" in data["stats"]
         assert "tagline" in data
-        print(f"✓ Trading card: rarity={data['rarity']}, tagline={data['tagline']}")
+        print(f"Ã¢Å“â€œ Trading card: rarity={data['rarity']}, tagline={data['tagline']}")
 
 
-# ═══════════════════════ MOOD RING TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â MOOD RING TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestMoodRing:
     """Client mood ring tests"""
@@ -398,10 +398,10 @@ class TestMoodRing:
         assert "colour" in data
         assert "label" in data
         # Score may be None if no sentiment data
-        print(f"✓ Mood ring: colour={data['colour']}, label={data['label']}, score={data.get('score')}")
+        print(f"Ã¢Å“â€œ Mood ring: colour={data['colour']}, label={data['label']}, score={data.get('score')}")
 
 
-# ═══════════════════════ SLOW INTERNET DETECTIVE TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â SLOW INTERNET DETECTIVE TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestSlowInternetDetective:
     """Slow internet detective tests (MOCKED - uses random values)"""
@@ -419,10 +419,10 @@ class TestSlowInternetDetective:
         assert "jitter_ms" in data["metrics"]
         assert "speed_down_mbps" in data["metrics"]
         assert "reasons" in data
-        print(f"✓ Slow internet detective (MOCKED): verdict={data['verdict']}, confidence={data['confidence']}")
+        print(f"Ã¢Å“â€œ Slow internet detective (MOCKED): verdict={data['verdict']}, confidence={data['confidence']}")
 
 
-# ═══════════════════════ DEVICE GRAVEYARD TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DEVICE GRAVEYARD TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestDeviceGraveyard:
     """Device graveyard tests"""
@@ -438,10 +438,10 @@ class TestDeviceGraveyard:
         if data["tombstones"]:
             tomb = data["tombstones"][0]
             assert "epitaph" in tomb
-        print(f"✓ Device graveyard: {data['count']} tombstones")
+        print(f"Ã¢Å“â€œ Device graveyard: {data['count']} tombstones")
 
 
-# ═══════════════════════ DEVICE FAMILY TREE TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DEVICE FAMILY TREE TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestDeviceFamilyTree:
     """Device family tree tests"""
@@ -454,10 +454,10 @@ class TestDeviceFamilyTree:
         assert "families" in data
         assert "client_id" in data
         assert isinstance(data["families"], list)
-        print(f"✓ Device family tree: {len(data['families'])} families for client-001")
+        print(f"Ã¢Å“â€œ Device family tree: {len(data['families'])} families for client-001")
 
 
-# ═══════════════════════ BRAIN BUCKET TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â BRAIN BUCKET TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestBrainBucket:
     """Brain bucket (private notes) tests"""
@@ -470,7 +470,7 @@ class TestBrainBucket:
         data = response.json()
         assert "user_id" in data
         assert "notes" in data
-        print(f"✓ Brain bucket GET: notes length={len(data.get('notes', ''))}")
+        print(f"Ã¢Å“â€œ Brain bucket GET: notes length={len(data.get('notes', ''))}")
 
     def test_brain_bucket_save(self, headers, user_info):
         """POST /api/team/{my_id}/brain-bucket - save notes"""
@@ -485,16 +485,16 @@ class TestBrainBucket:
         # Verify saved
         verify = requests.get(f"{BASE_URL}/api/team/{user_id}/brain-bucket", headers=headers).json()
         assert test_notes in verify.get("notes", "")
-        print("✓ Brain bucket saved and verified")
+        print("Ã¢Å“â€œ Brain bucket saved and verified")
 
     def test_brain_bucket_403_other_user(self, headers):
         """GET /api/team/{other_id}/brain-bucket - 403 for other user's bucket"""
         response = requests.get(f"{BASE_URL}/api/team/some-other-user-id/brain-bucket", headers=headers)
         assert response.status_code == 403
-        print("✓ Brain bucket 403 for other user's bucket")
+        print("Ã¢Å“â€œ Brain bucket 403 for other user's bucket")
 
 
-# ═══════════════════════ THREAT DRAGON TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â THREAT DRAGON TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestThreatDragon:
     """Threat dragon (security mood) tests"""
@@ -510,10 +510,10 @@ class TestThreatDragon:
         assert "size_pct" in data
         assert "open_alerts" in data
         assert "critical_alerts" in data
-        print(f"✓ Threat dragon: mood={data['mood']}, emoji={data['emoji']}, size={data['size_pct']}%")
+        print(f"Ã¢Å“â€œ Threat dragon: mood={data['mood']}, emoji={data['emoji']}, size={data['size_pct']}%")
 
 
-# ═══════════════════════ PASSWORD PET TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â PASSWORD PET TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestPasswordPet:
     """Password pet (hygiene avatar) tests"""
@@ -528,10 +528,10 @@ class TestPasswordPet:
         assert data["state"] in ["happy", "ok", "sick", "dying"]
         assert "emoji" in data
         assert "stats" in data
-        print(f"✓ Password pet: health={data['health']}, state={data['state']}, emoji={data['emoji']}")
+        print(f"Ã¢Å“â€œ Password pet: health={data['health']}, state={data['state']}, emoji={data['emoji']}")
 
 
-# ═══════════════════════ BIRTHDAYS TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â BIRTHDAYS TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestBirthdays:
     """Client birthdays tests"""
@@ -544,10 +544,10 @@ class TestBirthdays:
         assert "client_id" in data
         assert "upcoming" in data
         assert isinstance(data["upcoming"], list)
-        print(f"✓ Birthdays: {len(data['upcoming'])} upcoming for client-001")
+        print(f"Ã¢Å“â€œ Birthdays: {len(data['upcoming'])} upcoming for client-001")
 
 
-# ═══════════════════════ WEATHER MODE TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â WEATHER MODE TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestWeatherMode:
     """Ambient weather mode tests"""
@@ -561,10 +561,10 @@ class TestWeatherMode:
         assert data["mood"] in ["stormy", "beach", "rainy_monday", "sunny", "neutral"]
         assert "gradient_classes" in data
         assert "stats" in data
-        print(f"✓ Weather mode: mood={data['mood']}, gradient={data['gradient_classes']}")
+        print(f"Ã¢Å“â€œ Weather mode: mood={data['mood']}, gradient={data['gradient_classes']}")
 
 
-# ═══════════════════════ LAUNCH EVENTS TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â LAUNCH EVENTS TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestLaunchEvents:
     """Launch events (rocket animations) tests"""
@@ -579,7 +579,7 @@ class TestLaunchEvents:
         assert "id" in data
         assert data.get("kind") == "critical_resolved"
         assert data.get("label") == "Saved the day!"
-        print(f"✓ Launch event recorded: id={data['id']}")
+        print(f"Ã¢Å“â€œ Launch event recorded: id={data['id']}")
 
     def test_recent_launches(self, headers):
         """GET /api/ambient/recent-launches - get last 10 events"""
@@ -588,7 +588,7 @@ class TestLaunchEvents:
         data = response.json()
         assert isinstance(data, list)
         assert len(data) <= 10
-        print(f"✓ Recent launches: {len(data)} events")
+        print(f"Ã¢Å“â€œ Recent launches: {len(data)} events")
 
 
 if __name__ == "__main__":

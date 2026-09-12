@@ -16,7 +16,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -37,7 +37,7 @@ class TestServiceCatalog:
         r = requests.get(f"{BASE_URL}/api/pro-pack/service-catalog", headers=headers)
         assert r.status_code == 200
         assert isinstance(r.json(), list)
-        print(f"✓ Service catalog list: {len(r.json())} services")
+        print(f"Ã¢Å“â€œ Service catalog list: {len(r.json())} services")
     
     def test_create_service(self, headers):
         """POST /pro-pack/service-catalog creates a service with SLA + price"""
@@ -61,7 +61,7 @@ class TestServiceCatalog:
         assert data["sla_resolve_hours"] == 8
         assert data["billing_unit_price"] == 25.00
         assert "id" in data
-        print(f"✓ Service created: {data['id']}")
+        print(f"Ã¢Å“â€œ Service created: {data['id']}")
         return data["id"]
     
     def test_update_service(self, headers):
@@ -83,7 +83,7 @@ class TestServiceCatalog:
             "billing_unit_price": 75.00
         }, headers=headers)
         assert update_r.status_code == 200
-        print(f"✓ Service updated: {sid}")
+        print(f"Ã¢Å“â€œ Service updated: {sid}")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/pro-pack/service-catalog/{sid}", headers=headers)
@@ -100,7 +100,7 @@ class TestServiceCatalog:
         
         del_r = requests.delete(f"{BASE_URL}/api/pro-pack/service-catalog/{sid}", headers=headers)
         assert del_r.status_code == 200
-        print(f"✓ Service deleted: {sid}")
+        print(f"Ã¢Å“â€œ Service deleted: {sid}")
 
 
 # ============== TRIAGE QUEUE TESTS ==============
@@ -117,7 +117,7 @@ class TestTriageQueue:
         assert "by_priority" in data
         assert "by_source" in data
         assert "oldest_age_minutes" in data
-        print(f"✓ Triage queue: {data['count']} unassigned tickets")
+        print(f"Ã¢Å“â€œ Triage queue: {data['count']} unassigned tickets")
 
 
 # ============== NOTIFY CHANNELS TESTS ==============
@@ -129,7 +129,7 @@ class TestNotifyChannels:
         r = requests.get(f"{BASE_URL}/api/pro-pack/notify-channels", headers=headers)
         assert r.status_code == 200
         assert isinstance(r.json(), list)
-        print(f"✓ Notify channels list: {len(r.json())} channels")
+        print(f"Ã¢Å“â€œ Notify channels list: {len(r.json())} channels")
     
     def test_create_channel(self, headers):
         """POST /pro-pack/notify-channels creates a channel"""
@@ -145,7 +145,7 @@ class TestNotifyChannels:
         assert data["name"] == "TEST_Slack Channel"
         assert data["kind"] == "slack"
         assert "id" in data
-        print(f"✓ Channel created: {data['id']}")
+        print(f"Ã¢Å“â€œ Channel created: {data['id']}")
         return data["id"]
     
     def test_create_channel_invalid_url(self, headers):
@@ -157,7 +157,7 @@ class TestNotifyChannels:
         }
         r = requests.post(f"{BASE_URL}/api/pro-pack/notify-channels", json=payload, headers=headers)
         assert r.status_code == 400
-        print("✓ Invalid webhook URL correctly rejected")
+        print("Ã¢Å“â€œ Invalid webhook URL correctly rejected")
     
     def test_test_channel(self, headers):
         """POST /pro-pack/notify-channels/{id}/test sends test message"""
@@ -174,7 +174,7 @@ class TestNotifyChannels:
         test_r = requests.post(f"{BASE_URL}/api/pro-pack/notify-channels/{cid}/test", json={}, headers=headers)
         # Accept 200 (success), 400 (bad request), or 502 (webhook failed) - just not 500
         assert test_r.status_code in [200, 400, 502]
-        print(f"✓ Channel test returned: {test_r.status_code}")
+        print(f"Ã¢Å“â€œ Channel test returned: {test_r.status_code}")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/pro-pack/notify-channels/{cid}", headers=headers)
@@ -191,7 +191,7 @@ class TestNotifyChannels:
         
         del_r = requests.delete(f"{BASE_URL}/api/pro-pack/notify-channels/{cid}", headers=headers)
         assert del_r.status_code == 200
-        print(f"✓ Channel deleted: {cid}")
+        print(f"Ã¢Å“â€œ Channel deleted: {cid}")
 
 
 # ============== API TOKENS TESTS ==============
@@ -203,7 +203,7 @@ class TestApiTokens:
         r = requests.get(f"{BASE_URL}/api/pro-pack/api-tokens", headers=headers)
         assert r.status_code == 200
         assert isinstance(r.json(), list)
-        print(f"✓ API tokens list: {len(r.json())} tokens")
+        print(f"Ã¢Å“â€œ API tokens list: {len(r.json())} tokens")
     
     def test_create_token_returns_raw(self, headers):
         """POST /pro-pack/api-tokens returns raw token only once"""
@@ -219,14 +219,14 @@ class TestApiTokens:
         assert "secret_preview" in data
         assert data["name"] == "TEST_API Token"
         assert len(data["token"]) > 20  # Token should be substantial
-        print(f"✓ Token created with raw value: {data['secret_preview']}")
+        print(f"Ã¢Å“â€œ Token created with raw value: {data['secret_preview']}")
         
         # Verify list doesn't return raw token
         list_r = requests.get(f"{BASE_URL}/api/pro-pack/api-tokens", headers=headers)
         tokens = list_r.json()
         for t in tokens:
             assert "secret" not in t or t.get("secret") is None  # Secret should be redacted
-        print("✓ Token list correctly redacts secrets")
+        print("Ã¢Å“â€œ Token list correctly redacts secrets")
         
         # Cleanup - revoke
         requests.delete(f"{BASE_URL}/api/pro-pack/api-tokens/{data['id']}", headers=headers)
@@ -242,7 +242,7 @@ class TestApiTokens:
         
         revoke_r = requests.delete(f"{BASE_URL}/api/pro-pack/api-tokens/{tid}", headers=headers)
         assert revoke_r.status_code == 200
-        print(f"✓ Token revoked: {tid}")
+        print(f"Ã¢Å“â€œ Token revoked: {tid}")
 
 
 # ============== 2FA TESTS ==============
@@ -258,7 +258,7 @@ class Test2FA:
         assert "otpauth_uri" in data
         assert data["otpauth_uri"].startswith("otpauth://totp/")
         assert "NexusOps" in data["otpauth_uri"]
-        print(f"✓ 2FA setup returned secret: {data['secret'][:6]}...")
+        print(f"Ã¢Å“â€œ 2FA setup returned secret: {data['secret'][:6]}...")
     
     def test_verify_2fa_wrong_code(self, headers):
         """POST /pro-pack/2fa/verify with wrong code returns 400"""
@@ -268,13 +268,13 @@ class Test2FA:
         # Try wrong code
         r = requests.post(f"{BASE_URL}/api/pro-pack/2fa/verify", json={"code": "000000"}, headers=headers)
         assert r.status_code == 400
-        print("✓ Wrong 2FA code correctly rejected")
+        print("Ã¢Å“â€œ Wrong 2FA code correctly rejected")
     
     def test_disable_2fa(self, headers):
         """DELETE /pro-pack/2fa disables 2FA"""
         r = requests.delete(f"{BASE_URL}/api/pro-pack/2fa", headers=headers)
         assert r.status_code == 200
-        print("✓ 2FA disabled")
+        print("Ã¢Å“â€œ 2FA disabled")
 
 
 # ============== CRM PIPELINE TESTS ==============
@@ -290,7 +290,7 @@ class TestCrmPipeline:
         assert "buckets" in data
         assert "total_pipeline_value" in data
         assert len(data["stages"]) == 6  # new, qualified, proposal, negotiation, won, lost
-        print(f"✓ CRM pipeline: {len(data['buckets'])} stages, ${data['total_pipeline_value']} value")
+        print(f"Ã¢Å“â€œ CRM pipeline: {len(data['buckets'])} stages, ${data['total_pipeline_value']} value")
     
     def test_move_lead_stage(self, headers):
         """POST /pro-pack/crm/leads/{id}/move-stage moves a lead"""
@@ -306,7 +306,7 @@ class TestCrmPipeline:
         r = requests.post(f"{BASE_URL}/api/pro-pack/crm/leads/{lead_id}/move-stage", 
                          json={"stage": "qualified"}, headers=headers)
         assert r.status_code == 200
-        print(f"✓ Lead {lead_id} moved to qualified")
+        print(f"Ã¢Å“â€œ Lead {lead_id} moved to qualified")
     
     def test_move_lead_invalid_stage(self, headers):
         """POST /pro-pack/crm/leads/{id}/move-stage with invalid stage returns 400"""
@@ -318,7 +318,7 @@ class TestCrmPipeline:
         r = requests.post(f"{BASE_URL}/api/pro-pack/crm/leads/{lead_id}/move-stage",
                          json={"stage": "invalid_stage"}, headers=headers)
         assert r.status_code == 400
-        print("✓ Invalid stage correctly rejected")
+        print("Ã¢Å“â€œ Invalid stage correctly rejected")
 
 
 # ============== CUSTOMER HEALTH TESTS ==============
@@ -335,7 +335,7 @@ class TestCustomerHealth:
             assert "client_id" in data[0]
             assert "score" in data[0]
             assert "open_tickets" in data[0]
-        print(f"✓ Customer health: {len(data)} clients")
+        print(f"Ã¢Å“â€œ Customer health: {len(data)} clients")
     
     def test_single_customer_health(self, headers):
         """GET /pro-pack/customer-health/{client_id} returns detailed health"""
@@ -351,7 +351,7 @@ class TestCustomerHealth:
         assert "score" in data
         assert "grade" in data
         assert "metrics" in data
-        print(f"✓ Customer {data['client_name']}: score={data['score']}, grade={data['grade']}")
+        print(f"Ã¢Å“â€œ Customer {data['client_name']}: score={data['score']}, grade={data['grade']}")
 
 
 # ============== QUOTE TO CASH TESTS ==============
@@ -368,7 +368,7 @@ class TestQuoteToCash:
         assert "contracts" in data
         assert "invoices" in data
         assert "recurring" in data
-        print(f"✓ Quote-to-Cash: leads={data['leads']['count']}, invoices={data['invoices']['count']}")
+        print(f"Ã¢Å“â€œ Quote-to-Cash: leads={data['leads']['count']}, invoices={data['invoices']['count']}")
 
 
 # ============== PATCH TUESDAY TESTS ==============
@@ -386,7 +386,7 @@ class TestPatchTuesday:
             assert "date" in event
             assert "month" in event
             assert "days_until" in event
-        print(f"✓ Patch Tuesday: {len(data['events'])} months")
+        print(f"Ã¢Å“â€œ Patch Tuesday: {len(data['events'])} months")
 
 
 # ============== DR PLANS TESTS ==============
@@ -398,7 +398,7 @@ class TestDRPlans:
         r = requests.get(f"{BASE_URL}/api/pro-pack/dr-plans", headers=headers)
         assert r.status_code == 200
         assert isinstance(r.json(), list)
-        print(f"✓ DR plans: {len(r.json())} plans")
+        print(f"Ã¢Å“â€œ DR plans: {len(r.json())} plans")
     
     def test_create_dr_plan(self, headers):
         """POST /pro-pack/dr-plans creates a plan with scenarios"""
@@ -417,7 +417,7 @@ class TestDRPlans:
         assert data["rpo_hours"] == 1
         assert "scenarios" in data
         assert len(data["scenarios"]) >= 3  # Default scenarios
-        print(f"✓ DR plan created: {data['id']}")
+        print(f"Ã¢Å“â€œ DR plan created: {data['id']}")
 
 
 # ============== SAAS SPEND TESTS ==============
@@ -432,7 +432,7 @@ class TestSaasSpend:
         assert "by_client" in data
         assert "grand_monthly" in data
         assert "grand_annual" in data
-        print(f"✓ SaaS spend: ${data['grand_monthly']}/mo, ${data['grand_annual']}/yr")
+        print(f"Ã¢Å“â€œ SaaS spend: ${data['grand_monthly']}/mo, ${data['grand_annual']}/yr")
 
 
 # ============== DEFENDER HEALTH TESTS ==============
@@ -449,7 +449,7 @@ class TestDefenderHealth:
         assert "total_devices" in data["summary"]
         assert "healthy" in data["summary"]
         assert "unhealthy" in data["summary"]
-        print(f"✓ Defender health: {data['summary']['total_devices']} devices, {data['summary']['coverage_pct']}% coverage")
+        print(f"Ã¢Å“â€œ Defender health: {data['summary']['total_devices']} devices, {data['summary']['coverage_pct']}% coverage")
 
 
 # ============== STOCKTAKE MOBILE TESTS ==============
@@ -464,7 +464,7 @@ class TestStocktakeMobile:
             "session_id": "test-session"
         }, headers=headers)
         assert r.status_code == 404
-        print("✓ Unknown SKU correctly returns 404")
+        print("Ã¢Å“â€œ Unknown SKU correctly returns 404")
     
     def test_stocktake_session(self, headers):
         """GET /pro-pack/stocktake/session/{id} returns session data"""
@@ -474,7 +474,7 @@ class TestStocktakeMobile:
         assert "session_id" in data
         assert "scans" in data
         assert "total_diff" in data
-        print(f"✓ Stocktake session: {data['items_counted']} items")
+        print(f"Ã¢Å“â€œ Stocktake session: {data['items_counted']} items")
 
 
 # ============== NPS SUMMARY TESTS ==============
@@ -491,7 +491,7 @@ class TestNpsSummary:
         assert "passives" in data
         assert "detractors" in data
         assert "total_responses" in data
-        print(f"✓ NPS summary: score={data['nps']}, responses={data['total_responses']}")
+        print(f"Ã¢Å“â€œ NPS summary: score={data['nps']}, responses={data['total_responses']}")
 
 
 # ============== ASSET PRINT BATCH TESTS ==============
@@ -504,7 +504,7 @@ class TestAssetPrintBatch:
             "asset_ids": []
         }, headers=headers)
         assert r.status_code == 400
-        print("✓ Empty asset list correctly rejected")
+        print("Ã¢Å“â€œ Empty asset list correctly rejected")
     
     def test_print_batch(self, headers):
         """POST /pro-pack/assets/print-batch returns asset data"""
@@ -521,7 +521,7 @@ class TestAssetPrintBatch:
         data = r.json()
         assert "count" in data
         assert "assets" in data
-        print(f"✓ Asset print batch: {data['count']} assets")
+        print(f"Ã¢Å“â€œ Asset print batch: {data['count']} assets")
 
 
 # ============== PHONE INTEGRATION TESTS ==============
@@ -539,7 +539,7 @@ class TestPhoneIntegration:
         data = r.json()
         assert "ticket_id" in data
         assert "ticket_number" in data
-        print(f"✓ Phone inbound created ticket: {data['ticket_number']}")
+        print(f"Ã¢Å“â€œ Phone inbound created ticket: {data['ticket_number']}")
 
 
 # ============== CLEANUP ==============
@@ -565,7 +565,7 @@ def cleanup(headers):
     except:
         pass
     
-    print("\n✓ Cleanup completed")
+    print("\nÃ¢Å“â€œ Cleanup completed")
 
 
 if __name__ == "__main__":

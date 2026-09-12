@@ -1,4 +1,4 @@
-"""Iteration 175 â€” Client Studio (25 endpoints under /api/client-studio/*)."""
+"""Iteration 175 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Client Studio (25 endpoints under /api/client-studio/*)."""
 import os
 import time
 import pytest
@@ -6,7 +6,7 @@ import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://127.0.0.1:8001").rstrip("/")
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASS = "Lucky@2871$!"
+ADMIN_PASS = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="module")

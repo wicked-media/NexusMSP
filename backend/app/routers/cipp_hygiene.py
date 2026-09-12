@@ -13,7 +13,7 @@ Hygiene score (0-100) per tenant, composed of:
 Data comes from CIPP (best-effort; missing signals just skip that dimension).
 Cached per tenant for 6h in db.cipp_hygiene_cache.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import asyncio
@@ -21,6 +21,13 @@ import asyncio
 from app.database import db
 from app.auth import get_current_user
 from app.routers.cipp import _cipp_call, _get_config, _norm_tenants
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import (
+    assert_global_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -516,8 +523,7 @@ async def client_hygiene(client_id: str, force: bool = False, current_user: dict
     return {"linked": True, "configured": True, "tenant_id": tenant_id, "tenant_display": client.get("cipp_tenant_display"), "hygiene": hygiene}
 
 
-@router.get("/cipp/hygiene-digest")
-async def hygiene_digest(current_user: dict = Depends(get_current_user)):
+async def _build_hygiene_digest(current_user: dict) -> dict:
     """Compute hygiene for every linked client. Cached per-tenant."""
     cfg = await _get_config()
     if not cfg:
@@ -573,11 +579,39 @@ async def hygiene_digest(current_user: dict = Depends(get_current_user)):
     }
 
 
-@router.post("/cipp/hygiene-digest/send")
-async def send_hygiene_digest(data: dict = None, current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/cipp/hygiene-digest",
+    dependencies=[Depends(require_action("m365.tenant.manage"))],
+)
+async def hygiene_digest(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    await assert_global_scope(
+        current_user,
+        operation="m365.hygiene.digest.read",
+        request=request,
+    )
+    return await _build_hygiene_digest(current_user)
+
+
+@router.post(
+    "/cipp/hygiene-digest/send",
+    dependencies=[Depends(require_action("m365.tenant.manage"))],
+)
+async def send_hygiene_digest(
+    request: Request,
+    data: dict = None,
+    current_user: dict = Depends(get_current_user),
+):
     """Generate digest + email it through the configured Microsoft 365 mailbox."""
+    await assert_global_scope(
+        current_user,
+        operation="m365.hygiene.digest.send",
+        request=request,
+    )
     data = data or {}
-    digest = await hygiene_digest(current_user)
+    digest = await _build_hygiene_digest(current_user)
     if not digest.get("configured"):
         return {"sent": False, "reason": "CIPP not configured"}
 
@@ -667,6 +701,7 @@ async def send_hygiene_digest(data: dict = None, current_user: dict = Depends(ge
         error = str(e)[:120]
 
     await db.cipp_digests.insert_one({
+        "tenant_id": platform_tenant_id(current_user),
         "generated_at": digest["generated_at"],
         "avg_score": digest["avg_score"],
         "total_tenants": digest["total_tenants"],
@@ -681,7 +716,21 @@ async def send_hygiene_digest(data: dict = None, current_user: dict = Depends(ge
     return {"sent": bool(sent_via), "sent_via": sent_via, "to": to_list, "deliveries": deliveries, "error": error, "avg_score": digest["avg_score"], "preview_html": html if not sent_via else None}
 
 
-@router.get("/cipp/digests")
-async def list_digests(current_user: dict = Depends(get_current_user)):
-    rows = await db.cipp_digests.find({}, {"_id": 0}).sort("generated_at", -1).to_list(20)
+@router.get(
+    "/cipp/digests",
+    dependencies=[Depends(require_action("m365.tenant.manage"))],
+)
+async def list_digests(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    await assert_global_scope(
+        current_user,
+        operation="m365.hygiene.digest.history.read",
+        request=request,
+    )
+    rows = await db.cipp_digests.find(
+        tenant_scoped_query(current_user, scoped_query(current_user)),
+        {"_id": 0},
+    ).sort("generated_at", -1).to_list(20)
     return rows

@@ -15,9 +15,11 @@ Endpoints:
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+import re
 import uuid
-from app.database import db, UPLOADS_DIR
+from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
 from app.services.upload_security import safe_original_filename, safe_upload_extension
@@ -38,12 +40,19 @@ router = APIRouter(dependencies=[Depends(_enforce_client_profile_scope)])
 
 CLIENT_ASSETS_DIR = UPLOADS_DIR / "clients"
 CLIENT_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-CLIENT_DOCS_DIR = UPLOADS_DIR / "client-documents"
+# Client documents are private evidence. They must never live under the general
+# static uploads mount, even when Supabase artifact storage is not configured.
+CLIENT_DOCS_DIR = ROOT_DIR / "private_uploads" / "client_documents"
 CLIENT_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+# Existing installations may have documents in the historical public upload
+# location. They remain available only through the scoped download endpoint
+# until a future migration moves them into private retention.
+LEGACY_CLIENT_DOCS_DIR = UPLOADS_DIR / "client-documents"
 
 ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
 ALLOWED_DOC_EXTS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "md", "png", "jpg", "jpeg", "webp", "gif", "zip"}
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
+_STORED_DOCUMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 
 
 def _safe_ext(filename: str, allow: set) -> str:
@@ -51,6 +60,40 @@ def _safe_ext(filename: str, allow: set) -> str:
         return safe_upload_extension(filename, allowed=allow)
     except HTTPException as exc:
         raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(sorted(allow))}") from exc
+
+
+def _document_filename(document: dict) -> str | None:
+    """Return a locally retained filename without trusting a public URL."""
+    candidate = str(document.get("stored_filename") or "").strip()
+    if not candidate:
+        legacy_url = str(document.get("url") or "").strip()
+        legacy_prefix = "/api/uploads/client-documents/"
+        if legacy_url.startswith(legacy_prefix):
+            candidate = legacy_url[len(legacy_prefix):]
+    return candidate if _STORED_DOCUMENT_NAME.fullmatch(candidate) else None
+
+
+def _client_document_response(document: dict) -> dict:
+    """Return client-document metadata without exposing storage internals."""
+    response = dict(document)
+    response.pop("stored_filename", None)
+    response.pop("artifact_storage", None)
+    response.pop("url", None)
+    if response.get("kind") == "file" and response.get("id") and response.get("client_id"):
+        response["download_url"] = f"/api/clients/{response['client_id']}/documents/{response['id']}/download"
+    return response
+
+
+def _local_document_path(document: dict) -> Path | None:
+    """Locate a private or legacy local copy after the caller has scoped it."""
+    filename = _document_filename(document)
+    if not filename:
+        return None
+    for directory in (CLIENT_DOCS_DIR, LEGACY_CLIENT_DOCS_DIR):
+        candidate = directory / filename
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 async def _ensure_client(client_id: str):
@@ -219,7 +262,7 @@ async def update_client_profile(client_id: str, data: dict, current_user: dict =
 async def list_client_documents(client_id: str, current_user: dict = Depends(get_current_user)):
     await _ensure_client(client_id)
     docs = await db.client_documents.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return docs
+    return [_client_document_response(document) for document in docs]
 
 
 @router.post("/clients/{client_id}/documents")
@@ -252,7 +295,8 @@ async def upload_client_document(
         "extension": ext,
         "category": category,
         "size_bytes": len(content),
-        "url": f"/api/uploads/client-documents/{filename}",
+        "stored_filename": filename,
+        "content_type": file.content_type or "application/octet-stream",
         "uploaded_by": current_user.get("id"),
         "uploaded_by_name": current_user.get("name"),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -265,7 +309,7 @@ async def upload_client_document(
             "mirrored_at": datetime.now(timezone.utc).isoformat(),
         }
     await db.client_documents.insert_one({**doc})
-    return doc
+    return _client_document_response(doc)
 
 
 @router.get("/clients/{client_id}/documents/{doc_id}/download")
@@ -276,12 +320,19 @@ async def download_client_document(client_id: str, doc_id: str, current_user: di
     if not doc:
         raise HTTPException(status_code=404, detail="Client document not found")
     object_path = (doc.get("artifact_storage") or {}).get("object_path")
-    if not object_path:
-        raise HTTPException(status_code=404, detail="Client document has not been migrated to private storage")
-    artifact = await read_artifact(object_path)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Retained client document is unavailable")
-    content, content_type = artifact
+    if object_path:
+        artifact = await read_artifact(object_path)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="Retained client document is unavailable")
+        content, content_type = artifact
+    else:
+        local_path = _local_document_path(doc)
+        if not local_path:
+            raise HTTPException(status_code=404, detail="Retained client document is unavailable")
+        if local_path.stat().st_size > MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail="Client document exceeds the allowed size")
+        content = local_path.read_bytes()
+        content_type = doc.get("content_type") or "application/octet-stream"
     filename = safe_original_filename(doc.get("original_filename") or doc.get("title"), default="client-document")
     return Response(
         content=content,
@@ -324,15 +375,15 @@ async def delete_client_document(client_id: str, doc_id: str, current_user: dict
     doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    # If file, remove from disk
-    if doc.get("kind") == "file" and doc.get("url"):
-        try:
-            filename = doc["url"].rsplit("/", 1)[-1]
-            filepath = CLIENT_DOCS_DIR / filename
-            if filepath.exists():
-                filepath.unlink()
-        except Exception:
-            pass
+    # Remove both the current private local copy and a legacy local copy. The
+    # filename parser rejects paths, so record data cannot escape these roots.
+    if doc.get("kind") == "file":
+        filename = _document_filename(doc)
+        if filename:
+            for directory in (CLIENT_DOCS_DIR, LEGACY_CLIENT_DOCS_DIR):
+                filepath = directory / filename
+                if filepath.is_file():
+                    filepath.unlink()
     artifact_path = (doc.get("artifact_storage") or {}).get("object_path")
     if artifact_path:
         await delete_artifact(artifact_path)

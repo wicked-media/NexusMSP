@@ -20,7 +20,7 @@ class TestAuth:
         """Test standard login with admin credentials"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         data = response.json()
@@ -38,7 +38,7 @@ class TestRustDeskLiveAPI:
         """Get auth token before each test"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         self.token = response.json()["token"]
@@ -116,7 +116,7 @@ class TestRustDeskExistingEndpoints:
         """Get auth token before each test"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         self.token = response.json()["token"]
@@ -156,7 +156,7 @@ class TestNotificationsRegression:
         """Get auth token before each test"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         self.token = response.json()["token"]
@@ -187,7 +187,7 @@ class TestKanbanRegression:
         """Get auth token before each test"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         self.token = response.json()["token"]

@@ -14,7 +14,7 @@ def auth_headers():
     """Get auth token for admin user"""
     resp = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert resp.status_code == 200, f"Login failed: {resp.text}"
     token = resp.json().get("token")  # API returns 'token' not 'access_token'
@@ -24,7 +24,7 @@ def auth_headers():
 # ============ TICKET AI FEATURES ============
 
 class TestTicketDoppelganger:
-    """1. Ticket Doppelgänger - find similar resolved tickets"""
+    """1. Ticket DoppelgÃƒÂ¤nger - find similar resolved tickets"""
     
     def test_doppelganger_returns_matches(self, auth_headers):
         # First get a ticket ID

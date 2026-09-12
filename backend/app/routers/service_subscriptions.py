@@ -20,6 +20,12 @@ from app.services.scope_permissions import scoped_query
 router = APIRouter(prefix="/service-subscriptions", tags=["service-subscriptions"])
 
 
+# Provider evidence written by a verified Graph / Partner Center synchroniser.
+# These values deliberately match the Microsoft evidence boundary rather than
+# treating a local configuration record or an old demo row as live usage.
+M365_VERIFIED_SOURCES = frozenset({"m365_graph", "m365_partner_center"})
+
+
 def _number(value, default=0.0):
     try:
         return float(value if value not in (None, "") else default)
@@ -88,6 +94,154 @@ def _client_details(record, by_id, by_name):
 
 def _attention(*reasons):
     return [reason for reason in reasons if reason]
+
+
+def _stable_identifier(value) -> str:
+    """Return an external identifier only when it is safe to use as a join key."""
+    return str(value or "").strip()
+
+
+def _m365_tenant_id(record: dict) -> str:
+    return _stable_identifier(record.get("tenant_id") or record.get("tenantId") or record.get("id"))
+
+
+def _m365_number(record: dict, *fields: str):
+    """Read a provider quantity without turning absent evidence into zero."""
+    for field in fields:
+        value = record.get(field)
+        if value not in (None, ""):
+            return max(0.0, _number(value))
+    return None
+
+
+def _m365_purchased_seats(record: dict):
+    direct = _m365_number(record, "purchased", "purchased_units", "total_units", "enabled_units")
+    if direct is not None:
+        return direct
+    prepaid = record.get("prepaidUnits") or record.get("PrepaidUnits")
+    if isinstance(prepaid, dict):
+        return _m365_number(prepaid, "enabled", "total")
+    return None
+
+
+def _m365_consumed_seats(record: dict):
+    return _m365_number(record, "consumed_units", "consumedUnits", "ConsumedUnits", "assigned_units")
+
+
+def _m365_tenant_bindings(clients: list[dict], connections: list[dict], provider_tenants: list[dict]) -> tuple[dict[str, str], set[str]]:
+    """Map provider tenant IDs to scoped Nexus clients without name matching.
+
+    A corrupted or conflicting mapping is intentionally excluded.  It is safer
+    to show an evidence gap than risk presenting one customer's licence usage
+    against another customer's service register.
+    """
+    allowed_clients = {str(client.get("id")) for client in clients if client.get("id")}
+    candidates: dict[str, set[str]] = defaultdict(set)
+
+    def add(tenant_id, client_id):
+        tenant = _stable_identifier(tenant_id)
+        client = _stable_identifier(client_id)
+        if tenant and client in allowed_clients:
+            candidates[tenant].add(client)
+
+    for client in clients:
+        for field in ("cipp_tenant_id", "m365_tenant_id", "office365_tenant_id"):
+            add(client.get(field), client.get("id"))
+    for connection in connections:
+        add(connection.get("tenant_id") or connection.get("tenantId"), connection.get("client_id"))
+    for tenant in provider_tenants:
+        add(_m365_tenant_id(tenant), tenant.get("client_id"))
+
+    ambiguous = {tenant_id for tenant_id, client_ids in candidates.items() if len(client_ids) != 1}
+    return (
+        {tenant_id: next(iter(client_ids)) for tenant_id, client_ids in candidates.items() if len(client_ids) == 1},
+        ambiguous,
+    )
+
+
+def _m365_usage_items(provider_licenses: list[dict], tenant_to_client: dict[str, str], clients_by_id: dict[str, dict]) -> tuple[list[dict], dict]:
+    """Convert verified Microsoft SKU snapshots into non-commercial usage rows.
+
+    This is intentionally a read model: SKU consumption is provider evidence,
+    not a contract, invoice, subscription purchase, or billing decision.
+    """
+    items: list[dict] = []
+    observed_tenants: set[str] = set()
+    partial_records = 0
+    for index, record in enumerate(provider_licenses):
+        source = str(record.get("source") or "").strip().lower()
+        if source not in M365_VERIFIED_SOURCES:
+            continue
+        tenant_id = _m365_tenant_id(record)
+        client_id = tenant_to_client.get(tenant_id)
+        client = clients_by_id.get(client_id or "")
+        if not tenant_id or not client:
+            continue
+
+        observed_tenants.add(tenant_id)
+        purchased = _m365_purchased_seats(record)
+        consumed = _m365_consumed_seats(record)
+        partial = purchased is None or consumed is None
+        partial_records += int(partial)
+        sku_id = _stable_identifier(record.get("sku_id") or record.get("skuId") or record.get("SkuId") or record.get("id"))
+        sku_name = str(
+            record.get("sku_name")
+            or record.get("skuPartNumber")
+            or record.get("SkuPartNumber")
+            or record.get("display_name")
+            or record.get("name")
+            or sku_id
+            or "Microsoft licence SKU"
+        ).strip()
+        status = record.get("status")
+        item_status = _normalise_status(status) if status not in (None, "") else "provider_recorded"
+        reasons = _attention(
+            "Provider did not report purchased seats" if purchased is None else "",
+            "Provider did not report assigned seats" if consumed is None else "",
+        )
+        items.append({
+            "id": f"m365:{tenant_id}:{sku_id or index}",
+            "client_id": str(client.get("id")),
+            "client_name": client.get("name") or "Unassigned client",
+            "name": sku_name,
+            "category": "licence",
+            "record_kind": "provider_usage",
+            "source": "microsoft_365",
+            "source_label": "Microsoft 365 provider evidence",
+            "provider": "Microsoft 365",
+            "quantity": purchased,
+            "used_quantity": consumed,
+            "unit_cost": None,
+            "monthly_cost": None,
+            "unit_price": None,
+            "monthly_revenue": None,
+            "billing_cycle": "not_assessed",
+            "renewal_date": "",
+            "status": item_status,
+            "billing_linked": False,
+            # Never present consumption as a billing conclusion.  The dedicated
+            # Billing Assurance workflow owns explicit SKU-to-contract mapping.
+            "billing_state": "not_assessed",
+            "contract_id": "",
+            "recurring_invoice_id": "",
+            "quantity_source": "provider_sync",
+            "evidence_state": "partial_provider_sync" if partial else "provider_sync",
+            "last_synced": record.get("observed_at") or record.get("last_synced") or record.get("updated_at") or record.get("synced_at"),
+            "source_route": "/control-plane?module=microsoft365",
+            "editable": False,
+            "attention_reasons": reasons,
+        })
+
+    linked_clients = {client_id for client_id in tenant_to_client.values() if client_id}
+    return items, {
+        "state": "evidence_available" if items else ("awaiting_sync" if tenant_to_client else "tenant_not_linked"),
+        "linked_tenants": len(tenant_to_client),
+        "linked_clients": len(linked_clients),
+        "observed_tenants": len(observed_tenants),
+        "sku_records": len(items),
+        "partial_records": partial_records,
+        "boundary": "Provider-recorded Microsoft licence usage only. It does not prove a contract, invoice, purchase, or billing reconciliation.",
+    }
 
 
 @router.get("/overview")
@@ -199,6 +353,51 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
             "source_record_id": licence.get("id"),
             "attention_reasons": reasons,
         })
+
+    # Microsoft 365 is intentionally represented twice only when the evidence
+    # has a different purpose: the confirmed licence register above is a
+    # technician or integration-maintained record, while this block exposes
+    # provider-recorded consumption from a verified synchroniser. It is not a
+    # commercial subscription and must never create a billing commitment.
+    #
+    # Join provider evidence through stable, client-scoped tenant IDs only.
+    # We deliberately do not fall back to tenant display names or domains. A
+    # conflicting mapping is excluded rather than risking evidence appearing
+    # against the wrong customer.
+    m365_connections = await db.m365_tenant_connections.find(
+        scoped_query(current_user, {}, site_field=None),
+        {"_id": 0, "tenant_id": 1, "tenantId": 1, "client_id": 1},
+    ).to_list(2_000)
+    m365_provider_tenants = await db.m365_tenants.find(
+        scoped_query(
+            current_user,
+            {"source": {"$in": sorted(M365_VERIFIED_SOURCES)}},
+            site_field=None,
+        ),
+        {"_id": 0, "id": 1, "tenant_id": 1, "tenantId": 1, "client_id": 1},
+    ).to_list(2_000)
+    m365_tenant_to_client, m365_ambiguous_tenants = _m365_tenant_bindings(
+        clients,
+        m365_connections,
+        m365_provider_tenants,
+    )
+    m365_tenant_ids = sorted(m365_tenant_to_client)
+    m365_provider_licenses = await db.m365_licenses.find(
+        {
+            "$and": [
+                {"source": {"$in": sorted(M365_VERIFIED_SOURCES)}},
+                {"tenant_id": {"$in": m365_tenant_ids}},
+            ]
+        },
+        {"_id": 0},
+    ).to_list(10_000) if m365_tenant_ids else []
+    m365_usage, m365_usage_summary = _m365_usage_items(
+        m365_provider_licenses,
+        m365_tenant_to_client,
+        by_client_id,
+    )
+    m365_usage_summary["ambiguous_tenant_mappings"] = len(m365_ambiguous_tenants)
+    items.extend(m365_usage)
 
     # Generic Nexus-native subscriptions retained for backwards compatibility.
     generic_subscriptions = await db.subscriptions.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(5000)
@@ -552,5 +751,6 @@ async def service_subscription_overview(current_user: dict = Depends(get_current
             "provider_usage": "Operational quantity and provider cost evidence.",
             "billing_stream": "Customer-facing recurring revenue commitment.",
             "manual_evidence": "Technician-confirmed fallback when no provider connector exists.",
+            "microsoft_365_usage": m365_usage_summary,
         },
     }

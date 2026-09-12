@@ -8,7 +8,11 @@ import asyncio
 import logging
 from app.database import db
 from app.auth import get_current_user
-from app.services.finance_integrity import begin_idempotent_operation, complete_idempotent_operation
+from app.services.finance_integrity import (
+    begin_idempotent_operation,
+    complete_idempotent_operation,
+    fail_idempotent_operation,
+)
 from app.services.procurement_integrity import (
     assert_po_decision_allowed,
     get_po_approval_settings,
@@ -17,6 +21,10 @@ from app.services.procurement_integrity import (
     version_filter,
 )
 from app.services.nexus_document_pdf import render_nexus_purchase_order_pdf
+from app.services.commercial_documents import (
+    freeze_commercial_document_snapshot,
+    resolve_commercial_document_render_context,
+)
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
 
 logger = logging.getLogger(__name__)
@@ -52,10 +60,12 @@ async def generate_po_pdf(po_id: str, current_user: dict = Depends(get_current_u
     po = await _po_or_404(po_id, current_user)
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
     actor = current_user.get("name") or current_user.get("email") or "NexusMSP"
+    document_context = await resolve_commercial_document_render_context("purchase_order", po, branding, database=db)
     pdf_bytes = render_nexus_purchase_order_pdf(
         po,
-        branding=branding,
+        branding=document_context["branding"],
         generated_by=actor,
+        document_profile=document_context["profile"],
     )
     return Response(
         content=pdf_bytes,
@@ -429,16 +439,58 @@ async def email_po_to_vendor(po_id: str, data: dict, current_user: dict = Depend
     )
     if replay is not None:
         return {**replay, "replayed": True}
+    try:
+        branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+        generated_by = current_user.get("name") or current_user.get("email") or "NexusMSP"
+        document_snapshot = await freeze_commercial_document_snapshot(
+            "purchase_order", po, branding, database=db
+        )
+        pdf_attachment = {
+            "filename": f"PO_{po.get('po_number', po_id)}.pdf",
+            "content": render_nexus_purchase_order_pdf(
+                po,
+                branding=document_snapshot["branding"],
+                generated_by=generated_by,
+                document_profile=document_snapshot["profile"],
+            ),
+            "content_type": "application/pdf",
+        }
+    except Exception:
+        await fail_idempotent_operation(
+            db,
+            scope=f"po-email:{po_id}",
+            key=idempotency_key,
+            error="Unable to generate the purchase order PDF attachment",
+        )
+        raise
     from app.routers.email_utils import send_email
-    delivery = await send_email(email, subject, email_body, category="billing")
+    delivery = await send_email(
+        email,
+        subject,
+        email_body,
+        category="billing",
+        attachments=[pdf_attachment],
+        client_id=po.get("client_id") or None,
+        related_type="purchase_order",
+        related_id=po_id,
+        initiated_by=current_user.get("id"),
+        initiated_by_name=current_user.get("name"),
+    )
     sent = delivery.get("status") == "sent"
-    result = await db.purchase_orders.update_one({"id": po_id, **version_filter(po)}, {"$set": {
+    update = {
         "status": "submitted" if sent and po.get("status") == "approved" else po.get("status"),
         "emailed_to": email,
         "emailed_at": datetime.now(timezone.utc).isoformat(),
         "email_signature_id": signature_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-    }, "$inc": {"version": 1}})
+    }
+    if sent and (po.get("status") == "approved" or not po.get("document_snapshot")):
+        # Backfill legacy sent POs on their next successful delivery without
+        # mutating their procurement status or commercial values.
+        update["document_snapshot"] = document_snapshot
+    result = await db.purchase_orders.update_one(
+        {"id": po_id, **version_filter(po)}, {"$set": update, "$inc": {"version": 1}}
+    )
     if result.matched_count == 0:
         raise HTTPException(status_code=409, detail="Purchase order changed while the email was being sent; refresh to review the delivery record")
     await _po_audit(po_id, "emailed_to_vendor", f"PO emailed to {email} ({delivery.get('status')})", current_user)

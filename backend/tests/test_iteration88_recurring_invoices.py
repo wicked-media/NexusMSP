@@ -11,7 +11,7 @@ import os
 from datetime import datetime
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
-TEST_CREDENTIALS = {"email": "aaron@stech.com.au", "password": "Lucky@2871$!"}
+TEST_CREDENTIALS = {"email": "aaron@stech.com.au", "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")}
 
 
 class TestRecurringInvoicesModule:
@@ -47,7 +47,7 @@ class TestRecurringInvoicesModule:
         assert "frequency" in ri, "Missing frequency field"
         assert "status" in ri, "Missing status field"
         assert "line_items" in ri, "Missing line_items field"
-        print(f"✓ GET /api/recurring-invoices/list returned {len(data)} recurring invoices")
+        print(f"Ã¢Å“â€œ GET /api/recurring-invoices/list returned {len(data)} recurring invoices")
     
     def test_get_recurring_stats(self):
         """GET /api/recurring-invoices/stats - should return MRR, ARR, active count, due this week"""
@@ -65,7 +65,7 @@ class TestRecurringInvoicesModule:
         assert data["mrr"] > 0, "MRR should be positive"
         assert data["arr"] > 0, "ARR should be positive"
         assert data["active"] >= 0, "Active count should be non-negative"
-        print(f"✓ Stats: MRR=${data['mrr']}, ARR=${data['arr']}, Active={data['active']}, Due this week={data['due_this_week']}")
+        print(f"Ã¢Å“â€œ Stats: MRR=${data['mrr']}, ARR=${data['arr']}, Active={data['active']}, Due this week={data['due_this_week']}")
     
     def test_get_single_recurring_invoice(self):
         """GET /api/recurring-invoices/{id} - should return a single recurring invoice"""
@@ -74,13 +74,13 @@ class TestRecurringInvoicesModule:
         data = resp.json()
         assert data["id"] == "ri-001", "ID mismatch"
         assert data["client_name"] == "Acme Corporation", "Client name mismatch"
-        print(f"✓ GET /api/recurring-invoices/ri-001 returned {data['client_name']}")
+        print(f"Ã¢Å“â€œ GET /api/recurring-invoices/ri-001 returned {data['client_name']}")
     
     def test_get_nonexistent_recurring_invoice(self):
         """GET /api/recurring-invoices/{id} - should return 404 for nonexistent"""
         resp = self.session.get(f"{BASE_URL}/api/recurring-invoices/ri-nonexistent")
         assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
-        print("✓ GET nonexistent recurring invoice returns 404")
+        print("Ã¢Å“â€œ GET nonexistent recurring invoice returns 404")
     
     # ============== CREATE RECURRING INVOICE ==============
     
@@ -115,7 +115,7 @@ class TestRecurringInvoicesModule:
         assert data["subtotal"] == 700, f"Subtotal should be 700, got {data['subtotal']}"
         assert data["amount"] == 770, f"Total should be 770 (700 + 10% tax), got {data['amount']}"
         self.created_ri_id = data["id"]
-        print(f"✓ Created recurring invoice {data['id']} with amount ${data['amount']}")
+        print(f"Ã¢Å“â€œ Created recurring invoice {data['id']} with amount ${data['amount']}")
         return data["id"]
     
     # ============== UPDATE RECURRING INVOICE ==============
@@ -156,7 +156,7 @@ class TestRecurringInvoicesModule:
         assert data["frequency"] == "quarterly", "Frequency not updated"
         assert len(data["line_items"]) == 2, "Line items not updated"
         assert data["subtotal"] == 500, f"Subtotal should be 500, got {data['subtotal']}"
-        print(f"✓ Updated recurring invoice {ri_id}")
+        print(f"Ã¢Å“â€œ Updated recurring invoice {ri_id}")
         
         # Cleanup
         self.session.delete(f"{BASE_URL}/api/recurring-invoices/{ri_id}")
@@ -188,7 +188,7 @@ class TestRecurringInvoicesModule:
         toggle_resp2 = self.session.post(f"{BASE_URL}/api/recurring-invoices/{ri_id}/toggle")
         assert toggle_resp2.status_code == 200
         assert toggle_resp2.json()["status"] == "active", "Should be active after second toggle"
-        print(f"✓ Toggle recurring invoice {ri_id}: active -> paused -> active")
+        print(f"Ã¢Å“â€œ Toggle recurring invoice {ri_id}: active -> paused -> active")
         
         # Cleanup
         self.session.delete(f"{BASE_URL}/api/recurring-invoices/{ri_id}")
@@ -219,7 +219,7 @@ class TestRecurringInvoicesModule:
         assert "invoice_number" in data, "Missing invoice_number in response"
         assert "message" in data, "Missing message in response"
         assert data["amount"] == 550, f"Generated invoice amount should be 550, got {data['amount']}"
-        print(f"✓ Generated invoice {data['invoice_number']} from recurring {ri_id}")
+        print(f"Ã¢Å“â€œ Generated invoice {data['invoice_number']} from recurring {ri_id}")
         
         # Verify the recurring invoice stats were updated
         get_resp = self.session.get(f"{BASE_URL}/api/recurring-invoices/{ri_id}")
@@ -256,7 +256,7 @@ class TestRecurringInvoicesModule:
         assert data["status"] == "paused", "Duplicate should be paused by default"
         assert data["invoices_generated"] == 0, "Duplicate should have 0 invoices generated"
         assert data["total_billed"] == 0, "Duplicate should have 0 total billed"
-        print(f"✓ Duplicated {original_id} to {data['id']}")
+        print(f"Ã¢Å“â€œ Duplicated {original_id} to {data['id']}")
         
         # Cleanup
         self.session.delete(f"{BASE_URL}/api/recurring-invoices/{original_id}")
@@ -285,13 +285,13 @@ class TestRecurringInvoicesModule:
         # Verify it's gone
         get_resp = self.session.get(f"{BASE_URL}/api/recurring-invoices/{ri_id}")
         assert get_resp.status_code == 404, "Deleted RI should return 404"
-        print(f"✓ Deleted recurring invoice {ri_id}")
+        print(f"Ã¢Å“â€œ Deleted recurring invoice {ri_id}")
     
     def test_delete_nonexistent_recurring_invoice(self):
         """DELETE /api/recurring-invoices/{id} - should return 404 for nonexistent"""
         resp = self.session.delete(f"{BASE_URL}/api/recurring-invoices/ri-nonexistent-xyz")
         assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
-        print("✓ Delete nonexistent recurring invoice returns 404")
+        print("Ã¢Å“â€œ Delete nonexistent recurring invoice returns 404")
 
 
 class TestInvoiceTemplates:
@@ -322,7 +322,7 @@ class TestInvoiceTemplates:
         assert "name" in tpl, "Missing name field"
         assert "line_items" in tpl, "Missing line_items field"
         assert "category" in tpl, "Missing category field"
-        print(f"✓ GET /api/invoice-templates returned {len(data)} templates")
+        print(f"Ã¢Å“â€œ GET /api/invoice-templates returned {len(data)} templates")
     
     def test_create_invoice_template(self):
         """POST /api/invoice-templates - should create a new template with line items"""
@@ -346,7 +346,7 @@ class TestInvoiceTemplates:
         assert data["category"] == "consulting", "Category mismatch"
         assert len(data["line_items"]) == 2, "Should have 2 line items"
         assert data["usage_count"] == 0, "New template should have 0 usage count"
-        print(f"✓ Created template {data['id']}: {data['name']}")
+        print(f"Ã¢Å“â€œ Created template {data['id']}: {data['name']}")
         
         # Cleanup
         self.session.delete(f"{BASE_URL}/api/invoice-templates/{data['id']}")
@@ -376,7 +376,7 @@ class TestInvoiceTemplates:
         assert data["client_name"] == "TEST_ApplyTemplateClient", "Client name mismatch"
         assert data["frequency"] == "monthly", "Frequency mismatch"
         assert data["status"] == "active", "Applied template should create active RI"
-        print(f"✓ Applied template {template_id} to create recurring invoice {data['id']}")
+        print(f"Ã¢Å“â€œ Applied template {template_id} to create recurring invoice {data['id']}")
         
         # Cleanup
         self.session.delete(f"{BASE_URL}/api/recurring-invoices/{data['id']}")
@@ -397,13 +397,13 @@ class TestInvoiceTemplates:
         # Delete it
         del_resp = self.session.delete(f"{BASE_URL}/api/invoice-templates/{tpl_id}")
         assert del_resp.status_code == 200, f"Expected 200, got {del_resp.status_code}"
-        print(f"✓ Deleted template {tpl_id}")
+        print(f"Ã¢Å“â€œ Deleted template {tpl_id}")
     
     def test_delete_nonexistent_template(self):
         """DELETE /api/invoice-templates/{id} - should return 404 for nonexistent"""
         resp = self.session.delete(f"{BASE_URL}/api/invoice-templates/it-nonexistent-xyz")
         assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
-        print("✓ Delete nonexistent template returns 404")
+        print("Ã¢Å“â€œ Delete nonexistent template returns 404")
 
 
 class TestRecurringInvoicesHistory:
@@ -427,13 +427,13 @@ class TestRecurringInvoicesHistory:
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         data = resp.json()
         assert isinstance(data, list), "History should be a list"
-        print(f"✓ GET /api/recurring-invoices/ri-001/history returned {len(data)} entries")
+        print(f"Ã¢Å“â€œ GET /api/recurring-invoices/ri-001/history returned {len(data)} entries")
     
     def test_get_history_nonexistent(self):
         """GET /api/recurring-invoices/{id}/history - should return 404 for nonexistent"""
         resp = self.session.get(f"{BASE_URL}/api/recurring-invoices/ri-nonexistent/history")
         assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
-        print("✓ GET history for nonexistent RI returns 404")
+        print("Ã¢Å“â€œ GET history for nonexistent RI returns 404")
 
 
 if __name__ == "__main__":

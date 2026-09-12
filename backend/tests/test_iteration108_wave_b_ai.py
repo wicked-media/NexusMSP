@@ -1,6 +1,6 @@
 """
 Test Wave B P1 AI Differentiators:
-1. Voice Journal via OpenAI Whisper (record → transcribe → auto ticket comment + time entry)
+1. Voice Journal via OpenAI Whisper (record Ã¢â€ â€™ transcribe Ã¢â€ â€™ auto ticket comment + time entry)
 2. Coffee Break Mode (SLA-pause toggle with auto-resume)
 3. Morning Standup Digest scheduler (delivers at 7am via email/SMS when enabled)
 """
@@ -15,7 +15,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_EMAIL = "aaron@stech.com.au"
-TEST_PASSWORD = "Lucky@2871$!"
+TEST_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 class TestAuth:

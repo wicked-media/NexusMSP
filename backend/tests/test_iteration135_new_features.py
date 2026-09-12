@@ -13,7 +13,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -270,14 +270,14 @@ class TestThreatRadar:
 class TestHealthCertificate:
     """Client Health Certificate PDF tests"""
     
-    def test_health_certificate_pdf(self, auth_token, headers):
-        """GET /api/clients/{id}/health-certificate.pdf?token=... returns PDF"""
+    def test_health_certificate_pdf(self, headers):
+        """Authenticated GET /api/clients/{id}/health-certificate.pdf returns PDF."""
         clients_resp = requests.get(f"{BASE_URL}/api/clients?limit=1", headers=headers)
         if clients_resp.status_code != 200 or not clients_resp.json():
             pytest.skip("No clients available")
         client_id = clients_resp.json()[0]["id"]
         
-        response = requests.get(f"{BASE_URL}/api/clients/{client_id}/health-certificate.pdf?token={auth_token}")
+        response = requests.get(f"{BASE_URL}/api/clients/{client_id}/health-certificate.pdf", headers=headers)
         assert response.status_code == 200
         assert response.headers.get("content-type") == "application/pdf"
         assert response.content[:8] == b"%PDF-1.3" or response.content[:8] == b"%PDF-1.4"
@@ -293,9 +293,9 @@ class TestHealthCertificate:
         response = requests.get(f"{BASE_URL}/api/clients/{client_id}/health-certificate.pdf")
         assert response.status_code == 401
     
-    def test_health_certificate_not_found(self, auth_token):
-        """GET /api/clients/nonexistent/health-certificate.pdf returns 404"""
-        response = requests.get(f"{BASE_URL}/api/clients/nonexistent-id-12345/health-certificate.pdf?token={auth_token}")
+    def test_health_certificate_not_found(self, headers):
+        """Authenticated GET for a missing health certificate client returns 404."""
+        response = requests.get(f"{BASE_URL}/api/clients/nonexistent-id-12345/health-certificate.pdf", headers=headers)
         assert response.status_code == 404
 
 

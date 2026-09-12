@@ -11,7 +11,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials from test_credentials.md
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASSWORD = "Lucky@2871$!"
+ADMIN_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 class TestTRMMIntegration:
@@ -41,7 +41,7 @@ class TestTRMMIntegration:
         # Teardown: cleanup TRMM settings after tests
         self.session.delete(f"{BASE_URL}/api/trmm/settings")
     
-    # ─────────────────────────── Status/Settings when NOT configured ───────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Status/Settings when NOT configured Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     
     def test_trmm_status_not_configured(self):
         """GET /api/trmm/status returns configured=false initially with expected shape"""
@@ -58,7 +58,7 @@ class TestTRMMIntegration:
         assert "last_test_status" in data, "Missing 'last_test_status' field"
         assert "last_tested_at" in data, "Missing 'last_tested_at' field"
         assert "last_synced_at" in data, "Missing 'last_synced_at' field"
-        print(f"✓ TRMM status not configured: {data}")
+        print(f"Ã¢Å“â€œ TRMM status not configured: {data}")
     
     def test_trmm_summary_not_configured(self):
         """GET /api/trmm/summary returns configured=false and zero stats when not configured"""
@@ -73,7 +73,7 @@ class TestTRMMIntegration:
         assert stats.get("online") == 0, f"Expected online=0, got {stats.get('online')}"
         assert stats.get("offline") == 0, f"Expected offline=0, got {stats.get('offline')}"
         assert stats.get("alerts") == 0, f"Expected alerts=0, got {stats.get('alerts')}"
-        print(f"✓ TRMM summary not configured: {data}")
+        print(f"Ã¢Å“â€œ TRMM summary not configured: {data}")
     
     def test_trmm_test_not_configured(self):
         """GET /api/trmm/test returns success=false with 'Not configured' when no creds"""
@@ -84,9 +84,9 @@ class TestTRMMIntegration:
         assert data.get("success") == False, f"Expected success=false, got {data.get('success')}"
         assert "message" in data, "Missing 'message' field"
         assert "not configured" in data["message"].lower(), f"Expected 'Not configured' message, got: {data['message']}"
-        print(f"✓ TRMM test not configured: {data}")
+        print(f"Ã¢Å“â€œ TRMM test not configured: {data}")
     
-    # ─────────────────────────── Settings CRUD ───────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Settings CRUD Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     
     def test_trmm_settings_save_and_verify(self):
         """POST /api/trmm/settings saves base_url, api_key, verify_tls and persists configured=true"""
@@ -99,7 +99,7 @@ class TestTRMMIntegration:
         assert save_resp.status_code == 200, f"Expected 200, got {save_resp.status_code}: {save_resp.text}"
         save_data = save_resp.json()
         assert "message" in save_data, "Missing 'message' in save response"
-        print(f"✓ TRMM settings saved: {save_data}")
+        print(f"Ã¢Å“â€œ TRMM settings saved: {save_data}")
         
         # Verify status shows configured=true
         status_resp = self.session.get(f"{BASE_URL}/api/trmm/status")
@@ -108,9 +108,9 @@ class TestTRMMIntegration:
         
         assert status_data.get("configured") == True, f"Expected configured=true after save, got {status_data.get('configured')}"
         assert status_data.get("base_url") == "https://test-trmm.example.com", f"base_url mismatch: {status_data.get('base_url')}"
-        assert status_data.get("api_key_preview") == "…5678", f"api_key_preview mismatch: {status_data.get('api_key_preview')}"
+        assert status_data.get("api_key_preview") == "Ã¢â‚¬Â¦5678", f"api_key_preview mismatch: {status_data.get('api_key_preview')}"
         assert status_data.get("verify_tls") == False, f"verify_tls mismatch: {status_data.get('verify_tls')}"
-        print(f"✓ TRMM status after save: {status_data}")
+        print(f"Ã¢Å“â€œ TRMM status after save: {status_data}")
     
     def test_trmm_settings_validation(self):
         """POST /api/trmm/settings returns 400 when base_url or api_key missing"""
@@ -132,7 +132,7 @@ class TestTRMMIntegration:
             "api_key": ""
         })
         assert resp3.status_code == 400, f"Expected 400 for empty values, got {resp3.status_code}"
-        print("✓ TRMM settings validation works correctly")
+        print("Ã¢Å“â€œ TRMM settings validation works correctly")
     
     def test_trmm_test_unreachable_url(self):
         """GET /api/trmm/test against unreachable URL returns success=false with useful error (NOT 500)"""
@@ -151,7 +151,7 @@ class TestTRMMIntegration:
         assert data.get("success") == False, f"Expected success=false for unreachable URL, got {data.get('success')}"
         assert "message" in data, "Missing 'message' field in error response"
         assert len(data["message"]) > 0, "Error message should not be empty"
-        print(f"✓ TRMM test unreachable URL handled gracefully: {data}")
+        print(f"Ã¢Å“â€œ TRMM test unreachable URL handled gracefully: {data}")
     
     def test_trmm_settings_delete(self):
         """DELETE /api/trmm/settings removes credentials (status becomes configured=false again)"""
@@ -173,9 +173,9 @@ class TestTRMMIntegration:
         # Verify not configured
         status2 = self.session.get(f"{BASE_URL}/api/trmm/status").json()
         assert status2.get("configured") == False, f"Expected configured=false after delete, got {status2.get('configured')}"
-        print("✓ TRMM settings delete works correctly")
+        print("Ã¢Å“â€œ TRMM settings delete works correctly")
     
-    # ─────────────────────────── Actions Log & Linked Devices ───────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Actions Log & Linked Devices Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     
     def test_trmm_actions_log_empty(self):
         """GET /api/trmm/actions/log returns [] when no actions"""
@@ -184,7 +184,7 @@ class TestTRMMIntegration:
         data = resp.json()
         
         assert isinstance(data, list), f"Expected list, got {type(data)}"
-        print(f"✓ TRMM actions log: {data}")
+        print(f"Ã¢Å“â€œ TRMM actions log: {data}")
     
     def test_trmm_linked_devices_empty(self):
         """GET /api/trmm/linked-devices returns [] when no devices linked"""
@@ -193,9 +193,9 @@ class TestTRMMIntegration:
         data = resp.json()
         
         assert isinstance(data, list), f"Expected list, got {type(data)}"
-        print(f"✓ TRMM linked devices: {data}")
+        print(f"Ã¢Å“â€œ TRMM linked devices: {data}")
     
-    # ─────────────────────────── Device ↔ Agent Linking ───────────────────────────
+    # Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Device Ã¢â€ â€ Agent Linking Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     
     def test_device_link_trmm_agent(self):
         """POST /api/devices/{device_id}/link-trmm-agent persists trmm_agent_id on device record"""
@@ -218,7 +218,7 @@ class TestTRMMIntegration:
         assert link_resp.status_code == 200, f"Expected 200, got {link_resp.status_code}: {link_resp.text}"
         link_data = link_resp.json()
         assert "message" in link_data, "Missing 'message' in link response"
-        print(f"✓ Device linked to TRMM agent: {link_data}")
+        print(f"Ã¢Å“â€œ Device linked to TRMM agent: {link_data}")
         
         # Verify device has trmm_agent_id
         device_resp = self.session.get(f"{BASE_URL}/api/devices/{device_id}")
@@ -226,7 +226,7 @@ class TestTRMMIntegration:
         device_data = device_resp.json()
         assert device_data.get("trmm_agent_id") == "TEST_TRMM_AGENT_122", f"trmm_agent_id not persisted: {device_data.get('trmm_agent_id')}"
         assert device_data.get("trmm_hostname") == "test-hostname-122", f"trmm_hostname not persisted: {device_data.get('trmm_hostname')}"
-        print(f"✓ Device trmm_agent_id verified: {device_data.get('trmm_agent_id')}")
+        print(f"Ã¢Å“â€œ Device trmm_agent_id verified: {device_data.get('trmm_agent_id')}")
         
         # Verify linked-devices includes this device
         linked_resp = self.session.get(f"{BASE_URL}/api/trmm/linked-devices")
@@ -234,7 +234,7 @@ class TestTRMMIntegration:
         linked = linked_resp.json()
         linked_ids = [d.get("id") for d in linked]
         assert device_id in linked_ids, f"Device {device_id} not in linked-devices list"
-        print(f"✓ Device appears in linked-devices list")
+        print(f"Ã¢Å“â€œ Device appears in linked-devices list")
     
     def test_device_unlink_trmm_agent(self):
         """DELETE /api/devices/{device_id}/link-trmm-agent unsets trmm_agent_id"""
@@ -261,7 +261,7 @@ class TestTRMMIntegration:
         device_resp = self.session.get(f"{BASE_URL}/api/devices/{device_id}")
         device_data = device_resp.json()
         assert not device_data.get("trmm_agent_id"), f"trmm_agent_id should be unset, got: {device_data.get('trmm_agent_id')}"
-        print("✓ Device TRMM agent unlinked successfully")
+        print("Ã¢Å“â€œ Device TRMM agent unlinked successfully")
     
     def test_device_link_validation(self):
         """POST /api/devices/{device_id}/link-trmm-agent returns 400 when agent_id missing"""
@@ -276,7 +276,7 @@ class TestTRMMIntegration:
         # Missing agent_id
         resp = self.session.post(f"{BASE_URL}/api/devices/{device_id}/link-trmm-agent", json={})
         assert resp.status_code == 400, f"Expected 400 for missing agent_id, got {resp.status_code}"
-        print("✓ Device link validation works correctly")
+        print("Ã¢Å“â€œ Device link validation works correctly")
     
     def test_device_link_not_found(self):
         """POST /api/devices/{device_id}/link-trmm-agent returns 404 for non-existent device"""
@@ -284,7 +284,7 @@ class TestTRMMIntegration:
             "agent_id": "TEST_AGENT"
         })
         assert resp.status_code == 404, f"Expected 404 for non-existent device, got {resp.status_code}"
-        print("✓ Device link 404 for non-existent device")
+        print("Ã¢Å“â€œ Device link 404 for non-existent device")
 
 
 class TestRegressionSmoke:
@@ -314,7 +314,7 @@ class TestRegressionSmoke:
         assert resp.status_code == 200, f"Health check failed: {resp.status_code}"
         data = resp.json()
         assert data.get("status") == "ok", f"Health status not ok: {data}"
-        print(f"✓ Health endpoint: {data}")
+        print(f"Ã¢Å“â€œ Health endpoint: {data}")
     
     def test_auth_login(self):
         """POST /api/auth/login still works"""
@@ -326,7 +326,7 @@ class TestRegressionSmoke:
         data = resp.json()
         assert "token" in data, "No token in login response"
         assert "user" in data, "No user in login response"
-        print(f"✓ Auth login works: user={data['user'].get('email')}")
+        print(f"Ã¢Å“â€œ Auth login works: user={data['user'].get('email')}")
     
     def test_unifi_status(self):
         """GET /api/unifi/status still responds (regression)"""
@@ -334,7 +334,7 @@ class TestRegressionSmoke:
         assert resp.status_code == 200, f"UniFi status failed: {resp.status_code}"
         data = resp.json()
         assert "configured" in data, "Missing 'configured' field in UniFi status"
-        print(f"✓ UniFi status: configured={data.get('configured')}")
+        print(f"Ã¢Å“â€œ UniFi status: configured={data.get('configured')}")
     
     def test_cipp_status(self):
         """GET /api/cipp/status still responds (regression)"""
@@ -342,7 +342,7 @@ class TestRegressionSmoke:
         assert resp.status_code == 200, f"CIPP status failed: {resp.status_code}"
         data = resp.json()
         assert "configured" in data, "Missing 'configured' field in CIPP status"
-        print(f"✓ CIPP status: configured={data.get('configured')}")
+        print(f"Ã¢Å“â€œ CIPP status: configured={data.get('configured')}")
     
     def test_hudu_summary(self):
         """GET /api/hudu/summary still responds (regression)"""
@@ -351,7 +351,7 @@ class TestRegressionSmoke:
         data = resp.json()
         # Hudu summary should have stats object
         assert "stats" in data, "Missing 'stats' field in Hudu summary"
-        print(f"✓ Hudu summary: stats={data.get('stats')}")
+        print(f"Ã¢Å“â€œ Hudu summary: stats={data.get('stats')}")
 
 
 class TestTRMMAuthRequired:
@@ -361,19 +361,19 @@ class TestTRMMAuthRequired:
         """GET /api/trmm/status requires authentication"""
         resp = requests.get(f"{BASE_URL}/api/trmm/status")
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM status requires auth")
+        print("Ã¢Å“â€œ TRMM status requires auth")
     
     def test_trmm_summary_requires_auth(self):
         """GET /api/trmm/summary requires authentication"""
         resp = requests.get(f"{BASE_URL}/api/trmm/summary")
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM summary requires auth")
+        print("Ã¢Å“â€œ TRMM summary requires auth")
     
     def test_trmm_test_requires_auth(self):
         """GET /api/trmm/test requires authentication"""
         resp = requests.get(f"{BASE_URL}/api/trmm/test")
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM test requires auth")
+        print("Ã¢Å“â€œ TRMM test requires auth")
     
     def test_trmm_settings_post_requires_auth(self):
         """POST /api/trmm/settings requires authentication"""
@@ -382,22 +382,22 @@ class TestTRMMAuthRequired:
             "api_key": "test"
         }, headers={"Content-Type": "application/json"})
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM settings POST requires auth")
+        print("Ã¢Å“â€œ TRMM settings POST requires auth")
     
     def test_trmm_settings_delete_requires_auth(self):
         """DELETE /api/trmm/settings requires authentication"""
         resp = requests.delete(f"{BASE_URL}/api/trmm/settings")
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM settings DELETE requires auth")
+        print("Ã¢Å“â€œ TRMM settings DELETE requires auth")
     
     def test_trmm_actions_log_requires_auth(self):
         """GET /api/trmm/actions/log requires authentication"""
         resp = requests.get(f"{BASE_URL}/api/trmm/actions/log")
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM actions log requires auth")
+        print("Ã¢Å“â€œ TRMM actions log requires auth")
     
     def test_trmm_linked_devices_requires_auth(self):
         """GET /api/trmm/linked-devices requires authentication"""
         resp = requests.get(f"{BASE_URL}/api/trmm/linked-devices")
         assert resp.status_code in [401, 403], f"Expected 401/403 without auth, got {resp.status_code}"
-        print("✓ TRMM linked-devices requires auth")
+        print("Ã¢Å“â€œ TRMM linked-devices requires auth")

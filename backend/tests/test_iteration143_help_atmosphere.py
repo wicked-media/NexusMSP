@@ -21,7 +21,7 @@ def auth_token():
     """Get authentication token for admin user"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -33,7 +33,7 @@ def auth_headers(auth_token):
     return {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
 
 
-# ═══════════════════════ HELP CENTER ARTICLES ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â HELP CENTER ARTICLES Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestHelpArticles:
     """Help Center article CRUD tests"""
@@ -58,7 +58,7 @@ class TestHelpArticles:
         for cat in expected_cats:
             assert cat in categories, f"Expected category '{cat}' in by_category"
         
-        print(f"✓ List articles: {data['count']} articles in {len(categories)} categories")
+        print(f"Ã¢Å“â€œ List articles: {data['count']} articles in {len(categories)} categories")
 
     def test_list_articles_search(self, auth_headers):
         """GET /api/help/articles?q=tickets - search functionality"""
@@ -71,7 +71,7 @@ class TestHelpArticles:
         # At least the Tickets Module article should match
         titles = [a.get("title", "").lower() for a in data["articles"]]
         assert any("ticket" in t for t in titles), "Search for 'tickets' should find ticket-related articles"
-        print(f"✓ Search articles: found {data['count']} matching 'tickets'")
+        print(f"Ã¢Å“â€œ Search articles: found {data['count']} matching 'tickets'")
 
     def test_get_article_by_slug(self, auth_headers):
         """GET /api/help/articles/getting-started - get single article"""
@@ -83,16 +83,16 @@ class TestHelpArticles:
         assert data.get("slug") == "getting-started"
         assert data.get("title") == "Getting Started with NexusOps"
         assert data.get("category") == "Basics"
-        assert data.get("icon") == "🚀"
+        assert data.get("icon") == "Ã°Å¸Å¡â‚¬"
         assert "body_md" in data, "Article should have body_md"
         assert len(data.get("body_md", "")) > 100, "Article body should have content"
-        print(f"✓ Get article: '{data['title']}' ({len(data.get('body_md', ''))} chars)")
+        print(f"Ã¢Å“â€œ Get article: '{data['title']}' ({len(data.get('body_md', ''))} chars)")
 
     def test_get_article_not_found(self, auth_headers):
         """GET /api/help/articles/nonexistent-slug - 404 for missing"""
         response = requests.get(f"{BASE_URL}/api/help/articles/nonexistent-slug-xyz", headers=auth_headers)
         assert response.status_code == 404, f"Expected 404, got {response.status_code}"
-        print("✓ Get nonexistent article returns 404")
+        print("Ã¢Å“â€œ Get nonexistent article returns 404")
 
     def test_create_article(self, auth_headers):
         """POST /api/help/articles - create new article"""
@@ -101,7 +101,7 @@ class TestHelpArticles:
             "title": "Test Article for Iteration 143",
             "slug": test_slug,
             "category": "Testing",
-            "icon": "🧪",
+            "icon": "Ã°Å¸Â§Âª",
             "summary": "A test article created during automated testing",
             "body_md": "## Test Content\n\nThis is test content for the help center.",
             "order": 99
@@ -114,12 +114,12 @@ class TestHelpArticles:
         assert data.get("title") == payload["title"]
         assert data.get("category") == "Testing"
         assert "updated_at" in data
-        print(f"✓ Created article: {data['slug']}")
+        print(f"Ã¢Å“â€œ Created article: {data['slug']}")
         
         # Cleanup - delete the test article
         del_response = requests.delete(f"{BASE_URL}/api/help/articles/{test_slug}", headers=auth_headers)
         assert del_response.status_code == 200
-        print(f"✓ Cleaned up test article")
+        print(f"Ã¢Å“â€œ Cleaned up test article")
 
     def test_create_article_auto_slug(self, auth_headers):
         """POST /api/help/articles - auto-generates slug from title"""
@@ -134,7 +134,7 @@ class TestHelpArticles:
         
         # Slug should be auto-generated from title
         assert data.get("slug") == "auto-slug-test-article", f"Expected auto-slug, got {data.get('slug')}"
-        print(f"✓ Auto-slug generated: {data['slug']}")
+        print(f"Ã¢Å“â€œ Auto-slug generated: {data['slug']}")
         
         # Cleanup
         requests.delete(f"{BASE_URL}/api/help/articles/{data['slug']}", headers=auth_headers)
@@ -144,7 +144,7 @@ class TestHelpArticles:
         payload = {"category": "Testing", "body_md": "No title"}
         response = requests.post(f"{BASE_URL}/api/help/articles", json=payload, headers=auth_headers)
         assert response.status_code == 400, f"Expected 400, got {response.status_code}"
-        print("✓ Create article without title returns 400")
+        print("Ã¢Å“â€œ Create article without title returns 400")
 
     def test_delete_article(self, auth_headers):
         """DELETE /api/help/articles/{slug} - delete article"""
@@ -166,13 +166,13 @@ class TestHelpArticles:
         # Verify it's gone
         get_resp = requests.get(f"{BASE_URL}/api/help/articles/{test_slug}", headers=auth_headers)
         assert get_resp.status_code == 404
-        print("✓ Delete article works correctly")
+        print("Ã¢Å“â€œ Delete article works correctly")
 
     def test_delete_article_not_found(self, auth_headers):
         """DELETE /api/help/articles/nonexistent - 404"""
         response = requests.delete(f"{BASE_URL}/api/help/articles/nonexistent-xyz-123", headers=auth_headers)
         assert response.status_code == 404
-        print("✓ Delete nonexistent article returns 404")
+        print("Ã¢Å“â€œ Delete nonexistent article returns 404")
 
     def test_reseed_articles(self, auth_headers):
         """POST /api/help/seed - re-seeds default articles"""
@@ -181,10 +181,10 @@ class TestHelpArticles:
         data = response.json()
         
         assert data.get("seeded") == 6, f"Expected 6 seeded, got {data.get('seeded')}"
-        print(f"✓ Re-seeded {data['seeded']} default articles")
+        print(f"Ã¢Å“â€œ Re-seeded {data['seeded']} default articles")
 
 
-# ═══════════════════════ CHAT BROADCAST HOOKS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â CHAT BROADCAST HOOKS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestChatBroadcastHooks:
     """Chat broadcast hook tests for sentiment escalation and SLA pages"""
@@ -200,7 +200,7 @@ class TestChatBroadcastHooks:
         assert "items" in data, "Response should have 'items' list"
         assert isinstance(data["posted"], int)
         assert isinstance(data["items"], list)
-        print(f"✓ Sentiment broadcast: {data['posted']} new posts")
+        print(f"Ã¢Å“â€œ Sentiment broadcast: {data['posted']} new posts")
 
     def test_broadcast_sla_page(self, auth_headers):
         """POST /api/chat/broadcast/sla-page - scans and posts SLA pages"""
@@ -210,7 +210,7 @@ class TestChatBroadcastHooks:
         
         assert "posted" in data
         assert "items" in data
-        print(f"✓ SLA page broadcast: {data['posted']} new posts")
+        print(f"Ã¢Å“â€œ SLA page broadcast: {data['posted']} new posts")
 
     def test_broadcast_tick(self, auth_headers):
         """POST /api/chat/broadcast/tick - calls both broadcast hooks"""
@@ -220,10 +220,10 @@ class TestChatBroadcastHooks:
         
         assert "sentiment_posted" in data
         assert "sla_posted" in data
-        print(f"✓ Broadcast tick: sentiment={data['sentiment_posted']}, sla={data['sla_posted']}")
+        print(f"Ã¢Å“â€œ Broadcast tick: sentiment={data['sentiment_posted']}, sla={data['sla_posted']}")
 
 
-# ═══════════════════════ CHAT @CHANNEL BROADCAST ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â CHAT @CHANNEL BROADCAST Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestChatChannelBroadcast:
     """Test @channel/@here/@everyone broadcast mentions"""
@@ -247,7 +247,7 @@ class TestChatChannelBroadcast:
         
         assert msg.get("broadcast") == True, "Message with @channel should have broadcast=true"
         assert "@channel" in msg.get("body", "")
-        print(f"✓ @channel message sent with broadcast=true")
+        print(f"Ã¢Å“â€œ @channel message sent with broadcast=true")
 
     def test_send_message_with_here_mention(self, auth_headers):
         """POST /api/chat/channels/{id}/messages with @here sets broadcast=true"""
@@ -262,7 +262,7 @@ class TestChatChannelBroadcast:
         msg = msg_resp.json()
         
         assert msg.get("broadcast") == True
-        print(f"✓ @here message sent with broadcast=true")
+        print(f"Ã¢Å“â€œ @here message sent with broadcast=true")
 
     def test_send_message_with_everyone_mention(self, auth_headers):
         """POST /api/chat/channels/{id}/messages with @everyone sets broadcast=true"""
@@ -277,7 +277,7 @@ class TestChatChannelBroadcast:
         msg = msg_resp.json()
         
         assert msg.get("broadcast") == True
-        print(f"✓ @everyone message sent with broadcast=true")
+        print(f"Ã¢Å“â€œ @everyone message sent with broadcast=true")
 
     def test_send_message_with_user_mention_no_broadcast(self, auth_headers):
         """POST /api/chat/channels/{id}/messages with @user does NOT set broadcast"""
@@ -294,10 +294,10 @@ class TestChatChannelBroadcast:
         # Should NOT be broadcast (only @channel/@here/@everyone trigger broadcast)
         assert msg.get("broadcast") == False, "Regular @user mention should not set broadcast"
         assert "aaron" in msg.get("mentions", []), "Should extract @aaron as mention"
-        print(f"✓ @user mention works without broadcast flag")
+        print(f"Ã¢Å“â€œ @user mention works without broadcast flag")
 
 
-# ═══════════════════════ QUIRKY FEATURES (ATMOSPHERE) ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â QUIRKY FEATURES (ATMOSPHERE) Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestAtmosphereFeatures:
     """Regression tests for quirky features used in Atmosphere page"""
@@ -315,7 +315,7 @@ class TestAtmosphereFeatures:
         assert "runbooks" in data["stats"]
         assert "top_critical_wins" in data
         # storyboard may be None if no LLM key
-        print(f"✓ Friday reel: {data['stats']['closed']} closed, {data['stats']['criticals']} criticals")
+        print(f"Ã¢Å“â€œ Friday reel: {data['stats']['closed']} closed, {data['stats']['criticals']} criticals")
 
     def test_threat_dragon(self, auth_headers):
         """GET /api/security/threat-dragon - returns mood/label/emoji/size"""
@@ -330,7 +330,7 @@ class TestAtmosphereFeatures:
         assert "open_alerts" in data
         assert "critical_alerts" in data
         assert data["mood"] in ["sleeping_kitten", "drowsy_dragon", "hungry_dragon", "raging_dragon"]
-        print(f"✓ Threat dragon: {data['emoji']} {data['label']} ({data['open_alerts']} open)")
+        print(f"Ã¢Å“â€œ Threat dragon: {data['emoji']} {data['label']} ({data['open_alerts']} open)")
 
     def test_weather_mode(self, auth_headers):
         """GET /api/ambient/weather-mode - returns mood + gradient"""
@@ -342,7 +342,7 @@ class TestAtmosphereFeatures:
         assert "gradient_classes" in data
         assert "stats" in data
         assert data["mood"] in ["stormy", "beach", "rainy_monday", "sunny", "neutral"]
-        print(f"✓ Weather mode: {data['mood']} ({data['gradient_classes'][:30]}...)")
+        print(f"Ã¢Å“â€œ Weather mode: {data['mood']} ({data['gradient_classes'][:30]}...)")
 
     def test_launch_event_create(self, auth_headers):
         """POST /api/ambient/launch-event - records a launch"""
@@ -355,7 +355,7 @@ class TestAtmosphereFeatures:
         assert data.get("label") == payload["label"]
         assert "id" in data
         assert "ts" in data
-        print(f"✓ Launch event created: {data['id']}")
+        print(f"Ã¢Å“â€œ Launch event created: {data['id']}")
 
     def test_recent_launches(self, auth_headers):
         """GET /api/ambient/recent-launches - returns last 10"""
@@ -369,7 +369,7 @@ class TestAtmosphereFeatures:
             assert "id" in data[0]
             assert "kind" in data[0]
             assert "label" in data[0]
-        print(f"✓ Recent launches: {len(data)} events")
+        print(f"Ã¢Å“â€œ Recent launches: {len(data)} events")
 
     def test_device_graveyard(self, auth_headers):
         """GET /api/device-graveyard - returns tombstones"""
@@ -380,7 +380,7 @@ class TestAtmosphereFeatures:
         assert "tombstones" in data
         assert "count" in data
         assert isinstance(data["tombstones"], list)
-        print(f"✓ Device graveyard: {data['count']} tombstones")
+        print(f"Ã¢Å“â€œ Device graveyard: {data['count']} tombstones")
 
 
 class TestClientQuirkyFeatures:
@@ -410,7 +410,7 @@ class TestClientQuirkyFeatures:
         assert "ltv_revenue" in data["stats"]
         assert "tickets_resolved" in data["stats"]
         assert "tagline" in data
-        print(f"✓ Trading card: {data.get('name')} - {data['rarity']}")
+        print(f"Ã¢Å“â€œ Trading card: {data.get('name')} - {data['rarity']}")
 
     def test_mood_ring(self, auth_headers, client_id):
         """GET /api/clients/{id}/mood-ring - returns sentiment colour"""
@@ -421,7 +421,7 @@ class TestClientQuirkyFeatures:
         assert "colour" in data
         assert "label" in data
         # colour can be emerald, sky, amber, orange, rose, or grey
-        print(f"✓ Mood ring: {data['colour']} - {data['label']}")
+        print(f"Ã¢Å“â€œ Mood ring: {data['colour']} - {data['label']}")
 
     def test_slow_internet_detective(self, auth_headers, client_id):
         """POST /api/network/slow-internet/{client_id} - returns verdict"""
@@ -434,7 +434,7 @@ class TestClientQuirkyFeatures:
         assert "metrics" in data
         assert "reasons" in data
         assert "avg_ping_ms" in data["metrics"]
-        print(f"✓ Slow internet: {data['verdict']} ({data['confidence']*100:.0f}% confidence)")
+        print(f"Ã¢Å“â€œ Slow internet: {data['verdict']} ({data['confidence']*100:.0f}% confidence)")
 
     def test_password_pet(self, auth_headers, client_id):
         """GET /api/security/password-pet/{client_id} - returns pet health"""
@@ -446,7 +446,7 @@ class TestClientQuirkyFeatures:
         assert "state" in data
         assert "emoji" in data
         assert data["state"] in ["happy", "ok", "sick", "dying"]
-        print(f"✓ Password pet: {data['emoji']} health={data['health']} ({data['state']})")
+        print(f"Ã¢Å“â€œ Password pet: {data['emoji']} health={data['health']} ({data['state']})")
 
     def test_birthdays(self, auth_headers, client_id):
         """GET /api/clients/{id}/birthdays - returns upcoming birthdays"""
@@ -456,7 +456,7 @@ class TestClientQuirkyFeatures:
         
         assert "upcoming" in data
         assert isinstance(data["upcoming"], list)
-        print(f"✓ Birthdays: {len(data['upcoming'])} upcoming")
+        print(f"Ã¢Å“â€œ Birthdays: {len(data['upcoming'])} upcoming")
 
     def test_device_family_tree(self, auth_headers, client_id):
         """GET /api/device-family-tree/{client_id} - returns families grouped"""
@@ -470,10 +470,10 @@ class TestClientQuirkyFeatures:
             fam = data["families"][0]
             assert "family" in fam
             assert "count" in fam
-        print(f"✓ Device family tree: {len(data['families'])} families")
+        print(f"Ã¢Å“â€œ Device family tree: {len(data['families'])} families")
 
 
-# ═══════════════════════ NAVIGATION VERIFICATION ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â NAVIGATION VERIFICATION Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestNavigationRoutes:
     """Verify /help and /atmosphere routes are configured"""
@@ -482,7 +482,7 @@ class TestNavigationRoutes:
         """Verify /help articles endpoint works (proxy for route)"""
         response = requests.get(f"{BASE_URL}/api/help/articles", headers=auth_headers)
         assert response.status_code == 200
-        print("✓ /help route backend ready")
+        print("Ã¢Å“â€œ /help route backend ready")
 
     def test_atmosphere_endpoints_exist(self, auth_headers):
         """Verify atmosphere-related endpoints work"""
@@ -496,7 +496,7 @@ class TestNavigationRoutes:
         for ep in endpoints:
             response = requests.get(f"{BASE_URL}{ep}", headers=auth_headers)
             assert response.status_code == 200, f"{ep} failed: {response.status_code}"
-        print(f"✓ All {len(endpoints)} atmosphere endpoints ready")
+        print(f"Ã¢Å“â€œ All {len(endpoints)} atmosphere endpoints ready")
 
 
 if __name__ == "__main__":

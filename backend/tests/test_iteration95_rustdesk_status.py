@@ -21,7 +21,7 @@ class TestRustDeskStatusMap:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -67,7 +67,7 @@ class TestRustDeskQuickConnect:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -133,7 +133,7 @@ class TestRustDeskDeviceConnect:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -177,7 +177,7 @@ class TestRustDeskConfig:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -205,7 +205,7 @@ class TestInvoiceDownload:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -248,7 +248,7 @@ class TestDevicesEndpoint:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -298,7 +298,7 @@ class TestContractPdfEndpoint:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -337,7 +337,7 @@ class TestPurchaseOrderPdfEndpoint:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")

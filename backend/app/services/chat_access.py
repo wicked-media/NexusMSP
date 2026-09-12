@@ -8,6 +8,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import db
+from app.services.scope_permissions import normalise_scope_ids
 
 
 DEFAULT_CHAT_CHANNELS = (
@@ -42,13 +43,36 @@ def channel_is_accessible(channel: dict, user: dict) -> bool:
 
 def channel_visibility_query(user: dict) -> dict[str, Any]:
     uid = user.get("id")
+    # Private customer conversations become unreachable as soon as the
+    # technician loses the underlying client scope or customer-chat
+    # entitlement.  This is deliberately stricter than ordinary internal DMs.
+    from app.services.customer_chat import customer_chat_allowed_client_ids
+
+    allowed_customer_clients = customer_chat_allowed_client_ids(user)
+    member_clause: dict[str, Any]
+    if allowed_customer_clients is None:
+        member_clause = {"member_ids": uid}
+    elif allowed_customer_clients:
+        member_clause = {
+            "$or": [
+                {"$and": [{"member_ids": uid}, {"kind": {"$ne": "client_direct"}}]},
+                {"$and": [
+                    {"member_ids": uid},
+                    {"kind": "client_direct"},
+                    {"client_id": {"$in": normalise_scope_ids(allowed_customer_clients)}},
+                ]},
+            ]
+        }
+    else:
+        member_clause = {"$and": [{"member_ids": uid}, {"kind": {"$ne": "client_direct"}}]}
+
     if is_chat_admin(user):
-        return {"$or": [{"kind": "team"}, {"member_ids": uid}]}
+        return {"$or": [{"kind": "team"}, member_clause]}
     return {
         "$or": [
             {"kind": "team", "is_private": False},
             {"kind": "team", "is_private": {"$exists": False}, "member_ids": {"$size": 0}},
-            {"member_ids": uid},
+            member_clause,
         ]
     }
 
@@ -59,6 +83,14 @@ async def require_channel_access(channel_id: str, user: dict) -> dict:
         raise HTTPException(404, "Channel not found")
     if not channel_is_accessible(channel, user):
         raise HTTPException(403, "You do not have access to this conversation")
+    if (channel.get("kind") or "") == "client_direct":
+        # Membership alone is intentionally insufficient for a customer
+        # conversation.  Re-evaluate the technician's current client boundary
+        # at every read/write route so a later scope change revokes access.
+        from app.services.customer_chat import technician_is_eligible_for_client
+
+        if not technician_is_eligible_for_client(user, str(channel.get("client_id") or "")):
+            raise HTTPException(404, "Channel not found")
     return channel
 
 
@@ -102,6 +134,10 @@ async def initialize_chat_storage() -> None:
     await db.chat_typing.create_index([("channel_id", 1), ("ts", -1)])
     await db.ticket_handoffs.create_index([("to_user_id", 1), ("status", 1), ("created_at", -1)])
     await db.ticket_handoffs.create_index([("ticket_id", 1), ("created_at", -1)])
+    # Customer chat is deliberately a private extension of Team Chat.  Keep
+    # its idempotency indexes alongside the existing chat storage setup.
+    from app.services.customer_chat import initialize_customer_chat_storage
+    await initialize_customer_chat_storage()
     await ensure_default_channels()
 
 
@@ -128,9 +164,14 @@ async def enrich_channels(channels: list[dict], user: dict) -> list[dict]:
         channel = dict(source)
         kind = channel.get("kind") or "team"
         members = list(channel.get("member_ids") or [])
-        channel["is_dm"] = kind in {"dm", "group_dm"} or bool(channel.get("is_dm"))
+        if kind == "client_direct":
+            from app.services.customer_chat import technician_is_eligible_for_client
+
+            if uid not in members or not technician_is_eligible_for_client(user, str(channel.get("client_id") or "")):
+                continue
+        channel["is_dm"] = kind in {"dm", "group_dm", "client_direct"} or bool(channel.get("is_dm"))
         channel["is_group_dm"] = kind == "group_dm" or bool(channel.get("is_group_dm"))
-        channel["is_private"] = bool(channel.get("is_private") or kind in {"dm", "group_dm"})
+        channel["is_private"] = bool(channel.get("is_private") or kind in {"dm", "group_dm", "client_direct"})
 
         if kind == "dm":
             other_id = next((member for member in members if member != uid), None)
@@ -148,6 +189,14 @@ async def enrich_channels(channels: list[dict], user: dict) -> list[dict]:
                 channel["member_count"] = active_user_count
             else:
                 channel["member_count"] = len(members)
+        elif kind == "client_direct":
+            # The customer has portal-scoped access rather than an entry in
+            # ``users``.  Expose a polished direct conversation to its chosen
+            # technician without pretending the portal identity is staff.
+            channel["display_name"] = channel.get("display_name") or channel.get("customer_name") or "Customer conversation"
+            channel["name"] = channel["display_name"]
+            channel["other_user_id"] = f"portal:{channel.get('portal_user_id') or ''}"
+            channel["member_count"] = 2
         else:
             channel["display_name"] = channel.get("display_name") or channel.get("name") or "Group chat"
             channel["member_count"] = len(members)

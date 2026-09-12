@@ -23,7 +23,7 @@ class TestXeroDashboard:
         # Login to get token
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -68,7 +68,7 @@ class TestXeroInvoices:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -115,7 +115,7 @@ class TestXeroEstimates:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -186,7 +186,7 @@ class TestXeroRecurring:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -262,7 +262,7 @@ class TestXeroSyncHistory:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -302,7 +302,7 @@ class TestXeroContacts:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -334,7 +334,7 @@ class TestXeroAccounts:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -366,7 +366,7 @@ class TestTicketsBulkActions:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")
@@ -521,7 +521,7 @@ class TestXeroInvoiceActions:
         self.session.headers.update({"Content-Type": "application/json"})
         login_resp = self.session.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         if login_resp.status_code == 200:
             token = login_resp.json().get("token")

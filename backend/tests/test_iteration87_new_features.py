@@ -18,7 +18,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     return response.json().get("token")
@@ -48,7 +48,7 @@ class TestWorkflowAutomation:
         assert "ticket_created" in trigger_ids
         assert "device_offline" in trigger_ids
         assert "schedule" in trigger_ids
-        print(f"✓ Got {len(triggers)} workflow triggers")
+        print(f"Ã¢Å“â€œ Got {len(triggers)} workflow triggers")
     
     def test_get_workflow_actions(self, headers):
         """GET /api/workflows/actions - Should return 14 action types"""
@@ -62,7 +62,7 @@ class TestWorkflowAutomation:
         assert "send_email" in action_ids
         assert "create_ticket" in action_ids
         assert "run_script" in action_ids
-        print(f"✓ Got {len(actions)} workflow actions")
+        print(f"Ã¢Å“â€œ Got {len(actions)} workflow actions")
     
     def test_create_workflow(self, headers):
         """POST /api/workflows - Create a new workflow"""
@@ -82,7 +82,7 @@ class TestWorkflowAutomation:
         assert data["name"] == payload["name"]
         assert data["enabled"] == False  # Default disabled
         TestWorkflowAutomation.created_workflow_id = data["id"]
-        print(f"✓ Created workflow: {data['id']}")
+        print(f"Ã¢Å“â€œ Created workflow: {data['id']}")
     
     def test_get_workflows(self, headers):
         """GET /api/workflows - List all workflows"""
@@ -94,7 +94,7 @@ class TestWorkflowAutomation:
         if TestWorkflowAutomation.created_workflow_id:
             wf_ids = [w["id"] for w in workflows]
             assert TestWorkflowAutomation.created_workflow_id in wf_ids
-        print(f"✓ Got {len(workflows)} workflows")
+        print(f"Ã¢Å“â€œ Got {len(workflows)} workflows")
     
     def test_update_workflow(self, headers):
         """PUT /api/workflows/{id} - Update a workflow"""
@@ -116,7 +116,7 @@ class TestWorkflowAutomation:
         )
         assert get_resp.status_code == 200
         assert "Updated" in get_resp.json()["name"]
-        print(f"✓ Updated workflow")
+        print(f"Ã¢Å“â€œ Updated workflow")
     
     def test_toggle_workflow(self, headers):
         """POST /api/workflows/{id}/toggle - Enable/disable workflow"""
@@ -130,7 +130,7 @@ class TestWorkflowAutomation:
         data = response.json()
         assert "enabled" in data
         assert data["enabled"] == True  # Should toggle to enabled
-        print(f"✓ Toggled workflow to enabled={data['enabled']}")
+        print(f"Ã¢Å“â€œ Toggled workflow to enabled={data['enabled']}")
     
     def test_test_workflow(self, headers):
         """POST /api/workflows/{id}/test - Run test execution"""
@@ -145,7 +145,7 @@ class TestWorkflowAutomation:
         assert data["status"] == "test_completed"
         assert "results" in data
         assert "log_id" in data
-        print(f"✓ Test execution completed with {len(data['results'])} action results")
+        print(f"Ã¢Å“â€œ Test execution completed with {len(data['results'])} action results")
     
     def test_get_workflow_stats(self, headers):
         """GET /api/workflows/stats/overview - Get workflow statistics"""
@@ -155,7 +155,7 @@ class TestWorkflowAutomation:
         assert "total" in data
         assert "active" in data
         assert "total_executions" in data
-        print(f"✓ Stats: {data['total']} total, {data['active']} active, {data['total_executions']} executions")
+        print(f"Ã¢Å“â€œ Stats: {data['total']} total, {data['active']} active, {data['total_executions']} executions")
     
     def test_delete_workflow(self, headers):
         """DELETE /api/workflows/{id} - Delete workflow"""
@@ -172,7 +172,7 @@ class TestWorkflowAutomation:
             headers=headers
         )
         assert get_resp.status_code == 404
-        print(f"✓ Deleted workflow")
+        print(f"Ã¢Å“â€œ Deleted workflow")
 
 
 # ============== DEVICE TERMINAL TESTS ==============
@@ -189,7 +189,7 @@ class TestDeviceTerminal:
         assert response.status_code == 200
         sessions = response.json()
         assert isinstance(sessions, list)
-        print(f"✓ Got {len(sessions)} terminal sessions")
+        print(f"Ã¢Å“â€œ Got {len(sessions)} terminal sessions")
     
     def test_create_terminal_session(self, headers):
         """POST /api/device-terminal/sessions - Create session for online device"""
@@ -205,7 +205,7 @@ class TestDeviceTerminal:
         assert data["status"] == "active"
         assert data["session_type"] == "powershell"
         TestDeviceTerminal.created_session_id = data["id"]
-        print(f"✓ Created terminal session: {data['id']} for device {data['device_name']}")
+        print(f"Ã¢Å“â€œ Created terminal session: {data['id']} for device {data['device_name']}")
     
     def test_create_session_offline_device_fails(self, headers):
         """POST /api/device-terminal/sessions - Should fail for offline device"""
@@ -213,7 +213,7 @@ class TestDeviceTerminal:
         payload = {"device_id": "nonexistent-device", "session_type": "bash"}
         response = requests.post(f"{BASE_URL}/api/device-terminal/sessions", json=payload, headers=headers)
         assert response.status_code in [400, 404]
-        print(f"✓ Correctly rejected session for invalid device")
+        print(f"Ã¢Å“â€œ Correctly rejected session for invalid device")
     
     def test_execute_command(self, headers):
         """POST /api/device-terminal/sessions/{id}/execute - Execute command"""
@@ -229,7 +229,7 @@ class TestDeviceTerminal:
         assert "output" in data
         assert "exit_code" in data
         assert data["exit_code"] == 0
-        print(f"✓ Executed command, output: {data['output'][:50]}...")
+        print(f"Ã¢Å“â€œ Executed command, output: {data['output'][:50]}...")
     
     def test_execute_multiple_commands(self, headers):
         """Execute multiple commands in session"""
@@ -243,7 +243,7 @@ class TestDeviceTerminal:
             )
             assert response.status_code == 200
             assert "output" in response.json()
-        print(f"✓ Executed {len(commands)} commands successfully")
+        print(f"Ã¢Å“â€œ Executed {len(commands)} commands successfully")
     
     def test_end_terminal_session(self, headers):
         """POST /api/device-terminal/sessions/{id}/end - End session"""
@@ -254,7 +254,7 @@ class TestDeviceTerminal:
             json={}, headers=headers
         )
         assert response.status_code == 200
-        print(f"✓ Ended terminal session")
+        print(f"Ã¢Å“â€œ Ended terminal session")
 
 
 # ============== STRIPE BILLING PORTAL TESTS ==============
@@ -273,7 +273,7 @@ class TestStripeBillingPortal:
         assert "overdue" in data
         assert "collection_rate" in data
         assert "reminders_sent" in data
-        print(f"✓ Billing stats: {data['total_clients']} clients, ${data['total_revenue']} revenue, {data['collection_rate']}% collection rate")
+        print(f"Ã¢Å“â€œ Billing stats: {data['total_clients']} clients, ${data['total_revenue']} revenue, {data['collection_rate']}% collection rate")
     
     def test_get_client_billing_status(self, headers):
         """GET /api/billing-portal/clients - Get client billing status"""
@@ -288,7 +288,7 @@ class TestStripeBillingPortal:
             assert "total_invoices" in client
             assert "outstanding_amount" in client
             assert "overdue_count" in client
-        print(f"✓ Got billing status for {len(clients)} clients")
+        print(f"Ã¢Å“â€œ Got billing status for {len(clients)} clients")
     
     def test_create_portal_link(self, headers):
         """POST /api/billing-portal/clients/{id}/create-portal-link - Generate portal link"""
@@ -309,7 +309,7 @@ class TestStripeBillingPortal:
         assert "url" in data
         assert "billing.stripe.com" in data["url"]
         assert data["client_id"] == client_id
-        print(f"✓ Created portal link for client: {data['url'][:50]}...")
+        print(f"Ã¢Å“â€œ Created portal link for client: {data['url'][:50]}...")
     
     def test_send_payment_reminder(self, headers):
         """POST /api/billing-portal/send-reminder - Send payment reminder"""
@@ -328,7 +328,7 @@ class TestStripeBillingPortal:
         data = response.json()
         assert "message" in data
         assert "reminder_id" in data
-        print(f"✓ Sent payment reminder: {data['message']}")
+        print(f"Ã¢Å“â€œ Sent payment reminder: {data['message']}")
     
     def test_get_billing_portal_config(self, headers):
         """GET /api/billing-portal/config - Get portal configuration"""
@@ -336,7 +336,7 @@ class TestStripeBillingPortal:
         assert response.status_code == 200
         data = response.json()
         # Config may have default values
-        print(f"✓ Got billing portal config")
+        print(f"Ã¢Å“â€œ Got billing portal config")
 
 
 # ============== SCHEDULED REPORTS TESTS ==============
@@ -352,7 +352,7 @@ class TestScheduledReports:
         assert response.status_code == 200
         reports = response.json()
         assert isinstance(reports, list)
-        print(f"✓ Got {len(reports)} scheduled reports")
+        print(f"Ã¢Å“â€œ Got {len(reports)} scheduled reports")
     
     def test_create_scheduled_report(self, headers):
         """POST /api/scheduled-reports - Create a scheduled report"""
@@ -376,7 +376,7 @@ class TestScheduledReports:
         assert data["enabled"] == True
         assert len(data["recipients"]) == 2
         TestScheduledReports.created_report_id = data["id"]
-        print(f"✓ Created scheduled report: {data['id']}")
+        print(f"Ã¢Å“â€œ Created scheduled report: {data['id']}")
     
     def test_update_scheduled_report(self, headers):
         """PUT /api/scheduled-reports/{id} - Update report"""
@@ -391,7 +391,7 @@ class TestScheduledReports:
             json=payload, headers=headers
         )
         assert response.status_code == 200
-        print(f"✓ Updated scheduled report")
+        print(f"Ã¢Å“â€œ Updated scheduled report")
     
     def test_toggle_scheduled_report(self, headers):
         """POST /api/scheduled-reports/{id}/toggle - Toggle report enabled state"""
@@ -405,7 +405,7 @@ class TestScheduledReports:
         data = response.json()
         assert "enabled" in data
         assert data["enabled"] == False  # Should toggle to disabled
-        print(f"✓ Toggled report to enabled={data['enabled']}")
+        print(f"Ã¢Å“â€œ Toggled report to enabled={data['enabled']}")
     
     def test_send_report_now(self, headers):
         """POST /api/scheduled-reports/{id}/send-now - Trigger immediate send"""
@@ -419,7 +419,7 @@ class TestScheduledReports:
         data = response.json()
         assert "message" in data
         assert "log_id" in data
-        print(f"✓ Sent report now: {data['message']}")
+        print(f"Ã¢Å“â€œ Sent report now: {data['message']}")
     
     def test_get_report_logs(self, headers):
         """GET /api/scheduled-reports/{id}/logs - Get report send logs"""
@@ -433,7 +433,7 @@ class TestScheduledReports:
         logs = response.json()
         assert isinstance(logs, list)
         assert len(logs) >= 1  # Should have at least the send-now log
-        print(f"✓ Got {len(logs)} report logs")
+        print(f"Ã¢Å“â€œ Got {len(logs)} report logs")
     
     def test_get_scheduled_report_stats(self, headers):
         """GET /api/scheduled-reports/stats/overview - Get stats"""
@@ -443,7 +443,7 @@ class TestScheduledReports:
         assert "total" in data
         assert "active" in data
         assert "total_sent" in data
-        print(f"✓ Stats: {data['total']} total, {data['active']} active, {data['total_sent']} sent")
+        print(f"Ã¢Å“â€œ Stats: {data['total']} total, {data['active']} active, {data['total_sent']} sent")
     
     def test_delete_scheduled_report(self, headers):
         """DELETE /api/scheduled-reports/{id} - Delete report"""
@@ -454,7 +454,7 @@ class TestScheduledReports:
             headers=headers
         )
         assert response.status_code == 200
-        print(f"✓ Deleted scheduled report")
+        print(f"Ã¢Å“â€œ Deleted scheduled report")
 
 
 # ============== AI TICKET TRIAGE TESTS ==============
@@ -479,9 +479,9 @@ class TestAITicketTriage:
         assert "summary" in data
         # Check if AI error occurred (fallback response)
         if "ai_error" in data:
-            print(f"⚠ AI triage used fallback due to: {data.get('ai_error', 'unknown')[:50]}")
+            print(f"Ã¢Å¡Â  AI triage used fallback due to: {data.get('ai_error', 'unknown')[:50]}")
         else:
-            print(f"✓ AI triage: priority={data['suggested_priority']}, category={data['suggested_category']}")
+            print(f"Ã¢Å“â€œ AI triage: priority={data['suggested_priority']}, category={data['suggested_category']}")
         print(f"  Summary: {data.get('summary', 'N/A')[:80]}...")
     
     def test_ai_triage_nonexistent_ticket(self, headers):
@@ -491,7 +491,7 @@ class TestAITicketTriage:
             json={}, headers=headers
         )
         assert response.status_code == 404
-        print(f"✓ Correctly rejected triage for nonexistent ticket")
+        print(f"Ã¢Å“â€œ Correctly rejected triage for nonexistent ticket")
     
     def test_get_triage_stats(self, headers):
         """GET /api/ai-triage/stats - Get triage statistics"""
@@ -499,7 +499,7 @@ class TestAITicketTriage:
         assert response.status_code == 200
         data = response.json()
         assert "total_triages" in data
-        print(f"✓ Triage stats: {data['total_triages']} total triages")
+        print(f"Ã¢Å“â€œ Triage stats: {data['total_triages']} total triages")
 
 
 # ============== CLEANUP ==============
@@ -515,7 +515,7 @@ class TestCleanup:
             for wf in workflows:
                 if wf.get("name", "").startswith("TEST_"):
                     requests.delete(f"{BASE_URL}/api/workflows/{wf['id']}", headers=headers)
-        print("✓ Cleaned up test workflows")
+        print("Ã¢Å“â€œ Cleaned up test workflows")
     
     def test_cleanup_test_reports(self, headers):
         """Delete any remaining TEST_ scheduled reports"""
@@ -525,7 +525,7 @@ class TestCleanup:
             for r in reports:
                 if r.get("name", "").startswith("TEST_"):
                     requests.delete(f"{BASE_URL}/api/scheduled-reports/{r['id']}", headers=headers)
-        print("✓ Cleaned up test scheduled reports")
+        print("Ã¢Å“â€œ Cleaned up test scheduled reports")
 
 
 if __name__ == "__main__":

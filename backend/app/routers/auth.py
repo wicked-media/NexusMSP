@@ -8,7 +8,17 @@ import struct
 import time
 import uuid
 from app.database import db, AVATARS_DIR
-from app.auth import cache_busted_avatar_url, get_current_user, hash_password, verify_password, create_token, password_policy_error
+from app.auth import (
+    cache_busted_avatar_url,
+    create_token,
+    get_current_user,
+    hash_password,
+    password_policy_error,
+    revoke_all_user_sessions,
+    session_version_for_user,
+    user_is_active,
+    verify_password,
+)
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.request_throttling import (
     LoginRateLimitExceeded,
@@ -65,6 +75,29 @@ def _valid_totp(secret_b32: str, code: str) -> bool:
     now = int(time.time() // 30)
     return any(hmac.compare_digest(code, _totp_code(secret_b32, now + shift)) for shift in (-1, 0, 1))
 
+
+async def _technician_onboarding_flags(user: dict) -> dict:
+    """Return fail-closed onboarding gate flags without exposing audit history.
+
+    The dedicated technician-onboarding endpoint contains the detailed guide
+    and evidence.  Authentication responses only need the two gate flags, and
+    login must remain available even if a non-critical training-state write is
+    temporarily unavailable.
+    """
+    try:
+        from app.services.technician_onboarding import get_or_create_technician_onboarding
+
+        onboarding = await get_or_create_technician_onboarding(db, user)
+        return {
+            "onboarding_required": bool(onboarding.get("must_complete_before_operational_work", True)),
+            "is_onboarding_compliant": bool(onboarding.get("is_compliant", False)),
+        }
+    except Exception:
+        # Never silently open the first-use gate if Nexus cannot establish a
+        # technician's evidence state. The authenticated user can retry the
+        # dedicated onboarding endpoint after the transient dependency recovers.
+        return {"onboarding_required": True, "is_onboarding_compliant": False}
+
 # ============== AUTH ENDPOINTS ==============
 
 @router.post("/auth/register")
@@ -97,7 +130,12 @@ async def register(user_data: UserCreate):
     doc['created_at'] = doc['created_at'].isoformat()
     await db.users.insert_one(doc)
     
-    token = create_token(user.id, user.email, user.role)
+    token = create_token(
+        user.id,
+        user.email,
+        user.role,
+        session_version=session_version_for_user(doc),
+    )
     return {"token": token, "user": user.model_dump()}
 
 @router.post("/auth/login")
@@ -126,6 +164,15 @@ async def login(credentials: UserLogin, request: Request):
             details="Sign-in rejected because the supplied credentials were invalid.",
         )
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not user_is_active(user_doc):
+        await _log_auth_event(
+            request,
+            "auth.login_blocked",
+            user_doc["email"],
+            user=user_doc,
+            details="Sign-in was blocked because the technician account is inactive.",
+        )
+        raise HTTPException(status_code=401, detail="Account is inactive")
 
     two_factor = await db.user_2fa.find_one(
         {"user_id": user_doc["id"], "verified": True},
@@ -151,9 +198,19 @@ async def login(credentials: UserLogin, request: Request):
             )
             raise HTTPException(status_code=401, detail="Invalid authenticator code")
     
-    token = create_token(user_doc['id'], user_doc['email'], user_doc['role'])
+    token = create_token(
+        user_doc['id'],
+        user_doc['email'],
+        user_doc['role'],
+        session_version=session_version_for_user(user_doc),
+    )
     await clear_login_attempts(request, user_doc["email"])
+    onboarding_flags = await _technician_onboarding_flags(user_doc)
     user_doc.pop('password_hash', None)
+    # The account-owned evidence log is intentionally not returned from the
+    # authentication endpoint; it is available through the scoped onboarding
+    # API when the user opens the checklist.
+    user_doc.pop("technician_onboarding", None)
     user_doc['avatar'] = cache_busted_avatar_url(user_doc.get('avatar'))
     await _log_auth_event(
         request,
@@ -162,18 +219,58 @@ async def login(credentials: UserLogin, request: Request):
         user=user_doc,
         details="User authenticated successfully.",
     )
-    return {"token": token, "user": user_doc, "requires_2fa": False}
+    return {"token": token, "user": {**user_doc, **onboarding_flags}, "requires_2fa": False}
 
 @router.get("/auth/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
-    return current_user
+    onboarding_flags = await _technician_onboarding_flags(current_user)
+    safe_user = dict(current_user)
+    safe_user.pop("technician_onboarding", None)
+    return {**safe_user, **onboarding_flags}
+
+
+@router.post("/auth/sessions/revoke-all")
+async def revoke_all_sessions(request: Request, current_user: dict = Depends(get_current_user)):
+    """Immediately invalidate the caller's active Nexus sessions everywhere.
+
+    This endpoint intentionally requires a valid current session before the
+    generation is advanced. The triggering request can complete normally, but
+    every token issued before it is rejected by the canonical auth dependency
+    on its next use.
+    """
+    session_version = await revoke_all_user_sessions(current_user.get("id"))
+    await _log_auth_event(
+        request,
+        "auth.sessions_revoked",
+        str(current_user.get("email") or ""),
+        user=current_user,
+        details="The technician revoked all active Nexus sessions.",
+    )
+    return {
+        "message": "All active Nexus sessions have been revoked. Sign in again to continue.",
+        "session_version": session_version,
+    }
 
 
 # ============== USER UPDATE ENDPOINT ==============
 
+
+def _can_manage_user_profile(actor: dict, target_user_id: str) -> bool:
+    """Allow self-service profile changes or an explicitly administrative edit."""
+    if str(actor.get("id") or "") == str(target_user_id):
+        return True
+    return actor.get("is_admin") in (True, 1) or str(actor.get("role") or "").lower() == "admin"
+
+
 @router.put("/users/{user_id}")
 async def update_user(user_id: str, user_data: dict, current_user: dict = Depends(get_current_user)):
-    allowed_fields = {"name", "email_signature", "hourly_rate", "avatar"}
+    if not _can_manage_user_profile(current_user, user_id):
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
+    managing_another_user = str(current_user.get("id") or "") != str(user_id)
+    allowed_fields = {"name", "email_signature", "avatar"}
+    if managing_another_user:
+        # Labour rates are staff-management data, not a self-service field.
+        allowed_fields.add("hourly_rate")
     update = {k: v for k, v in user_data.items() if k in allowed_fields}
     if not update:
         raise HTTPException(status_code=400, detail="No valid fields to update")
@@ -181,4 +278,13 @@ async def update_user(user_id: str, user_data: dict, current_user: dict = Depend
     result = await db.users.update_one({"id": user_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+    await log_activity(
+        current_user,
+        "updated",
+        "user_profile",
+        user_id,
+        user_id,
+        "Updated own profile" if not managing_another_user else "Updated technician profile",
+        metadata={"changed_fields": sorted(update.keys()), "self_service": not managing_another_user},
+    )
     return {"message": "User updated"}

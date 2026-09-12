@@ -9,7 +9,7 @@ Tests for:
 - GET /api/cipp/digests - returns array (empty ok)
 - GET /api/clients/{client_id}/health - breakdown includes m365_hygiene when client has cipp_tenant_id AND cipp_hygiene_cache entry
 - GET /api/client-health/{client_id}/detail - metrics includes m365_hygiene key
-- Health score rebalancing: devices max 20→15, contracts 10→5 when m365_hygiene present
+- Health score rebalancing: devices max 20Ã¢â€ â€™15, contracts 10Ã¢â€ â€™5 when m365_hygiene present
 - Digest computes properly with scored tenants + upsell_candidates list
 """
 
@@ -28,7 +28,7 @@ class TestCippHygieneEndpoints:
         """Get auth token for all tests"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -95,7 +95,7 @@ class TestHealthScoreWithHygieneCache:
         """Get auth token and prepare test data"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
         self.token = login_resp.json().get("token")
@@ -194,7 +194,7 @@ class TestHealthScoreWithHygieneCache:
         contracts_score = breakdown.get("contracts", 0)
         assert contracts_score <= 5, f"Expected contracts max 5 (rebalanced), got {contracts_score}"
         
-        # m365_hygiene should be calculated from 62% score → 6/10
+        # m365_hygiene should be calculated from 62% score Ã¢â€ â€™ 6/10
         m365_score = breakdown.get("m365_hygiene", 0)
         assert m365_score == 6, f"Expected m365_hygiene=6 (62% of 10), got {m365_score}"
     
@@ -272,7 +272,7 @@ class TestHygieneDigestComputation:
         """Get auth token"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200
         self.token = login_resp.json().get("token")
@@ -309,7 +309,7 @@ class TestClientCippHygieneEndpoint:
         """Get auth token"""
         login_resp = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert login_resp.status_code == 200
         self.token = login_resp.json().get("token")

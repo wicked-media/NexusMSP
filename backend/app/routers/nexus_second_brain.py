@@ -20,6 +20,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from app.auth import get_current_user
 from app.database import db
 from app.services.platform_foundation import emit_platform_event, request_correlation_id
+from app.services.scope_permissions import scoped_query
 
 
 router = APIRouter()
@@ -82,6 +83,22 @@ def _now() -> str:
 def _stable_id(prefix: str, *parts: object) -> str:
     material = "|".join(str(part or "").strip().lower() for part in parts)
     return f"{prefix}-{hashlib.sha1(material.encode('utf-8'), usedforsecurity=False).hexdigest()[:12]}"
+
+
+def _personal_decision_query(current_user: dict) -> dict:
+    """Keep a technician's recommendation decisions within their Nexus tenant."""
+    query = {"user_id": current_user.get("id")}
+    tenant_id = str(current_user.get("tenant_id") or "").strip()
+    if tenant_id:
+        query["tenant_id"] = tenant_id
+    return query
+
+
+def _valid_recommendation_id(value: object) -> str:
+    recommendation_id = str(value or "").strip()
+    if not re.fullmatch(r"recommendation-[a-f0-9]{12}", recommendation_id):
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+    return recommendation_id
 
 
 def _plain(value: object) -> str:
@@ -349,26 +366,28 @@ def _score_search_record(query: str, record: dict, fields: Iterable[str]) -> tup
     return len(matched) * 5 + title_bonus + exact_bonus, matched
 
 
-async def _overview_records() -> tuple[list[dict], list[dict], list[dict]]:
+async def _overview_records(current_user: dict) -> tuple[list[dict], list[dict], list[dict]]:
+    """Load only the evidence records the caller is authorised to inspect."""
     tickets, runbooks, articles = await asyncio.gather(
-        db.tickets.find({}, {"_id": 0}).sort("updated_at", -1).to_list(1000),
-        db.runbooks.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500),
-        db.kb_articles.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.tickets.find(scoped_query(current_user), {"_id": 0}).sort("updated_at", -1).to_list(1000),
+        db.runbooks.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.kb_articles.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
     )
     return tickets, runbooks, articles
 
 
 @router.get("/second-brain/overview")
 async def second_brain_overview(current_user: dict = Depends(get_current_user)):
-    tickets, runbooks, articles = await _overview_records()
-    operational_decisions = await db.context_relationships.find({}, {"_id": 0}).to_list(500)
+    tickets, runbooks, articles = await _overview_records(current_user)
+    operational_decisions = await db.context_relationships.find(
+        scoped_query(current_user, {}, site_field=None),
+        {"_id": 0},
+    ).to_list(500)
     knowledge = [*runbooks, *articles]
     signals = _build_topic_signals(tickets, knowledge)
     expertise = _build_expertise(tickets)
     recommendations = _build_recommendations(signals, expertise)
-    decisions = await db.second_brain_decisions.find(
-        {"user_id": current_user.get("id")}, {"_id": 0}
-    ).to_list(500)
+    decisions = await db.second_brain_decisions.find(_personal_decision_query(current_user), {"_id": 0}).to_list(500)
     decision_by_id = {item.get("recommendation_id"): item for item in decisions}
     for recommendation in recommendations:
         recommendation["decision"] = decision_by_id.get(recommendation["id"])
@@ -410,12 +429,12 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
         raise HTTPException(status_code=400, detail="Keep memory searches under 240 characters")
 
     tickets, runbooks, articles, clients, audit, decisions = await asyncio.gather(
-        db.tickets.find({}, {"_id": 0}).sort("updated_at", -1).to_list(600),
-        db.runbooks.find({}, {"_id": 0}).sort("updated_at", -1).to_list(300),
-        db.kb_articles.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500),
-        db.clients.find({}, {"_id": 0}).sort("updated_at", -1).to_list(300),
-        db.audit_logs.find({}, {"_id": 0}).sort("created_at", -1).to_list(500),
-        db.context_relationships.find({}, {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.tickets.find(scoped_query(current_user), {"_id": 0}).sort("updated_at", -1).to_list(600),
+        db.runbooks.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(300),
+        db.kb_articles.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.clients.find(scoped_query(current_user, {}, field="id", site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(300),
+        db.audit_logs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("created_at", -1).to_list(500),
+        db.context_relationships.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
     )
     source_records = [
         (
@@ -490,6 +509,14 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
     }
 
 
+async def _visible_recommendation_ids(current_user: dict) -> set[str]:
+    """Recompute actionable recommendations from the caller's visible evidence."""
+    tickets, runbooks, articles = await _overview_records(current_user)
+    signals = _build_topic_signals(tickets, [*runbooks, *articles])
+    expertise = _build_expertise(tickets)
+    return {item["id"] for item in _build_recommendations(signals, expertise)}
+
+
 @router.post("/second-brain/recommendations/{recommendation_id}/decision")
 async def decide_recommendation(
     recommendation_id: str,
@@ -497,29 +524,40 @@ async def decide_recommendation(
     payload: dict = Body(...),
     current_user: dict = Depends(get_current_user),
 ):
+    recommendation_id = _valid_recommendation_id(recommendation_id)
     status = str(payload.get("status") or "").strip().lower()
     if status not in {"accepted", "snoozed", "dismissed", "reset"}:
         raise HTTPException(status_code=400, detail="Decision must be accepted, snoozed, dismissed or reset")
     reason = str(payload.get("reason") or "").strip()
     if status in {"snoozed", "dismissed"} and len(reason) < 5:
         raise HTTPException(status_code=400, detail="Record a short reason so the decision remains auditable")
+    if len(reason) > 1000:
+        raise HTTPException(status_code=422, detail="Keep the decision reason to 1000 characters or fewer")
+
+    decision_query = {**_personal_decision_query(current_user), "recommendation_id": recommendation_id}
+    visible_recommendations = await _visible_recommendation_ids(current_user)
+    if recommendation_id not in visible_recommendations:
+        # A reset is permitted only for a decision that already belongs to this
+        # user and tenant. This lets users clear stale recommendations without
+        # allowing arbitrary IDs to create audit or event records.
+        existing = await db.second_brain_decisions.find_one(decision_query, {"_id": 0, "recommendation_id": 1})
+        if status != "reset" or not existing:
+            raise HTTPException(status_code=404, detail="Recommendation not found")
 
     if status == "reset":
-        await db.second_brain_decisions.delete_one({
-            "recommendation_id": recommendation_id,
-            "user_id": current_user.get("id"),
-        })
+        await db.second_brain_decisions.delete_one(decision_query)
     else:
         record = {
             "recommendation_id": recommendation_id,
             "user_id": current_user.get("id"),
             "user_name": current_user.get("name") or current_user.get("email"),
+            "tenant_id": str(current_user.get("tenant_id") or "").strip() or None,
             "status": status,
             "reason": reason,
             "updated_at": _now(),
         }
         await db.second_brain_decisions.update_one(
-            {"recommendation_id": recommendation_id, "user_id": current_user.get("id")},
+            decision_query,
             {"$set": record, "$setOnInsert": {"created_at": record["updated_at"]}},
             upsert=True,
         )
@@ -530,6 +568,7 @@ async def decide_recommendation(
         "action": "second_brain_recommendation_reviewed",
         "actor_id": current_user.get("id"),
         "actor_name": current_user.get("name") or current_user.get("email"),
+        "tenant_id": str(current_user.get("tenant_id") or "").strip() or None,
         "target_id": recommendation_id,
         "details": {"status": status, "reason": reason, "external_changes": False},
         "correlation_id": correlation_id,

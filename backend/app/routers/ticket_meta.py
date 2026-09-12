@@ -67,10 +67,19 @@ async def change_customer(ticket_id: str, data: dict, current_user: dict = Depen
         update["contact_id"] = None
         update["contact_name"] = None
 
-    await db.tickets.update_one({"id": ticket_id}, {
+    move_result = await db.tickets.update_one({
+        "id": ticket_id,
+        "client_id": old_client_id,
+        "automation_note_lock": {"$exists": False},
+    }, {
         "$set": update,
         "$push": {"customer_history": history_entry},
     })
+    if move_result.matched_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="This ticket has a protected automation note in progress. Retry the customer change shortly.",
+        )
 
     # Audit comment
     comment_text = (

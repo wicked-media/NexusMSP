@@ -24,7 +24,7 @@ def auth_headers():
     """Authenticate and return headers with token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     token = response.json().get("token")  # API returns 'token' not 'access_token'

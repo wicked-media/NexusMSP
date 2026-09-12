@@ -7,11 +7,14 @@ never be invoked by passing arbitrary method names from the browser.
 """
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from typing import Any
 
 from fastapi import HTTPException
+
+from app.services.secret_store import decrypt_secret, encrypt_secret
 
 
 def _catalogue(*operations: tuple[str, str, str, bool]) -> dict[str, dict[str, Any]]:
@@ -94,28 +97,75 @@ def validate_parameters(parameters: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def seal_action_parameters(parameters: Mapping[str, Any]) -> str:
-    """Encrypt pending action inputs; provider changes must not persist clear text."""
+    """Encrypt pending action inputs; provider changes must not persist clear text.
+
+    New records use the shared Nexus secret vault, which is already used for
+    provider credentials throughout the application.  The legacy per-Synergy
+    Fernet key remains readable below so previously approved actions are not
+    orphaned during the transition.
+    """
+    try:
+        payload = json.dumps(
+            validate_parameters(parameters),
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Synergy action parameters must be JSON-compatible values",
+        ) from exc
+
+    try:
+        return encrypt_secret(payload)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Nexus secret encryption is not configured",
+        ) from exc
+
+
+def _unseal_legacy_action_parameters(ciphertext: str) -> dict[str, Any]:
+    """Read pre-vault Synergy action records when their legacy key remains set."""
     key = os.environ.get("SYNERGY_ACTION_ENCRYPTION_KEY", "").strip()
     if not key:
-        raise HTTPException(status_code=503, detail="Synergy action encryption is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="The encrypted Synergy action input is unavailable",
+        )
     try:
         from cryptography.fernet import Fernet
-        import json
-        return Fernet(key.encode()).encrypt(json.dumps(validate_parameters(parameters)).encode()).decode()
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(status_code=503, detail="Synergy action encryption key is invalid") from exc
+
+        plaintext = Fernet(key.encode()).decrypt(ciphertext.encode()).decode()
+        return validate_parameters(json.loads(plaintext))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The encrypted Synergy action input could not be decrypted",
+        ) from exc
 
 
 def unseal_action_parameters(ciphertext: str) -> dict[str, Any]:
-    key = os.environ.get("SYNERGY_ACTION_ENCRYPTION_KEY", "").strip()
-    if not key or not ciphertext:
+    if not ciphertext:
         raise HTTPException(status_code=503, detail="The encrypted Synergy action input is unavailable")
+
     try:
-        from cryptography.fernet import Fernet
-        import json
-        return validate_parameters(json.loads(Fernet(key.encode()).decrypt(ciphertext.encode()).decode()))
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="The encrypted Synergy action input could not be decrypted") from exc
+        plaintext = decrypt_secret(ciphertext)
+    except RuntimeError:
+        # A production instance that still has a legacy per-Synergy key can
+        # complete an already-approved action while the shared vault is being
+        # configured. New writes remain blocked by ``seal_action_parameters``.
+        plaintext = ""
+    if plaintext:
+        try:
+            return validate_parameters(json.loads(plaintext))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="The encrypted Synergy action input could not be decrypted",
+            ) from exc
+
+    return _unseal_legacy_action_parameters(ciphertext)
 
 
 def execute(operation_id: str, parameters: Mapping[str, Any], credentials: Mapping[str, Any] | None = None) -> Any:

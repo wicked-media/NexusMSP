@@ -28,9 +28,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASSWORD = "Lucky@2871$!"
+ADMIN_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
-# Known test client with Pax8 link (ACB Consultants → Acme Corporation)
+# Known test client with Pax8 link (ACB Consultants Ã¢â€ â€™ Acme Corporation)
 ACME_CLIENT_ID = "client-001"
 ACME_CLIENT_NAME = "Acme Corporation"
 
@@ -125,7 +125,7 @@ class TestPax8Companies:
             
             # Show first few
             for c in data[:3]:
-                link_info = f" → {c.get('linked_client_name')}" if c.get('linked_client_id') else ""
+                link_info = f" Ã¢â€ â€™ {c.get('linked_client_name')}" if c.get('linked_client_id') else ""
                 print(f"  - {c.get('name')}{link_info}")
         else:
             print("INFO: No Pax8 companies found - may need to run sync")
@@ -154,7 +154,7 @@ class TestPax8Subscriptions:
                 vendor = s.get("vendor_name", "")
                 qty = s.get("quantity", 0)
                 price = s.get("price", 0)
-                print(f"  - {product} ({vendor}): {qty} × ${price:.2f}")
+                print(f"  - {product} ({vendor}): {qty} Ãƒâ€” ${price:.2f}")
         else:
             print("INFO: No Pax8 subscriptions found - may need to run sync")
 

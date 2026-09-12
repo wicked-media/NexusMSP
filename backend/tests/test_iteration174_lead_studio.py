@@ -1,4 +1,4 @@
-"""Iteration 174 â€” Lead Studio backend test suite.
+"""Iteration 174 ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Lead Studio backend test suite.
 
 Covers /api/lead-studio/* endpoints + per-lead actions (NBA, draft email,
 win-loss, tasks, merge-into-ticket, create-ticket).
@@ -11,7 +11,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://127.0.0.1:8001").rstr
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "aaron@stech.com.au"
-ADMIN_PASS = "Lucky@2871$!"
+ADMIN_PASS = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="session")

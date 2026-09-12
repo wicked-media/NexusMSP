@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, Depends, Request
+from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
+from app.services.scope_permissions import assert_global_scope
 
 router = APIRouter()
 
@@ -39,9 +42,24 @@ def _normalise_time_entry(entry: dict) -> dict:
     }
 
 
-@router.get("/billing-recon/overview")
-async def billing_reconciliation(current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/billing-recon/overview",
+    dependencies=[Depends(require_action("billing.analytics.view"))],
+)
+async def billing_reconciliation(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Automated billing reconciliation - find unbilled work."""
+    # This is an organisation-wide financial and supplier reconciliation view.
+    # Do not turn a restricted technician's scope into a silently partial
+    # dashboard: require explicitly global scope before touching any source
+    # collection, including supplier invoice evidence.
+    await assert_global_scope(
+        current_user,
+        operation="billing.reconciliation.overview.read",
+        request=request,
+    )
     # Time entries not linked to invoices
     unbilled_time_docs = await db.time_entries.find(
         {"invoiced": {"$ne": True}, "billable": {"$ne": False}},
@@ -126,7 +144,7 @@ async def billing_reconciliation(current_user: dict = Depends(get_current_user))
     ]
     supplier_variance_total = round(sum(abs(float((po.get("vendor_invoice_match") or {}).get("variance", 0) or 0)) for po in active_supplier_variances), 2)
 
-    return {
+    response = {
         "unbilled_time": {
             "entries": unbilled_time[:20],
             "total_entries": len(unbilled_time),
@@ -162,3 +180,18 @@ async def billing_reconciliation(current_user: dict = Depends(get_current_user))
         ),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    # The overview includes financial and supplier variance evidence. Retain a
+    # compact, non-sensitive access record without copying provider payloads
+    # or customer financial details into the central activity trail.
+    await log_activity(
+        current_user,
+        "billing_reconciliation_viewed",
+        "billing_reconciliation",
+        "organisation",
+        "Organisation-wide billing reconciliation",
+        metadata={
+            "scope": "organisation",
+            "finding_count": response["action_count"],
+        },
+    )
+    return response

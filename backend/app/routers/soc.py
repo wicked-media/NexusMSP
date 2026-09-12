@@ -3,7 +3,8 @@ from app.database import db
 from app.routers.auth import get_current_user
 from datetime import datetime, timezone, timedelta
 import uuid
-import random; random = random.SystemRandom()
+from app.services.module_permissions import require_module_permission
+from app.services.scope_permissions import assert_client_scope, scoped_query
 
 router = APIRouter(tags=["Huntress Integration"])
 
@@ -16,6 +17,59 @@ def _retired_generated_data_error(workspace: str) -> HTTPException:
             "instead of reading a connected provider or Nexus evidence source."
         ),
     )
+
+
+async def _load_scoped_alert(alert_id: str, user: dict, *, operation: str) -> tuple[dict, dict | None]:
+    """Load a SOC alert and prove the caller may act on its customer scope.
+
+    Legacy alert rows do not always carry their client binding, so a linked
+    device is used only to establish that binding.  An unbound row remains
+    inaccessible to a restricted technician rather than becoming an implicit
+    global alert.
+    """
+    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
+    if not alert:
+        raise HTTPException(status_code=404, detail="SOC alert not found")
+
+    device = None
+    client_id = alert.get("client_id")
+    site_id = alert.get("site_id")
+    if not client_id and alert.get("device_id"):
+        device = await db.devices.find_one(scoped_query(user, {"id": alert["device_id"]}), {"_id": 0})
+        if device:
+            client_id = device.get("client_id")
+            site_id = device.get("site_id")
+
+    await assert_client_scope(
+        user,
+        client_id,
+        site_id=site_id,
+        operation=operation,
+        mask_not_found=True,
+    )
+    if client_id and not alert.get("client_id"):
+        # Preserve the derived scope in the returned in-memory representation
+        # so audit records and a created ticket are correctly customer-bound.
+        alert = {**alert, "client_id": client_id, "site_id": site_id}
+    return alert, device
+
+
+async def _write_soc_audit(user: dict, action: str, alert: dict, metadata: dict | None = None) -> None:
+    """Persist a compact, client-scoped audit record for an internal SOC action."""
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "tenant_id": user.get("tenant_id"),
+        "user_id": user.get("id"),
+        "user_name": user.get("name") or user.get("email") or user.get("id"),
+        "action": action,
+        "entity_type": "soc_alert",
+        "entity_id": alert.get("id"),
+        "entity_name": alert.get("title") or alert.get("summary") or "SOC alert",
+        "client_id": alert.get("client_id"),
+        "device_id": alert.get("device_id"),
+        "metadata": metadata or {},
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
 @router.get("/huntress/settings")
 async def get_huntress_settings(user=Depends(get_current_user)):
@@ -71,15 +125,17 @@ async def get_huntress_incidents(user=Depends(get_current_user)):
 @router.get("/soc/dashboard")
 async def get_soc_dashboard(user=Depends(get_current_user)):
     """Operational SOC view from stored alerts and enrolled Nexus devices only."""
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(scoped_query(user), {"_id": 0}).to_list(5000)
     agent_devices = [device for device in devices if device.get("nexus_agent_id")]
-    alerts = await db.soc_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    alerts = await db.soc_alerts.find(scoped_query(user), {"_id": 0}).sort("created_at", -1).to_list(200)
     open_alerts = [a for a in alerts if a.get("status") in {"new", "investigating", "open"}]
     critical_alerts = [a for a in open_alerts if a.get("severity") == "critical"]
     online = sum(1 for d in agent_devices if d.get("status") == "online")
     offline = sum(1 for d in agent_devices if d.get("status") == "offline")
     security_scores = [float(d["compliance_score"]) for d in agent_devices if isinstance(d.get("compliance_score"), (int, float))]
-    vulnerabilities = await db.vulnerabilities.find({}, {"_id": 0, "severity": 1, "discovered_at": 1}).to_list(2000)
+    vulnerabilities = await db.vulnerabilities.find(
+        scoped_query(user), {"_id": 0, "severity": 1, "discovered_at": 1}
+    ).to_list(2000)
     vuln_summary = {severity: sum(1 for v in vulnerabilities if v.get("severity") == severity) for severity in ("critical", "high", "medium", "low")}
     vuln_summary["last_scan"] = max((v.get("discovered_at") for v in vulnerabilities if v.get("discovered_at")), default=None)
     resolved_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -116,38 +172,48 @@ async def get_soc_dashboard(user=Depends(get_current_user)):
 @router.get("/soc/alerts")
 async def get_soc_alerts(user=Depends(get_current_user)):
     """Get all SOC alerts from all sources."""
-    db_alerts = await db.soc_alerts.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    db_alerts = await db.soc_alerts.find(scoped_query(user), {"_id": 0}).sort("created_at", -1).to_list(200)
     db_alerts.sort(key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x.get("severity", "low"), 4))
     return db_alerts
 
 
 @router.post("/soc/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(alert_id: str, user=Depends(get_current_user)):
-    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
-    if not alert:
-        raise HTTPException(status_code=404, detail="SOC alert not found")
+    await require_module_permission(user, "devices", "edit")
+    alert, _device = await _load_scoped_alert(alert_id, user, operation="soc_alert.acknowledge")
+    if str(alert.get("status") or "").lower() in {"closed", "remediated", "resolved", "dismissed"}:
+        raise HTTPException(status_code=409, detail="This SOC alert is already closed")
     now = datetime.now(timezone.utc).isoformat()
     await db.soc_alerts.update_one(
         {"id": alert_id},
         {"$set": {"status": "investigating", "acknowledged_by": user.get("name"), "acknowledged_at": now}}
     )
+    await _write_soc_audit(user, "soc_alert_acknowledge", alert, {"status": "investigating"})
     return {"message": "Alert acknowledgement recorded", "status": "investigating"}
 
 
 @router.post("/soc/alerts/{alert_id}/create-ticket")
 async def create_ticket_from_alert(alert_id: str, body: dict, user=Depends(get_current_user)):
     """Create a ticket from a SOC alert."""
+    await require_module_permission(user, "tickets", "create")
+    alert, device = await _load_scoped_alert(alert_id, user, operation="soc_alert.create_ticket")
+    existing = await db.tickets.find_one(
+        scoped_query(user, {"soc_alert_id": alert_id, "status": {"$nin": ["resolved", "closed", "cancelled"]}}),
+        {"_id": 0},
+    )
+    if existing:
+        return {
+            "message": f"Existing ticket {existing.get('ticket_number') or existing.get('id')} retained",
+            "ticket_id": existing.get("id"),
+            "ticket_number": existing.get("ticket_number"),
+            "existing": True,
+        }
+
     now = datetime.now(timezone.utc).isoformat()
     ticket_id = str(uuid.uuid4())
-    ticket_num = f"SEC-{random.randint(1000,9999)}"
-    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
-    if not alert:
-        raise HTTPException(status_code=404, detail="SOC alert not found")
-    device = None
-    if alert.get("device_id"):
-        device = await db.devices.find_one({"id": alert["device_id"]}, {"_id": 0})
+    ticket_num = f"SEC-{datetime.now(timezone.utc).strftime('%y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
     if not device and alert.get("hostname"):
-        device = await db.devices.find_one({"name": alert["hostname"]}, {"_id": 0})
+        device = await db.devices.find_one(scoped_query(user, {"name": alert["hostname"]}), {"_id": 0})
 
     ticket = {
         "id": ticket_id,
@@ -175,7 +241,8 @@ async def create_ticket_from_alert(alert_id: str, body: dict, user=Depends(get_c
         {"id": alert_id},
         {"$set": {"ticket_id": ticket_id, "ticket_number": ticket_num, "status": "investigating"}}
     )
-    return {"message": f"Ticket {ticket_num} created", "ticket_id": ticket_id, "ticket_number": ticket_num}
+    await _write_soc_audit(user, "soc_alert_create_ticket", alert, {"ticket_id": ticket_id, "ticket_number": ticket_num})
+    return {"message": f"Ticket {ticket_num} created", "ticket_id": ticket_id, "ticket_number": ticket_num, "existing": False}
 
 
 @router.post("/soc/alerts/{alert_id}/isolate")
@@ -189,9 +256,8 @@ async def isolate_endpoint(alert_id: str, body: dict, user=Depends(get_current_u
 @router.post("/soc/alerts/{alert_id}/remediate")
 async def remediate_alert(alert_id: str, body: dict, user=Depends(get_current_user)):
     """Record internal remediation evidence; it never claims provider remediation."""
-    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
-    if not alert:
-        raise HTTPException(status_code=404, detail="SOC alert not found")
+    await require_module_permission(user, "devices", "edit")
+    alert, _device = await _load_scoped_alert(alert_id, user, operation="soc_alert.remediate")
     notes = str(body.get("notes") or "").strip()
     if not notes:
         raise HTTPException(status_code=400, detail="Record remediation evidence or an external provider reference before closing the internal case")
@@ -202,14 +268,14 @@ async def remediate_alert(alert_id: str, body: dict, user=Depends(get_current_us
                   "remediation_notes": notes},
          "$push": {"actions": {"type": "remediation_evidence_recorded", "by": user.get("name"), "at": now, "notes": notes}}}
     )
+    await _write_soc_audit(user, "soc_alert_remediate", alert, {"notes": notes})
     return {"message": "Internal remediation evidence recorded", "status": "remediated"}
 
 
 @router.post("/soc/alerts/{alert_id}/close")
 async def close_alert(alert_id: str, body: dict, user=Depends(get_current_user)):
-    alert = await db.soc_alerts.find_one({"id": alert_id}, {"_id": 0})
-    if not alert:
-        raise HTTPException(status_code=404, detail="SOC alert not found")
+    await require_module_permission(user, "devices", "edit")
+    alert, _device = await _load_scoped_alert(alert_id, user, operation="soc_alert.close")
     reason = str(body.get("reason") or "").strip()
     if not reason:
         raise HTTPException(status_code=400, detail="A closure reason or provider reference is required")
@@ -219,6 +285,7 @@ async def close_alert(alert_id: str, body: dict, user=Depends(get_current_user))
         {"$set": {"status": "closed", "closed_by": user.get("name"), "closed_at": now,
                   "close_reason": reason}}
     )
+    await _write_soc_audit(user, "soc_alert_close", alert, {"reason": reason})
     return {"message": "Internal alert case closed"}
 
 
@@ -410,13 +477,17 @@ async def get_billing_reconciliation(user=Depends(get_current_user)):
 
 @router.get("/soc-feed/events")
 async def get_soc_feed_events(current_user: dict = Depends(get_current_user)):
-    events = await db.soc_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    events = await db.soc_events.find(
+        scoped_query(current_user), {"_id": 0}
+    ).sort("timestamp", -1).to_list(200)
     return events
 
 
 @router.get("/soc-feed/stats")
 async def get_soc_feed_stats(current_user: dict = Depends(get_current_user)):
-    events = await db.soc_events.find({}, {"_id": 0}).to_list(500)
+    events = await db.soc_events.find(
+        scoped_query(current_user), {"_id": 0}
+    ).to_list(500)
     return {
         "total_events": len(events),
         "investigations": sum(1 for e in events if e.get("type") == "investigation"),
@@ -430,7 +501,16 @@ async def get_soc_feed_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/soc-realtime/events")
 async def get_soc_realtime_events(current_user: dict = Depends(get_current_user)):
-    events = await db.soc_realtime_events.find({}, {"_id": 0}).sort("timestamp", -1).to_list(50)
+    """Return recorded SOC realtime events within the caller's client scope.
+
+    This endpoint is a polling view over persisted evidence, not a claim that
+    Nexus has an active streaming provider connection.  Legacy events without
+    a client binding remain unavailable to restricted technicians rather than
+    becoming a cross-client feed.
+    """
+    events = await db.soc_realtime_events.find(
+        scoped_query(current_user), {"_id": 0}
+    ).sort("timestamp", -1).to_list(50)
     stats = {
         "total_events_24h": len(events),
         "critical": len([e for e in events if e.get("severity") == "critical"]),
@@ -439,7 +519,12 @@ async def get_soc_realtime_events(current_user: dict = Depends(get_current_user)
         "blocked": len([e for e in events if e.get("action") == "blocked"]),
         "investigating": len([e for e in events if e.get("status") == "investigating"]),
     }
-    return {"events": events, "stats": stats, "feed_type": "polling"}
+    return {
+        "events": events,
+        "stats": stats,
+        "feed_type": "polling",
+        "evidence_state": "recorded_events_only",
+    }
 
 
 @router.post("/soc-realtime/generate")

@@ -8,7 +8,7 @@ import base64
 import httpx
 from urllib.parse import urlencode
 from app.database import db
-from app.auth import get_current_user, create_token
+from app.auth import get_current_user, create_token, session_version_for_user
 
 router = APIRouter()
 
@@ -239,6 +239,7 @@ async def microsoft_callback(request: Request, code: str = "", state: str = "", 
                 "password_hash": "",
                 "microsoft_id": ms_id,
                 "sso_provider": "microsoft",
+                "session_version": 0,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.users.insert_one(new_user)
@@ -253,7 +254,12 @@ async def microsoft_callback(request: Request, code: str = "", state: str = "", 
                 )
 
         # Generate our JWT token
-        jwt_token = create_token(user_doc["id"], user_doc["email"], user_doc.get("role", "tech"))
+        jwt_token = create_token(
+            user_doc["id"],
+            user_doc["email"],
+            user_doc.get("role", "tech"),
+            session_version=session_version_for_user(user_doc),
+        )
 
         # Redirect to frontend with token
         return RedirectResponse(

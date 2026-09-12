@@ -22,7 +22,7 @@ def auth_token():
     """Get authentication token for admin user"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -39,7 +39,7 @@ def api_client(auth_token):
     return session
 
 
-# ═══════════════════════ HELP ARTICLES TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â HELP ARTICLES TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestHelpArticles:
     """Help Center article listing and retrieval"""
@@ -58,7 +58,7 @@ class TestHelpArticles:
         assert "articles" in data
         assert "by_category" in data
         assert len(data["articles"]) >= 42
-        print(f"✓ Help articles count: {data['count']}")
+        print(f"Ã¢Å“â€œ Help articles count: {data['count']}")
     
     def test_list_help_articles_has_12_categories(self, api_client):
         """GET /api/help/articles should have 12 categories including Easter Eggs"""
@@ -78,7 +78,7 @@ class TestHelpArticles:
         
         # Check we have at least 10 categories
         assert len(categories) >= 10, f"Expected at least 10 categories, got {len(categories)}: {categories}"
-        print(f"✓ Categories found: {categories}")
+        print(f"Ã¢Å“â€œ Categories found: {categories}")
     
     def test_get_easter_eggs_overview_article(self, api_client):
         """GET /api/help/articles/easter-eggs-overview should return the Easter Eggs landing page"""
@@ -91,7 +91,7 @@ class TestHelpArticles:
         assert "title" in data
         assert "body_md" in data
         assert len(data.get("body_md", "")) > 100, "Article body should have substantial content"
-        print(f"✓ Easter Eggs overview article: {data.get('title')}")
+        print(f"Ã¢Å“â€œ Easter Eggs overview article: {data.get('title')}")
     
     def test_get_konami_crt_mode_article(self, api_client):
         """GET /api/help/articles/konami-crt-mode should return the Konami code doc"""
@@ -105,8 +105,8 @@ class TestHelpArticles:
         assert "body_md" in data
         # Should mention the key sequence
         body = data.get("body_md", "")
-        assert "↑" in body or "ArrowUp" in body.lower() or "up" in body.lower()
-        print(f"✓ Konami CRT mode article: {data.get('title')}")
+        assert "Ã¢â€ â€˜" in body or "ArrowUp" in body.lower() or "up" in body.lower()
+        print(f"Ã¢Å“â€œ Konami CRT mode article: {data.get('title')}")
     
     def test_get_weather_mode_article(self, api_client):
         """GET /api/help/articles/weather-mode should return the weather mode doc"""
@@ -120,13 +120,13 @@ class TestHelpArticles:
         # Should mention mood states
         body = data.get("body_md", "").lower()
         assert "stormy" in body or "sunny" in body or "mood" in body
-        print(f"✓ Weather mode article: {data.get('title')}")
+        print(f"Ã¢Å“â€œ Weather mode article: {data.get('title')}")
     
     def test_get_nonexistent_article_returns_404(self, api_client):
         """GET /api/help/articles/nonexistent-slug should return 404"""
         response = api_client.get(f"{BASE_URL}/api/help/articles/nonexistent-slug-xyz123")
         assert response.status_code == 404
-        print("✓ Nonexistent article returns 404")
+        print("Ã¢Å“â€œ Nonexistent article returns 404")
     
     def test_reseed_help_articles(self, api_client):
         """POST /api/help/seed should re-seed default articles"""
@@ -136,10 +136,10 @@ class TestHelpArticles:
         
         assert "seeded" in data
         assert data["seeded"] >= 42, f"Expected at least 42 seeded articles, got {data['seeded']}"
-        print(f"✓ Seeded {data['seeded']} articles")
+        print(f"Ã¢Å“â€œ Seeded {data['seeded']} articles")
 
 
-# ═══════════════════════ HELP CO-PILOT TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â HELP CO-PILOT TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestHelpCopilot:
     """Help Co-pilot AI search tests"""
@@ -157,8 +157,8 @@ class TestHelpCopilot:
         assert isinstance(data["citations"], list)
         # Should have some answer text
         assert len(data.get("answer", "")) > 10
-        print(f"✓ Copilot answer length: {len(data['answer'])} chars")
-        print(f"✓ Copilot citations: {[c.get('slug') for c in data.get('citations', [])]}")
+        print(f"Ã¢Å“â€œ Copilot answer length: {len(data['answer'])} chars")
+        print(f"Ã¢Å“â€œ Copilot citations: {[c.get('slug') for c in data.get('citations', [])]}")
     
     def test_copilot_with_empty_question_returns_400(self, api_client):
         """POST /api/help/copilot with empty question returns 400"""
@@ -166,7 +166,7 @@ class TestHelpCopilot:
             "question": ""
         })
         assert response.status_code == 400
-        print("✓ Empty question returns 400")
+        print("Ã¢Å“â€œ Empty question returns 400")
     
     def test_copilot_with_gibberish_returns_fallback(self, api_client):
         """POST /api/help/copilot with gibberish returns fallback response"""
@@ -180,12 +180,12 @@ class TestHelpCopilot:
         assert "answer" in data
         # Either fallback is true or citations is empty
         if data.get("fallback"):
-            print("✓ Gibberish question returns fallback=true")
+            print("Ã¢Å“â€œ Gibberish question returns fallback=true")
         else:
-            print(f"✓ Gibberish question handled (citations: {len(data.get('citations', []))})")
+            print(f"Ã¢Å“â€œ Gibberish question handled (citations: {len(data.get('citations', []))})")
 
 
-# ═══════════════════════ SCREENSHOT UPLOAD TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â SCREENSHOT UPLOAD TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestScreenshotUpload:
     """Screenshot upload for help articles"""
@@ -208,7 +208,7 @@ class TestScreenshotUpload:
         assert data["url"].startswith("/api/uploads/help/")
         assert "size_bytes" in data
         assert data["size_bytes"] > 0
-        print(f"✓ Screenshot uploaded: {data['url']} ({data['size_bytes']} bytes)")
+        print(f"Ã¢Å“â€œ Screenshot uploaded: {data['url']} ({data['size_bytes']} bytes)")
         
         # Store URL for next test
         TestScreenshotUpload.uploaded_url = data["url"]
@@ -222,7 +222,7 @@ class TestScreenshotUpload:
         response = api_client.get(f"{BASE_URL}{url}")
         assert response.status_code == 200
         assert "image" in response.headers.get("content-type", "")
-        print(f"✓ Uploaded screenshot accessible at {url}")
+        print(f"Ã¢Å“â€œ Uploaded screenshot accessible at {url}")
     
     def test_upload_screenshot_with_invalid_data_url_returns_400(self, api_client):
         """POST /api/help/upload-screenshot with invalid data URL returns 400"""
@@ -230,7 +230,7 @@ class TestScreenshotUpload:
             "data_url": "not-a-valid-data-url"
         })
         assert response.status_code == 400
-        print("✓ Invalid data URL returns 400")
+        print("Ã¢Å“â€œ Invalid data URL returns 400")
     
     def test_upload_screenshot_with_non_image_returns_400(self, api_client):
         """POST /api/help/upload-screenshot with non-image data URL returns 400"""
@@ -238,10 +238,10 @@ class TestScreenshotUpload:
             "data_url": "data:text/plain;base64,SGVsbG8gV29ybGQ="
         })
         assert response.status_code == 400
-        print("✓ Non-image data URL returns 400")
+        print("Ã¢Å“â€œ Non-image data URL returns 400")
 
 
-# ═══════════════════════ SLA AUTO-PAGE WITH FREEZE ENFORCEMENT ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â SLA AUTO-PAGE WITH FREEZE ENFORCEMENT Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestSLAAutoPageWithFreeze:
     """SLA auto-page respects change freeze windows"""
@@ -255,7 +255,7 @@ class TestSLAAutoPageWithFreeze:
         assert "scanned" in data
         assert "new_pages_fired" in data
         assert "pages" in data
-        print(f"✓ SLA auto-page: scanned {data['scanned']} tickets, fired {data['new_pages_fired']} pages")
+        print(f"Ã¢Å“â€œ SLA auto-page: scanned {data['scanned']} tickets, fired {data['new_pages_fired']} pages")
     
     def test_create_freeze_for_broadcast_kind(self, api_client):
         """Create a freeze window that blocks broadcasts"""
@@ -277,7 +277,7 @@ class TestSLAAutoPageWithFreeze:
         
         assert "id" in data
         TestSLAAutoPageWithFreeze.freeze_id = data["id"]
-        print(f"✓ Created broadcast freeze: {data['id']}")
+        print(f"Ã¢Å“â€œ Created broadcast freeze: {data['id']}")
     
     def test_freeze_check_returns_frozen_for_broadcast(self, api_client):
         """GET /api/change-freezes/check should return frozen=true for broadcast kind"""
@@ -288,9 +288,9 @@ class TestSLAAutoPageWithFreeze:
         assert "frozen" in data
         # Should be frozen since we just created an active broadcast freeze
         if data["frozen"]:
-            print("✓ Freeze check returns frozen=true for broadcast")
+            print("Ã¢Å“â€œ Freeze check returns frozen=true for broadcast")
         else:
-            print("⚠ Freeze check returned frozen=false (may be timing issue)")
+            print("Ã¢Å¡Â  Freeze check returned frozen=false (may be timing issue)")
     
     def test_cleanup_test_freeze(self, api_client):
         """Delete the test freeze"""
@@ -299,10 +299,10 @@ class TestSLAAutoPageWithFreeze:
         
         response = api_client.delete(f"{BASE_URL}/api/change-freezes/{TestSLAAutoPageWithFreeze.freeze_id}")
         assert response.status_code == 200
-        print("✓ Test freeze deleted")
+        print("Ã¢Å“â€œ Test freeze deleted")
 
 
-# ═══════════════════════ CHAT BROADCAST REGRESSION ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â CHAT BROADCAST REGRESSION Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestChatBroadcastRegression:
     """Regression tests for chat broadcast endpoints"""
@@ -313,7 +313,7 @@ class TestChatBroadcastRegression:
         assert response.status_code == 200
         data = response.json()
         assert "posted" in data
-        print(f"✓ Sentiment escalating broadcast: posted {data['posted']}")
+        print(f"Ã¢Å“â€œ Sentiment escalating broadcast: posted {data['posted']}")
     
     def test_broadcast_sla_page(self, api_client):
         """POST /api/chat/broadcast/sla-page should work"""
@@ -321,7 +321,7 @@ class TestChatBroadcastRegression:
         assert response.status_code == 200
         data = response.json()
         assert "posted" in data
-        print(f"✓ SLA page broadcast: posted {data['posted']}")
+        print(f"Ã¢Å“â€œ SLA page broadcast: posted {data['posted']}")
     
     def test_broadcast_storm_check(self, api_client):
         """POST /api/chat/broadcast/storm-check should work"""
@@ -329,7 +329,7 @@ class TestChatBroadcastRegression:
         assert response.status_code == 200
         data = response.json()
         assert "posted" in data
-        print(f"✓ Storm check broadcast: posted {data['posted']}")
+        print(f"Ã¢Å“â€œ Storm check broadcast: posted {data['posted']}")
     
     def test_broadcast_all_clear_check(self, api_client):
         """POST /api/chat/broadcast/all-clear-check should work"""
@@ -337,7 +337,7 @@ class TestChatBroadcastRegression:
         assert response.status_code == 200
         data = response.json()
         assert "posted" in data
-        print(f"✓ All-clear check broadcast: posted {data['posted']}")
+        print(f"Ã¢Å“â€œ All-clear check broadcast: posted {data['posted']}")
     
     def test_broadcast_tick(self, api_client):
         """POST /api/chat/broadcast/tick should return all 4 keys"""
@@ -349,10 +349,10 @@ class TestChatBroadcastRegression:
         assert "sla_posted" in data
         assert "storm_posted" in data
         assert "all_clear_posted" in data
-        print(f"✓ Broadcast tick: sentiment={data['sentiment_posted']}, sla={data['sla_posted']}, storm={data['storm_posted']}, all_clear={data['all_clear_posted']}")
+        print(f"Ã¢Å“â€œ Broadcast tick: sentiment={data['sentiment_posted']}, sla={data['sla_posted']}, storm={data['storm_posted']}, all_clear={data['all_clear_posted']}")
 
 
-# ═══════════════════════ REGRESSION TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â REGRESSION TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestRegression:
     """Regression tests for existing functionality"""
@@ -361,13 +361,13 @@ class TestRegression:
         """GET /api/dashboard/stats should work"""
         response = api_client.get(f"{BASE_URL}/api/dashboard/stats")
         assert response.status_code == 200
-        print("✓ Dashboard stats endpoint works")
+        print("Ã¢Å“â€œ Dashboard stats endpoint works")
     
     def test_dashboard_enhanced_stats(self, api_client):
         """GET /api/dashboard/enhanced-stats should work"""
         response = api_client.get(f"{BASE_URL}/api/dashboard/enhanced-stats")
         assert response.status_code == 200
-        print("✓ Dashboard enhanced stats endpoint works")
+        print("Ã¢Å“â€œ Dashboard enhanced stats endpoint works")
     
     def test_weather_mode(self, api_client):
         """GET /api/ambient/weather-mode should work"""
@@ -375,28 +375,28 @@ class TestRegression:
         assert response.status_code == 200
         data = response.json()
         assert "mood" in data
-        print(f"✓ Weather mode: {data.get('mood')}")
+        print(f"Ã¢Å“â€œ Weather mode: {data.get('mood')}")
     
     def test_change_freezes_list(self, api_client):
         """GET /api/change-freezes should work"""
         response = api_client.get(f"{BASE_URL}/api/change-freezes")
         assert response.status_code == 200
-        print("✓ Change freezes list endpoint works")
+        print("Ã¢Å“â€œ Change freezes list endpoint works")
     
     def test_clients_list(self, api_client):
         """GET /api/clients should work"""
         response = api_client.get(f"{BASE_URL}/api/clients")
         assert response.status_code == 200
-        print("✓ Clients list endpoint works")
+        print("Ã¢Å“â€œ Clients list endpoint works")
     
     def test_tickets_list(self, api_client):
         """GET /api/tickets should work"""
         response = api_client.get(f"{BASE_URL}/api/tickets")
         assert response.status_code == 200
-        print("✓ Tickets list endpoint works")
+        print("Ã¢Å“â€œ Tickets list endpoint works")
 
 
-# ═══════════════════════ EASTER EGG ARTICLES VERIFICATION ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â EASTER EGG ARTICLES VERIFICATION Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestEasterEggArticles:
     """Verify all Easter Egg articles are fetchable"""
@@ -435,9 +435,9 @@ class TestEasterEggArticles:
             else:
                 missing.append(slug)
         
-        print(f"✓ Found {len(found)}/{len(self.EASTER_EGG_SLUGS)} Easter Egg articles")
+        print(f"Ã¢Å“â€œ Found {len(found)}/{len(self.EASTER_EGG_SLUGS)} Easter Egg articles")
         if missing:
-            print(f"⚠ Missing articles: {missing}")
+            print(f"Ã¢Å¡Â  Missing articles: {missing}")
         
         # At least 15 should exist
         assert len(found) >= 15, f"Expected at least 15 Easter Egg articles, found {len(found)}"

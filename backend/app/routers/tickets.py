@@ -1,19 +1,86 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timezone, timedelta
+from hashlib import sha256
+import json
+import math
 import uuid
 import os
 import asyncio
 import logging
+from email_validator import EmailNotValidError, validate_email
+from pydantic import BaseModel, ConfigDict, Field
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.avatar_enrichment import attach_user_avatars
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.action_permissions import assert_action_permission, require_action
+from app.services.labour_types import labour_snapshot, resolve_labour_type
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
+from app.services.ticket_conversation import sanitise_ticket_rich_text
+from app.services.ticket_time import (
+    create_canonical_ticket_time_entry,
+    list_ticket_time_history,
+    sync_ticket_time_cache,
+)
 from app.models import *
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+_CONVERSATION_INDEXED_DATABASE_IDS: set[int] = set()
+
+
+class TicketConversationTime(BaseModel):
+    """Technician-controlled input for one optional conversation time record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    minutes: int = Field(ge=1, le=1_440)
+    labour_type_id: Optional[str] = Field(default=None, max_length=100)
+    billable: Optional[bool] = None
+    description: Optional[str] = Field(default=None, max_length=500)
+    performed_at: Optional[datetime] = None
+
+
+class TicketConversationEntryCreate(BaseModel):
+    """One idempotent, auditable ticket update with optional time evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, max_length=50_000)
+    visibility: Literal["internal", "public"] = "internal"
+    notify_client: bool = False
+    to_addresses: List[str] = Field(default_factory=list, max_length=25)
+    subject_label: str = Field(default="Update", max_length=80)
+    status_after: Optional[Literal["open", "in_progress", "on_hold", "resolved"]] = None
+    idempotency_key: str = Field(min_length=16, max_length=128)
+    time: Optional[TicketConversationTime] = None
+
+
+@router.get("/tickets/{ticket_id}/handover")
+async def get_ticket_handover(ticket_id: str, hours: int = 0, current_user: dict = Depends(get_current_user)):
+    from app.services.ticket_handover import build_handover
+    from app.services.scope_permissions import tenant_scoped_query
+    if hours not in (0, 24, 168):
+        raise HTTPException(status_code=422, detail="Choose all recent notes, 24 hours or 7 days")
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.comment.read")
+    # Compose evidence only after authorising the parent; also constrain explicit
+    # tenant ownership so a mismatched child document cannot leak across tenants.
+    comments, children = await asyncio.gather(
+        db.ticket_comments.find(tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+            {"_id": 0, "id": 1, "content": 1, "created_at": 1, "user_name": 1, "is_internal": 1, "visibility": 1}).sort("created_at", -1).to_list(200),
+        db.tickets.find(tenant_scoped_query(current_user, {"parent_id": ticket_id, "client_id": ticket.get("client_id")}),
+            {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1}).to_list(100),
+    )
+    since = datetime.now(timezone.utc) - timedelta(hours=hours) if hours else None
+    return build_handover(ticket, comments, children, since=since)
 
 
 async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -> dict:
@@ -23,6 +90,185 @@ async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -
         ticket_id,
         operation=operation,
         resource_name="Ticket",
+    )
+
+
+async def _ticket_in_tenant_scope(
+    ticket_id: str,
+    current_user: dict,
+    operation: str,
+    *,
+    request: Request | None = None,
+) -> dict:
+    """Use the newer tenant-aware boundary for new ticket child records."""
+    return await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation=operation,
+        request=request,
+        resource_name="Ticket",
+    )
+
+
+def _ticket_time_rate(value: Any) -> float:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return 75.0
+    return round(rate, 4) if math.isfinite(rate) and rate >= 0 else 75.0
+
+
+async def _ticket_time_actor(current_user: dict) -> tuple[dict, float]:
+    """Derive the technician and their fallback rate from trusted records."""
+    user_id = str(current_user.get("id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authenticated technician identity is required")
+    stored = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "email": 1, "hourly_rate": 1})
+    return (
+        {
+            "id": user_id,
+            "name": (stored or {}).get("name") or current_user.get("name"),
+            "email": (stored or {}).get("email") or current_user.get("email"),
+        },
+        _ticket_time_rate((stored or {}).get("hourly_rate", 75.0)),
+    )
+
+
+def _conversation_fingerprint(payload: TicketConversationEntryCreate, *, content: str) -> str:
+    """Bind a browser retry key to one exact, safe workflow request."""
+    time_payload = payload.time.model_dump(mode="json") if payload.time else None
+    safe = {
+        "content": content,
+        "visibility": payload.visibility,
+        "notify_client": payload.notify_client,
+        "to_addresses": sorted({address.strip().lower() for address in payload.to_addresses if address.strip()}),
+        "subject_label": payload.subject_label.strip(),
+        "status_after": payload.status_after or "",
+        "time": time_payload,
+    }
+    encoded = json.dumps(safe, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _normalise_ticket_recipient(value: Any) -> str:
+    """Reject malformed mailboxes before a ticket update reaches a provider."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return validate_email(raw, check_deliverability=False).normalized
+    except EmailNotValidError as exc:
+        raise HTTPException(status_code=422, detail="Every customer recipient must be a valid email address") from exc
+
+
+async def _ticket_comment_recipients(ticket: dict, current_user: dict, requested: list[str]) -> list[str]:
+    """Resolve only ticket/client-owned customer routes for a public update.
+
+    A technician may select a known ticket contact or client contact, but the
+    ticket conversation endpoint must not become a generic outbound-email
+    relay. The final recipient list is normalised, de-duplicated and bounded
+    to the authorised customer record before any time or delivery side effect.
+    """
+    client = await db.clients.find_one(
+        tenant_scoped_query(current_user, {"id": ticket.get("client_id")}),
+        {"_id": 0, "contacts": 1, "email": 1},
+    )
+    known_by_lower: dict[str, str] = {}
+
+    def add_known(value: Any) -> None:
+        address = _normalise_ticket_recipient(value)
+        if address:
+            known_by_lower.setdefault(address.lower(), address)
+
+    add_known(ticket.get("contact_email"))
+    add_known((client or {}).get("email"))
+    for contact in ((client or {}).get("contacts") or []):
+        add_known(contact.get("email"))
+
+    selected: list[str] = []
+    for raw_address in requested:
+        address = _normalise_ticket_recipient(raw_address)
+        if not address:
+            continue
+        if address.lower() not in known_by_lower:
+            raise HTTPException(
+                status_code=422,
+                detail="Customer updates can only be emailed to contacts recorded on this ticket or client.",
+            )
+        if address.lower() not in {item.lower() for item in selected}:
+            selected.append(known_by_lower[address.lower()])
+    if selected:
+        return selected
+
+    contact_id = str(ticket.get("contact_id") or "").strip()
+    if contact_id:
+        contact = next(
+            (
+                item
+                for item in ((client or {}).get("contacts") or [])
+                if str(item.get("id") or item.get("name") or "") == contact_id
+            ),
+            None,
+        )
+        if contact:
+            address = _normalise_ticket_recipient(contact.get("email"))
+            if address:
+                return [address]
+    contact_address = _normalise_ticket_recipient(ticket.get("contact_email"))
+    if contact_address:
+        return [contact_address]
+    client_address = _normalise_ticket_recipient((client or {}).get("email"))
+    return [client_address] if client_address else []
+
+
+def _performed_at(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        raise HTTPException(status_code=422, detail="Performed time must include a timezone")
+    normalised = value.astimezone(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if normalised > now + timedelta(minutes=5):
+        raise HTTPException(status_code=422, detail="Performed time cannot be in the future")
+    if normalised < now - timedelta(days=3660):
+        raise HTTPException(status_code=422, detail="Performed time is too far in the past")
+    return normalised.isoformat()
+
+
+async def _ensure_ticket_conversation_action_indexes() -> None:
+    """Protect the retry ledger without making comments a second source of truth."""
+    database_id = id(db)
+    if database_id in _CONVERSATION_INDEXED_DATABASE_IDS:
+        return
+    collection = db.ticket_conversation_actions
+    create_index = getattr(collection, "create_index", None)
+    if not callable(create_index):
+        return
+    await create_index(
+        [("tenant_id", 1), ("ticket_id", 1), ("user_id", 1), ("idempotency_key", 1)],
+        name="ticket_conversation_action_idempotency",
+        unique=True,
+    )
+    await create_index(
+        [("ticket_id", 1), ("created_at", -1)],
+        name="ticket_conversation_action_history",
+    )
+    _CONVERSATION_INDEXED_DATABASE_IDS.add(database_id)
+
+
+async def _set_ticket_activity(ticket: dict, actor: dict, *, public: bool, at: str) -> None:
+    update = {
+        "updated_at": at,
+        "last_activity_at": at,
+        "last_activity_by_id": actor.get("id"),
+        "last_activity_by_name": actor.get("name"),
+    }
+    if public:
+        update["last_technician_reply_at"] = at
+    await db.tickets.update_one(
+        tenant_scoped_query(actor, {"id": ticket["id"], "client_id": ticket.get("client_id")}),
+        {"$set": update},
     )
 
 
@@ -38,6 +284,94 @@ async def _attach_client_branding(tickets: list[dict]) -> None:
     logos = {client["id"]: client.get("logo_url") for client in clients}
     for ticket in tickets:
         ticket["client_logo_url"] = logos.get(ticket.get("client_id"))
+
+
+async def _assert_project_plan_parent_can_close(ticket: dict) -> None:
+    """Keep a generated project parent ticket open until required delivery work closes.
+
+    The project plan is intentionally enforced in the domain API rather than in
+    the UI: a technician can update ticket status from the queue, API, or an
+    automation. Optional child tickets do not block parent close-out.
+    """
+    if ticket.get("project_ticket_plan_role") != "parent":
+        return
+
+    child_ticket_ids = list(dict.fromkeys(ticket.get("child_ticket_ids") or []))
+    if not child_ticket_ids:
+        return
+
+    child_tickets = await db.tickets.find(
+        {
+            "id": {"$in": child_ticket_ids},
+            "client_id": ticket.get("client_id"),
+            "$or": [
+                {"project_ticket_plan_required": {"$ne": False}},
+                {"project_ticket_plan_required": {"$exists": False}},
+            ],
+        },
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1},
+    ).to_list(len(child_ticket_ids))
+    terminal_statuses = {"resolved", "closed", "completed"}
+    remaining = [
+        child for child in child_tickets
+        if (child.get("status") or "open").lower() not in terminal_statuses
+    ]
+    if not remaining:
+        return
+
+    examples = ", ".join(
+        f"{child.get('ticket_number') or child.get('id')} ({child.get('status') or 'open'})"
+        for child in remaining[:3]
+    )
+    suffix = f" Examples: {examples}." if examples else ""
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"Project delivery is still in progress: {len(remaining)} required child "
+            f"ticket{'s' if len(remaining) != 1 else ''} must be completed before "
+            f"this parent ticket can be closed.{suffix}"
+        ),
+    )
+
+
+async def _place_project_task_into_review(ticket: dict, current_user: dict, completed_at: str) -> None:
+    """Turn completed delivery work into an independently-reviewable project task.
+
+    Ticket closure proves that the technician finished the work item. It does
+    not bypass the project's independent-review rule, so the corresponding
+    project task moves to ``review`` instead of directly to ``completed``.
+    """
+    if ticket.get("project_ticket_plan_role") != "child" or not ticket.get("project_id"):
+        return
+
+    result = await db.project_tasks.update_one(
+        {
+            "project_id": ticket["project_id"],
+            "ticket_id": ticket.get("id"),
+            "status": {"$nin": ["review", "completed"]},
+        },
+        {
+            "$set": {
+                "status": "review",
+                "completed_at": completed_at,
+                "implemented_by": current_user.get("id") or current_user.get("email"),
+                "implemented_by_name": current_user.get("name") or current_user.get("email"),
+                "implemented_at": completed_at,
+                "reviewed_by": None,
+                "reviewed_by_name": None,
+                "reviewed_at": None,
+                "review_result": None,
+                "review_notes": None,
+            }
+        },
+    )
+    if result.modified_count:
+        await ticket_audit(
+            ticket["id"],
+            current_user,
+            "project_task_ready_for_review",
+            "Linked project task moved to independent review after ticket completion",
+        )
 
 
 # ============== TICKETS ENDPOINTS ==============
@@ -296,6 +630,7 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     # A closure is an audit event, not simply a queue state. Retain who closed
     # it, when it happened, and that it was resolved through the normal flow.
     if ticket_data.get("status") == "closed" and old_ticket and old_ticket.get("status") != "closed":
+        await _assert_project_plan_parent_can_close(old_ticket)
         ticket_data.update({
             "resolved_at": old_ticket.get("resolved_at") or now_iso,
             "closed_at": now_iso,
@@ -354,9 +689,26 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
             ticket_data['assigned_at'] = datetime.now(timezone.utc).isoformat()
         else:
             ticket_data['assigned_name'] = None
-    result = await db.tickets.update_one({"id": ticket_id}, {"$set": ticket_data})
+    ticket_update_query = {"id": ticket_id}
+    if target_client_id != old_ticket.get("client_id"):
+        # Automation note creation keeps a brief, parent-document lock while
+        # it writes a separate child note. A client move must race safely with
+        # that action rather than splitting the ticket and its audit evidence
+        # across customer scopes.
+        ticket_update_query.update({
+            "client_id": old_ticket.get("client_id"),
+            "automation_note_lock": {"$exists": False},
+        })
+    result = await db.tickets.update_one(ticket_update_query, {"$set": ticket_data})
     if result.matched_count == 0:
+        if target_client_id != old_ticket.get("client_id"):
+            raise HTTPException(
+                status_code=409,
+                detail="This ticket has a protected automation note in progress. Retry the customer change shortly.",
+            )
         raise HTTPException(status_code=404, detail="Ticket not found")
+    if ticket_data.get("status") == "closed" and old_ticket.get("status") != "closed":
+        await _place_project_task_into_review(old_ticket, current_user, now_iso)
     if old_ticket:
         changes = []
         change_dict = {}
@@ -485,48 +837,32 @@ async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current
 async def get_ticket_comments(ticket_id: str, current_user: dict = Depends(get_current_user)):
     await _ticket_in_scope(ticket_id, current_user, "ticket.comment.read")
     comments = await db.ticket_comments.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
     ).sort("created_at", -1).to_list(500)
     return await attach_user_avatars(comments)
 
-@router.post("/tickets/{ticket_id}/comments")
+@router.post(
+    "/tickets/{ticket_id}/comments",
+    dependencies=[Depends(require_action("ticket.conversation.create"))],
+)
 async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user: dict = Depends(get_current_user)):
-    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.comment.create")
-    content = str(comment_data.get("content") or "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="Write an update before publishing")
+    ticket = await _ticket_in_tenant_scope(ticket_id, current_user, "ticket.comment.create")
+    content, content_text = sanitise_ticket_rich_text(comment_data.get("content"))
 
     visibility = str(comment_data.get("visibility") or "").strip().lower()
     is_internal = bool(comment_data.get("is_internal", visibility != "public"))
     if visibility not in {"internal", "public"}:
         visibility = "internal" if is_internal else "public"
     is_internal = visibility == "internal"
+    if not is_internal:
+        await assert_action_permission(current_user, "ticket.public_update.send")
     notify_client = bool(comment_data.get("notify_client", False)) and not is_internal
 
-    recipients = [
-        str(address or "").strip()
-        for address in (comment_data.get("to_addresses") or [])
-        if str(address or "").strip()
-    ]
-    if notify_client and not recipients:
-        contact_email = str(ticket.get("contact_email") or "").strip()
-        if contact_email:
-            recipients.append(contact_email)
-    if notify_client and not recipients and ticket.get("contact_id"):
-        client = await db.clients.find_one({"id": ticket.get("client_id")}, {"_id": 0, "contacts": 1})
-        contact = next(
-            (
-                item for item in ((client or {}).get("contacts") or [])
-                if str(item.get("id") or item.get("name") or "") == str(ticket.get("contact_id"))
-            ),
-            None,
-        )
-        if contact and str(contact.get("email") or "").strip():
-            recipients.append(str(contact["email"]).strip())
-    if notify_client and not recipients:
-        client = await db.clients.find_one({"id": ticket.get("client_id")}, {"_id": 0, "email": 1})
-        if client and str(client.get("email") or "").strip():
-            recipients.append(str(client["email"]).strip())
+    recipients = await _ticket_comment_recipients(
+        ticket,
+        current_user,
+        comment_data.get("to_addresses") or [],
+    ) if notify_client else []
     if notify_client and not recipients:
         raise HTTPException(
             status_code=400,
@@ -560,15 +896,29 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
             related_id=ticket_id,
             initiated_by=current_user.get("id"),
             initiated_by_name=current_user.get("name"),
+            thread_key=f"ticket:{ticket_id}",
+        )
+        from app.services.ticket_participants import sync_ticket_participants
+        await sync_ticket_participants(
+            ticket=ticket,
+            addresses=recipients,
+            role="recipient",
+            direction="outbound",
+            delivery_status=delivery.get("status"),
         )
 
     comment = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
+        "tenant_id": platform_tenant_id(current_user),
+        "client_id": ticket.get("client_id"),
+        "site_id": ticket.get("site_id"),
         "user_id": current_user['id'],
         "user_name": current_user['name'],
         "avatar_url": current_user.get("avatar"),
         "content": content,
+        "content_text": content_text,
+        "content_format": "tiptap_html.v1",
         "is_internal": is_internal,
         "visibility": visibility,
         "portal_visible": not is_internal,
@@ -583,6 +933,22 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.ticket_comments.insert_one(dict(comment))
+    # Queue recovery relies on explicit activity evidence rather than treating
+    # a missing response field as customer silence. Record every technician
+    # update, and only record a reply when a customer-visible update was made.
+    activity_at = comment["created_at"]
+    activity_update = {
+        "updated_at": activity_at,
+        "last_activity_at": activity_at,
+        "last_activity_by_id": current_user.get("id"),
+        "last_activity_by_name": current_user.get("name"),
+    }
+    if not is_internal:
+        activity_update["last_technician_reply_at"] = activity_at
+    await db.tickets.update_one(
+        {"id": ticket_id, "client_id": ticket.get("client_id")},
+        {"$set": activity_update},
+    )
     await ticket_audit(
         ticket_id,
         current_user,
@@ -601,6 +967,340 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
         await update_ticket(ticket_id, {"status": status_after}, current_user)
         comment["status_after"] = "closed" if status_after == "resolved" else status_after
     return comment
+
+
+@router.post(
+    "/tickets/{ticket_id}/conversation-entries",
+    dependencies=[Depends(require_action("ticket.conversation.create"))],
+)
+async def create_ticket_conversation_entry(
+    ticket_id: str,
+    payload: TicketConversationEntryCreate,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create one rich ticket update and its optional canonical time record.
+
+    The retry ledger is operational evidence only.  ``ticket_comments`` stays
+    authoritative for the conversation and ``time_entries`` stays
+    authoritative for commercial time.  The ledger coordinates both writes so
+    a browser retry cannot silently duplicate work or billable minutes.
+    """
+    ticket = await _ticket_in_tenant_scope(
+        ticket_id,
+        current_user,
+        "ticket.conversation.create",
+        request=request,
+    )
+    if payload.visibility == "public":
+        await assert_action_permission(current_user, "ticket.public_update.send", request=request)
+    if payload.time:
+        await assert_action_permission(current_user, "ticket.time.create", request=request)
+
+    content, content_text = sanitise_ticket_rich_text(payload.content)
+    resolved_recipients = []
+    if payload.visibility == "public" and payload.notify_client:
+        resolved_recipients = await _ticket_comment_recipients(ticket, current_user, payload.to_addresses)
+        if not resolved_recipients:
+            raise HTTPException(
+                status_code=422,
+                detail="This public update has no recipient. Add an email address or publish it to the client portal without email.",
+            )
+    fingerprint = _conversation_fingerprint(payload, content=content)
+    tenant_id = platform_tenant_id(current_user)
+
+    async def prepare_time_context() -> dict[str, Any]:
+        """Validate commercial input before reserving a new retry key."""
+        actor, fallback_rate = await _ticket_time_actor(current_user)
+        labour_type = await resolve_labour_type(
+            payload.time.labour_type_id,
+            tenant_id=tenant_id,
+            database=db,
+        )
+        commercial = labour_snapshot(
+            labour_type,
+            fallback_rate=fallback_rate,
+            requested_billable=payload.time.billable,
+        )
+        return {
+            "actor": actor,
+            "commercial": commercial,
+            "performed_at": _performed_at(payload.time.performed_at),
+        }
+
+    action_query = {
+        "tenant_id": tenant_id,
+        "ticket_id": ticket["id"],
+        "user_id": current_user.get("id"),
+        "idempotency_key": payload.idempotency_key,
+    }
+    await _ensure_ticket_conversation_action_indexes()
+    action = await db.ticket_conversation_actions.find_one(action_query, {"_id": 0})
+    replay = bool(action)
+    if action and action.get("payload_fingerprint") != fingerprint:
+        raise HTTPException(
+            status_code=409,
+            detail="This update key was already used for different content. Refresh the ticket before trying again.",
+        )
+    prepared_time = await prepare_time_context() if payload.time and not action else None
+    if not action:
+        now = datetime.now(timezone.utc).isoformat()
+        action = {
+            "id": str(uuid.uuid4()),
+            **action_query,
+            "client_id": ticket.get("client_id"),
+            "site_id": ticket.get("site_id"),
+            "visibility": payload.visibility,
+            "payload_fingerprint": fingerprint,
+            "has_time": bool(payload.time),
+            "comment_id": None,
+            "time_entry_id": None,
+            "delivery_status": "not_requested",
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            await db.ticket_conversation_actions.insert_one(dict(action))
+        except Exception:
+            # A concurrent click is a replay only when it carries the exact
+            # same stable browser key and fingerprint.
+            action = await db.ticket_conversation_actions.find_one(action_query, {"_id": 0})
+            if not action:
+                raise
+            if action.get("payload_fingerprint") != fingerprint:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This update key was already used for different content. Refresh the ticket before trying again.",
+                )
+            replay = True
+
+    action_scope = {"id": action["id"], **action_query}
+    time_entry = None
+    time_created = False
+    if payload.time:
+        existing_time_id = str(action.get("time_entry_id") or "").strip()
+        if existing_time_id:
+            time_entry = await db.time_entries.find_one(
+                {
+                    "id": existing_time_id,
+                    "tenant_id": tenant_id,
+                    "ticket_id": ticket["id"],
+                    "client_id": ticket.get("client_id"),
+                },
+                {"_id": 0},
+            )
+        if not time_entry:
+            time_context = prepared_time or await prepare_time_context()
+            actor = time_context["actor"]
+            commercial = time_context["commercial"]
+            performed_at = time_context["performed_at"]
+            time_extra = {
+                **commercial["extra"],
+                "tenant_id": tenant_id,
+                "conversation_action_id": action["id"],
+                "performed_at": performed_at,
+            }
+            time_entry, time_created = await create_canonical_ticket_time_entry(
+                ticket=ticket,
+                actor=actor,
+                minutes=payload.time.minutes,
+                description=(payload.time.description or content_text)[:500],
+                billable=commercial["billable"],
+                source="ticket_conversation",
+                source_reference=action["id"],
+                idempotency_key=f"ticket_conversation:{action['id']}",
+                hourly_rate=commercial["hourly_rate"],
+                date=performed_at[:10] if performed_at else None,
+                extra={key: value for key, value in time_extra.items() if value is not None},
+                database=db,
+            )
+        else:
+            commercial = {
+                "extra": {
+                    "labour_type_name": time_entry.get("labour_type_name") or "Technician default",
+                }
+            }
+        if action.get("time_entry_id") != time_entry["id"]:
+            await db.ticket_conversation_actions.update_one(
+                action_scope,
+                {"$set": {"time_entry_id": time_entry["id"], "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            action["time_entry_id"] = time_entry["id"]
+        if time_created:
+            labour_name = commercial["extra"].get("labour_type_name") or "Technician default"
+            await ticket_audit(
+                ticket["id"],
+                current_user,
+                "time_logged",
+                f"Logged {payload.time.minutes} minutes · {labour_name}",
+            )
+
+    comment = None
+    comment_id = str(action.get("comment_id") or "").strip()
+    if comment_id:
+        comment = await db.ticket_comments.find_one(
+            tenant_scoped_query(current_user, {"id": comment_id, "ticket_id": ticket["id"]}),
+            {"_id": 0},
+        )
+    if not comment:
+        comment = await db.ticket_comments.find_one(
+            tenant_scoped_query(current_user, {"ticket_id": ticket["id"], "conversation_action_id": action["id"]}),
+            {"_id": 0},
+        )
+    if not comment:
+        now = datetime.now(timezone.utc).isoformat()
+        public = payload.visibility == "public"
+        comment = {
+            "id": str(uuid.uuid4()),
+            "ticket_id": ticket["id"],
+            "tenant_id": tenant_id,
+            "client_id": ticket.get("client_id"),
+            "site_id": ticket.get("site_id"),
+            "conversation_action_id": action["id"],
+            "time_entry_id": time_entry.get("id") if time_entry else None,
+            "idempotency_key": payload.idempotency_key,
+            "user_id": current_user.get("id"),
+            "user_name": current_user.get("name"),
+            "avatar_url": current_user.get("avatar"),
+            "content": content,
+            "content_text": content_text,
+            "content_format": "tiptap_html.v1",
+            "is_internal": not public,
+            "visibility": payload.visibility,
+            "portal_visible": public,
+            "client_notified": bool(public and payload.notify_client),
+            "to_addresses": [],
+            "subject": "",
+            "subject_label": "",
+            "delivery_status": "pending" if public and payload.notify_client else "portal_only" if public else "internal",
+            "delivery_message": "",
+            "delivery_id": None,
+            "sender_mailbox": None,
+            "source": "ticket_conversation",
+            "created_at": now,
+        }
+        if public:
+            subject_label = payload.subject_label.strip() or "Update"
+            comment.update(
+                {
+                    "to_addresses": resolved_recipients if payload.notify_client else [],
+                    "subject_label": subject_label,
+                    "subject": f"{subject_label}: [{ticket.get('ticket_number', ticket_id)}] {ticket.get('title', 'Service request')}",
+                }
+            )
+        await db.ticket_comments.insert_one(dict(comment))
+        await db.ticket_conversation_actions.update_one(
+            action_scope,
+            {"$set": {"comment_id": comment["id"], "updated_at": now}},
+        )
+        action["comment_id"] = comment["id"]
+        await _set_ticket_activity(ticket, current_user, public=public, at=now)
+        await ticket_audit(
+            ticket["id"],
+            current_user,
+            "public_update_added" if public else "internal_note_added",
+            "Published client-visible portal update" if public else "Added internal technician note",
+        )
+
+    # The comment is intentionally durable before an outbound provider call.
+    # Claim the one delivery attempt in Mongo so duplicate browser retries do
+    # not send duplicate client email.  A process that dies while ``sending``
+    # leaves explicit recovery evidence rather than guessing that it is safe
+    # to resend.
+    delivery_status = comment.get("delivery_status")
+    if payload.visibility == "public" and payload.notify_client and delivery_status == "pending":
+        attempt_at = datetime.now(timezone.utc).isoformat()
+        claimed = await db.ticket_comments.update_one(
+            tenant_scoped_query(current_user, {"id": comment["id"], "ticket_id": ticket["id"], "delivery_status": "pending"}),
+            {"$set": {"delivery_status": "sending", "delivery_attempted_at": attempt_at}},
+        )
+        if claimed.matched_count:
+            await db.ticket_conversation_actions.update_one(
+                action_scope,
+                {"$set": {"delivery_status": "sending", "delivery_attempted_at": attempt_at, "updated_at": attempt_at}},
+            )
+            try:
+                from app.routers.email_signatures import append_default_signature
+                from app.routers.email_utils import send_email
+
+                body, body_type, _ = await append_default_signature(
+                    body=comment["content"],
+                    body_type="html",
+                    current_user=current_user,
+                    subject=comment["subject"],
+                    ticket_id=ticket["id"],
+                )
+                delivery = await send_email(
+                    comment["to_addresses"],
+                    comment["subject"],
+                    body if body_type == "html" else f"<pre>{body}</pre>",
+                    category="ticket_comments",
+                    client_id=ticket.get("client_id"),
+                    related_type="ticket",
+                    related_id=ticket["id"],
+                    initiated_by=current_user.get("id"),
+                    initiated_by_name=current_user.get("name"),
+                    thread_key=f"ticket:{ticket['id']}",
+                )
+                delivery_patch = {
+                    "delivery_status": delivery.get("status") or "failed",
+                    "delivery_message": delivery.get("message", ""),
+                    "delivery_id": delivery.get("delivery_id") or delivery.get("email_id"),
+                    "sender_mailbox": delivery.get("sender"),
+                    "delivery_completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            except Exception:
+                logger.exception("ticket conversation delivery state is unknown action_id=%s", action["id"])
+                delivery_patch = {
+                    "delivery_status": "attempt_unknown",
+                    "delivery_message": "Nexus could not confirm the provider outcome. Do not resend automatically.",
+                    "delivery_completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            else:
+                try:
+                    from app.services.ticket_participants import sync_ticket_participants
+
+                    await sync_ticket_participants(
+                        ticket=ticket,
+                        addresses=comment["to_addresses"],
+                        role="recipient",
+                        direction="outbound",
+                        delivery_status=delivery_patch["delivery_status"],
+                    )
+                except Exception:
+                    # Sending is already provider-confirmed. Preserve that
+                    # fact and leave explicit evidence for a later participant
+                    # reconciliation instead of misrepresenting delivery.
+                    logger.exception("ticket participant sync failed action_id=%s", action["id"])
+                    delivery_patch["participant_sync_status"] = "failed"
+            await db.ticket_comments.update_one(
+                tenant_scoped_query(current_user, {"id": comment["id"], "ticket_id": ticket["id"]}),
+                {"$set": delivery_patch},
+            )
+            await db.ticket_conversation_actions.update_one(
+                action_scope,
+                {"$set": {**delivery_patch, "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            comment.update(delivery_patch)
+        else:
+            comment = await db.ticket_comments.find_one(tenant_scoped_query(current_user, {"id": comment["id"], "ticket_id": ticket["id"]}), {"_id": 0}) or comment
+
+    if payload.status_after and not action.get("status_transitioned"):
+        await update_ticket(ticket["id"], {"status": payload.status_after}, current_user)
+        transitioned_at = datetime.now(timezone.utc).isoformat()
+        await db.ticket_conversation_actions.update_one(
+            action_scope,
+            {"$set": {"status_transitioned": True, "updated_at": transitioned_at}},
+        )
+        comment["status_after"] = "closed" if payload.status_after == "resolved" else payload.status_after
+
+    return {
+        "comment": comment,
+        "time_entry": time_entry,
+        "time_logged": bool(time_entry),
+        "idempotent_replay": replay and not time_created,
+        "status_after": comment.get("status_after"),
+    }
 
 # ============== TICKET CHILD/PARENT ENDPOINTS ==============
 
@@ -660,49 +1360,84 @@ async def merge_tickets(ticket_id: str, merge_data: dict, current_user: dict = D
     merge_ids = merge_data.get("merge_ids", [])
     if not merge_ids:
         raise HTTPException(status_code=400, detail="merge_ids required")
-    target = await _ticket_in_scope(ticket_id, current_user, "ticket.merge")
-    for mid in merge_ids:
-        source = await _ticket_in_scope(mid, current_user, "ticket.merge")
-        if source.get("client_id") != target.get("client_id"):
-            raise HTTPException(status_code=400, detail="Merged tickets must belong to the same client")
-        await db.tickets.update_one({"id": mid}, {"$set": {"status": "closed", "merged_into": ticket_id}})
-        src_comments = await db.ticket_comments.find({"ticket_id": mid}, {"_id": 0}).to_list(500)
-        for c in src_comments:
-            c["ticket_id"] = ticket_id
-            c["content"] = f"[Merged from {source.get('ticket_number', mid)}] {c.get('content', '')}"
-            c["id"] = str(uuid.uuid4())
-            await db.ticket_comments.insert_one(c)
-        await ticket_audit(ticket_id, current_user, "ticket_merged", f"Merged {source.get('ticket_number', mid)} into this ticket")
-    return {"message": f"Merged {len(merge_ids)} tickets"}
+    from app.services.ticket_merging import merge_tickets as merge_ticket_records
+    result = await merge_ticket_records(
+        primary_ticket_id=ticket_id,
+        secondary_ticket_ids=merge_ids,
+        current_user=current_user,
+    )
+    return {"message": f"Merged {result['merged_count']} ticket(s)", **result}
 
 # ============== TICKET TIME TRACKING ==============
 
 @router.get("/tickets/{ticket_id}/time-entries")
 async def get_ticket_time_entries(ticket_id: str, current_user: dict = Depends(get_current_user)):
     await _ticket_in_scope(ticket_id, current_user, "ticket.time.read")
-    entries = await db.ticket_time_entries.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return entries
+    # ``time_entries`` owns billable time.  Retain old ticket-local entries in
+    # the returned timeline as clearly labelled, non-billable historical
+    # evidence instead of silently deleting them or letting them affect totals.
+    await sync_ticket_time_cache(ticket_id, database=db)
+    return await list_ticket_time_history(ticket_id, database=db)
 
-@router.post("/tickets/{ticket_id}/time-entries")
+@router.post(
+    "/tickets/{ticket_id}/time-entries",
+    dependencies=[Depends(require_action("ticket.time.create"))],
+)
 async def add_ticket_time_entry(ticket_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
-    await _ticket_in_scope(ticket_id, current_user, "ticket.time.create")
-    entry = {
-        "id": str(uuid.uuid4()),
-        "ticket_id": ticket_id,
-        "user_id": current_user["id"],
-        "user_name": current_user["name"],
-        "minutes": entry_data.get("minutes", 0),
-        "description": entry_data.get("description", ""),
-        "billable": entry_data.get("billable", True),
-        "created_at": datetime.now(timezone.utc).isoformat()
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.time.create")
+    try:
+        minutes = int(entry_data.get("minutes") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Minutes must be a whole number")
+    if minutes < 1:
+        raise HTTPException(status_code=422, detail="Minutes must be at least one")
+    actor, fallback_rate = await _ticket_time_actor(current_user)
+    labour_type = await resolve_labour_type(
+        entry_data.get("labour_type_id"),
+        tenant_id=platform_tenant_id(current_user),
+        database=db,
+    )
+    commercial = labour_snapshot(
+        labour_type,
+        fallback_rate=fallback_rate,
+        requested_billable=entry_data.get("billable") if "billable" in entry_data else None,
+    )
+    raw_performed_at = entry_data.get("performed_at")
+    performed_at = None
+    if raw_performed_at:
+        try:
+            performed_at = _performed_at(datetime.fromisoformat(str(raw_performed_at).replace("Z", "+00:00")))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Performed time must be an ISO date-time") from None
+    idempotency_key = str(entry_data.get("idempotency_key") or "").strip() or None
+    extra = {
+        **commercial["extra"],
+        "tenant_id": platform_tenant_id(current_user),
+        "performed_at": performed_at,
     }
-    await db.ticket_time_entries.insert_one(entry)
-    entry.pop("_id", None)
-    total_min = entry["minutes"]
-    existing = await db.ticket_time_entries.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(5000)
-    total_min = sum(e.get("minutes", 0) for e in existing)
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {"total_time_minutes": total_min}})
-    await ticket_audit(ticket_id, current_user, "time_logged", f"Logged {entry_data.get('minutes',0)} minutes")
+    if entry_data.get("category"):
+        extra["category"] = str(entry_data.get("category"))[:100]
+    entry, created = await create_canonical_ticket_time_entry(
+        ticket=ticket,
+        actor=actor,
+        minutes=minutes,
+        description=str(entry_data.get("description") or ""),
+        billable=commercial["billable"],
+        source="ticket_workspace",
+        idempotency_key=idempotency_key,
+        hourly_rate=commercial["hourly_rate"],
+        date=performed_at[:10] if performed_at else entry_data.get("date"),
+        extra={key: value for key, value in extra.items() if value is not None},
+        database=db,
+    )
+    if created:
+        await ticket_audit(
+            ticket_id,
+            current_user,
+            "time_logged",
+            f"Logged {minutes} minutes · {commercial['extra'].get('labour_type_name') or 'Technician default'}",
+        )
+    entry["idempotent_replay"] = not created
     return entry
 
 # ============== TICKET AUDIT LOG ==============
@@ -719,17 +1454,38 @@ async def ticket_audit(ticket_id: str, user: dict, action: str, details: str):
     }
     await db.ticket_audit_log.insert_one(entry)
 
+
+def _ticket_audit_display_entry(entry: dict) -> dict:
+    """Normalise central audit evidence for the ticket-local activity view."""
+    result = dict(entry)
+    if result.get("action") in {"ticket_attachment_added", "ticket_attachment_deleted", "ticket_attachment_downloaded"} and not result.get("details"):
+        metadata = result.get("metadata") or {}
+        filename = metadata.get("filename") or result.get("entity_name") or "attachment"
+        verb = {
+            "ticket_attachment_added": "Attached",
+            "ticket_attachment_deleted": "Removed",
+            "ticket_attachment_downloaded": "Downloaded",
+        }[result.get("action")]
+        source = metadata.get("source")
+        result["details"] = f"{verb} {filename}" + (f" · source: {source.replace('_', ' ')}" if source else "")
+    return result
+
 @router.get("/tickets/{ticket_id}/audit-log")
 async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_current_user)):
     await _ticket_in_scope(ticket_id, current_user, "ticket.audit.read")
     # ``ticket_audit`` was used by early workflow/device features.  Merge it
     # once at read time so existing history remains visible while all new
     # records are written to ``ticket_audit_log``.
-    current, legacy = await asyncio.gather(
+    current, legacy, central = await asyncio.gather(
         db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
         db.ticket_audit.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
+        db.audit_logs.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
     )
-    entries_by_id = {entry.get("id"): entry for entry in [*current, *legacy] if entry.get("id")}
+    entries_by_id = {
+        entry.get("id"): _ticket_audit_display_entry(entry)
+        for entry in [*current, *legacy, *central]
+        if entry.get("id")
+    }
     return sorted(entries_by_id.values(), key=lambda entry: entry.get("created_at") or "", reverse=True)
 
 
@@ -762,6 +1518,14 @@ async def delete_canned_response(response_id: str, current_user: dict = Depends(
 
 # ============== TICKET EMAIL ENDPOINTS ==============
 
+@router.get("/tickets/{ticket_id}/participants")
+async def get_ticket_participants(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Visible people involved in this ticket conversation; BCC is intentionally excluded."""
+    await _ticket_in_scope(ticket_id, current_user, "ticket.participants.read")
+    return await db.ticket_participants.find(
+        {"ticket_id": ticket_id}, {"_id": 0}
+    ).sort("last_seen_at", -1).to_list(100)
+
 @router.get("/tickets/{ticket_id}/emails")
 async def get_ticket_emails(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Get all emails associated with a ticket"""
@@ -790,6 +1554,38 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         ticket_id=ticket_id,
     )
 
+    attachment_ids = list(dict.fromkeys(str(value).strip() for value in email_data.attachment_ids if str(value).strip()))
+    if len(attachment_ids) > 10:
+        raise HTTPException(status_code=400, detail="A ticket email can include at most 10 retained attachments")
+    email_attachments = []
+    if attachment_ids:
+        from app.services.supabase_storage import read_artifact
+        attachments = await db.ticket_attachments.find(
+            {"ticket_id": ticket_id, "id": {"$in": attachment_ids}}, {"_id": 0}
+        ).to_list(len(attachment_ids))
+        by_id = {attachment.get("id"): attachment for attachment in attachments}
+        missing = [attachment_id for attachment_id in attachment_ids if attachment_id not in by_id]
+        if missing:
+            raise HTTPException(status_code=404, detail="One or more selected ticket attachments are unavailable")
+        total_size = 0
+        for attachment_id in attachment_ids:
+            attachment = by_id[attachment_id]
+            artifact_path = (attachment.get("artifact_storage") or {}).get("object_path")
+            if not artifact_path:
+                raise HTTPException(status_code=409, detail=f"{attachment.get('filename', 'Attachment')} is not available in private storage")
+            artifact = await read_artifact(artifact_path)
+            if not artifact:
+                raise HTTPException(status_code=404, detail=f"{attachment.get('filename', 'Attachment')} is unavailable")
+            content, stored_content_type = artifact
+            total_size += len(content)
+            if total_size > 20 * 1024 * 1024:
+                raise HTTPException(status_code=400, detail="Selected attachments exceed the 20MB email safety limit")
+            email_attachments.append({
+                "filename": attachment.get("filename") or "attachment",
+                "content": content,
+                "content_type": stored_content_type or attachment.get("content_type") or "application/octet-stream",
+            })
+
     ticket_email = TicketEmail(
         ticket_id=ticket_id,
         ticket_title=ticket.get('title'),
@@ -798,6 +1594,8 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         to_addresses=email_data.to_addresses,
         cc_addresses=email_data.cc_addresses,
         bcc_addresses=email_data.bcc_addresses,
+        attachment_ids=attachment_ids,
+        attachment_count=len(email_attachments),
         subject=subject,
         body=body,
         body_type=body_type,
@@ -816,11 +1614,13 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         category="ticket_replies",
         cc_addresses=ticket_email.cc_addresses,
         bcc_addresses=ticket_email.bcc_addresses,
+        attachments=email_attachments,
         client_id=ticket.get("client_id"),
         related_type="ticket",
         related_id=ticket_id,
         initiated_by=current_user.get("id"),
         initiated_by_name=current_user.get("name"),
+        thread_key=f"ticket:{ticket_id}",
     )
     ticket_email.status = delivery.get("status", "failed")
     ticket_email.message_id = delivery.get("email_id")
@@ -835,6 +1635,34 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
     doc['delivery_message'] = delivery.get('message', '')
     doc['sender_mailbox'] = delivery.get('sender')
     await db.ticket_emails.insert_one(doc)
+    activity_at = doc.get("sent_at") or doc["created_at"]
+    activity_update = {
+        "updated_at": activity_at,
+        "last_activity_at": activity_at,
+        "last_activity_by_id": current_user.get("id"),
+        "last_activity_by_name": current_user.get("name"),
+    }
+    if ticket_email.status == "sent":
+        activity_update["last_technician_reply_at"] = activity_at
+    await db.tickets.update_one(
+        {"id": ticket_id, "client_id": ticket.get("client_id")},
+        {"$set": activity_update},
+    )
+    from app.services.ticket_participants import sync_ticket_participants
+    await sync_ticket_participants(
+        ticket=ticket,
+        addresses=ticket_email.to_addresses,
+        role="recipient",
+        direction="outbound",
+        delivery_status=delivery.get("status"),
+    )
+    await sync_ticket_participants(
+        ticket=ticket,
+        addresses=ticket_email.cc_addresses,
+        role="cc",
+        direction="outbound",
+        delivery_status=delivery.get("status"),
+    )
     
     return ticket_email
 

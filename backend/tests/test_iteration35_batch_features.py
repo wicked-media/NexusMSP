@@ -478,7 +478,10 @@ class TestTicketAttachments:
         data = response.json()
         assert "id" in data
         assert "filename" in data
-        assert "url" in data
+        assert "url" not in data
+        assert "stored_filename" not in data
+        assert "artifact_storage" not in data
+        assert "email_attachable" in data
         print(f"Uploaded attachment: {data}")
 
 

@@ -17,7 +17,7 @@ def auth_headers():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     token = response.json().get("token")
@@ -138,7 +138,7 @@ class TestProposalCRUD:
 
 
 class TestProposalLifecycle:
-    """Test proposal lifecycle: send → accept/decline → convert"""
+    """Test proposal lifecycle: send Ã¢â€ â€™ accept/decline Ã¢â€ â€™ convert"""
     
     def _create_test_proposal(self, auth_headers):
         """Helper to create a test proposal"""
@@ -207,7 +207,7 @@ class TestProposalLifecycle:
         assert data["id"] != proposal_id, "Duplicate should have new ID"
         assert data["status"] == "draft", "Duplicate should be draft"
         assert "(Copy)" in data["title"], "Duplicate should have (Copy) in title"
-        print(f"PASS: Duplicated proposal {proposal_id} → {data['id']}")
+        print(f"PASS: Duplicated proposal {proposal_id} Ã¢â€ â€™ {data['id']}")
     
     def test_convert_to_contract(self, auth_headers):
         """POST /api/proposals/{id}/convert-to-contract creates contract + recurring invoice"""
@@ -235,7 +235,7 @@ class TestProposalLifecycle:
             ri_resp = requests.get(f"{BASE_URL}/api/recurring-invoices/{data['recurring_invoice_id']}", headers=auth_headers)
             assert ri_resp.status_code == 200, "Recurring invoice should exist"
         
-        print(f"PASS: Converted proposal {proposal_id} → contract {data['contract_id']}, RI {data['recurring_invoice_id']}")
+        print(f"PASS: Converted proposal {proposal_id} Ã¢â€ â€™ contract {data['contract_id']}, RI {data['recurring_invoice_id']}")
 
 
 class TestContractEnhancements:
@@ -305,7 +305,7 @@ class TestContractEnhancements:
         assert "old_value" in data
         assert "new_value" in data
         assert data["new_value"] > data["old_value"], "New value should be higher"
-        print(f"PASS: Applied 5% increase to contract {contract['id']}: ${data['old_value']} → ${data['new_value']}")
+        print(f"PASS: Applied 5% increase to contract {contract['id']}: ${data['old_value']} Ã¢â€ â€™ ${data['new_value']}")
     
     def test_get_price_history(self, auth_headers):
         """GET /api/contracts/{id}/price-history returns price increase history"""

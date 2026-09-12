@@ -1,6 +1,6 @@
 """
-Iteration 149: Client 360° Full Profile Tests
-Tests for the new Client 360° backend aggregator endpoints:
+Iteration 149: Client 360Ã‚Â° Full Profile Tests
+Tests for the new Client 360Ã‚Â° backend aggregator endpoints:
 - GET /api/clients/{client_id}/full-profile
 - GET /api/clients/{client_id}/subscriptions
 - GET /api/clients/{client_id}/security
@@ -19,7 +19,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     assert response.status_code == 200, f"Login failed: {response.text}"
     return response.json().get("token")

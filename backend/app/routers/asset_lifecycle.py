@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
 from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 
 
@@ -53,6 +55,43 @@ def _asset_status_for_stage(stage: str, current_status: str | None = None) -> st
     if stage in {"procurement", "deployment", "decommission"}:
         return current_status or "active"
     return "active"
+
+
+async def _validate_device_link(
+    current_user: dict,
+    *,
+    client_id: str | None,
+    device_id: str | None,
+    asset_id: str | None = None,
+    operation: str,
+) -> None:
+    """Validate stable asset-to-endpoint ownership before persisting it."""
+    resolved_device_id = str(device_id or "").strip()
+    if not resolved_device_id:
+        return
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        resolved_device_id,
+        operation=operation,
+        resource_name="Managed asset",
+    )
+    if not client_id or str(device.get("client_id") or "") != str(client_id):
+        raise HTTPException(
+            status_code=409,
+            detail="A lifecycle asset linked to an endpoint must use that endpoint's client ownership.",
+        )
+    links = await db.assets.find({"device_id": resolved_device_id}, {"_id": 0, "id": 1}).to_list(10)
+    if any(str(link.get("id") or "") != str(asset_id or "") for link in links):
+        raise HTTPException(status_code=409, detail="This managed asset is already linked to another lifecycle record")
+
+
+def _delete_blocker(asset: dict) -> str | None:
+    if asset.get("device_id"):
+        return "This lifecycle record is linked to a managed asset. Archive or transition it instead of deleting its evidence."
+    if asset.get("contract_id") or asset.get("contract_line_item_id") or asset.get("billing_lock"):
+        return "This lifecycle record is linked to billing or a contract. Reconcile that relationship before deletion."
+    return None
 
 
 @router.get("/asset-lifecycle")
@@ -109,7 +148,10 @@ async def get_lifecycle_asset(asset_id: str, current_user: dict = Depends(get_cu
     return _lifecycle_view(asset)
 
 
-@router.post("/asset-lifecycle")
+@router.post(
+    "/asset-lifecycle",
+    dependencies=[Depends(require_action("asset.lifecycle.manage"))],
+)
 async def create_lifecycle_asset(data: dict, current_user: dict = Depends(get_current_user)):
     name = str(data.get("name") or "").strip()
     if not name:
@@ -126,6 +168,12 @@ async def create_lifecycle_asset(data: dict, current_user: dict = Depends(get_cu
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
         client_name = client.get("name") or ""
+    await _validate_device_link(
+        current_user,
+        client_id=client_id,
+        device_id=data.get("device_id"),
+        operation="asset.lifecycle.create",
+    )
 
     asset_id = str(uuid.uuid4())
     purchase_cost = float(data.get("purchase_cost", data.get("cost", 0)) or 0)
@@ -176,18 +224,36 @@ async def create_lifecycle_asset(data: dict, current_user: dict = Depends(get_cu
     return _lifecycle_view(asset)
 
 
-@router.put("/asset-lifecycle/{asset_id}")
+@router.put(
+    "/asset-lifecycle/{asset_id}",
+    dependencies=[Depends(require_action("asset.lifecycle.manage"))],
+)
 async def update_lifecycle_asset(asset_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     existing = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.update", resource_name="Inventory asset")
-    if "client_id" in data and data.get("client_id") != existing.get("client_id"):
-        await assert_client_scope(current_user, data.get("client_id"), operation="asset.lifecycle.reassign")
+    next_client_id = data.get("client_id", existing.get("client_id"))
+    if "client_id" in data and next_client_id != existing.get("client_id"):
+        await assert_client_scope(current_user, next_client_id, operation="asset.lifecycle.reassign")
+        client = await db.clients.find_one({"id": next_client_id}, {"_id": 0, "name": 1}) if next_client_id else None
+        if next_client_id and not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+    else:
+        client = None
+    await _validate_device_link(
+        current_user,
+        client_id=next_client_id,
+        device_id=data.get("device_id", existing.get("device_id")),
+        asset_id=asset_id,
+        operation="asset.lifecycle.update",
+    )
 
     allowed = {
-        "name", "asset_type", "category", "manufacturer", "model", "serial_number", "client_id", "client_name",
+        "name", "asset_type", "category", "manufacturer", "model", "serial_number", "client_id",
         "device_id", "assigned_to", "assigned_user_name", "location", "purchase_date", "vendor", "purchase_order_number",
         "warranty_start", "notes", "expected_lifespan_months", "depreciation_method", "depreciation_rate",
     }
     update = {key: value for key, value in data.items() if key in allowed}
+    if client is not None:
+        update["client_name"] = client.get("name") or ""
     if "purchase_cost" in data or "cost" in data:
         cost = float(data.get("purchase_cost", data.get("cost", 0)) or 0)
         update.update({"cost": cost, "purchase_cost": cost})
@@ -209,20 +275,45 @@ async def update_lifecycle_asset(asset_id: str, data: dict, current_user: dict =
         }
         await db.assets.update_one({"id": asset_id}, {"$push": {"history": history}})
 
+    changed_fields = {key: {"old": existing.get(key), "new": value} for key, value in update.items() if key != "updated_at" and existing.get(key) != value}
+    if changed_fields:
+        await db.assets.update_one(
+            {"id": asset_id},
+            {"$push": {"history": {
+                "id": str(uuid.uuid4()), "action": "asset_updated", "stage": update.get("lifecycle_stage") or _lifecycle_view(existing)["lifecycle_stage"],
+                "user_id": current_user.get("id"), "user_name": _user_name(current_user),
+                "notes": f"Updated {', '.join(sorted(changed_fields))}", "timestamp": _now(),
+            }}},
+        )
+
     await db.assets.update_one({"id": asset_id}, {"$set": update})
     return {"message": "Inventory asset updated"}
 
 
-@router.delete("/asset-lifecycle/{asset_id}")
+@router.delete(
+    "/asset-lifecycle/{asset_id}",
+    dependencies=[Depends(require_action("asset.lifecycle.manage"))],
+)
 async def delete_lifecycle_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.delete", resource_name="Inventory asset")
+    asset = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.delete", resource_name="Inventory asset")
+    blocker = _delete_blocker(asset)
+    if blocker:
+        raise HTTPException(status_code=409, detail=blocker)
     result = await db.assets.delete_one({"id": asset_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Inventory asset not found")
+    await log_activity(
+        current_user, "deleted", "asset", asset_id, str(asset.get("name") or asset_id),
+        "Permanently deleted an empty manual lifecycle record.",
+        metadata={"purge": True, "client_id": asset.get("client_id")},
+    )
     return {"message": "Inventory asset deleted"}
 
 
-@router.post("/asset-lifecycle/{asset_id}/transition")
+@router.post(
+    "/asset-lifecycle/{asset_id}/transition",
+    dependencies=[Depends(require_action("asset.lifecycle.manage"))],
+)
 async def transition_lifecycle_stage(asset_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     asset = await assert_record_scope(current_user, db.assets, asset_id, operation="asset.lifecycle.transition", resource_name="Inventory asset")
     new_stage = data.get("new_stage") or ""

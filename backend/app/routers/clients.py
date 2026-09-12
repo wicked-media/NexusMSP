@@ -6,7 +6,14 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.nexus_timeline import TIMELINE_CATEGORIES, build_client_timeline
-from app.services.scope_permissions import assert_global_scope, assert_record_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_global_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.models import *
 
 router = APIRouter()
@@ -132,7 +139,7 @@ async def _build_what_changed_brief(client_id: str, days: int) -> dict:
 @router.get("/clients", response_model=List[Client])
 async def get_clients(current_user: dict = Depends(get_current_user)):
     clients = await db.clients.find(
-        scoped_query(current_user, field="id", site_field=None),
+        tenant_scoped_query(current_user, scoped_query(current_user, field="id", site_field=None)),
         {"_id": 0},
     ).to_list(1000)
     for c in clients:
@@ -142,7 +149,7 @@ async def get_clients(current_user: dict = Depends(get_current_user)):
 
 @router.get("/clients/{client_id}")
 async def get_client(client_id: str, current_user: dict = Depends(get_current_user)):
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.clients,
         client_id,
@@ -156,28 +163,32 @@ async def create_client(client_data: ClientCreate, current_user: dict = Depends(
     await assert_global_scope(current_user, operation="client.create")
     client = Client(**client_data.model_dump())
     doc = client.model_dump()
+    doc['tenant_id'] = platform_tenant_id(current_user)
     doc['created_at'] = doc['created_at'].isoformat()
     await db.clients.insert_one(doc)
     return client
 
 @router.put("/clients/{client_id}")
 async def update_client(client_id: str, client_data: ClientCreate, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(
+    await assert_tenant_record_scope(
         current_user, db.clients, client_id,
         client_field="id", operation="client.update", resource_name="Client",
     )
-    result = await db.clients.update_one({"id": client_id}, {"$set": client_data.model_dump()})
+    result = await db.clients.update_one(
+        tenant_scoped_query(current_user, {"id": client_id}),
+        {"$set": client_data.model_dump()},
+    )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
     return {"message": "Client updated"}
 
 @router.delete("/clients/{client_id}")
 async def delete_client(client_id: str, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(
+    await assert_tenant_record_scope(
         current_user, db.clients, client_id,
         client_field="id", operation="client.delete", resource_name="Client",
     )
-    result = await db.clients.delete_one({"id": client_id})
+    result = await db.clients.delete_one(tenant_scoped_query(current_user, {"id": client_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Client not found")
     return {"message": "Client deleted"}
@@ -187,7 +198,7 @@ async def delete_client(client_id: str, current_user: dict = Depends(get_current
 @router.get("/clients/{client_id}/health")
 async def get_client_health(client_id: str, current_user: dict = Depends(get_current_user)):
     """Calculate client health score (0-100) based on multiple factors"""
-    client = await assert_record_scope(
+    client = await assert_tenant_record_scope(
         current_user, db.clients, client_id,
         client_field="id", operation="client.health.read", resource_name="Client",
     )
@@ -197,7 +208,7 @@ async def get_client_health(client_id: str, current_user: dict = Depends(get_cur
 async def get_all_client_health(current_user: dict = Depends(get_current_user)):
     """Get health scores for all clients"""
     clients = await db.clients.find(
-        scoped_query(current_user, field="id", site_field=None),
+        tenant_scoped_query(current_user, scoped_query(current_user, field="id", site_field=None)),
         {"_id": 0},
     ).to_list(1000)
     results = []
@@ -211,21 +222,21 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
     """Rich one-shot dataset powering the revamped Clients page."""
     now = datetime.now(timezone.utc)
     clients = await db.clients.find(
-        scoped_query(current_user, field="id", site_field=None),
+        tenant_scoped_query(current_user, scoped_query(current_user, field="id", site_field=None)),
         {"_id": 0},
     ).to_list(1000)
     client_ids = [c["id"] for c in clients]
 
     open_tix_map = {}
     async for row in db.tickets.aggregate([
-        {"$match": {"client_id": {"$in": client_ids}, "status": {"$in": ["open", "in_progress", "pending"]}}},
+        {"$match": tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}, "status": {"$in": ["open", "in_progress", "pending"]}})},
         {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
     ]):
         open_tix_map[row["_id"]] = row["count"]
 
     asset_map = {}
     async for row in db.devices.aggregate([
-        {"$match": {"client_id": {"$in": client_ids}}},
+        {"$match": tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}})},
         {"$group": {
             "_id": "$client_id", "count": {"$sum": 1},
             "online": {"$sum": {"$cond": [{"$eq": ["$status", "online"]}, 1, 0]}},
@@ -238,16 +249,18 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
     ]):
         asset_map[row["_id"]] = {"total": row["count"], "online": row["online"], "assessed": row.get("assessed", 0), "pending_patches": int(row.get("pending_patches") or 0)}
 
-    contact_map = {}
-    async for row in db.contacts.aggregate([
-        {"$match": {"client_id": {"$in": client_ids}}},
-        {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
-    ]):
-        contact_map[row["_id"]] = row["count"]
+    # Contacts are currently embedded in their authoritative client record.
+    # Counting a legacy standalone collection here made the Client directory
+    # disagree with the contact cards and could understate account readiness.
+    contact_map = {
+        client["id"]: len(client.get("contacts") or [])
+        for client in clients
+        if client.get("id")
+    }
 
     overdue_map = {}
     async for row in db.invoices.aggregate([
-        {"$match": {"client_id": {"$in": client_ids}, "payment_status": {"$ne": "paid"}, "due_date": {"$lt": now.isoformat()}}},
+        {"$match": tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}, "payment_status": {"$ne": "paid"}, "due_date": {"$lt": now.isoformat()}})},
         {"$group": {"_id": "$client_id", "count": {"$sum": 1}, "amount": {"$sum": "$total"}}},
     ]):
         overdue_map[row["_id"]] = {"count": row["count"], "amount": row["amount"]}
@@ -258,7 +271,7 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
         month_keys.append(dt)
     mrr_trend_map = {cid: {k: 0.0 for k in month_keys} for cid in client_ids}
     async for inv in db.invoices.find(
-        {"client_id": {"$in": client_ids}, "created_at": {"$gte": (now - timedelta(days=366)).isoformat()}},
+        tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}, "created_at": {"$gte": (now - timedelta(days=366)).isoformat()}}),
         {"_id": 0, "client_id": 1, "created_at": 1, "total": 1}
     ):
         try:
@@ -270,21 +283,21 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
 
     active_contract_map = {}
     async for row in db.contracts.aggregate([
-        {"$match": {"client_id": {"$in": client_ids}, "status": "active"}},
+        {"$match": tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}, "status": "active"})},
         {"$group": {"_id": "$client_id", "count": {"$sum": 1}, "mrr": {"$sum": "$monthly_value"}}},
     ]):
         active_contract_map[row["_id"]] = row
 
-    acronis_links = {l["client_id"] async for l in db.acronis_customer_links.find({}, {"_id": 0, "client_id": 1})}
-    pax8_links = {l["client_id"] async for l in db.pax8_company_links.find({}, {"_id": 0, "client_id": 1})}
+    acronis_links = {l["client_id"] async for l in db.acronis_customer_links.find(tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0, "client_id": 1})}
+    pax8_links = {l["client_id"] async for l in db.pax8_company_links.find(tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0, "client_id": 1})}
     nexus_dmarc_domains = await db.nexus_dmarc_domains.find(
-        {"client_id": {"$in": client_ids}}, {"_id": 0, "client_id": 1, "dmarc_status": 1, "last_report_at": 1}
+        tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0, "client_id": 1, "dmarc_status": 1, "last_report_at": 1}
     ).to_list(1000)
     nexus_dmarc_by_client = {}
     for record in nexus_dmarc_domains:
         nexus_dmarc_by_client.setdefault(record.get("client_id"), []).append(record)
     yeastar_records = await db.yeastar_pbxs.find(
-        {"client_id": {"$in": client_ids}, "enabled": {"$ne": False}},
+        tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}, "enabled": {"$ne": False}}),
         {"_id": 0, "id": 1, "client_id": 1, "name": 1, "status": 1, "extension_count": 1, "billable_extension_count": 1, "last_sync": 1},
     ).to_list(500)
     yeastar_links = {record["client_id"] for record in yeastar_records if record.get("client_id")}
@@ -293,7 +306,7 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
         yeastar_by_client.setdefault(record.get("client_id"), []).append(record)
 
     last_activity_map = {}
-    async for t in db.tickets.find({"client_id": {"$in": client_ids}}, {"_id": 0, "client_id": 1, "updated_at": 1, "created_at": 1}).sort("updated_at", -1):
+    async for t in db.tickets.find(tenant_scoped_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0, "client_id": 1, "updated_at": 1, "created_at": 1}).sort("updated_at", -1):
         cid = t["client_id"]
         if cid not in last_activity_map:
             last_activity_map[cid] = t.get("updated_at") or t.get("created_at")
@@ -324,6 +337,7 @@ async def get_clients_enriched(current_user: dict = Depends(get_current_user)):
             "email": c.get("email"),
             "phone": c.get("phone"),
             "address": c.get("address"),
+            "website": c.get("website"),
             "health_score": health["health_score"],
             "risk_level": health["risk_level"],
             "open_tickets": open_tix_map.get(cid, 0),
@@ -471,12 +485,12 @@ async def get_client_activity_timeline(client_id: str, current_user: dict = Depe
     # Client-level operational milestones, including onboarding completion,
     # are kept with the same client history as correspondence and tickets.
     client_activity = await db.activity_logs.find(
-        {"entity_type": "client", "entity_id": client_id}, {"_id": 0}
+        {"$or": [{"entity_type": "client", "entity_id": client_id}, {"entity_type": "device", "metadata.client_id": client_id}]}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     for entry in client_activity:
         timeline.append({
             "type": "client_activity",
-            "title": entry.get("details") or entry.get("action", "Client activity").replace("_", " "),
+            "title": (entry.get("details") or entry.get("action", "Client activity").replace("_", " ")) + (f" — Reason: {entry['metadata']['reason']}" if entry.get("metadata", {}).get("reason") else ""),
             "status": entry.get("action"),
             "timestamp": entry.get("created_at"),
             "id": entry.get("id"),

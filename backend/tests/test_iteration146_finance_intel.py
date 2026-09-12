@@ -18,7 +18,7 @@ import uuid
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 TEST_EMAIL = "aaron@stech.com.au"
-TEST_PASSWORD = "Lucky@2871$!"
+TEST_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="module")
@@ -44,7 +44,7 @@ def api(auth_token):
     return session
 
 
-# ═══════════════════════ 1) SMART PRODUCT CATALOG ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 1) SMART PRODUCT CATALOG Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestProductMarginInsights:
     """Tests for GET /api/finance/product-margin-insights"""
@@ -65,7 +65,7 @@ class TestProductMarginInsights:
         assert "low_margin_count" in summary
         assert "cost_erosion_count" in summary
         assert "avg_margin_pct" in summary
-        print(f"✓ Product margin insights: {summary['count']} products, {summary['avg_margin_pct']}% avg margin")
+        print(f"Ã¢Å“â€œ Product margin insights: {summary['count']} products, {summary['avg_margin_pct']}% avg margin")
         
     def test_product_margin_insights_product_fields(self, api):
         resp = api.get(f"{BASE_URL}/api/finance/product-margin-insights")
@@ -75,7 +75,7 @@ class TestProductMarginInsights:
             required_fields = ["id", "name", "cost_price", "retail_price", "margin_pct", "status"]
             for field in required_fields:
                 assert field in p, f"Missing field '{field}' in product"
-            print(f"✓ First product: {p['name']} - margin {p['margin_pct']}%, status: {p['status']}")
+            print(f"Ã¢Å“â€œ First product: {p['name']} - margin {p['margin_pct']}%, status: {p['status']}")
 
 
 class TestProductPriceHistory:
@@ -94,7 +94,7 @@ class TestProductPriceHistory:
         data = resp.json()
         assert "product_id" in data
         assert "history" in data
-        print(f"✓ Price history for {product_id}: {len(data['history'])} entries")
+        print(f"Ã¢Å“â€œ Price history for {product_id}: {len(data['history'])} entries")
         
     def test_get_price_history_404_for_invalid_product(self, api):
         resp = api.get(f"{BASE_URL}/api/finance/product/invalid-product-id/price-history")
@@ -120,7 +120,7 @@ class TestProductPriceHistory:
         data = resp.json()
         assert data.get("ok") is True
         assert "entry" in data
-        print(f"✓ Price change recorded for {product_id}")
+        print(f"Ã¢Å“â€œ Price change recorded for {product_id}")
         
         # Revert the price change
         api.post(f"{BASE_URL}/api/finance/product/{product_id}/price-change", json={
@@ -130,7 +130,7 @@ class TestProductPriceHistory:
         })
 
 
-# ═══════════════════════ 2) PRODUCT KITS / BUNDLES ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 2) PRODUCT KITS / BUNDLES Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestProductKits:
     """Tests for Product Kits CRUD"""
@@ -141,7 +141,7 @@ class TestProductKits:
         data = resp.json()
         assert "kits" in data
         assert "count" in data
-        print(f"✓ Listed {data['count']} kits")
+        print(f"Ã¢Å“â€œ Listed {data['count']} kits")
         
     def test_create_kit_success(self, api):
         # Get a product to add to kit
@@ -163,7 +163,7 @@ class TestProductKits:
         data = resp.json()
         assert data.get("name") == kit_name
         assert "id" in data
-        print(f"✓ Created kit: {kit_name} (id: {data['id']})")
+        print(f"Ã¢Å“â€œ Created kit: {kit_name} (id: {data['id']})")
         return data["id"]
         
     def test_create_kit_400_when_name_missing(self, api):
@@ -185,7 +185,7 @@ class TestProductKits:
         })
         assert resp.status_code == 200
         assert resp.json().get("ok") is True
-        print(f"✓ Updated kit {kit_id}")
+        print(f"Ã¢Å“â€œ Updated kit {kit_id}")
         
         # Cleanup
         api.delete(f"{BASE_URL}/api/product-kits/{kit_id}")
@@ -204,7 +204,7 @@ class TestProductKits:
         resp = api.delete(f"{BASE_URL}/api/product-kits/{kit_id}")
         assert resp.status_code == 200
         assert resp.json().get("deleted") is True
-        print(f"✓ Deleted kit {kit_id}")
+        print(f"Ã¢Å“â€œ Deleted kit {kit_id}")
         
     def test_delete_kit_404_for_invalid_id(self, api):
         resp = api.delete(f"{BASE_URL}/api/product-kits/invalid-kit-id")
@@ -241,7 +241,7 @@ class TestApplyKitToTicket:
         data = resp.json()
         assert data.get("ok") is True
         assert "attached_count" in data
-        print(f"✓ Applied kit to ticket {ticket_id}: {data['attached_count']} products attached")
+        print(f"Ã¢Å“â€œ Applied kit to ticket {ticket_id}: {data['attached_count']} products attached")
         
         # Cleanup
         api.delete(f"{BASE_URL}/api/product-kits/{kit_id}")
@@ -267,7 +267,7 @@ class TestApplyKitToTicket:
         assert resp.status_code == 404
 
 
-# ═══════════════════════ 3) PER-CLIENT PRICE BOOK ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 3) PER-CLIENT PRICE BOOK Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestClientPriceBook:
     """Tests for Client Price Book endpoints"""
@@ -285,7 +285,7 @@ class TestClientPriceBook:
         data = resp.json()
         assert "overrides" in data
         assert "count" in data
-        print(f"✓ Price book for client {client_id}: {data['count']} overrides")
+        print(f"Ã¢Å“â€œ Price book for client {client_id}: {data['count']} overrides")
         
     def test_upsert_price_override(self, api):
         # Get client and product
@@ -309,7 +309,7 @@ class TestClientPriceBook:
         })
         assert resp.status_code == 200
         assert resp.json().get("ok") is True
-        print(f"✓ Created price override for client {client_id}, product {product_id}")
+        print(f"Ã¢Å“â€œ Created price override for client {client_id}, product {product_id}")
         
         # Cleanup
         api.delete(f"{BASE_URL}/api/clients/{client_id}/price-book/{product_id}")
@@ -349,7 +349,7 @@ class TestClientPriceBook:
         resp = api.delete(f"{BASE_URL}/api/clients/{client_id}/price-book/{product_id}")
         assert resp.status_code == 200
         assert resp.json().get("deleted") is True
-        print(f"✓ Deleted price override")
+        print(f"Ã¢Å“â€œ Deleted price override")
         
     def test_get_client_price_for_product(self, api):
         # Get client and product
@@ -371,10 +371,10 @@ class TestClientPriceBook:
         assert "price" in data
         assert "source" in data
         assert data["source"] in ["standard", "client_override"]
-        print(f"✓ Price for client {client_id}, product {product_id}: ${data['price']} ({data['source']})")
+        print(f"Ã¢Å“â€œ Price for client {client_id}, product {product_id}: ${data['price']} ({data['source']})")
 
 
-# ═══════════════════════ 4) SUBSCRIPTION DRIFT DETECTOR ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 4) SUBSCRIPTION DRIFT DETECTOR Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestSubscriptionDrift:
     """Tests for GET /api/subscription-drift"""
@@ -390,10 +390,10 @@ class TestSubscriptionDrift:
         assert "count" in data
         assert "total_monthly_waste_aud" in data
         assert "annual_waste_aud" in data
-        print(f"✓ Subscription drift: {data['count']} findings, ${data['total_monthly_waste_aud']}/mo waste")
+        print(f"Ã¢Å“â€œ Subscription drift: {data['count']} findings, ${data['total_monthly_waste_aud']}/mo waste")
 
 
-# ═══════════════════════ 5) CASH FLOW FORECAST ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 5) CASH FLOW FORECAST Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestCashFlowForecast:
     """Tests for GET /api/finance/cash-flow-forecast"""
@@ -416,10 +416,10 @@ class TestCashFlowForecast:
         assert "60d" in projected
         assert "90d" in projected
         
-        print(f"✓ Cash flow forecast: 30d=${projected['30d']}, 60d=${projected['60d']}, 90d=${projected['90d']}")
+        print(f"Ã¢Å“â€œ Cash flow forecast: 30d=${projected['30d']}, 60d=${projected['60d']}, 90d=${projected['90d']}")
 
 
-# ═══════════════════════ 6) LATE-PAYMENT PREDICTOR ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 6) LATE-PAYMENT PREDICTOR Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestLatePaymentRisk:
     """Tests for late payment risk endpoints"""
@@ -439,7 +439,7 @@ class TestLatePaymentRisk:
         assert "medium_risk" in summary
         assert "low_risk" in summary
         assert "total" in summary
-        print(f"✓ Late payment risk: {summary['total']} invoices scored (H:{summary['high_risk']}, M:{summary['medium_risk']}, L:{summary['low_risk']})")
+        print(f"Ã¢Å“â€œ Late payment risk: {summary['total']} invoices scored (H:{summary['high_risk']}, M:{summary['medium_risk']}, L:{summary['low_risk']})")
         
     def test_late_payment_risk_invoice_fields(self, api):
         resp = api.get(f"{BASE_URL}/api/finance/invoices/late-payment-risk")
@@ -450,7 +450,7 @@ class TestLatePaymentRisk:
             assert "band" in inv
             assert "reasons" in inv
             assert inv["band"] in ["high", "medium", "low"]
-            print(f"✓ First invoice: score={inv['score']}, band={inv['band']}")
+            print(f"Ã¢Å“â€œ First invoice: score={inv['score']}, band={inv['band']}")
             
     def test_single_invoice_late_risk(self, api):
         # Get an invoice
@@ -466,14 +466,14 @@ class TestLatePaymentRisk:
         assert "score" in data
         assert "band" in data
         assert "reasons" in data
-        print(f"✓ Invoice {invoice_id} late risk: score={data['score']}, band={data['band']}")
+        print(f"Ã¢Å“â€œ Invoice {invoice_id} late risk: score={data['score']}, band={data['band']}")
         
     def test_single_invoice_late_risk_404(self, api):
         resp = api.get(f"{BASE_URL}/api/invoices/invalid-invoice-id/late-risk")
         assert resp.status_code == 404
 
 
-# ═══════════════════════ 7) MARGIN PER INVOICE ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 7) MARGIN PER INVOICE Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestInvoiceMargin:
     """Tests for invoice margin endpoints"""
@@ -502,7 +502,7 @@ class TestInvoiceMargin:
         assert "cost_breakdown" in data
         assert "profit" in data
         assert "margin_pct" in data
-        print(f"✓ Invoice {invoice_id} margin: revenue=${data['revenue']}, profit=${data['profit']}, margin={data['margin_pct']}%")
+        print(f"Ã¢Å“â€œ Invoice {invoice_id} margin: revenue=${data['revenue']}, profit=${data['profit']}, margin={data['margin_pct']}%")
         
     def test_invoice_margin_404(self, api):
         resp = api.get(f"{BASE_URL}/api/invoices/invalid-invoice-id/margin")
@@ -521,10 +521,10 @@ class TestInvoiceMargin:
         assert "total_profit" in data
         assert "margin_pct" in data
         assert "clients" in data
-        print(f"✓ Margin overview (90d): revenue=${data['total_revenue']}, profit=${data['total_profit']}, margin={data['margin_pct']}%")
+        print(f"Ã¢Å“â€œ Margin overview (90d): revenue=${data['total_revenue']}, profit=${data['total_profit']}, margin={data['margin_pct']}%")
 
 
-# ═══════════════════════ 8) PREDICTIVE AUTO-QUOTE TRIGGER ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 8) PREDICTIVE AUTO-QUOTE TRIGGER Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestQuoteNudge:
     """Tests for POST /api/tickets/{ticket_id}/quote-nudge"""
@@ -553,14 +553,14 @@ class TestQuoteNudge:
         assert "signals" in data
         assert isinstance(data["should_quote"], bool)
         assert isinstance(data["score"], (int, float))
-        print(f"✓ Quote nudge for ticket {ticket_id}: should_quote={data['should_quote']}, score={data['score']}")
+        print(f"Ã¢Å“â€œ Quote nudge for ticket {ticket_id}: should_quote={data['should_quote']}, score={data['score']}")
         
     def test_quote_nudge_404(self, api):
         resp = api.post(f"{BASE_URL}/api/tickets/invalid-ticket-id/quote-nudge")
         assert resp.status_code == 404
 
 
-# ═══════════════════════ 9) PRE-EMPTIVE DISPUTESHIELD SCAN ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â 9) PRE-EMPTIVE DISPUTESHIELD SCAN Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestDisputeScan:
     """Tests for POST /api/invoices/{invoice_id}/dispute-scan"""
@@ -587,14 +587,14 @@ class TestDisputeScan:
         assert "flags" in data
         # Model can be "heuristic-only" or "claude-sonnet-4-5"
         assert "model" in data or "error" in data
-        print(f"✓ Dispute scan for invoice {invoice_id}: {len(data.get('flags', []))} flags, model={data.get('model', 'N/A')}")
+        print(f"Ã¢Å“â€œ Dispute scan for invoice {invoice_id}: {len(data.get('flags', []))} flags, model={data.get('model', 'N/A')}")
         
     def test_dispute_scan_404(self, api):
         resp = api.post(f"{BASE_URL}/api/invoices/invalid-invoice-id/dispute-scan")
         assert resp.status_code == 404
 
 
-# ═══════════════════════ REGRESSION TESTS ═══════════════════════
+# Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â REGRESSION TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestRegressionEndpoints:
     """Regression tests for existing endpoints"""
@@ -602,29 +602,29 @@ class TestRegressionEndpoints:
     def test_products_endpoint(self, api):
         resp = api.get(f"{BASE_URL}/api/products")
         assert resp.status_code == 200
-        print("✓ /api/products still works")
+        print("Ã¢Å“â€œ /api/products still works")
         
     def test_invoices_endpoint(self, api):
         resp = api.get(f"{BASE_URL}/api/invoices")
         assert resp.status_code == 200
-        print("✓ /api/invoices still works")
+        print("Ã¢Å“â€œ /api/invoices still works")
         
     def test_help_copilot_endpoint(self, api):
         resp = api.post(f"{BASE_URL}/api/help/copilot", json={"question": "How do I create a ticket?"})
         assert resp.status_code == 200
         data = resp.json()
         assert "answer" in data
-        print("✓ /api/help/copilot still works")
+        print("Ã¢Å“â€œ /api/help/copilot still works")
         
     def test_atmosphere_endpoint(self, api):
         resp = api.get(f"{BASE_URL}/api/atmosphere")
         assert resp.status_code == 200
-        print("✓ /api/atmosphere still works")
+        print("Ã¢Å“â€œ /api/atmosphere still works")
         
     def test_change_freezes_endpoint(self, api):
         resp = api.get(f"{BASE_URL}/api/change-freezes")
         assert resp.status_code == 200
-        print("✓ /api/change-freezes still works")
+        print("Ã¢Å“â€œ /api/change-freezes still works")
 
 
 if __name__ == "__main__":

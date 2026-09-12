@@ -1,12 +1,45 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 from pymongo.errors import DuplicateKeyError
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.activity import log_activity
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_record_scope,
+    scoped_query,
+)
 
 router = APIRouter()
+
+
+async def _get_scoped_recurring_invoice(
+    recurring_invoice_id: str,
+    current_user: dict,
+    *,
+    operation: str,
+) -> dict:
+    """Load one recurring invoice without revealing another client's record."""
+    return await assert_record_scope(
+        current_user,
+        db.recurring_invoices,
+        recurring_invoice_id,
+        operation=operation,
+        resource_name="Recurring invoice",
+    )
+
+
+async def _require_global_recurring_template_scope(
+    current_user: dict,
+    request: Request | None,
+    operation: str,
+) -> None:
+    """Reusable billing baselines are organisation-wide commercial settings."""
+    await assert_global_scope(current_user, operation=operation, request=request)
 
 
 async def _ensure_recurring_period_guard():
@@ -123,15 +156,18 @@ async def _deliver_recurring_invoice(invoice: dict, recurring: dict, current_use
 
 @router.get("/recurring-invoices/list")
 async def get_recurring_invoices(current_user: dict = Depends(get_current_user)):
-    invoices = await db.recurring_invoices.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    if not invoices:
-        invoices = await _seed_recurring()
-    return invoices
+    # Do not seed demo billing data from a read path.  An empty scoped result is
+    # legitimate, particularly for a technician who is assigned to another client.
+    return await db.recurring_invoices.find(
+        scoped_query(current_user), {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
 
 
 @router.get("/recurring-invoices/stats")
 async def get_recurring_stats(current_user: dict = Depends(get_current_user)):
-    all_ri = await db.recurring_invoices.find({}, {"_id": 0}).to_list(500)
+    all_ri = await db.recurring_invoices.find(
+        scoped_query(current_user), {"_id": 0}
+    ).to_list(500)
     active = [r for r in all_ri if r.get("status") == "active"]
     paused = [r for r in all_ri if r.get("status") == "paused"]
     monthly = [r for r in active if r.get("frequency") == "monthly"]
@@ -163,10 +199,9 @@ async def get_recurring_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/recurring-invoices/{ri_id}")
 async def get_recurring_invoice(ri_id: str, current_user: dict = Depends(get_current_user)):
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Recurring invoice not found")
-    return ri
+    return await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.read"
+    )
 
 
 @router.post("/recurring-invoices/create")
@@ -175,6 +210,12 @@ async def create_recurring(data: dict, current_user: dict = Depends(get_current_
     line_items = data.get("line_items", [])
     if not data.get("client_id") or not str(data.get("description", "")).strip():
         raise HTTPException(status_code=400, detail="Client and description are required")
+    await assert_client_scope(
+        current_user,
+        str(data["client_id"]),
+        operation="recurring_invoice.create",
+        mask_not_found=True,
+    )
     if not line_items:
         raise HTTPException(status_code=400, detail="At least one recurring invoice line is required")
     for line in line_items:
@@ -233,10 +274,20 @@ async def create_recurring(data: dict, current_user: dict = Depends(get_current_
 
 @router.put("/recurring-invoices/{ri_id}")
 async def update_recurring(ri_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    ri = await db.recurring_invoices.find_one({"id": ri_id})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Recurring invoice not found")
-    update = {k: v for k, v in data.items() if k not in ("id", "_id", "created_at", "created_by")}
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.update"
+    )
+    requested_client_id = data.get("client_id")
+    if requested_client_id is not None and str(requested_client_id) != str(ri.get("client_id") or ""):
+        raise HTTPException(
+            status_code=422,
+            detail="A recurring invoice cannot be moved to a different client",
+        )
+    update = {
+        k: v
+        for k, v in data.items()
+        if k not in ("id", "_id", "client_id", "created_at", "created_by")
+    }
     # Recalculate amount if line_items changed
     if "line_items" in update:
         if not update["line_items"]:
@@ -254,24 +305,32 @@ async def update_recurring(ri_id: str, data: dict, current_user: dict = Depends(
     if update.get("auto_send", ri.get("auto_send", False)) and not str(update.get("auto_send_email", ri.get("auto_send_email", ""))).strip():
         raise HTTPException(status_code=400, detail="An email recipient is required when auto-send is enabled")
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.recurring_invoices.update_one({"id": ri_id}, {"$set": update})
+    await db.recurring_invoices.update_one(
+        {"id": ri_id, "client_id": ri.get("client_id")}, {"$set": update}
+    )
     return {"message": "Updated"}
 
 
 @router.delete("/recurring-invoices/{ri_id}")
 async def delete_recurring(ri_id: str, current_user: dict = Depends(get_current_user)):
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0, "invoices_generated": 1, "generation_history": 1})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Not found")
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.delete"
+    )
     if ri.get("invoices_generated", 0) > 0 or ri.get("generation_history"):
         raise HTTPException(status_code=400, detail="Recurring invoices with generated invoice history are retained for financial traceability")
-    result = await db.recurring_invoices.delete_one({"id": ri_id})
+    await db.recurring_invoices.delete_one({"id": ri_id, "client_id": ri.get("client_id")})
     return {"message": "Deleted"}
 
 
 @router.get("/recurring-invoices/by-client/{client_id}")
 async def get_recurring_by_client(client_id: str, current_user: dict = Depends(get_current_user)):
     """Return active recurring invoices for a specific client (used by Acronis link UI)."""
+    await assert_client_scope(
+        current_user,
+        client_id,
+        operation="recurring_invoice.list_by_client",
+        mask_not_found=True,
+    )
     docs = await db.recurring_invoices.find(
         {"client_id": client_id},
         {"_id": 0, "id": 1, "description": 1, "amount": 1, "currency": 1, "frequency": 1,
@@ -284,12 +343,12 @@ async def get_recurring_by_client(client_id: str, current_user: dict = Depends(g
 @router.post("/recurring-invoices/{ri_id}/set-acronis-auto")
 async def set_acronis_auto(ri_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Toggle the include_acronis_usage flag on a specific recurring invoice."""
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Not found")
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.acronis_auto.update"
+    )
     enabled = bool(data.get("include_acronis_usage", True))
     await db.recurring_invoices.update_one(
-        {"id": ri_id},
+        {"id": ri_id, "client_id": ri.get("client_id")},
         {"$set": {
             "include_acronis_usage": enabled,
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -300,13 +359,16 @@ async def set_acronis_auto(ri_id: str, data: dict, current_user: dict = Depends(
 
 @router.post("/recurring-invoices/{ri_id}/toggle")
 async def toggle_recurring(ri_id: str, current_user: dict = Depends(get_current_user)):
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Not found")
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.toggle"
+    )
     if ri.get("status") not in ("active", "paused"):
         raise HTTPException(status_code=400, detail="Only active or paused recurring invoices can be toggled")
     new_status = "paused" if ri.get("status") == "active" else "active"
-    await db.recurring_invoices.update_one({"id": ri_id}, {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    await db.recurring_invoices.update_one(
+        {"id": ri_id, "client_id": ri.get("client_id")},
+        {"$set": {"status": new_status, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
     return {"status": new_status}
 
 
@@ -315,9 +377,9 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
     """Manually generate an invoice from a recurring template right now.
     If the linked contract's client has an Acronis tenant and `include_acronis_usage=True`,
     fresh Acronis usage line items are auto-attached for the current period."""
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Not found")
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.generate"
+    )
     if ri.get("status") != "active":
         raise HTTPException(status_code=400, detail="Activate the recurring invoice before generating an invoice")
 
@@ -432,7 +494,7 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
                  "acronis_items": len(acronis_attached),
                  "pax8_items": len(pax8_attached), "yeastar_items": len(yeastar_attached), "delivery": delivery}
     next_date = _calc_next_date(now.strftime("%Y-%m-%d"), ri.get("frequency", "monthly"))
-    await db.recurring_invoices.update_one({"id": ri_id}, {
+    await db.recurring_invoices.update_one({"id": ri_id, "client_id": ri.get("client_id")}, {
         "$inc": {"invoices_generated": 1, "total_billed": total},
         "$set": {"last_generated": now.isoformat(), "next_generation": next_date, "updated_at": now.isoformat()},
         "$push": {"generation_history": gen_entry},
@@ -456,9 +518,9 @@ async def generate_invoice_now(ri_id: str, current_user: dict = Depends(get_curr
 @router.post("/recurring-invoices/{ri_id}/duplicate")
 async def duplicate_recurring(ri_id: str, current_user: dict = Depends(get_current_user)):
     """Duplicate a recurring invoice template."""
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Not found")
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.duplicate"
+    )
     now = datetime.now(timezone.utc)
     new_ri = {**ri}
     new_ri["id"] = f"ri-{uuid.uuid4().hex[:8]}"
@@ -477,22 +539,47 @@ async def duplicate_recurring(ri_id: str, current_user: dict = Depends(get_curre
 
 @router.get("/recurring-invoices/{ri_id}/history")
 async def get_generation_history(ri_id: str, current_user: dict = Depends(get_current_user)):
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Not found")
+    ri = await _get_scoped_recurring_invoice(
+        ri_id, current_user, operation="recurring_invoice.history.read"
+    )
     return ri.get("generation_history", [])
 
 
-# ============== INVOICE TEMPLATES (reusable billing templates) ==============
+# ============== RECURRING BILLING TEMPLATES (reusable line-item baselines) ==============
 
-@router.get("/invoice-templates")
-async def get_invoice_templates(current_user: dict = Depends(get_current_user)):
+# These are deliberately not ``/invoice-templates``.  That public namespace is
+# owned by the commercial PDF-layout template studio.  Reusing it made the
+# recurring UI create/list the wrong collection and let FastAPI shadow dynamic
+# update/delete handlers according to import order.
+@router.get(
+    "/recurring-invoice-templates",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def get_invoice_templates(
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    await _require_global_recurring_template_scope(
+        current_user, request, "recurring_invoice.template.list"
+    )
     templates = await db.invoice_templates.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return templates
 
 
-@router.post("/invoice-templates")
-async def create_invoice_template(data: dict, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/recurring-invoice-templates",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def create_invoice_template(
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    await _require_global_recurring_template_scope(
+        current_user, request, "recurring_invoice.template.create"
+    )
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Template payload must be an object")
     now = datetime.now(timezone.utc).isoformat()
     template = {
         "id": f"it-{uuid.uuid4().hex[:8]}",
@@ -510,34 +597,116 @@ async def create_invoice_template(data: dict, current_user: dict = Depends(get_c
         "updated_at": now,
     }
     await db.invoice_templates.insert_one(template)
-    return {k: v for k, v in template.items() if k != "_id"}
+    result = {k: v for k, v in template.items() if k != "_id"}
+    await log_activity(
+        current_user,
+        "created",
+        "recurring_invoice_template",
+        result["id"],
+        result["name"],
+        "Created an organisation-wide reusable recurring billing template",
+        metadata={"category": result["category"], "line_item_count": len(result["line_items"])},
+    )
+    return result
 
 
-@router.put("/invoice-templates/{template_id}")
-async def update_invoice_template(template_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.put(
+    "/recurring-invoice-templates/{template_id}",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def update_invoice_template(
+    template_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    await _require_global_recurring_template_scope(
+        current_user, request, "recurring_invoice.template.update"
+    )
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Template payload must be an object")
     tpl = await db.invoice_templates.find_one({"id": template_id})
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
-    update = {k: v for k, v in data.items() if k not in ("id", "_id", "created_at", "created_by")}
+    editable_fields = {
+        "name", "description", "line_items", "tax_rate", "payment_terms",
+        "notes", "currency", "category",
+    }
+    update = {key: value for key, value in data.items() if key in editable_fields}
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.invoice_templates.update_one({"id": template_id}, {"$set": update})
+    await log_activity(
+        current_user,
+        "updated",
+        "recurring_invoice_template",
+        template_id,
+        tpl.get("name") or "Recurring billing template",
+        "Updated an organisation-wide reusable recurring billing template",
+        metadata={"fields": sorted(key for key in update if key != "updated_at")},
+    )
     return {"message": "Template updated"}
 
 
-@router.delete("/invoice-templates/{template_id}")
-async def delete_invoice_template(template_id: str, current_user: dict = Depends(get_current_user)):
+@router.delete(
+    "/recurring-invoice-templates/{template_id}",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def delete_invoice_template(
+    template_id: str,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    await _require_global_recurring_template_scope(
+        current_user, request, "recurring_invoice.template.delete"
+    )
+    existing = await db.invoice_templates.find_one({"id": template_id}, {"_id": 0, "name": 1})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Template not found")
     result = await db.invoice_templates.delete_one({"id": template_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Template not found")
+    await log_activity(
+        current_user,
+        "deleted",
+        "recurring_invoice_template",
+        template_id,
+        existing.get("name") or "Recurring billing template",
+        "Deleted an organisation-wide reusable recurring billing template",
+    )
     return {"message": "Template deleted"}
 
 
-@router.post("/invoice-templates/{template_id}/apply")
-async def apply_template_to_recurring(template_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post(
+    "/recurring-invoice-templates/{template_id}/apply",
+    dependencies=[Depends(require_action("billing.document_template.manage"))],
+)
+async def apply_template_to_recurring(
+    template_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     """Create a recurring invoice from a template."""
+    await _require_global_recurring_template_scope(
+        current_user, request, "recurring_invoice.template.apply"
+    )
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="Template payload must be an object")
     tpl = await db.invoice_templates.find_one({"id": template_id}, {"_id": 0})
     if not tpl:
         raise HTTPException(status_code=404, detail="Template not found")
+    # Check the requested client before mutating the global template's usage
+    # counter.  Otherwise a restricted technician could still alter shared
+    # billing metadata while attempting to create a foreign-client invoice.
+    client_id = str(data.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="Client is required")
+    await assert_client_scope(
+        current_user,
+        client_id,
+        operation="recurring_invoice.template.apply",
+        mask_not_found=True,
+    )
     # Increment usage count
     await db.invoice_templates.update_one({"id": template_id}, {"$inc": {"usage_count": 1}})
     # Create recurring invoice with template data
@@ -555,7 +724,17 @@ async def apply_template_to_recurring(template_id: str, data: dict, current_user
         "auto_send": data.get("auto_send", False),
         "auto_send_email": data.get("auto_send_email", ""),
     }
-    return await create_recurring(create_data, current_user)
+    recurring = await create_recurring(create_data, current_user)
+    await log_activity(
+        current_user,
+        "applied",
+        "recurring_invoice_template",
+        template_id,
+        tpl.get("name") or "Recurring billing template",
+        "Applied a reusable recurring billing template",
+        metadata={"recurring_invoice_id": recurring.get("id"), "client_id": client_id},
+    )
+    return recurring
 
 
 
@@ -564,6 +743,9 @@ async def apply_template_to_recurring(template_id: str, data: dict, current_user
 @router.get("/recurring-invoices/scheduler/status")
 async def get_scheduler_status(current_user: dict = Depends(get_current_user)):
     """Get the auto-generation scheduler status and recent logs."""
+    await assert_global_scope(
+        current_user, operation="recurring_invoice.scheduler.read"
+    )
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
 
@@ -599,6 +781,19 @@ async def get_scheduler_status(current_user: dict = Depends(get_current_user)):
 @router.post("/recurring-invoices/scheduler/run-now")
 async def run_scheduler_now(current_user: dict = Depends(get_current_user)):
     """Manually trigger the scheduler to process all due recurring invoices."""
+    await assert_global_scope(
+        current_user, operation="recurring_invoice.scheduler.run"
+    )
+    return await _run_scheduler_now(current_user)
+
+
+async def _run_scheduler_now(current_user: dict) -> dict:
+    """Run the global scheduler after its caller has passed the global boundary.
+
+    This private helper is also used by the server-owned background worker.  It
+    deliberately has no FastAPI dependency so scheduled work can use an
+    explicit, auditable system actor rather than bypassing the route's policy.
+    """
     now = datetime.now(timezone.utc)
     today_str = now.strftime("%Y-%m-%d")
     actor_name = current_user.get("name") or "Manual Scheduler Run"

@@ -98,7 +98,7 @@ async def _resolve_billing_inclusion(item: dict) -> dict:
 def _recurring_line(item: dict) -> dict:
     qty = float(item.get("quantity", 1))
     rate = float(item.get("unit_price", 0))
-    return {"description": item.get("name", ""), "details": item.get("description", ""), "quantity": qty, "rate": rate, "amount": round(qty * rate, 2), "source_line_item_id": item.get("id"), "line_type": item.get("line_type", "standard"), "billing_source": item.get("billing_source", "manual"), "asset_id": item.get("asset_id"), "asset_serial_number": item.get("asset_serial_number"), "term_end": item.get("term_end"), "asset_type_filter": item.get("asset_type_filter"), "product_id": item.get("product_id")}
+    return {"description": item.get("name", ""), "details": item.get("description", ""), "quantity": qty, "rate": rate, "amount": round(qty * rate, 2), "source_line_item_id": item.get("id"), "line_type": item.get("line_type", "standard"), "billing_source": item.get("billing_source", "manual"), "asset_id": item.get("asset_id"), "asset_serial_number": item.get("asset_serial_number"), "term_end": item.get("term_end"), "asset_type_filter": item.get("asset_type_filter"), "product_id": item.get("product_id"), "m365_sku_id": item.get("m365_sku_id"), "m365_sku_part_number": item.get("m365_sku_part_number")}
 
 # ============== CONTRACTS ENDPOINTS ==============
 
@@ -363,6 +363,47 @@ async def create_line_item(item_data: LineItemCreate, current_user: dict = Depen
     await log_activity(current_user, "created", "contract_line_item", item.id, item.name,
                        f"Added {item.line_type.replace('_', ' ')} billing inclusion", metadata={"contract_id": item.contract_id, "asset_id": item.asset_id})
     return item
+
+
+@router.put("/line-items/{item_id}/m365-sku-mapping")
+async def update_line_item_m365_sku_mapping(item_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Attach or clear an explicit Microsoft SKU mapping on a billing inclusion.
+
+    This stores only a provider reference against the authoritative contract
+    line. It never changes Microsoft capacity, contract quantity, or a customer
+    invoice. A contract-to-recurring sync remains a deliberate follow-up step.
+    """
+    item = await _line_item_or_404(item_id, current_user)
+    if "m365_sku_id" not in (data or {}):
+        raise HTTPException(status_code=422, detail="m365_sku_id is required; provide an empty value to clear the mapping")
+    sku_id = str((data or {}).get("m365_sku_id") or "").strip()
+    sku_part_number = str((data or {}).get("m365_sku_part_number") or "").strip()
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {
+        "m365_sku_id": sku_id or None,
+        "m365_sku_part_number": sku_part_number or None,
+        "m365_mapping_updated_at": now,
+        "m365_mapping_updated_by": current_user.get("name") or current_user.get("email") or "Unknown technician",
+        "updated_at": now,
+    }
+    await db.line_items.update_one({"id": item_id}, {"$set": updates})
+    action = "cleared" if not sku_id else "mapped"
+    await log_activity(
+        current_user,
+        f"m365_sku_{action}",
+        "contract_line_item",
+        item_id,
+        item.get("name", "Billing inclusion"),
+        f"{action.title()} Microsoft 365 SKU evidence on billing inclusion",
+        changes={"m365_sku_id": updates["m365_sku_id"], "m365_sku_part_number": updates["m365_sku_part_number"]},
+        metadata={"contract_id": item.get("contract_id"), "client_id": item.get("client_id"), "requires_recurring_sync": bool(item.get("linked_recurring_invoice_id"))},
+    )
+    return {
+        "message": "Microsoft SKU mapping cleared" if not sku_id else "Microsoft SKU mapping saved",
+        "line_item_id": item_id,
+        **updates,
+        "requires_recurring_sync": bool(item.get("linked_recurring_invoice_id")),
+    }
 
 @router.put("/line-items/{item_id}")
 async def update_line_item(item_id: str, item_data: dict, current_user: dict = Depends(get_current_user)):

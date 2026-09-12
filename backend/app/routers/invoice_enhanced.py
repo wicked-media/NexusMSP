@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -6,23 +6,69 @@ import uuid
 import os
 import asyncio
 import logging
+from math import isfinite
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
-from app.services.finance_integrity import begin_idempotent_operation, complete_idempotent_operation
+from app.services.action_permissions import require_action
+from app.services.finance_integrity import (
+    begin_idempotent_operation,
+    complete_idempotent_operation,
+    fail_idempotent_operation,
+)
+from app.services.commercial_documents import (
+    freeze_commercial_document_snapshot,
+)
+from app.services.nexus_document_pdf import render_nexus_invoice_pdf
+from app.services.scope_permissions import assert_client_scope, scoped_query
 from app.routers.financial_reports import build_accounts_receivable_aging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _credit_money(value: object, field: str) -> float:
+    """Parse a finite, cent-precise credit-note amount.
+
+    Credit notes are financial records.  ``float('nan')`` and infinity both
+    pass surprisingly many ordinary numeric comparisons, so reject them at
+    the shared input boundary rather than allowing a malformed value to reach
+    an invoice balance.
+    """
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"Credit note {field} must be a valid number")
+    if not isfinite(amount):
+        raise HTTPException(status_code=422, detail=f"Credit note {field} must be finite")
+    return round(amount, 2)
+
+
+def _optimistic_version_filter(document: dict) -> dict:
+    """Match either the saved version or the legacy no-version representation."""
+    version = document.get("version")
+    return {"version": version} if version is not None else {"version": {"$exists": False}}
+
+
 # ============== EMAIL INVOICE TO CLIENT ==============
 
-@router.post("/invoices/{invoice_id}/email")
-async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/invoices/{invoice_id}/email", dependencies=[Depends(require_action("billing.invoice.modify"))])
+async def email_invoice_to_client(
+    invoice_id: str,
+    data: dict,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.invoice.email",
+        request=request,
+        mask_not_found=True,
+    )
     email = data.get("email", "")
     if not email:
         client = await db.clients.find_one({"id": invoice.get("client_id", "")}, {"_id": 0})
@@ -66,12 +112,43 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
     )
     if replay is not None:
         return {**replay, "replayed": True}
+    try:
+        # Render the exact evidence we will freeze if delivery succeeds.  The
+        # attachment, browser preview and subsequent download therefore share
+        # one governed commercial-document contract.
+        document_snapshot = await freeze_commercial_document_snapshot(
+            "invoice", invoice, branding, database=db
+        )
+        document_context = {
+            "profile": document_snapshot["profile"],
+            "branding": document_snapshot["branding"],
+        }
+        actor = current_user.get("name") or current_user.get("email") or "NexusMSP"
+        pdf_attachment = {
+            "filename": f"Invoice_{invoice.get('invoice_number') or invoice_id}.pdf",
+            "content": render_nexus_invoice_pdf(
+                invoice,
+                branding=document_context["branding"],
+                generated_by=actor,
+                document_profile=document_context["profile"],
+            ),
+            "content_type": "application/pdf",
+        }
+    except Exception:
+        await fail_idempotent_operation(
+            db,
+            scope=f"invoice-email:{invoice_id}",
+            key=idempotency_key,
+            error="Unable to generate the invoice PDF attachment",
+        )
+        raise
     from app.routers.email_utils import send_email
     delivery = await send_email(
         email,
         subject,
         f"<div style='font-family:sans-serif;max-width:600px;margin:auto;'>{message}</div>",
         category="billing",
+        attachments=[pdf_attachment],
         client_id=invoice.get("client_id"),
         related_type="invoice",
         related_id=invoice_id,
@@ -83,6 +160,7 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
     record = {
         "id": str(uuid.uuid4()),
         "invoice_id": invoice_id,
+        "client_id": invoice.get("client_id"),
         "email": email,
         "subject": subject,
         "sent": sent,
@@ -99,9 +177,22 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
         "last_emailed_at": datetime.now(timezone.utc).isoformat(),
         "last_email_delivery_status": delivery_status,
     }
+    if sent and (invoice.get("status") == "draft" or not invoice.get("document_snapshot")):
+        # A legacy already-sent invoice can gain immutable render evidence on
+        # its next successful delivery without altering its financial state.
+        update["document_snapshot"] = document_snapshot
     if sent and invoice.get("status") == "draft":
         update["status"] = "sent"
-    await db.invoices.update_one({"id": invoice_id}, {"$set": update, "$inc": {"version": 1}})
+        update["sent_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.invoices.update_one(
+        {"id": invoice_id, **_optimistic_version_filter(invoice)},
+        {"$set": update, "$inc": {"version": 1}},
+    )
+    if not result.matched_count:
+        raise HTTPException(
+            status_code=409,
+            detail="Invoice changed while the email was being delivered; refresh and review the delivery record",
+        )
     activity_action = "emailed" if sent else "email_attempted"
     activity_detail = f"Invoice emailed to {email}" if sent else f"Invoice email {delivery_status} for {email}"
     await log_activity(current_user, activity_action, "invoice", invoice_id, invoice.get("invoice_number", ""), activity_detail)
@@ -115,49 +206,113 @@ async def email_invoice_to_client(invoice_id: str, data: dict, current_user: dic
     return response
 
 
-@router.get("/invoices/{invoice_id}/email-history")
-async def get_invoice_email_history(invoice_id: str, current_user: dict = Depends(get_current_user)):
+@router.get("/invoices/{invoice_id}/email-history", dependencies=[Depends(require_action("billing.portal.view"))])
+async def get_invoice_email_history(
+    invoice_id: str,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0, "client_id": 1})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.invoice.email_history.read",
+        request=request,
+        mask_not_found=True,
+    )
     emails = await db.invoice_emails.find({"invoice_id": invoice_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return emails
 
 
 # ============== CREDIT NOTES ==============
 
-@router.get("/credit-notes")
-async def get_credit_notes(client_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+@router.get("/credit-notes", dependencies=[Depends(require_action("billing.portal.view"))])
+async def get_credit_notes(
+    client_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
     query = {}
     if client_id:
         query["client_id"] = client_id
-    notes = await db.credit_notes.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="billing.credit_note.read",
+            request=request,
+            mask_not_found=True,
+        )
+    notes = await db.credit_notes.find(
+        scoped_query(current_user, query, site_field=None),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(1000)
     return notes
 
 
-@router.post("/credit-notes")
-async def create_credit_note(data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/credit-notes", dependencies=[Depends(require_action("billing.invoice.modify"))])
+async def create_credit_note(
+    data: dict,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
     count = await db.credit_notes.count_documents({})
-    invoice_id = data.get("invoice_id", "")
+    invoice_id = str(data.get("invoice_id") or "").strip()
+    requested_client_id = str(data.get("client_id") or "").strip()
     invoice = None
     if invoice_id:
         invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
+        await assert_client_scope(
+            current_user,
+            invoice.get("client_id"),
+            operation="billing.credit_note.create",
+            request=request,
+            mask_not_found=True,
+        )
         if invoice.get("status") in {"cancelled", "voided"}:
             raise HTTPException(status_code=409, detail="Cannot issue a credit note for a voided invoice")
-    try:
-        total = round(float(data.get("total", 0)), 2)
-        subtotal = round(float(data.get("subtotal", total)), 2)
-        tax = round(float(data.get("tax", 0)), 2)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="Credit note amounts must be valid numbers")
+        if invoice.get("is_split_parent"):
+            raise HTTPException(status_code=409, detail="Issue credits against a generated payer invoice, not a split-billing source record")
+        if requested_client_id and requested_client_id != invoice.get("client_id"):
+            raise HTTPException(status_code=422, detail="Credit note client must match the linked invoice client")
+        client_id = str(invoice.get("client_id") or "").strip()
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        if not client:
+            raise HTTPException(status_code=404, detail="Invoice client not found")
+    else:
+        if not requested_client_id:
+            raise HTTPException(status_code=422, detail="Client is required when no invoice is linked")
+        await assert_client_scope(
+            current_user,
+            requested_client_id,
+            operation="billing.credit_note.create",
+            request=request,
+            mask_not_found=True,
+        )
+        client_id = requested_client_id
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        if not client:
+            raise HTTPException(status_code=404, detail="Client not found")
+
+    total = _credit_money(data.get("total", 0), "total")
+    subtotal = _credit_money(data.get("subtotal", total), "subtotal")
+    tax = _credit_money(data.get("tax", 0), "tax")
     if total <= 0:
         raise HTTPException(status_code=422, detail="Credit note total must be greater than zero")
+    if subtotal < 0 or tax < 0:
+        raise HTTPException(status_code=422, detail="Credit note subtotal and tax cannot be negative")
+    if abs(round(subtotal + tax, 2) - total) > 0.005:
+        raise HTTPException(status_code=422, detail="Credit note total must equal subtotal plus tax")
     cn = {
         "id": str(uuid.uuid4()),
         "credit_note_number": f"CN-{count + 1001:04d}",
         "invoice_id": invoice_id,
         "invoice_number": invoice.get("invoice_number", "") if invoice else "",
-        "client_id": data.get("client_id") or (invoice.get("client_id") if invoice else ""),
-        "client_name": data.get("client_name") or (invoice.get("client_name") if invoice else ""),
+        "client_id": client_id,
+        "client_name": client.get("name", ""),
         "line_items": data.get("line_items", []),
         "subtotal": subtotal,
         "tax": tax,
@@ -168,59 +323,181 @@ async def create_credit_note(data: dict, current_user: dict = Depends(get_curren
         "created_by": current_user["id"],
         "created_by_name": current_user.get("name", ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "version": 1,
+        "audit_trail": [{
+            "action": "issued",
+            "by": current_user.get("name", ""),
+            "at": datetime.now(timezone.utc).isoformat(),
+            "invoice_id": invoice_id,
+            "client_id": client_id,
+            "amount": total,
+        }],
     }
     await db.credit_notes.insert_one(cn)
     cn.pop("_id", None)
-    await log_activity(current_user, "created", "credit_note", cn["id"], cn["credit_note_number"], f"Issued credit note {cn['credit_note_number']} for ${total:.2f}", metadata={"invoice_id": invoice_id, "total": total})
+    await log_activity(
+        current_user,
+        "created",
+        "credit_note",
+        cn["id"],
+        cn["credit_note_number"],
+        f"Issued credit note {cn['credit_note_number']} for ${total:.2f}",
+        metadata={"invoice_id": invoice_id, "client_id": client_id, "total": total},
+    )
     return cn
 
 
-@router.post("/credit-notes/{cn_id}/apply")
-async def apply_credit_note(cn_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+@router.post("/credit-notes/{cn_id}/apply", dependencies=[Depends(require_action("billing.payment.record"))])
+async def apply_credit_note(
+    cn_id: str,
+    data: dict,
+    request: Request = None,
+    current_user: dict = Depends(get_current_user),
+):
     cn = await db.credit_notes.find_one({"id": cn_id}, {"_id": 0})
     if not cn:
         raise HTTPException(status_code=404, detail="Credit note not found")
+    credit_client_id = str(cn.get("client_id") or "").strip()
+    await assert_client_scope(
+        current_user,
+        credit_client_id,
+        operation="billing.credit_note.apply",
+        request=request,
+        mask_not_found=True,
+    )
+    if not credit_client_id:
+        raise HTTPException(status_code=422, detail="Credit note has no client and cannot be applied")
     if cn.get("applied_to_invoice"):
-        raise HTTPException(status_code=400, detail="Already applied")
-    invoice_id = data.get("invoice_id") or cn.get("invoice_id", "")
+        raise HTTPException(status_code=409, detail="Credit note is already applied")
+    if cn.get("status", "issued") != "issued":
+        raise HTTPException(status_code=409, detail="Credit note is not available to apply")
+    invoice_id = str(data.get("invoice_id") or cn.get("invoice_id") or "").strip()
     if not invoice_id:
         raise HTTPException(status_code=400, detail="No invoice to apply to")
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    await assert_client_scope(
+        current_user,
+        invoice.get("client_id"),
+        operation="billing.credit_note.apply",
+        request=request,
+        mask_not_found=True,
+    )
     if invoice.get("status") == "pending_approval":
         raise HTTPException(status_code=409, detail="Approve the invoice before sending it to the customer")
     if invoice.get("status") in {"cancelled", "voided"}:
         raise HTTPException(status_code=409, detail="Voided invoices cannot be emailed as payable documents")
     if invoice.get("is_split_parent"):
         raise HTTPException(status_code=409, detail="Email the generated payer invoices; the split-billing source is retained for audit only")
-    if invoice.get("status") in {"cancelled", "voided"}:
-        raise HTTPException(status_code=409, detail="Cannot apply a credit note to a voided invoice")
-    if cn.get("client_id") and cn.get("client_id") != invoice.get("client_id"):
+    if credit_client_id != invoice.get("client_id"):
         raise HTTPException(status_code=409, detail="Credit note client does not match the invoice client")
-    credit_amount = float(cn.get("total", 0) or 0)
-    outstanding = max(0, float(invoice.get("total", 0) or 0) - float(invoice.get("amount_paid", 0) or 0))
-    if credit_amount <= 0 or credit_amount > outstanding + 0.005:
+    credit_amount = _credit_money(cn.get("total", 0), "total")
+    invoice_total = _credit_money(invoice.get("total", 0), "total")
+    previous_paid = _credit_money(invoice.get("amount_paid", 0), "amount paid")
+    outstanding = round(max(0, invoice_total - previous_paid), 2)
+    if credit_amount <= 0 or credit_amount > outstanding:
         raise HTTPException(status_code=422, detail=f"Credit must be greater than zero and no more than the outstanding balance of ${outstanding:.2f}")
-    new_paid = float(invoice.get("amount_paid", 0) or 0) + credit_amount
-    new_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
-    await db.invoices.update_one({"id": invoice_id}, {
-        "$set": {"amount_paid": new_paid, "payment_status": new_status, "status": "paid" if new_status == "paid" else invoice.get("status")},
+    new_paid = round(previous_paid + credit_amount, 2)
+    new_status = "paid" if new_paid >= invoice_total else "partial"
+
+    # Claim the credit note before touching the invoice.  The conditional
+    # version match prevents concurrent browser requests from applying the
+    # same credit twice.  If the invoice has changed we release the claim so a
+    # technician can refresh and retry against the current balance.
+    claim = await db.credit_notes.update_one(
+        {
+            "id": cn_id,
+            "client_id": credit_client_id,
+            "status": "issued",
+            "applied_to_invoice": {"$ne": True},
+            **_optimistic_version_filter(cn),
+        },
+        {
+            "$set": {
+                "status": "applying",
+                "application_invoice_id": invoice_id,
+                "application_started_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "$inc": {"version": 1},
+        },
+    )
+    if claim.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Credit note changed while it was being applied; refresh and retry")
+
+    invoice_update = await db.invoices.update_one({
+        "id": invoice_id,
+        "client_id": credit_client_id,
+        "status": invoice.get("status"),
+        "payment_status": invoice.get("payment_status"),
+        "amount_paid": invoice.get("amount_paid", 0),
+        **_optimistic_version_filter(invoice),
+    }, {
+        "$set": {
+            "amount_paid": new_paid,
+            "payment_status": new_status,
+            "status": "paid" if new_status == "paid" else invoice.get("status"),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
         "$push": {"payments": {
             "amount": credit_amount, "method": "credit_note",
             "date": datetime.now(timezone.utc).isoformat(),
             "reference": cn.get("credit_note_number", ""),
             "recorded_by": current_user.get("name", ""),
-        }}
+            "credit_note_id": cn_id,
+        }},
+        "$inc": {"version": 1},
     })
-    await db.credit_notes.update_one({"id": cn_id}, {"$set": {
-        "applied_to_invoice": True,
-        "applied_to_invoice_id": invoice_id,
-        "applied_at": datetime.now(timezone.utc).isoformat(),
-        "status": "applied",
-    }})
-    await log_activity(current_user, "credit_applied", "invoice", invoice_id, invoice.get("invoice_number", ""), f"Applied credit note {cn.get('credit_note_number', '')} for ${credit_amount:.2f}", metadata={"credit_note_id": cn_id, "amount": credit_amount})
-    return {"message": f"Credit of ${credit_amount:.2f} applied to invoice", "new_balance": max(0, float(invoice.get("total", 0) or 0) - new_paid)}
+    if invoice_update.matched_count == 0:
+        await db.credit_notes.update_one(
+            {"id": cn_id, "client_id": credit_client_id, "status": "applying", "application_invoice_id": invoice_id},
+            {"$set": {
+                "status": "issued",
+                "application_error": "invoice_update_conflict",
+                "application_failed_at": datetime.now(timezone.utc).isoformat(),
+            }, "$inc": {"version": 1}},
+        )
+        raise HTTPException(status_code=409, detail="Invoice changed while the credit was being applied; refresh and retry")
+
+    applied = await db.credit_notes.update_one(
+        {"id": cn_id, "client_id": credit_client_id, "status": "applying", "application_invoice_id": invoice_id},
+        {"$set": {
+            "applied_to_invoice": True,
+            "applied_to_invoice_id": invoice_id,
+            "applied_at": datetime.now(timezone.utc).isoformat(),
+            "status": "applied",
+        }, "$push": {"audit_trail": {
+            "action": "applied",
+            "by": current_user.get("name", ""),
+            "at": datetime.now(timezone.utc).isoformat(),
+            "invoice_id": invoice_id,
+            "amount": credit_amount,
+        }}, "$inc": {"version": 1}},
+    )
+    if applied.matched_count == 0:
+        # The invoice payment is intentionally not reversed here: another
+        # writer may already have observed it.  Leave a recoverable, auditable
+        # claim rather than risk silently applying a second credit.
+        await log_activity(
+            current_user,
+            "credit_application_reconciliation_required",
+            "credit_note",
+            cn_id,
+            cn.get("credit_note_number", ""),
+            "Invoice credit was recorded but the credit-note finalisation needs reconciliation.",
+            metadata={"invoice_id": invoice_id, "client_id": credit_client_id, "amount": credit_amount},
+        )
+        raise HTTPException(status_code=409, detail="Credit was recorded but finalisation needs reconciliation; do not retry until reviewed")
+    await log_activity(
+        current_user,
+        "credit_applied",
+        "invoice",
+        invoice_id,
+        invoice.get("invoice_number", ""),
+        f"Applied credit note {cn.get('credit_note_number', '')} for ${credit_amount:.2f}",
+        metadata={"credit_note_id": cn_id, "client_id": credit_client_id, "amount": credit_amount, "invoice_version": invoice.get("version")},
+    )
+    return {"message": f"Credit of ${credit_amount:.2f} applied to invoice", "new_balance": round(max(0, invoice_total - new_paid), 2)}
 
 
 # ============== LATE FEE AUTOMATION ==============
@@ -368,13 +645,30 @@ async def send_payment_reminders(current_user: dict = Depends(get_current_user))
 
 # ============== CLIENT ACCOUNT STATEMENTS ==============
 
-@router.get("/clients/{client_id}/statement")
-async def get_client_statement(client_id: str, current_user: dict = Depends(get_current_user)):
+@router.get("/clients/{client_id}/statement", dependencies=[Depends(require_action("billing.portal.view"))])
+async def get_client_statement(
+    client_id: str,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    await assert_client_scope(
+        current_user,
+        client_id,
+        operation="billing.client_statement.read",
+        request=request,
+        mask_not_found=True,
+    )
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    invoices = await db.invoices.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    credits = await db.credit_notes.find({"client_id": client_id}, {"_id": 0}).to_list(200)
+    invoices = await db.invoices.find(
+        scoped_query(current_user, {"client_id": client_id}, site_field=None),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(1000)
+    credits = await db.credit_notes.find(
+        scoped_query(current_user, {"client_id": client_id}, site_field=None),
+        {"_id": 0},
+    ).to_list(200)
     total_invoiced = sum(i.get("total", 0) for i in invoices)
     total_paid = sum(i.get("amount_paid", 0) for i in invoices)
     total_credits = sum(c.get("total", 0) for c in credits if c.get("status") == "applied")
@@ -410,12 +704,26 @@ async def get_client_statement(client_id: str, current_user: dict = Depends(get_
     }
 
 
-@router.get("/clients/{client_id}/statement/pdf")
-async def get_client_statement_pdf(client_id: str, current_user: dict = Depends(get_current_user)):
+@router.get("/clients/{client_id}/statement/pdf", dependencies=[Depends(require_action("billing.portal.view"))])
+async def get_client_statement_pdf(
+    client_id: str,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+):
+    await assert_client_scope(
+        current_user,
+        client_id,
+        operation="billing.client_statement.export",
+        request=request,
+        mask_not_found=True,
+    )
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    invoices = await db.invoices.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    invoices = await db.invoices.find(
+        scoped_query(current_user, {"client_id": client_id}, site_field=None),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
     branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
     from fpdf import FPDF
 

@@ -19,7 +19,7 @@ def auth_token():
     """Get authentication token"""
     response = requests.post(f"{BASE_URL}/api/auth/login", json={
         "email": "aaron@stech.com.au",
-        "password": "Lucky@2871$!"
+        "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
     })
     if response.status_code == 200:
         return response.json().get("token")
@@ -83,14 +83,14 @@ class TestCippSettings:
         print("PASS: CIPP settings saved")
     
     def test_cipp_status_after_save(self, headers):
-        """GET /api/cipp/status after save returns configured:true with api_key_preview"""
+        """GET /api/cipp/status after save never returns credential material."""
         response = requests.get(f"{BASE_URL}/api/cipp/status", headers=headers)
         assert response.status_code == 200
         data = response.json()
         assert data["configured"] == True, f"Expected configured=True, got {data['configured']}"
-        assert data.get("api_key_preview") is not None, "Missing api_key_preview"
-        assert "…" in data["api_key_preview"], "api_key_preview should be masked with …"
-        print(f"PASS: CIPP status shows configured=True, preview={data['api_key_preview']}")
+        assert "api_key_preview" not in data, "Credential previews must not be returned"
+        assert "test-api-key-12345" not in response.text, "Status must not expose the submitted credential"
+        print("PASS: CIPP status shows configured=True without credential material")
     
     def test_cipp_test_connection(self, headers):
         """GET /api/cipp/test returns connection status (expected failure on fake URL)"""

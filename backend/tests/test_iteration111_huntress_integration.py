@@ -18,7 +18,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 # Test credentials
 TEST_EMAIL = "aaron@stech.com.au"
-TEST_PASSWORD = "Lucky@2871$!"
+TEST_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 # Placeholder Huntress keys (will fail test-connection, which is expected)
 TEST_API_KEY = "test-huntress-api-key-12345"
@@ -58,7 +58,7 @@ class TestHuntressStatusNotConfigured:
         data = response.json()
         assert data.get("configured") == False, f"Expected configured=False, got {data}"
         assert data.get("api_key_preview") is None, f"Expected api_key_preview=None, got {data.get('api_key_preview')}"
-        print(f"✓ Status when not configured: {data}")
+        print(f"Ã¢Å“â€œ Status when not configured: {data}")
 
 
 class TestHuntressSettingsSave:
@@ -69,17 +69,17 @@ class TestHuntressSettingsSave:
         # Test with empty body
         response = requests.post(f"{BASE_URL}/api/huntress/settings", headers=headers, json={})
         assert response.status_code == 400, f"Expected 400 for empty body, got {response.status_code}"
-        print(f"✓ Empty body returns 400: {response.json()}")
+        print(f"Ã¢Å“â€œ Empty body returns 400: {response.json()}")
         
         # Test with only api_key
         response = requests.post(f"{BASE_URL}/api/huntress/settings", headers=headers, json={"api_key": "test"})
         assert response.status_code == 400, f"Expected 400 for missing secret_key, got {response.status_code}"
-        print(f"✓ Missing secret_key returns 400")
+        print(f"Ã¢Å“â€œ Missing secret_key returns 400")
         
         # Test with only secret_key
         response = requests.post(f"{BASE_URL}/api/huntress/settings", headers=headers, json={"secret_key": "test"})
         assert response.status_code == 400, f"Expected 400 for missing api_key, got {response.status_code}"
-        print(f"✓ Missing api_key returns 400")
+        print(f"Ã¢Å“â€œ Missing api_key returns 400")
     
     def test_save_settings_success(self, headers):
         """POST /api/huntress/settings with {api_key, secret_key} saves to db.settings"""
@@ -93,7 +93,7 @@ class TestHuntressSettingsSave:
         data = response.json()
         assert "message" in data, f"Expected message in response, got {data}"
         assert "updated_at" in data, f"Expected updated_at in response, got {data}"
-        print(f"✓ Settings saved successfully: {data}")
+        print(f"Ã¢Å“â€œ Settings saved successfully: {data}")
 
 
 class TestHuntressStatusConfigured:
@@ -117,7 +117,7 @@ class TestHuntressStatusConfigured:
         # Preview should contain first 6 chars + ellipsis + last 4 chars
         preview = data.get("api_key_preview", "")
         assert len(preview) > 0, f"Expected non-empty api_key_preview"
-        print(f"✓ Status when configured: configured={data.get('configured')}, api_key_preview={preview}")
+        print(f"Ã¢Å“â€œ Status when configured: configured={data.get('configured')}, api_key_preview={preview}")
 
 
 class TestHuntressTestConnection:
@@ -139,7 +139,7 @@ class TestHuntressTestConnection:
         data = response.json()
         assert data.get("success") == False, f"Expected success=False with test keys, got {data}"
         assert "message" in data, f"Expected message in response, got {data}"
-        print(f"✓ Test connection with invalid keys: success={data.get('success')}, message={data.get('message')[:100]}")
+        print(f"Ã¢Å“â€œ Test connection with invalid keys: success={data.get('success')}, message={data.get('message')[:100]}")
     
     def test_connection_updates_last_test_status(self, headers):
         """Test connection updates last_test_status in DB"""
@@ -153,7 +153,7 @@ class TestHuntressTestConnection:
         data = response.json()
         assert data.get("last_test_status") is not None, f"Expected last_test_status to be set, got {data}"
         assert data.get("last_tested_at") is not None, f"Expected last_tested_at to be set, got {data}"
-        print(f"✓ last_test_status updated: {data.get('last_test_status')}, last_tested_at: {data.get('last_tested_at')}")
+        print(f"Ã¢Å“â€œ last_test_status updated: {data.get('last_test_status')}, last_tested_at: {data.get('last_tested_at')}")
 
 
 class TestHuntressSummary:
@@ -175,7 +175,7 @@ class TestHuntressSummary:
         # Check stats are all zeros
         stats = data.get("stats", {})
         assert stats.get("agents_total") == 0, f"Expected agents_total=0, got {stats}"
-        print(f"✓ Summary when not configured: {data.get('message')}")
+        print(f"Ã¢Å“â€œ Summary when not configured: {data.get('message')}")
     
     def test_summary_configured_with_test_keys(self, headers):
         """GET /api/huntress/summary when configured (with test keys) returns 200 with configured:true and stats:{all 0s}"""
@@ -202,7 +202,7 @@ class TestHuntressSummary:
         assert recent is not None, f"Expected recent_incidents to be present, got {data}"
         assert isinstance(recent, list), f"Expected recent_incidents to be list, got {type(recent)}"
         
-        print(f"✓ Summary when configured: configured={data.get('configured')}, stats={stats}")
+        print(f"Ã¢Å“â€œ Summary when configured: configured={data.get('configured')}, stats={stats}")
 
 
 class TestHuntressProtectedEndpointsNotConfigured:
@@ -215,25 +215,25 @@ class TestHuntressProtectedEndpointsNotConfigured:
         
         response = requests.get(f"{BASE_URL}/api/huntress/agents", headers=headers)
         assert response.status_code == 503, f"Expected 503, got {response.status_code}: {response.text}"
-        print(f"✓ /agents returns 503 when not configured")
+        print(f"Ã¢Å“â€œ /agents returns 503 when not configured")
     
     def test_incident_reports_not_configured_503(self, headers):
         """GET /api/huntress/incident-reports when NOT configured returns 503"""
         response = requests.get(f"{BASE_URL}/api/huntress/incident-reports", headers=headers)
         assert response.status_code == 503, f"Expected 503, got {response.status_code}: {response.text}"
-        print(f"✓ /incident-reports returns 503 when not configured")
+        print(f"Ã¢Å“â€œ /incident-reports returns 503 when not configured")
     
     def test_organizations_not_configured_503(self, headers):
         """GET /api/huntress/organizations when NOT configured returns 503"""
         response = requests.get(f"{BASE_URL}/api/huntress/organizations", headers=headers)
         assert response.status_code == 503, f"Expected 503, got {response.status_code}: {response.text}"
-        print(f"✓ /organizations returns 503 when not configured")
+        print(f"Ã¢Å“â€œ /organizations returns 503 when not configured")
     
     def test_signals_not_configured_503(self, headers):
         """GET /api/huntress/signals when NOT configured returns 503"""
         response = requests.get(f"{BASE_URL}/api/huntress/signals", headers=headers)
         assert response.status_code == 503, f"Expected 503, got {response.status_code}: {response.text}"
-        print(f"✓ /signals returns 503 when not configured")
+        print(f"Ã¢Å“â€œ /signals returns 503 when not configured")
 
 
 class TestHuntressDeleteSettings:
@@ -258,12 +258,12 @@ class TestHuntressDeleteSettings:
         
         data = response.json()
         assert "message" in data, f"Expected message in response, got {data}"
-        print(f"✓ Delete response: {data}")
+        print(f"Ã¢Å“â€œ Delete response: {data}")
         
         # Verify not configured after delete
         status_after = requests.get(f"{BASE_URL}/api/huntress/status", headers=headers).json()
         assert status_after.get("configured") == False, f"Expected configured=False after delete, got {status_after}"
-        print(f"✓ Status after delete: configured={status_after.get('configured')}")
+        print(f"Ã¢Å“â€œ Status after delete: configured={status_after.get('configured')}")
 
 
 class TestHuntressCleanup:
@@ -272,4 +272,4 @@ class TestHuntressCleanup:
     def test_cleanup(self, headers):
         """Clean up test credentials"""
         response = requests.delete(f"{BASE_URL}/api/huntress/settings", headers=headers)
-        print(f"✓ Cleanup complete: {response.status_code}")
+        print(f"Ã¢Å“â€œ Cleanup complete: {response.status_code}")

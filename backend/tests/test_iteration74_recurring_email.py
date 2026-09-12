@@ -24,7 +24,7 @@ class TestRecurringBillingEnhanced:
         """Setup auth token for all tests"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["token"]
@@ -332,7 +332,7 @@ class TestInvoiceEmail:
         """Setup auth token for all tests"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200, f"Login failed: {response.text}"
         self.token = response.json()["token"]
@@ -461,7 +461,7 @@ class TestRecurringKPIs:
         """Setup auth token for all tests"""
         response = requests.post(f"{BASE_URL}/api/auth/login", json={
             "email": "aaron@stech.com.au",
-            "password": "Lucky@2871$!"
+            "password": os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
         })
         assert response.status_code == 200
         self.token = response.json()["token"]

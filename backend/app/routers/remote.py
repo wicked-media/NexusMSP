@@ -6,6 +6,8 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
+from app.services.secret_store import decrypt_secret, encrypt_secret
+from app.services.rustdesk_provider_security import is_masked_secret, normalise_rustdesk_server_url
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import (
@@ -190,27 +192,32 @@ async def save_remote_settings(settings: RustDeskSettings, current_user: dict = 
         raise HTTPException(status_code=403, detail="Admin access required")
     legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
     legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
+    server_url = normalise_rustdesk_server_url(settings.server_url)
+    current_secret = decrypt_secret(legacy_value.get("api_key_encrypted")) or str(legacy_value.get("api_key") or "")
+    incoming_secret = settings.api_key
+    if incoming_secret is not None and not is_masked_secret(incoming_secret):
+        current_secret = str(incoming_secret).strip()
     shared = {
-        "server_url": settings.server_url,
-        "api_key": settings.api_key,
+        "server_url": server_url,
         "relay_server": settings.relay_server,
+        "api_key_encrypted": encrypt_secret(current_secret) if current_secret else "",
     }
     await db.settings.update_one(
         {"type": "rustdesk"},
         {"$set": {
             "type": "rustdesk",
-            "server_url": settings.server_url,
-            "api_key": settings.api_key,
+            "server_url": server_url,
+            "api_key_encrypted": shared["api_key_encrypted"],
             "relay_server": settings.relay_server,
             "updated_at": datetime.now(timezone.utc).isoformat()
-        }},
+        }, "$unset": {"api_key": ""}},
         upsert=True
     )
     await db.settings.update_one(
         {"key": "rustdesk_config"},
         {"$set": {
             "key": "rustdesk_config",
-            "value": {**legacy_value, **shared, "enabled": True},
+            "value": {key: value for key, value in {**legacy_value, **shared, "enabled": True}.items() if key != "api_key"},
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "updated_by": current_user["id"],
         }},
@@ -347,7 +354,11 @@ async def confirm_remote_session_opened(
         operation="device.remote.start",
         request=request,
     )
-    return await mark_remote_session_opened(session, current_user)
+    return await mark_remote_session_opened(
+        session,
+        current_user,
+        correlation_id=request_correlation_id(request),
+    )
 
 
 @router.post("/remote/sessions/{session_id}/heartbeat")

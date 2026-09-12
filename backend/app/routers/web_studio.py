@@ -8,10 +8,13 @@ been configured and approved.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import uuid
 import base64
 import ipaddress
+import re
 import socket
 import time
 from datetime import datetime, timezone
@@ -25,16 +28,35 @@ from pydantic import BaseModel, Field
 from app.auth import get_current_user
 from app.database import db
 from app.routers.approval_workflows import create_approval
+from app.services.activity import log_activity
 from app.services.action_permissions import require_action
+from app.services.secret_store import decrypt_secret, encrypt_secret
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
 from app.services.synergy_wholesale import SYNERGY_OPERATIONS, connector_status, execute as execute_synergy, public_catalogue, seal_action_parameters, unseal_action_parameters, validate_parameters
 
 
 router = APIRouter(tags=["Nexus Web Studio"])
 
+_DOMAIN_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", re.IGNORECASE)
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalise_domain(value: str) -> str:
+    """Store a hostname as a stable domain reference, never a URL or path."""
+    domain = str(value or "").strip().lower().rstrip(".")
+    if not domain or "://" in domain or "/" in domain or "@" in domain:
+        raise HTTPException(status_code=400, detail="Enter a domain name such as example.com, not a URL or path")
+    try:
+        domain = domain.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise HTTPException(status_code=400, detail="Enter a valid domain name") from exc
+    labels = domain.split(".")
+    if len(domain) > 253 or len(labels) < 2 or any(not _DOMAIN_LABEL.fullmatch(label or "") for label in labels):
+        raise HTTPException(status_code=400, detail="Enter a valid fully qualified domain name")
+    return domain
 
 
 async def _synergy_credentials() -> dict:
@@ -49,12 +71,48 @@ async def _synergy_credentials() -> dict:
     return {
         "reseller_id": value.get("reseller_id", ""),
         "wsdl": value.get("wsdl", ""),
-        "api_key": _open_synergy_api_key(value["api_key_encrypted"]),
+        "api_key": _open_synergy_api_key(
+            value["api_key_encrypted"],
+            encryption_version=value.get("api_key_encryption_version"),
+        ),
     }
 
 
-def _open_synergy_api_key(value: str) -> str:
-    return str(unseal_action_parameters(value).get("api_key") or "")
+def _open_synergy_api_key(
+    value: str,
+    *,
+    encryption_version: str | None = None,
+) -> str:
+    """Read the shared-vault credential with a safe legacy fallback.
+
+    Legacy Settings records used the Synergy action-envelope format.  They
+    remain usable only while their old key is available; otherwise the caller
+    receives an unconfigured state and can safely re-save the credential.
+    """
+    try:
+        secret = decrypt_secret(value)
+    except RuntimeError:
+        secret = ""
+    if secret:
+        return secret
+    if encryption_version == "nexus_secret_v1":
+        # A current vault record must not fall through to a legacy decryptor:
+        # a rotated/missing vault key is an unavailable credential, not an
+        # excuse to try a different source of truth.
+        return ""
+
+    legacy_key = os.environ.get("SYNERGY_ACTION_ENCRYPTION_KEY", "").strip()
+    if not legacy_key:
+        return ""
+    try:
+        from cryptography.fernet import Fernet
+
+        payload = json.loads(Fernet(legacy_key.encode()).decrypt(value.encode()))
+        return str(payload.get("api_key") or "").strip()
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    except Exception:
+        return ""
 
 
 async def _integration_status() -> dict:
@@ -109,6 +167,7 @@ class WebSiteInput(BaseModel):
 
 class WebSiteUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
+    primary_domain: str | None = Field(default=None, min_length=3, max_length=253)
     site_url: str | None = Field(default=None, max_length=2048)
     platform: Literal["wordpress", "static", "custom", "other"] | None = None
     stage: Literal["discovery", "design", "build", "review", "launch", "live", "maintenance"] | None = None
@@ -264,6 +323,17 @@ async def _site_or_404(site_id: str, user: dict, operation: str) -> dict:
     )
 
 
+async def _assert_agreement_for_client(client_id: str, agreement_id: str) -> None:
+    """Keep commercial links on the same client as the authoritative site record."""
+    if not agreement_id:
+        return
+    agreement = await db.contracts.find_one({"id": agreement_id}, {"_id": 0, "id": 1, "client_id": 1})
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Linked agreement was not found")
+    if agreement.get("client_id") != client_id:
+        raise HTTPException(status_code=409, detail="Linked agreement belongs to a different client")
+
+
 @router.get("/web-studio/overview")
 async def get_web_studio_overview(client_id: str | None = None, user: dict = Depends(get_current_user)):
     query: dict = {"archived_at": {"$exists": False}}
@@ -286,11 +356,12 @@ async def create_web_site(payload: WebSiteInput, user: dict = Depends(get_curren
     client = await db.clients.find_one({"id": payload.client_id}, {"_id": 0, "id": 1, "name": 1})
     if not client:
         raise HTTPException(404, "Client not found")
+    await _assert_agreement_for_client(payload.client_id, payload.agreement_id)
     now = _now()
     site = {
         "id": str(uuid.uuid4()),
         **payload.model_dump(),
-        "primary_domain": payload.primary_domain.lower().strip().rstrip("."),
+        "primary_domain": _normalise_domain(payload.primary_domain),
         "client_name": client.get("name") or "Unnamed client",
         "created_at": now,
         "updated_at": now,
@@ -298,22 +369,55 @@ async def create_web_site(payload: WebSiteInput, user: dict = Depends(get_curren
         "last_provider_sync_at": None,
     }
     await db.web_sites.insert_one(site)
+    await log_activity(
+        user,
+        "web_site_created",
+        "web_site",
+        site["id"],
+        site["name"],
+        "Created a client-linked Web Studio delivery record",
+        metadata={"client_id": site["client_id"], "primary_domain": site["primary_domain"]},
+    )
     return {key: value for key, value in site.items() if key != "_id"}
 
 
 @router.patch("/web-studio/sites/{site_id}")
 async def update_web_site(site_id: str, payload: WebSiteUpdate, user: dict = Depends(get_current_user)):
-    await _site_or_404(site_id, user, "web_studio.update")
+    site = await _site_or_404(site_id, user, "web_studio.update")
     update = {key: value for key, value in payload.model_dump().items() if value is not None}
+    if "primary_domain" in update:
+        update["primary_domain"] = _normalise_domain(update["primary_domain"])
+    if "agreement_id" in update:
+        await _assert_agreement_for_client(site.get("client_id", ""), update["agreement_id"])
     update.update({"updated_at": _now(), "updated_by": user.get("email") or user.get("id")})
     await db.web_sites.update_one({"id": site_id}, {"$set": update})
+    await log_activity(
+        user,
+        "web_site_updated",
+        "web_site",
+        site_id,
+        update.get("name") or site.get("name") or "Web site",
+        "Updated Web Studio delivery or billing details",
+        changes={key: value for key, value in update.items() if key not in {"updated_at", "updated_by"}},
+        metadata={"client_id": site.get("client_id"), "primary_domain": update.get("primary_domain") or site.get("primary_domain")},
+    )
     return await db.web_sites.find_one({"id": site_id}, {"_id": 0})
 
 
 @router.delete("/web-studio/sites/{site_id}")
 async def archive_web_site(site_id: str, user: dict = Depends(get_current_user)):
-    await _site_or_404(site_id, user, "web_studio.archive")
-    await db.web_sites.update_one({"id": site_id}, {"$set": {"archived_at": _now(), "archived_by": user.get("email") or user.get("id")}})
+    site = await _site_or_404(site_id, user, "web_studio.archive")
+    archived_at = _now()
+    await db.web_sites.update_one({"id": site_id}, {"$set": {"archived_at": archived_at, "archived_by": user.get("email") or user.get("id")}})
+    await log_activity(
+        user,
+        "web_site_archived",
+        "web_site",
+        site_id,
+        site.get("name") or "Web site",
+        "Archived the Web Studio delivery record; provider and audit history remain retained",
+        metadata={"client_id": site.get("client_id"), "primary_domain": site.get("primary_domain"), "archived_at": archived_at},
+    )
     return {"ok": True}
 
 
@@ -332,6 +436,15 @@ async def request_provider_action(site_id: str, payload: ProviderAction, user: d
         "requested_by": user.get("email") or user.get("id"),
     }
     await db.web_provider_actions.insert_one(action)
+    await log_activity(
+        user,
+        "web_provider_action_requested",
+        "web_provider_action",
+        action["id"],
+        payload.action,
+        "Requested a Web Studio provider workflow",
+        metadata={"client_id": site.get("client_id"), "site_id": site_id, "provider": action["provider"], "status": action["status"]},
+    )
     return {"action": {key: value for key, value in action.items() if key != "_id"}, "connector": await _integration_status()}
 
 
@@ -348,6 +461,15 @@ async def connect_wordpress_site(site_id: str, payload: WordPressConnectionInput
         "connected_by": user.get("email") or user.get("id"),
     }
     await db.web_sites.update_one({"id": site_id}, {"$set": {"wordpress_connection": connection, "updated_at": _now(), "updated_by": user.get("email") or user.get("id")}})
+    await log_activity(
+        user,
+        "wordpress_connection_linked",
+        "web_site",
+        site_id,
+        "WordPress management connection",
+        "Linked a server-encrypted WordPress Application Password",
+        metadata={"api_url": api_url, "username": connection["username"]},
+    )
     return {"site_id": site_id, "connected": True, "api_url": api_url, "username": connection["username"]}
 
 
@@ -357,6 +479,7 @@ async def health_check_web_site(site_id: str, user: dict = Depends(get_current_u
     site = await _site_or_404(site_id, user, "web_studio.health_check")
     health = await _website_health(site)
     await db.web_sites.update_one({"id": site_id}, {"$set": {"website_health": health, "last_health_check_at": health["checked_at"], "updated_at": _now()}})
+    await log_activity(user, "web_site_health_checked", "web_site", site_id, site.get("name") or "Web site", "Recorded public website health evidence", metadata={"status": health.get("status"), "http_status": health.get("http_status")})
     return health
 
 
@@ -369,7 +492,10 @@ async def request_wordpress_action(site_id: str, payload: WordPressActionInput, 
     if payload.action == "inventory":
         inventory = await _wordpress_inventory(site)
         await db.web_sites.update_one({"id": site_id}, {"$set": {"wordpress_inventory": inventory, "last_wordpress_sync_at": inventory["synced_at"], "updated_at": _now()}})
+        await log_activity(user, "wordpress_inventory_refreshed", "web_site", site_id, site.get("name") or "Web site", "Refreshed WordPress inventory through the secured management connection", metadata={"plugin_count": len(inventory.get("plugins") or [])})
         return inventory
+    if payload.action in {"plugin_update", "theme_update"} and not payload.target.strip():
+        raise HTTPException(status_code=400, detail="Select the exact WordPress plugin or theme before requesting an update")
     action = {
         "id": str(uuid.uuid4()), "provider": "wordpress", "site_id": site_id, "client_id": site.get("client_id"),
         "client_name": site.get("client_name"), "action": payload.action, "target": payload.target.strip(),
@@ -384,6 +510,15 @@ async def request_wordpress_action(site_id: str, payload: WordPressActionInput, 
         "ref_id": action["id"], "ref_type": "web_provider_action", "approver_role": "admin",
     }, user)
     await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"approval_id": approval["id"]}})
+    await log_activity(
+        user,
+        "wordpress_maintenance_requested",
+        "web_provider_action",
+        action["id"],
+        payload.action,
+        "Created an approval-backed WordPress maintenance request",
+        metadata={"client_id": site.get("client_id"), "site_id": site_id, "target": action["target"], "approval_id": approval["id"]},
+    )
     return {"action": {**action, "approval_id": approval["id"]}, "approval": approval,
             "message": "Update is awaiting approval and a Nexus WordPress Control worker; no WordPress change has been made."}
 
@@ -421,11 +556,19 @@ async def get_synergy_settings(user: dict = Depends(get_current_user)):
 @router.put("/settings/synergy-wholesale")
 async def save_synergy_settings(payload: SynergyIntegrationInput, user: dict = Depends(require_action("synergy.wholesale.manage"))):
     await assert_global_scope(user, operation="synergy.settings.write")
-    # Keep the credential as an encrypted one-field payload using the existing
-    # deployment-managed Fernet key; the plaintext is never written to Mongo.
-    encrypted = seal_action_parameters({"api_key": payload.api_key.strip()})
+    # Settings credentials use the shared deployment-managed vault rather than
+    # a second Synergy-only bootstrap key. The plaintext is never written to
+    # Mongo or returned to the browser.
+    try:
+        encrypted = encrypt_secret(payload.api_key.strip())
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Nexus secret encryption is not configured",
+        ) from exc
     value = {
         "reseller_id": payload.reseller_id.strip(), "wsdl": payload.wsdl.strip(), "api_key_encrypted": encrypted,
+        "api_key_encryption_version": "nexus_secret_v1",
         "updated_at": _now(), "updated_by": user.get("email") or user.get("id"),
     }
     await db.settings.update_one({"key": "synergy_wholesale_config"}, {"$set": {"key": "synergy_wholesale_config", "value": value}}, upsert=True)
@@ -436,7 +579,7 @@ async def save_synergy_settings(payload: SynergyIntegrationInput, user: dict = D
 @router.post("/settings/synergy-wholesale/test")
 async def test_synergy_settings(user: dict = Depends(require_action("synergy.wholesale.manage"))):
     await assert_global_scope(user, operation="synergy.settings.test")
-    result = execute_synergy("account.balance", {}, await _synergy_credentials())
+    result = await asyncio.to_thread(execute_synergy, "account.balance", {}, await _synergy_credentials())
     return {"success": True, "message": "Synergy Wholesale SOAP connection succeeded", "result": _redact_provider_value(result)}
 
 
@@ -469,6 +612,15 @@ async def create_synergy_action(payload: SynergyActionRequest, user: dict = Depe
     if operation["mutates"]:
         action["parameters_encrypted"] = seal_action_parameters(parameters)
     await db.web_provider_actions.insert_one(action)
+    await log_activity(
+        user,
+        "synergy_action_requested",
+        "web_provider_action",
+        action["id"],
+        payload.operation_id,
+        "Requested a governed Synergy Wholesale action",
+        metadata={"client_id": payload.client_id, "area": operation["area"], "mutates": operation["mutates"], "status": action["status"]},
+    )
     if operation["mutates"]:
         approval = await create_approval({
             "type": "synergy_wholesale", "title": f"Synergy: {payload.operation_id.replace('.', ' ')}",
@@ -478,9 +630,19 @@ async def create_synergy_action(payload: SynergyActionRequest, user: dict = Depe
         await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"approval_id": approval["id"]}})
         action["approval_id"] = approval["id"]
         return {"action": action, "approval": approval, "message": "Provider change is awaiting independent approval"}
-    result = execute_synergy(payload.operation_id, parameters, await _synergy_credentials())
+    try:
+        result = await asyncio.to_thread(execute_synergy, payload.operation_id, parameters, await _synergy_credentials())
+    except HTTPException:
+        await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"status": "execution_failed", "failed_at": _now(), "failure_kind": "connector_or_provider_error"}})
+        await log_activity(user, "synergy_action_failed", "web_provider_action", action["id"], payload.operation_id, "Synergy read action could not execute; no provider change was made", metadata={"client_id": payload.client_id})
+        raise
+    except Exception as exc:
+        await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"status": "execution_failed", "failed_at": _now(), "failure_kind": "connector_or_provider_error"}})
+        await log_activity(user, "synergy_action_failed", "web_provider_action", action["id"], payload.operation_id, "Synergy read action failed unexpectedly; no provider change was made", metadata={"client_id": payload.client_id})
+        raise HTTPException(status_code=502, detail="Nexus could not complete the Synergy read action") from exc
     safe_result = _redact_provider_value(result)
     await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"status": "completed", "completed_at": _now(), "result": safe_result}})
+    await log_activity(user, "synergy_action_completed", "web_provider_action", action["id"], payload.operation_id, "Completed a read-only Synergy Wholesale action", metadata={"client_id": payload.client_id})
     return {"action": {**action, "status": "completed"}, "result": safe_result}
 
 
@@ -494,12 +656,23 @@ async def execute_approved_synergy_action(action_id: str, user: dict = Depends(r
     approval = await db.approvals.find_one({"id": action.get("approval_id"), "ref_id": action_id, "status": "approved"}, {"_id": 0})
     if not approval:
         raise HTTPException(status_code=409, detail="An independent approval is required before Synergy executes this action")
-    await db.web_provider_actions.update_one({"id": action_id, "status": "pending_approval"}, {"$set": {"status": "executing", "execution_started_at": _now(), "executed_by": user.get("email") or user.get("id")}})
+    claim = await db.web_provider_actions.update_one(
+        {"id": action_id, "status": action.get("status")},
+        {"$set": {"status": "executing", "execution_started_at": _now(), "executed_by": user.get("email") or user.get("id")}},
+    )
+    if getattr(claim, "matched_count", 1) != 1:
+        raise HTTPException(status_code=409, detail="This Synergy action is already being executed or has changed state")
     try:
-        result = execute_synergy(action["operation_id"], unseal_action_parameters(action.get("parameters_encrypted", "")), await _synergy_credentials())
+        result = await asyncio.to_thread(execute_synergy, action["operation_id"], unseal_action_parameters(action.get("parameters_encrypted", "")), await _synergy_credentials())
     except HTTPException:
         await db.web_provider_actions.update_one({"id": action_id}, {"$set": {"status": "approved_execution_failed", "failed_at": _now()}})
+        await log_activity(user, "synergy_action_execution_failed", "web_provider_action", action_id, action.get("operation_id", "Synergy action"), "Approved Synergy action failed before provider completion evidence was recorded", metadata={"client_id": action.get("client_id")})
         raise
+    except Exception as exc:
+        await db.web_provider_actions.update_one({"id": action_id}, {"$set": {"status": "approved_execution_failed", "failed_at": _now()}})
+        await log_activity(user, "synergy_action_execution_failed", "web_provider_action", action_id, action.get("operation_id", "Synergy action"), "Approved Synergy action failed unexpectedly before provider completion evidence was recorded", metadata={"client_id": action.get("client_id")})
+        raise HTTPException(status_code=502, detail="Nexus could not complete the approved Synergy action") from exc
     safe_result = _redact_provider_value(result)
     await db.web_provider_actions.update_one({"id": action_id}, {"$set": {"status": "completed", "completed_at": _now(), "result": safe_result}})
+    await log_activity(user, "synergy_action_completed", "web_provider_action", action_id, action.get("operation_id", "Synergy action"), "Completed an approved Synergy Wholesale action", metadata={"client_id": action.get("client_id"), "approval_id": action.get("approval_id")})
     return {"id": action_id, "status": "completed", "result": safe_result}

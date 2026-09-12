@@ -19,7 +19,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_EMAIL = "aaron@stech.com.au"
-TEST_PASSWORD = "Lucky@2871$!"
+TEST_PASSWORD = os.environ.get("NEXUS_TEST_ADMIN_PASSWORD", "")
 
 # Test data prefixes for cleanup
 TEST_PREFIX = "TEST_ITER123_"
@@ -161,7 +161,7 @@ class TestTrmmSettingsRegression:
         data = get_response.json()
         assert data.get("configured") == True
         assert data.get("base_url") == "https://test-trmm.example.com"
-        assert data.get("api_key_preview") == "…1234"
+        assert data.get("api_key_preview") == "Ã¢â‚¬Â¦1234"
         
         # Delete settings
         delete_response = requests.delete(f"{BASE_URL}/api/trmm/settings", headers=auth_headers)
