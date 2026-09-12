@@ -81,6 +81,7 @@ agenthub/agents/youtube/db
 /tmp/
 
 # Runtime uploads are local tenant data. Curated help-guide screenshots are source assets.
+backend/private_uploads/
 backend/uploads/*
 !backend/uploads/help/
 backend/uploads/help/*

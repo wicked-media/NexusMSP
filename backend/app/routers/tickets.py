@@ -25,6 +25,7 @@ from app.services.scope_permissions import (
     tenant_scoped_query,
 )
 from app.services.ticket_conversation import sanitise_ticket_rich_text
+from app.services.upload_security import upload_is_releasable
 from app.services.ticket_time import (
     create_canonical_ticket_time_entry,
     list_ticket_time_history,
@@ -1570,6 +1571,8 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
         total_size = 0
         for attachment_id in attachment_ids:
             attachment = by_id[attachment_id]
+            if not upload_is_releasable(attachment):
+                raise HTTPException(status_code=423, detail="A selected attachment has not passed security scanning")
             artifact_path = (attachment.get("artifact_storage") or {}).get("object_path")
             if not artifact_path:
                 raise HTTPException(status_code=409, detail=f"{attachment.get('filename', 'Attachment')} is not available in private storage")

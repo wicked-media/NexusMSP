@@ -27,6 +27,9 @@ services:
       NEXUS_TEST_ENVIRONMENT: "1"
       NEXUS_SEED_DEMO_DATA: "false"
       NEXUS_RUN_BACKGROUND_WORKERS: "false"
+      # Deterministic clean/EICAR-only scanner is accepted solely because this
+      # stack also enforces NEXUS_TEST_ENVIRONMENT and a disposable database.
+      NEXUS_MALWARE_SCANNER: test
       NEXUS_UPLOADS_DIR: /app/uploads/acceptance
       MONGO_URL: mongodb://mongo:27017
       DB_NAME: ${NEXUS_ACCEPTANCE_DB_NAME:?Set an isolated nexus_acceptance_ database name}

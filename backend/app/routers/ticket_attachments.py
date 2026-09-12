@@ -8,7 +8,19 @@ from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_record_scope
-from app.services.upload_security import ATTACHMENT_EXTENSIONS, safe_original_filename, safe_upload_extension
+from app.services.upload_quarantine import (
+    UploadQuarantineFailure,
+    discard_upload,
+    inspect_upload,
+    release_upload,
+)
+from app.services.upload_security import (
+    ATTACHMENT_EXTENSIONS,
+    safe_original_filename,
+    safe_upload_extension,
+    upload_is_releasable,
+    validate_upload_signature,
+)
 from app.services.supabase_storage import archive_record_artifact, delete_artifact, read_artifact
 
 
@@ -31,7 +43,7 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 def _attachment_response(attachment: dict) -> dict:
     """Return safe ticket attachment metadata without storage implementation details."""
     result = {key: value for key, value in attachment.items() if key not in {"_id", "url", "stored_filename", "artifact_storage"}}
-    result["email_attachable"] = bool((attachment.get("artifact_storage") or {}).get("object_path"))
+    result["email_attachable"] = bool((attachment.get("artifact_storage") or {}).get("object_path")) and upload_is_releasable(attachment)
     return result
 
 
@@ -50,13 +62,27 @@ async def store_ticket_attachment(
     if len(content) > 25 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 25MB)")
     ext = safe_upload_extension(filename, allowed=ATTACHMENT_EXTENSIONS, default="bin")
+    validate_upload_signature(content, ext)
     attachment_id = str(uuid.uuid4())
     stored_filename = f"{str(ticket['id'])[:8]}_{uuid.uuid4().hex[:8]}.{ext}"
-    (UPLOAD_DIR / stored_filename).write_bytes(content)
+    try:
+        clean_upload = await inspect_upload(
+            database=db,
+            content=content,
+            filename=filename,
+            content_type=content_type,
+            tenant_id=ticket.get("tenant_id"),
+            client_id=ticket.get("client_id"),
+            target_type="ticket_attachment",
+            target_id=str(ticket["id"]),
+            actor_id=uploaded_by,
+            actor_name=uploaded_by_name,
+        )
+    except UploadQuarantineFailure as exc:
+        if exc.rejected:
+            raise HTTPException(status_code=422, detail="Upload rejected by malware scanner") from exc
+        raise HTTPException(status_code=503, detail="Upload scanning is temporarily unavailable") from exc
 
-    artifact_path = await archive_record_artifact(
-        "ticket-attachments", attachment_id, content, ext, content_type or "application/octet-stream"
-    )
     now = datetime.now(timezone.utc).isoformat()
     attachment = {
         "id": attachment_id,
@@ -70,33 +96,53 @@ async def store_ticket_attachment(
         "uploaded_by_name": uploaded_by_name,
         "source": source,
         "source_message_id": source_message_id,
+        "security_scan": clean_upload.metadata(),
         "created_at": now,
     }
-    if artifact_path:
-        attachment["artifact_storage"] = {
-            "provider": "supabase",
-            "object_path": artifact_path,
-            "mirrored_at": now,
-        }
-    await db.ticket_attachments.insert_one(attachment)
-    await db.audit_logs.insert_one({
-        "id": str(uuid.uuid4()),
-        "action": "ticket_attachment_added",
-        "entity_type": "ticket_attachment",
-        "entity_id": attachment_id,
-        "entity_name": attachment["filename"],
-        "ticket_id": ticket["id"],
-        "client_id": ticket.get("client_id") or None,
-        "user_id": uploaded_by,
-        "user_name": uploaded_by_name,
-        "metadata": {
-            "size": attachment["size"],
-            "content_type": attachment["content_type"],
-            "source": source,
-            "private_artifact": bool(artifact_path),
-        },
-        "created_at": now,
-    })
+    local_path = UPLOAD_DIR / stored_filename
+    artifact_path = None
+    inserted = False
+    try:
+        local_path.write_bytes(content)
+        artifact_path = await archive_record_artifact(
+            "ticket-attachments", attachment_id, content, ext, content_type or "application/octet-stream"
+        )
+        if artifact_path:
+            attachment["artifact_storage"] = {
+                "provider": "supabase",
+                "object_path": artifact_path,
+                "mirrored_at": now,
+            }
+        await db.ticket_attachments.insert_one(attachment)
+        inserted = True
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "action": "ticket_attachment_added",
+            "entity_type": "ticket_attachment",
+            "entity_id": attachment_id,
+            "entity_name": attachment["filename"],
+            "ticket_id": ticket["id"],
+            "client_id": ticket.get("client_id") or None,
+            "user_id": uploaded_by,
+            "user_name": uploaded_by_name,
+            "metadata": {
+                "size": attachment["size"],
+                "content_type": attachment["content_type"],
+                "source": source,
+                "private_artifact": bool(artifact_path),
+                "scan_status": "clean",
+            },
+            "created_at": now,
+        })
+    except Exception:
+        local_path.unlink(missing_ok=True)
+        if artifact_path:
+            await delete_artifact(artifact_path)
+        if inserted:
+            await db.ticket_attachments.delete_one({"id": attachment_id})
+        await discard_upload(db, clean_upload)
+        raise
+    await release_upload(db, clean_upload)
     return _attachment_response(attachment)
 
 
@@ -112,7 +158,7 @@ async def get_ticket_attachments(ticket_id: str, current_user: dict = Depends(ge
 @router.post("/tickets/{ticket_id}/attachments", dependencies=[Depends(require_action("ticket.attachment.upload"))])
 async def upload_ticket_attachment(ticket_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """Upload an attachment to a ticket"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "client_id": 1, "ticket_number": 1})
+    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "tenant_id": 1, "client_id": 1, "ticket_number": 1})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -132,6 +178,8 @@ async def download_ticket_attachment(ticket_id: str, attachment_id: str, current
     attachment = await db.ticket_attachments.find_one({"id": attachment_id, "ticket_id": ticket_id}, {"_id": 0})
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
+    if not upload_is_releasable(attachment):
+        raise HTTPException(status_code=423, detail="Attachment has not passed security scanning")
     object_path = (attachment.get("artifact_storage") or {}).get("object_path")
     if object_path:
         artifact = await read_artifact(object_path)

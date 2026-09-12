@@ -713,6 +713,29 @@ def test_authenticated_two_client_api_acceptance(acceptance_base_url: str) -> No
     )
     assert "url" not in client_a_document
     assert "artifact_storage" not in client_a_document
+    assert client_a_document.get("security_scan", {}).get("status") == "clean"
+
+    malware_rejection = technician_a.post(
+        f"{acceptance_base_url}/api/clients/{client_a['id']}/documents",
+        data={"title": "Rejected malware evidence", "category": "acceptance"},
+        files={
+            "file": (
+                "eicar-test.txt",
+                b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+                "text/plain",
+            )
+        },
+        timeout=20,
+    )
+    _expect_status(malware_rejection, 422, "malware upload fails closed")
+
+    signature_rejection = technician_a.post(
+        f"{acceptance_base_url}/api/clients/{client_a['id']}/documents",
+        data={"title": "Rejected mismatched evidence", "category": "acceptance"},
+        files={"file": ("mismatched.png", b"<script>active content</script>", "image/png")},
+        timeout=20,
+    )
+    _expect_status(signature_rejection, 400, "mismatched upload content fails closed")
     scoped_documents = _expect_status(
         technician_a.get(
             f"{acceptance_base_url}/api/clients/{client_a['id']}/documents", timeout=20
@@ -722,6 +745,7 @@ def test_authenticated_two_client_api_acceptance(acceptance_base_url: str) -> No
     )
     assert isinstance(scoped_documents, list)
     assert {document["id"] for document in scoped_documents} == {client_a_document["id"]}
+    assert scoped_documents[0].get("security_scan", {}).get("status") == "clean"
     assert "url" not in scoped_documents[0]
     scoped_download = technician_a.get(
         f"{acceptance_base_url}/api/clients/{client_a['id']}/documents/{client_a_document['id']}/download",

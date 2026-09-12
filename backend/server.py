@@ -593,6 +593,14 @@ async def _boot_warmup():
     """Run seed + ticket-number backfill without blocking app startup."""
     global _warmup_complete
     try:
+        from app.services.upload_quarantine import cleanup_stale_quarantine, ensure_upload_quarantine_indexes
+        await ensure_upload_quarantine_indexes(db)
+        removed_quarantine_files = await cleanup_stale_quarantine(db)
+        if removed_quarantine_files:
+            logger.warning("Removed %s stale private upload quarantine files", removed_quarantine_files)
+    except Exception as e:
+        logger.error(f"Upload-quarantine initialization failed: {e}")
+    try:
         from app.services.academy import ensure_academy_indexes
         await ensure_academy_indexes(database=db)
     except Exception as e:

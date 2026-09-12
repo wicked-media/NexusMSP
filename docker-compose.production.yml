@@ -15,6 +15,13 @@ services:
       timeout: 5s
       retries: 10
 
+  clamav:
+    image: clamav/clamav:1.4
+    restart: unless-stopped
+    volumes:
+      - nexus-clamav-db:/var/lib/clamav
+    networks: [backend]
+
   api:
     build:
       context: .
@@ -38,10 +45,16 @@ services:
       NEXUS_LOGIN_WINDOW_SECONDS: ${NEXUS_LOGIN_WINDOW_SECONDS:-300}
       NEXUS_LOGIN_IDENTITY_ATTEMPTS: ${NEXUS_LOGIN_IDENTITY_ATTEMPTS:-8}
       NEXUS_LOGIN_IP_ATTEMPTS: ${NEXUS_LOGIN_IP_ATTEMPTS:-30}
+      NEXUS_MALWARE_SCANNER: clamav
+      NEXUS_CLAMAV_HOST: clamav
+      NEXUS_CLAMAV_PORT: "3310"
+      NEXUS_MALWARE_SCAN_TIMEOUT_SECONDS: ${NEXUS_MALWARE_SCAN_TIMEOUT_SECONDS:-30}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     depends_on:
       mongo:
         condition: service_healthy
+      clamav:
+        condition: service_started
     volumes:
       - nexus-uploads:/app/uploads
       - nexus-private-uploads:/app/private_uploads
@@ -62,6 +75,8 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      clamav:
+        condition: service_started
     volumes:
       - nexus-uploads:/app/uploads
       - nexus-private-uploads:/app/private_uploads
@@ -84,6 +99,7 @@ networks:
 
 volumes:
   nexus-mongo:
+  nexus-clamav-db:
   nexus-uploads:
   nexus-private-uploads:
   nexus-installers:

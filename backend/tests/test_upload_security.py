@@ -1,14 +1,22 @@
 """Security contracts for upload naming and client-bound attachment routes."""
 
 import asyncio
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
 from app.routers import client_profile, device_chat, login_wallpaper, ticket_attachments, tickets
 from app.services.action_permissions import ACTION_PERMISSION_IDS, TECHNICIAN_DEFAULTS
-from app.services.upload_security import IMAGE_EXTENSIONS, safe_original_filename, safe_upload_extension
+from app.services.upload_quarantine import UploadQuarantineFailure
+from app.services.upload_security import (
+    IMAGE_EXTENSIONS,
+    safe_original_filename,
+    safe_upload_extension,
+    upload_is_releasable,
+    validate_upload_signature,
+)
 
 
 def _request(parameter: str, value: str):
@@ -27,6 +35,25 @@ def test_upload_extension_discards_path_components_and_requires_allowlist():
         safe_upload_extension("../../payload.html", allowed=IMAGE_EXTENSIONS)
 
     assert exc.value.status_code == 400
+
+
+def test_upload_signature_rejects_mismatched_active_content():
+    validate_upload_signature(b"\x89PNG\r\n\x1a\nimage-data", "png")
+    validate_upload_signature(b"plain customer evidence", "txt")
+
+    with pytest.raises(HTTPException) as exc:
+        validate_upload_signature(b"<script>alert('active')</script>", "png")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "File content does not match its extension"
+
+
+def test_only_clean_or_documented_legacy_uploads_can_be_released():
+    assert upload_is_releasable({}) is True
+    assert upload_is_releasable({"security_scan": {"status": "clean"}}) is True
+    assert upload_is_releasable({"security_scan": {"status": "pending"}}) is False
+    assert upload_is_releasable({"security_scan": {"status": "error"}}) is False
+    assert upload_is_releasable({"security_scan": {"status": "infected"}}) is False
 
 
 def test_device_chat_dependency_enforces_device_record_scope(monkeypatch):
@@ -71,6 +98,7 @@ def test_ticket_attachment_metadata_hides_storage_paths_and_marks_email_eligibil
         "stored_filename": "private-name.pdf",
         "url": "/api/uploads/ticket_attachments/private-name.pdf",
         "artifact_storage": {"provider": "supabase", "object_path": "ticket-attachments/attachment-1.pdf"},
+        "security_scan": {"status": "clean", "provider": "clamav"},
     }
 
     result = ticket_attachments._attachment_response(attachment)
@@ -80,6 +108,10 @@ def test_ticket_attachment_metadata_hides_storage_paths_and_marks_email_eligibil
     assert "stored_filename" not in result
     assert "url" not in result
     assert "artifact_storage" not in result
+    assert result["security_scan"]["status"] == "clean"
+
+    attachment["security_scan"] = {"status": "error"}
+    assert ticket_attachments._attachment_response(attachment)["email_attachable"] is False
 
 
 def test_ticket_attachment_local_retention_is_outside_the_public_upload_mount():
@@ -100,6 +132,7 @@ def test_client_document_metadata_hides_storage_paths_and_uses_scoped_download_r
         "stored_filename": "client-1__document-1.pdf",
         "url": "/api/uploads/client-documents/client-1__document-1.pdf",
         "artifact_storage": {"provider": "supabase", "object_path": "clients/client-1/documents/document-1.pdf"},
+        "security_scan": {"status": "clean", "provider": "clamav"},
     }
 
     result = client_profile._client_document_response(document)
@@ -108,12 +141,62 @@ def test_client_document_metadata_hides_storage_paths_and_uses_scoped_download_r
     assert "stored_filename" not in result
     assert "url" not in result
     assert "artifact_storage" not in result
+    assert result["security_scan"]["status"] == "clean"
 
 
 def test_client_document_legacy_filename_requires_the_expected_static_prefix():
-    assert client_profile._document_filename({"url": "/api/uploads/client-documents/client-1__document-1.pdf"}) == "client-1__document-1.pdf"
+    assert client_profile._document_filename({
+        "url": "/api/uploads/client-documents/client-1__document-1.pdf"
+    }) == "client-1__document-1.pdf"
     assert client_profile._document_filename({"url": "/api/uploads/clients/client-1__document-1.pdf"}) is None
     assert client_profile._document_filename({"stored_filename": "../other-client.pdf"}) is None
+
+
+def test_client_document_download_rejects_non_clean_scan_state(monkeypatch):
+    class _Documents:
+        async def find_one(self, *_args, **_kwargs):
+            return {
+                "id": "document-1",
+                "client_id": "client-1",
+                "kind": "file",
+                "security_scan": {"status": "error"},
+            }
+
+    monkeypatch.setattr(client_profile, "db", SimpleNamespace(client_documents=_Documents()))
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(client_profile.download_client_document("client-1", "document-1", {"id": "tech-1"}))
+
+    assert exc.value.status_code == 423
+
+
+@pytest.mark.parametrize(("rejected", "status_code"), [(False, 503), (True, 422)])
+def test_client_document_upload_maps_scanner_failure_without_releasing_file(
+    monkeypatch, tmp_path, rejected, status_code
+):
+    class _Clients:
+        async def find_one(self, *_args, **_kwargs):
+            return {"id": "client-1", "tenant_id": "tenant-1", "name": "Client One"}
+
+    async def fail_scan(**_kwargs):
+        raise UploadQuarantineFailure("malware_detected" if rejected else "scanner_unavailable", rejected=rejected)
+
+    monkeypatch.setattr(client_profile, "db", SimpleNamespace(clients=_Clients()))
+    monkeypatch.setattr(client_profile, "CLIENT_DOCS_DIR", tmp_path)
+    monkeypatch.setattr(client_profile, "inspect_upload", fail_scan)
+    upload = UploadFile(file=BytesIO(b"customer evidence"), filename="evidence.txt")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(client_profile.upload_client_document(
+            "client-1",
+            upload,
+            title="Evidence",
+            category="general",
+            current_user={"id": "tech-1", "name": "Technician One", "tenant_id": "tenant-1"},
+        ))
+
+    assert exc.value.status_code == status_code
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_ticket_attachment_permissions_separate_upload_from_permanent_deletion():

@@ -106,6 +106,9 @@ environment at an existing database.
   webhooks, providers, or other long-running automation.
 - The authenticated test refuses to make mutable requests unless both
   `NEXUS_ACCEPTANCE_BASE_URL` and `NEXUS_TEST_ENVIRONMENT=1` are present.
+- The runner sets `NEXUS_MALWARE_SCANNER=test` only inside that disposable
+  runtime. It recognizes the EICAR marker and otherwise returns clean so upload
+  lifecycle tests are deterministic without claiming a production ClamAV result.
 - Browser mode also requires an explicit loopback API origin, assigns a separate
   loopback frontend origin to CORS, refuses occupied ports, and runs with one
   worker so shared workflow state is deterministic.
@@ -119,6 +122,11 @@ The explicit local-Mongo path completed successfully against a generated
 restricted technicians, created two separate client/device/ticket estates,
 proved permitted same-client work, rejected cross-client reads and mutations,
 then stopped its API process and dropped only the generated database.
+
+The same run now uploads a clean client document through the quarantine
+boundary, verifies its clean scan state and scoped download, rejects the EICAR
+marker with HTTP 422, rejects active content disguised as PNG with HTTP 400,
+and proves neither rejected payload creates a released client-document record.
 
 The ticket golden path now additionally publishes a client-visible update,
 proves portal-only delivery through the secure-link ticket history endpoint,
@@ -134,7 +142,7 @@ contract was corrected before the passing run. The runner now prints the
 isolated API log tail before cleanup when an acceptance failure occurs, so
 future failures retain actionable server evidence without retaining data.
 
-The 2026-09-12 browser execution passed all eight checks in 1.6 minutes. It
+The latest 2026-09-12 browser execution passed all eight checks in 4.1 minutes. It
 covered login and readiness, ticket/client history, failed-closed remote access,
 the complete purchase-order approval and receipt path, invoice/Xero pending
 state, contract/global-reconciliation boundaries, unavailable Yeastar handling,

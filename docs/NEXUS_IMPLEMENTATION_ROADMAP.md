@@ -112,7 +112,7 @@ Gate: product-specific security/recovery reviews, signed artifacts, staged updat
 
 1. [Completed 2026-08-07] Add and verify public authentication abuse protection with privacy-safe counters and proxy trust controls.
 2. [Completed 2026-09-12] Run authenticated two-client DAST over the eight golden workflows and close boundary gaps. The isolated Playwright gate passed 8/8 and fixed the Microsoft Control Plane PyMongo database-selection crash; live provider-success proof remains item 6.
-3. Add upload quarantine/malware-scanner interface before broad portal uploads.
+3. [Completed 2026-09-12] Add upload quarantine/malware-scanner interface before broad portal uploads. Ticket attachments, inbound email evidence and client documents now stage privately, validate content signatures, require a clean ClamAV verdict, retain safe scoped disposition/audit evidence and fail closed when scanning is unavailable. The deterministic scanner is restricted to the disposable acceptance runtime.
 4. Connect structured metrics/traces/alerts to a production observability backend and assign owners.
 5. Rehearse Mongo/uploads restore and immutable application rollback.
 6. Execute provider sandbox acceptance for email/SMS, Microsoft, Xero, Yeastar, backup and RustDesk.

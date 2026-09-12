@@ -33,6 +33,7 @@ CI must also build both containers and validate `docker-compose.production.yml`.
 4. Keep `OPENAI_API_KEY` empty until AI data handling, tenancy, retention, and spend controls have been accepted.
 5. Store production secrets in the deployment platform's secret store and restrict read access.
 6. Rotate the JWT and encryption secrets under an approved change plan; changing the encryption key without a migration can make stored integration credentials unreadable.
+7. Keep `NEXUS_MALWARE_SCANNER=clamav`; never use the acceptance-only deterministic scanner outside the isolated test runner. See [UPLOAD_QUARANTINE_RUNBOOK.md](UPLOAD_QUARANTINE_RUNBOOK.md).
 
 ## 3. Deployment
 
@@ -50,6 +51,8 @@ Confirm:
 - MongoDB is not published to the public network.
 - The API and worker use the same uploads and installer volumes.
 - Correlation IDs appear in proxy responses and API logs.
+- ClamAV is reachable only on the backend network, its signatures are current,
+  and the clean/EICAR/outage checks in the upload-quarantine runbook pass.
 
 ## 4. Backup and restore proof
 

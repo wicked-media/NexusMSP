@@ -22,7 +22,18 @@ import uuid
 from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
-from app.services.upload_security import safe_original_filename, safe_upload_extension
+from app.services.upload_quarantine import (
+    UploadQuarantineFailure,
+    discard_upload,
+    inspect_upload,
+    release_upload,
+)
+from app.services.upload_security import (
+    safe_original_filename,
+    safe_upload_extension,
+    upload_is_releasable,
+    validate_upload_signature,
+)
 from app.services.supabase_storage import archive_client_artifact, delete_artifact, read_artifact
 
 
@@ -97,7 +108,7 @@ def _local_document_path(document: dict) -> Path | None:
 
 
 async def _ensure_client(client_id: str):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1, "artifact_storage": 1})
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "tenant_id": 1, "name": 1, "artifact_storage": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
@@ -273,19 +284,33 @@ async def upload_client_document(
     category: str = Form("general"),
     current_user: dict = Depends(get_current_user),
 ):
-    await _ensure_client(client_id)
+    client = await _ensure_client(client_id)
     ext = _safe_ext(file.filename, ALLOWED_DOC_EXTS)
     content = await file.read()
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large (max 20MB)")
+    validate_upload_signature(content, ext)
     doc_id = str(uuid.uuid4())
     filename = f"{client_id}__{doc_id}.{ext}"
     filepath = CLIENT_DOCS_DIR / filename
-    with open(filepath, "wb") as f:
-        f.write(content)
-    artifact_path = await archive_client_artifact(
-        client_id, f"documents-{doc_id}", content, ext, file.content_type or "application/octet-stream"
-    )
+    try:
+        clean_upload = await inspect_upload(
+            database=db,
+            content=content,
+            filename=file.filename,
+            content_type=file.content_type,
+            tenant_id=client.get("tenant_id") or current_user.get("tenant_id"),
+            client_id=client_id,
+            target_type="client_document",
+            target_id=doc_id,
+            actor_id=str(current_user.get("id") or "unknown"),
+            actor_name=str(current_user.get("name") or current_user.get("email") or current_user.get("id") or "unknown"),
+        )
+    except UploadQuarantineFailure as exc:
+        if exc.rejected:
+            raise HTTPException(status_code=422, detail="Upload rejected by malware scanner") from exc
+        raise HTTPException(status_code=503, detail="Upload scanning is temporarily unavailable") from exc
+
     doc = {
         "id": doc_id,
         "client_id": client_id,
@@ -299,16 +324,41 @@ async def upload_client_document(
         "content_type": file.content_type or "application/octet-stream",
         "uploaded_by": current_user.get("id"),
         "uploaded_by_name": current_user.get("name"),
+        "security_scan": clean_upload.metadata(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    if artifact_path:
-        doc["artifact_storage"] = {
-            "provider": "supabase",
-            "object_path": artifact_path,
-            "content_type": file.content_type or "application/octet-stream",
-            "mirrored_at": datetime.now(timezone.utc).isoformat(),
-        }
-    await db.client_documents.insert_one({**doc})
+    artifact_path = None
+    inserted = False
+    try:
+        filepath.write_bytes(content)
+        artifact_path = await archive_client_artifact(
+            client_id, f"documents-{doc_id}", content, ext, file.content_type or "application/octet-stream"
+        )
+        if artifact_path:
+            doc["artifact_storage"] = {
+                "provider": "supabase",
+                "object_path": artifact_path,
+                "content_type": file.content_type or "application/octet-stream",
+                "mirrored_at": datetime.now(timezone.utc).isoformat(),
+            }
+        await db.client_documents.insert_one({**doc})
+        inserted = True
+        await _write_client_audit(
+            current_user,
+            "client_document_uploaded",
+            client_id,
+            client.get("name") or "Client",
+            {"document_id": doc_id, "category": category, "size": len(content), "scan_status": "clean"},
+        )
+    except Exception:
+        filepath.unlink(missing_ok=True)
+        if artifact_path:
+            await delete_artifact(artifact_path)
+        if inserted:
+            await db.client_documents.delete_one({"id": doc_id})
+        await discard_upload(db, clean_upload)
+        raise
+    await release_upload(db, clean_upload)
     return _client_document_response(doc)
 
 
@@ -319,6 +369,8 @@ async def download_client_document(client_id: str, doc_id: str, current_user: di
     doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id, "kind": "file"}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Client document not found")
+    if not upload_is_releasable(doc):
+        raise HTTPException(status_code=423, detail="Client document has not passed security scanning")
     object_path = (doc.get("artifact_storage") or {}).get("object_path")
     if object_path:
         artifact = await read_artifact(object_path)

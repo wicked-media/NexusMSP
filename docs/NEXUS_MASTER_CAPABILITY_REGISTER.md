@@ -23,9 +23,9 @@ Priority values: `P0` release blocker, `P1` core pilot, `P2` subsequent release,
 | API | FastAPI, Pydantic, Motor/PyMongo, dynamically registered routers | Large modular API; continued tenant-boundary, pagination and input-contract review required. |
 | Data | MongoDB 7 with service-owned indexes and durable event/automation collections | Canonical relationships are emerging; schema governance and migration discipline are not yet complete. |
 | Agent | Go 1.22 endpoint agent with command, trust, heartbeat and updater tests | Windows path is most mature; signed release, macOS/Linux parity and fleet rollout proof remain blocked. |
-| Runtime | API, worker, MongoDB and Nginx containers in production Compose | Reproducible baseline and distributed login abuse guard exist; TLS ingress, broader edge policy, recovery proof and observability backend require deployment evidence. |
+| Runtime | API, worker, MongoDB, private ClamAV and Nginx containers in production Compose | Reproducible baseline, distributed login abuse guard and fail-closed customer-evidence scanning exist; TLS ingress, broader edge policy, recovery proof and observability backend require deployment evidence. |
 | CI | Frontend test/lint/build/audit, backend deterministic tests/compile, Go test/vet/build, container builds | Strong baseline; E2E, DAST, load, migration, accessibility and visual regression gates remain. |
-| Security | Central secret boundary, scoped high-risk paths, agent trust, upload controls, audit/event services | Reviewed findings are fixed; authenticated cross-tenant DAST, ingress throttling, malware scanning and independent penetration testing remain. |
+| Security | Central secret boundary, scoped high-risk paths, agent trust, customer-evidence quarantine/scanning, audit/event services | Reviewed findings and the two-client browser/customer-upload gates are fixed; broader ingress controls, specialist-upload adoption and independent penetration testing remain. |
 
 ## Capability register
 

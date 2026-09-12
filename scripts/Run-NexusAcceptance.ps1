@@ -331,6 +331,7 @@ $environmentNames = @(
     "NEXUS_ACCEPTANCE_BASE_URL",
     "NEXUS_ACCEPTANCE_CORS_ORIGINS",
     "NEXUS_BROWSER_BASE_URL",
+    "NEXUS_MALWARE_SCANNER",
     "NEXUS_UPLOADS_DIR",
     "MONGO_URL",
     "DB_NAME",
@@ -357,6 +358,7 @@ try {
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_BASE_URL", $apiUrl, "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_CORS_ORIGINS", $(if ($Browser) { $browserUrl } else { $apiUrl }), "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_BROWSER_BASE_URL", $browserUrl, "Process")
+    [Environment]::SetEnvironmentVariable("NEXUS_MALWARE_SCANNER", "test", "Process")
 
     if ($UseLocalMongo) {
         Write-Host "[Nexus acceptance] Checking explicit loopback MongoDB listener..."
