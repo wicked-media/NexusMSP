@@ -1,10 +1,10 @@
-# Disposable API acceptance testing
+# Disposable API and browser acceptance testing
 
-`scripts/Run-NexusAcceptance.ps1` runs a small authenticated API acceptance
-suite against a **new local MongoDB container**. It proves that two restricted
-technicians can work only in their assigned client scope; it does not use the
-normal development database, a production compose stack, seeded demo data,
-external integrations, or provider credentials.
+`scripts/Run-NexusAcceptance.ps1` runs authenticated API or Playwright browser
+acceptance against a **new disposable MongoDB database**. It proves that two
+restricted technicians can work only in their assigned client scope; it does
+not use the normal development database, a production compose stack, seeded
+demo data, external integrations, or provider credentials.
 
 ## Run it locally
 
@@ -46,6 +46,30 @@ Use another unused local port if necessary:
 .\scripts\Run-NexusAcceptance.ps1 -Port 18080
 ```
 
+### Authenticated browser gate
+
+Install the pinned Playwright Chromium runtime once, then run the same isolated
+environment with the browser suite enabled:
+
+```powershell
+pnpm --dir frontend exec playwright install chromium
+.\scripts\Run-NexusAcceptance.ps1 -UseLocalMongo -Browser
+```
+
+The browser runner binds the React development server only to
+`127.0.0.1:13000` by default; use `-FrontendPort` to select another unused
+loopback port. It provisions a fresh administrator, two clients, two
+client-restricted technicians, their account-owned readiness attestations and
+the workflow records needed by the eight golden-path checks. Each technician
+signs in through the real login page. Cross-client probes run from separate
+browser contexts, and provider-disabled paths must report an honest unavailable
+or pending state rather than fabricated success.
+
+The generated HTML report, JSON result and per-workflow screenshots are written
+under `test_reports/browser-acceptance/`. They are local execution evidence and
+are intentionally ignored by Git because they contain machine-specific paths
+and randomly generated acceptance identifiers.
+
 ### Explicit local-Mongo fallback
 
 The runner does **not** automatically fall back from containers. If no Compose
@@ -82,12 +106,11 @@ environment at an existing database.
   webhooks, providers, or other long-running automation.
 - The authenticated test refuses to make mutable requests unless both
   `NEXUS_ACCEPTANCE_BASE_URL` and `NEXUS_TEST_ENVIRONMENT=1` are present.
+- Browser mode also requires an explicit loopback API origin, assigns a separate
+  loopback frontend origin to CORS, refuses occupied ports, and runs with one
+  worker so shared workflow state is deterministic.
 - The local-Mongo fallback accepts only loopback MongoDB addresses and refuses
   credentials or remote connection strings before it can start the API.
-
-This is a focused API acceptance harness, not browser/end-to-end coverage. Add
-separate Playwright coverage only after an isolated browser target and test
-identities are deliberately provisioned.
 
 ## Latest execution — 2026-09-12
 
@@ -110,3 +133,12 @@ The first 2026-08-24 execution also caught a real ticket-creation contract defec
 contract was corrected before the passing run. The runner now prints the
 isolated API log tail before cleanup when an acceptance failure occurs, so
 future failures retain actionable server evidence without retaining data.
+
+The 2026-09-12 browser execution passed all eight checks in 1.6 minutes. It
+covered login and readiness, ticket/client history, failed-closed remote access,
+the complete purchase-order approval and receipt path, invoice/Xero pending
+state, contract/global-reconciliation boundaries, unavailable Yeastar handling,
+Microsoft readiness without secret disclosure, and Web Studio pending-connector
+evidence. It also exposed and drove a fix for PyMongo `Database` truth-value
+evaluation in Microsoft provider visibility. Provider-success acceptance still
+requires the dedicated vendor sandboxes listed in the production checklist.

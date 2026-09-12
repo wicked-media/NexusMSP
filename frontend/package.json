@@ -74,6 +74,7 @@
     "start": "craco start",
     "build": "craco build",
     "test": "craco test",
+    "test:e2e:golden": "playwright test e2e/golden-workflows.spec.js",
     "lint:ci": "eslint \"src/**/*.{js,jsx}\" --max-warnings 127",
     "audit:production": "node scripts/audit-production.mjs",
     "audit:consistency": "node scripts/audit-workspace-consistency.mjs",
@@ -94,6 +95,7 @@
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@craco/craco": "^7.1.0",
+    "@playwright/test": "^1.63.0",
     "autoprefixer": "^10.4.20",
     "babel-preset-react-app": "^10.1.0",
     "cra-template": "1.2.0",

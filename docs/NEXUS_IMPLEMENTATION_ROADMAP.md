@@ -111,7 +111,7 @@ Gate: product-specific security/recovery reviews, signed artifacts, staged updat
 ## Immediate work queue
 
 1. [Completed 2026-08-07] Add and verify public authentication abuse protection with privacy-safe counters and proxy trust controls.
-2. Run authenticated two-client DAST over the eight golden workflows and close boundary gaps.
+2. [Completed 2026-09-12] Run authenticated two-client DAST over the eight golden workflows and close boundary gaps. The isolated Playwright gate passed 8/8 and fixed the Microsoft Control Plane PyMongo database-selection crash; live provider-success proof remains item 6.
 3. Add upload quarantine/malware-scanner interface before broad portal uploads.
 4. Connect structured metrics/traces/alerts to a production observability backend and assign owners.
 5. Rehearse Mongo/uploads restore and immutable application rollback.

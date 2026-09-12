@@ -21,6 +21,7 @@ node_modules/
 # Testing
 /coverage
 .pytest_cache/
+/test_reports/browser-acceptance/
 
 # Next.js
 /.next/

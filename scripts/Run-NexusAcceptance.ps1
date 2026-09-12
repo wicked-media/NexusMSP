@@ -2,6 +2,9 @@
 param(
     [ValidateRange(1024, 65535)]
     [int]$Port = 18000,
+    [ValidateRange(1024, 65535)]
+    [int]$FrontendPort = 13000,
+    [switch]$Browser,
     [switch]$KeepEnvironment,
     [switch]$UseLocalMongo,
     [string]$LocalMongoUrl = "mongodb://127.0.0.1:27017",
@@ -13,9 +16,11 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $composeFile = Join-Path $root "docker-compose.acceptance.yml"
 $acceptanceTest = Join-Path $root "backend\tests\test_two_client_api_acceptance.py"
+$browserTest = Join-Path $root "frontend\e2e\golden-workflows.spec.js"
 $projectName = "nexus-acceptance-$([guid]::NewGuid().ToString('N'))"
 $acceptanceDatabase = "nexus_acceptance_$([guid]::NewGuid().ToString('N'))"
 $apiUrl = "http://127.0.0.1:$Port"
+$browserUrl = "http://127.0.0.1:$FrontendPort"
 $composeProjectArguments = @("-p", $projectName, "-f", $composeFile)
 $composeAttempted = $false
 $script:composeExecutable = $null
@@ -255,6 +260,12 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
 if (-not (Test-Path -LiteralPath $acceptanceTest)) {
     throw "Nexus acceptance test was not found: $acceptanceTest"
 }
+if ($Browser -and -not (Test-Path -LiteralPath $browserTest)) {
+    throw "Nexus browser acceptance test was not found: $browserTest"
+}
+if ($Browser -and -not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    throw "pnpm was not found. Install frontend dependencies before running browser acceptance."
+}
 if ($UseLocalMongo) {
     if ($KeepEnvironment) {
         throw "-KeepEnvironment is only supported for the disposable Compose path; local MongoDB runs always clean up their generated API process and database."
@@ -292,6 +303,21 @@ if ($listener) {
     $owner = if ($listener.PSObject.Properties.Name -contains "OwningProcess") { " by PID $($listener.OwningProcess)" } else { "" }
     throw "Acceptance port $Port is already in use$owner. Choose a different -Port; this runner will not stop another process."
 }
+if ($Browser) {
+    $frontendListener = $null
+    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
+        $frontendListener = Get-NetTCPConnection -LocalPort $FrontendPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    else {
+        $frontendListener = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() |
+            Where-Object { $_.Port -eq $FrontendPort } |
+            Select-Object -First 1
+    }
+    if ($frontendListener) {
+        $owner = if ($frontendListener.PSObject.Properties.Name -contains "OwningProcess") { " by PID $($frontendListener.OwningProcess)" } else { "" }
+        throw "Browser acceptance port $FrontendPort is already in use$owner. Choose a different -FrontendPort; this runner will not stop another process."
+    }
+}
 
 $environmentNames = @(
     "APP_ENV",
@@ -303,6 +329,8 @@ $environmentNames = @(
     "NEXUS_ACCEPTANCE_JWT_SECRET",
     "NEXUS_ACCEPTANCE_ENCRYPTION_KEY",
     "NEXUS_ACCEPTANCE_BASE_URL",
+    "NEXUS_ACCEPTANCE_CORS_ORIGINS",
+    "NEXUS_BROWSER_BASE_URL",
     "NEXUS_UPLOADS_DIR",
     "MONGO_URL",
     "DB_NAME",
@@ -327,6 +355,8 @@ try {
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_JWT_SECRET", (New-NexusAcceptanceSecret), "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_ENCRYPTION_KEY", (New-NexusAcceptanceSecret), "Process")
     [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_BASE_URL", $apiUrl, "Process")
+    [Environment]::SetEnvironmentVariable("NEXUS_ACCEPTANCE_CORS_ORIGINS", $(if ($Browser) { $browserUrl } else { $apiUrl }), "Process")
+    [Environment]::SetEnvironmentVariable("NEXUS_BROWSER_BASE_URL", $browserUrl, "Process")
 
     if ($UseLocalMongo) {
         Write-Host "[Nexus acceptance] Checking explicit loopback MongoDB listener..."
@@ -336,7 +366,7 @@ try {
         [Environment]::SetEnvironmentVariable("DB_NAME", $acceptanceDatabase, "Process")
         [Environment]::SetEnvironmentVariable("JWT_SECRET", [Environment]::GetEnvironmentVariable("NEXUS_ACCEPTANCE_JWT_SECRET", "Process"), "Process")
         [Environment]::SetEnvironmentVariable("NEXUS_SECRET_ENCRYPTION_KEY", [Environment]::GetEnvironmentVariable("NEXUS_ACCEPTANCE_ENCRYPTION_KEY", "Process"), "Process")
-        [Environment]::SetEnvironmentVariable("CORS_ORIGINS", $apiUrl, "Process")
+        [Environment]::SetEnvironmentVariable("CORS_ORIGINS", [Environment]::GetEnvironmentVariable("NEXUS_ACCEPTANCE_CORS_ORIGINS", "Process"), "Process")
 
         $localApiLogDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "nexus-acceptance-$([guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $localApiLogDirectory -Force | Out-Null
@@ -377,8 +407,14 @@ try {
         }
         throw
     }
-    Write-Host "[Nexus acceptance] Running authenticated two-client API acceptance tests..."
-    & $venvPython -m pytest $acceptanceTest -q -p no:cacheprovider
+    if ($Browser) {
+        Write-Host "[Nexus acceptance] Running authenticated two-client browser acceptance across eight golden workflows..."
+        & pnpm --dir (Join-Path $root "frontend") exec playwright test e2e/golden-workflows.spec.js
+    }
+    else {
+        Write-Host "[Nexus acceptance] Running authenticated two-client API acceptance tests..."
+        & $venvPython -m pytest $acceptanceTest -q -p no:cacheprovider
+    }
     if ($LASTEXITCODE -ne 0) {
         # The database and process are still disposable, but surface the local
         # API trace before cleanup.  Without this, a real acceptance failure is
@@ -387,7 +423,8 @@ try {
         if ($UseLocalMongo) {
             Write-NexusAcceptanceApiDiagnostics -LogDirectory $localApiLogDirectory
         }
-        throw "Nexus two-client API acceptance tests failed."
+        $suiteName = if ($Browser) { "browser" } else { "API" }
+        throw "Nexus two-client $suiteName acceptance tests failed."
     }
 
     Write-Host "[Nexus acceptance] Passed."

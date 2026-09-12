@@ -33,8 +33,13 @@ class _Collection:
         return _Cursor(rows)
 
 
+class _Database(SimpleNamespace):
+    def __bool__(self):
+        raise NotImplementedError("Database objects do not implement truth value testing")
+
+
 def _database(client_rows, connection_calls, provider_calls, captured):
-    return SimpleNamespace(
+    return _Database(
         clients=_Collection([client_rows], captured, "clients"),
         m365_tenant_connections=_Collection(connection_calls, captured, "connections"),
         m365_tenants=_Collection(provider_calls, captured, "provider_tenants"),

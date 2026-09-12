@@ -87,7 +87,9 @@ async def visible_m365_provider_tenant_ids(
     if platform_tenant_id(current_user) == "nexus-local" and effective_scope(current_user)["mode"] == "all":
         return None
 
-    store = database or default_db
+    # PyMongo Database deliberately rejects truth-value testing. Keep injected
+    # databases explicit so production and test stores follow the same path.
+    store = database if database is not None else default_db
     clients = await store.clients.find(
         tenant_scoped_query(
             current_user,
