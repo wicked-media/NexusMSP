@@ -11,8 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
-import { Users, Plus, Trash2, Phone, Mail, MessageSquare, Bell, Edit2, Loader2, Radio } from "lucide-react";
+import { Users, Plus, Trash2, Phone, Mail, MessageSquare, Bell, Edit2, Loader2, Radio, RefreshCw, Search, ShieldCheck, AlertTriangle } from "lucide-react";
 
 const TIER_CLS = {
   1: "text-rose-400 border-rose-500/40 bg-rose-500/10",
@@ -44,6 +46,8 @@ export default function TechRosterPage() {
   const [form, setForm] = useState(EMPTY);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [search, setSearch] = useState("");
+  const [coverageFilter, setCoverageFilter] = useState("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -93,25 +97,82 @@ export default function TechRosterPage() {
     });
   };
 
+  const activeTechs = useMemo(() => techs.filter((tech) => tech.active !== false), [techs]);
+  const onCallTechs = useMemo(() => activeTechs.filter((tech) => tech.on_call), [activeTechs]);
+  const tierOneCoverage = useMemo(() => activeTechs.filter((tech) => (tech.escalation_tier || 2) === 1), [activeTechs]);
+  const missingContactPath = useMemo(
+    () => activeTechs.filter((tech) => !(tech.preferred_channels || []).length || (!tech.email && !tech.mobile && !tech.teams_email && !tech.slack_handle)),
+    [activeTechs],
+  );
+
+  const filteredTechs = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return techs.filter((tech) => {
+      const isActive = tech.active !== false;
+      const hasContactPath = (tech.preferred_channels || []).length > 0 && Boolean(tech.email || tech.mobile || tech.teams_email || tech.slack_handle);
+      if (coverageFilter === "active" && !isActive) return false;
+      if (coverageFilter === "on_call" && (!isActive || !tech.on_call)) return false;
+      if (coverageFilter === "needs_contact" && (!isActive || hasContactPath)) return false;
+      if (coverageFilter.startsWith("tier_") && (tech.escalation_tier || 2) !== Number(coverageFilter.replace("tier_", ""))) return false;
+      if (!normalizedSearch) return true;
+      return [
+        tech.name,
+        tech.role,
+        tech.email,
+        tech.mobile,
+        tech.slack_handle,
+        tech.teams_email,
+        ...(tech.preferred_channels || []),
+      ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch));
+    });
+  }, [coverageFilter, search, techs]);
+
   const tiers = { 1: [], 2: [], 3: [] };
-  techs.forEach((t) => { tiers[t.escalation_tier || 2]?.push(t); });
+  filteredTechs.forEach((tech) => { tiers[tech.escalation_tier || 2]?.push(tech); });
+  const filtersApplied = search.trim() || coverageFilter !== "all";
 
   return (
     <div className="space-y-4" data-testid="tech-roster-page">
-      <div className="flex flex-col gap-4 rounded-xl border border-rose-500/20 bg-gradient-to-r from-rose-500/[0.08] via-background to-background p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-500/25 bg-rose-500/10"><Radio className="h-5 w-5 text-rose-300" /></div>
-          <div>
-          <h2 className="text-base font-semibold tracking-tight text-foreground">On-call coverage and escalation</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Technicians available for War Room paging. Tiered escalation fires Tier 1 → 2 → 3 with ack tracking.
-          </p>
+      <OperationalPageHeader
+        eyebrow="Team operations"
+        title="On-call roster"
+        description="A live escalation directory for War Room paging. Keep the active contact path, escalation tier and on-call assignment clear before an incident occurs."
+        icon={Radio}
+        tone="amber"
+        actions={<><Button size="sm" variant="outline" onClick={load} disabled={loading} data-testid="tech-roster-refresh-btn"><RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button><Button onClick={openCreate} size="sm" data-testid="tech-roster-add-btn"><Plus className="mr-1.5 h-4 w-4" />Add roster contact</Button></>}
+      />
+
+      <MetricStrip columns={4}>
+        <MetricTile label="Active contacts" value={activeTechs.length} accent="cyan" icon={<Users className="h-3 w-3 text-cyan-400" />} testid="roster-tile-active" />
+        <MetricTile label="On-call now" value={onCallTechs.length} accent="emerald" icon={<Radio className="h-3 w-3 text-emerald-400" />} testid="roster-tile-on-call" />
+        <MetricTile label="Tier 1 coverage" value={tierOneCoverage.length} accent="amber" icon={<ShieldCheck className="h-3 w-3 text-amber-400" />} testid="roster-tile-tier-one" />
+        <MetricTile label="Contact paths missing" value={missingContactPath.length} accent={missingContactPath.length ? "rose" : "zinc"} icon={<AlertTriangle className={`h-3 w-3 ${missingContactPath.length ? "text-rose-400" : "text-zinc-400"}`} />} testid="roster-tile-contact-gaps" />
+      </MetricStrip>
+
+      <section className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Filter roster contacts">
+        <div className="flex flex-1 flex-col gap-2 sm:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input aria-label="Search roster contacts" className="pl-9" placeholder="Search name, role, mobile or contact channel…" value={search} onChange={(event) => setSearch(event.target.value)} data-testid="tech-roster-search" />
           </div>
+          <Select value={coverageFilter} onValueChange={setCoverageFilter}>
+            <SelectTrigger aria-label="Filter roster contacts" className="w-full sm:w-[210px]" data-testid="tech-roster-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All roster contacts</SelectItem>
+              <SelectItem value="active">Active contacts</SelectItem>
+              <SelectItem value="on_call">On-call now</SelectItem>
+              <SelectItem value="needs_contact">Contact path missing</SelectItem>
+              <SelectItem value="tier_1">Tier 1 responders</SelectItem>
+              <SelectItem value="tier_2">Tier 2 backup</SelectItem>
+              <SelectItem value="tier_3">Tier 3 escalation</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        <Button onClick={openCreate} size="sm" className="bg-rose-500 text-white hover:bg-rose-400" data-testid="tech-roster-add-btn">
-          <Plus className="mr-1.5 h-4 w-4" /> Add roster contact
-        </Button>
-      </div>
+        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+          <span data-testid="tech-roster-result-count">{filteredTechs.length} of {techs.length} shown</span>
+          {filtersApplied && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setSearch(""); setCoverageFilter("all"); }}>Clear</Button>}
+        </div>
+      </section>
 
       <div className="grid gap-3 md:grid-cols-3">
         {[1, 2, 3].map((tier) => (
@@ -121,7 +182,7 @@ export default function TechRosterPage() {
                 <Users className="w-3 h-3" /> Tier {tier} · {tiers[tier].length}
               </div>
               {tiers[tier].length === 0 ? (
-                <div className="text-xs text-zinc-500 py-6 text-center">No techs in this tier</div>
+                <div className="py-6 text-center text-xs text-muted-foreground">No matching contacts in this tier</div>
               ) : tiers[tier].map((t) => (
                 <div key={t.id} className="flex items-center justify-between border-b border-border py-2 last:border-0">
                   <div className="flex-1 min-w-0">
@@ -132,10 +193,6 @@ export default function TechRosterPage() {
                     </div>
                     <div className="text-[10px] text-zinc-500 truncate">{t.role || t.email || t.mobile || "—"}</div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(t)} data-testid={`tech-edit-${t.id}`}><Edit2 className="w-3 h-3" /></Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-400" onClick={() => setDeleteCandidate(t)} data-testid={`tech-delete-${t.id}`}><Trash2 className="w-3 h-3" /></Button>
-                  </div>
                 </div>
               ))}
             </CardContent>
@@ -143,44 +200,50 @@ export default function TechRosterPage() {
         ))}
       </div>
 
-      <Card>
+      <Card className="overflow-hidden border-border/70 bg-card/70">
+        <div className="border-b border-border/70 bg-muted/[0.14] px-4 py-3">
+          <p className="text-sm font-semibold text-foreground">Coverage directory</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Use this detailed list to update a contact. The tier cards above are an at-a-glance escalation view, so actions live here only.</p>
+        </div>
         <CardContent className="p-0">
           {loading ? (
             <div className="p-12 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline mr-2" /> Loading…</div>
-          ) : techs.length === 0 ? (
+          ) : filteredTechs.length === 0 ? (
             <div className="p-16 text-center text-sm text-muted-foreground">
-              No technicians yet. Add your first one to enable War Room paging.
+              {techs.length ? "No roster contacts match the current filters." : "No technicians yet. Add your first one to enable War Room paging."}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Tier</TableHead>
-                  <TableHead>Channels</TableHead>
-                  <TableHead>Mobile</TableHead>
-                  <TableHead>On-Call</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {techs.map((t) => (
-                  <TableRow key={t.id} data-testid={`tech-row-${t.id}`}>
-                    <TableCell className="font-medium">{t.name}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{t.role || "—"}</TableCell>
-                    <TableCell><Badge variant="outline" className={TIER_CLS[t.escalation_tier || 2]}>T{t.escalation_tier || 2}</Badge></TableCell>
-                    <TableCell className="text-[10px] font-mono">{(t.preferred_channels || []).join(" · ")}</TableCell>
-                    <TableCell className="text-xs font-mono">{t.mobile || "—"}</TableCell>
-                    <TableCell>{t.on_call ? <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-[9px]">ON-CALL</Badge> : <span className="text-zinc-500 text-xs">—</span>}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(t)}><Edit2 className="w-3 h-3" /></Button>
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-rose-400" onClick={() => setDeleteCandidate(t)}><Trash2 className="w-3 h-3" /></Button>
-                    </TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Tier</TableHead>
+                    <TableHead>Channels</TableHead>
+                    <TableHead>Mobile</TableHead>
+                    <TableHead>On-call</TableHead>
+                    <TableHead><span className="sr-only">Actions</span></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredTechs.map((t) => (
+                    <TableRow key={t.id} data-testid={`tech-row-${t.id}`}>
+                      <TableCell className="font-medium">{t.name}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{t.role || "—"}</TableCell>
+                      <TableCell><Badge variant="outline" className={TIER_CLS[t.escalation_tier || 2]}>T{t.escalation_tier || 2}</Badge></TableCell>
+                      <TableCell className="text-[10px] font-mono">{(t.preferred_channels || []).join(" · ") || "—"}</TableCell>
+                      <TableCell className="text-xs font-mono">{t.mobile || "—"}</TableCell>
+                      <TableCell>{t.on_call ? <Badge variant="outline" className="border-emerald-500/30 text-[9px] text-emerald-400">ON-CALL</Badge> : <span className="text-zinc-500 text-xs">—</span>}</TableCell>
+                      <TableCell className="text-right">
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => openEdit(t)} data-testid={`tech-edit-${t.id}`}><Edit2 className="mr-1 h-3 w-3" />Edit</Button>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-rose-400" onClick={() => setDeleteCandidate(t)} data-testid={`tech-delete-${t.id}`}><Trash2 className="mr-1 h-3 w-3" />Remove</Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>

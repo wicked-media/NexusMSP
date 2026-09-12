@@ -5,19 +5,17 @@ import {
   CheckCircle2,
   CircleDollarSign,
   ClipboardCheck,
-  FileText,
-  Monitor,
   MonitorCog,
   RefreshCw,
   Search,
   ShieldCheck,
-  ShoppingCart,
   Sparkles,
   Ticket,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
 import { buildNexusDailyBriefing } from "@/lib/nexusDaily";
 
 const SECTION_ICONS = {
@@ -107,55 +105,42 @@ export default function NexusDaily({
 
   return (
     <section
-      className="relative overflow-hidden rounded-2xl border border-border/80 bg-card text-card-foreground shadow-[0_22px_70px_rgba(15,23,42,0.09)] dark:shadow-[0_26px_72px_rgba(0,0,0,0.26)]"
+      className="nx-command-workspace relative overflow-hidden rounded-2xl border border-border/80 bg-card text-card-foreground shadow-[0_22px_70px_rgba(15,23,42,0.09)] dark:shadow-[0_26px_72px_rgba(0,0,0,0.26)]"
       data-testid="nexus-daily"
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-primary/[0.08] to-transparent" />
-      <div className="relative border-b border-border/80 px-5 py-4 md:px-7">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-              <Sparkles className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[0.25em] text-primary">MSP operating system · Nexus Daily</p>
-              <h1 className="mt-0.5 whitespace-nowrap text-xl font-semibold tracking-tight text-foreground md:text-2xl">Nexus Mission Control</h1>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">One live briefing, one priority view, one place to act.</p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 xl:items-end">
-            <div className="text-left xl:text-right">
-              <p className="flex items-center gap-1.5 text-[11px] font-medium text-foreground xl:justify-end">
-                <CalendarDays className="h-3.5 w-3.5 text-primary" />{dateLabel}
-              </p>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">Generated from live, access-scoped records</p>
-            </div>
-            <div className="flex flex-wrap gap-1.5 xl:justify-end" aria-label="Mission Control shortcuts">
+      <NexusWorkspaceHeader
+        eyebrow="MSP operating system · Nexus Daily"
+        title="Nexus Mission Control"
+        description="One live briefing, one priority view, one place to act."
+        icon={Sparkles}
+        tone="emerald"
+        signal={briefing.healthScore < 50 ? "critical" : briefing.healthScore < 75 ? "attention" : briefing.attentionCount ? "working" : "healthy"}
+        signalLabel={`${briefing.healthLabel} operating health`}
+        signalDescription={`${briefing.healthScore}/100 · ${briefing.attentionCount} connected signal${briefing.attentionCount === 1 ? "" : "s"} affecting the score.`}
+        meta={[
+          <span key="date"><CalendarDays className="h-3.5 w-3.5 text-primary" />{dateLabel}</span>,
+          <span key="scope">Generated from live, access-scoped records</span>,
+        ]}
+        showBack={false}
+        variant="command"
+        actions={
+          <div className="flex flex-wrap gap-1.5" aria-label="Mission Control shortcuts">
               <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={onOpenCommand} data-testid="bridge-search-btn">
                 <Search className="mr-1.5 h-3.5 w-3.5" />Search <kbd className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[8px]">Ctrl K</kbd>
               </Button>
               <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/tickets")} data-testid="bridge-tickets-btn">
                 <Ticket className="mr-1.5 h-3.5 w-3.5" />Tickets
               </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/leads")} data-testid="bridge-leads-btn">
-                <Users className="mr-1.5 h-3.5 w-3.5" />Leads
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/devices")} data-testid="bridge-devices-btn">
-                <Monitor className="mr-1.5 h-3.5 w-3.5" />Assets
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/invoices")} data-testid="bridge-invoices-btn">
-                <FileText className="mr-1.5 h-3.5 w-3.5" />Invoices
-              </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8 px-2.5 text-xs" onClick={() => navigate("/purchase-orders")} data-testid="bridge-purchase-orders-btn">
-                <ShoppingCart className="mr-1.5 h-3.5 w-3.5" />Purchase Orders
+              <Button type="button" size="sm" className="h-8 px-2.5 text-xs shadow-[0_6px_18px_rgba(14,165,233,0.18)]" onClick={() => navigate(briefing.focus?.route || "/clients")} data-testid="nexus-daily-hero-focus" title={briefing.focus?.title || "Start today's priority"}>
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />Start priority <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
               </Button>
               <Button type="button" size="sm" variant="ghost" className="h-8 px-2.5 text-xs" onClick={onRefresh} data-testid="bridge-refresh-btn">
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh
               </Button>
-            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       <div className="relative grid gap-5 px-5 py-6 md:px-7 xl:grid-cols-[1.45fr_0.55fr] xl:items-center">
         <div>
@@ -206,8 +191,8 @@ export default function NexusDaily({
           <Button type="button" variant="outline" className="h-9" onClick={onOpenDailyReview} data-testid="nexus-daily-sign-off">
             <ClipboardCheck className="mr-2 h-4 w-4" />Daily sign-off
           </Button>
-          <Button type="button" className="h-9" onClick={() => navigate(briefing.focus?.route || "/clients")} data-testid="nexus-daily-start">
-            Start recommendation <ArrowRight className="ml-2 h-4 w-4" />
+          <Button type="button" variant="outline" className="h-9" onClick={() => navigate(briefing.focus?.route || "/clients")} data-testid="nexus-daily-start">
+            Review details <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         </div>
       </div>

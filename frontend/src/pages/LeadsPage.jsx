@@ -16,18 +16,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
-  Plus, Search, RefreshCw, Loader2, Sparkles, Flame, Filter as FilterIcon,
+  Plus, Search, RefreshCw, Loader2, Sparkles, Filter as FilterIcon,
   Funnel, KanbanSquare, BarChart3, Table as TableIcon, Ticket, GitMerge, MoreVertical, Mail, Trophy,
   Building2, UserRound, BadgeDollarSign, NotebookPen, Check, ChevronsUpDown, ShieldCheck
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 import InitialsAvatar from "../components/leads/InitialsAvatar";
 import LeadScoreBadge from "../components/leads/LeadScoreBadge";
-import HotLeadsStrip from "../components/leads/HotLeadsStrip";
 import LeadActivityTicker from "../components/leads/LeadActivityTicker";
+import LeadStudioCommandDeck from "../components/leads/LeadStudioCommandDeck";
 import PipelineFunnelCanvas from "../components/leads/PipelineFunnelCanvas";
 import LeadsKanban from "../components/leads/LeadsKanban";
 import LeadSavedViewsBar from "../components/leads/LeadSavedViewsBar";
@@ -55,6 +56,8 @@ export default function LeadsPage() {
   const [users, setUsers] = useState([]);
   const [scores, setScores] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [drawerLeadId, setDrawerLeadId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingLead, setEditingLead] = useState(null);
@@ -69,8 +72,10 @@ export default function LeadsPage() {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    setLoadError(null);
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const [l, u, s] = await Promise.all([
         axios.get(`${API}/leads`, { headers }),
@@ -82,8 +87,13 @@ export default function LeadsPage() {
       const m = {};
       (s.data?.scores || []).forEach(x => { m[x.id] = x; });
       setScores(m);
-    } catch { toast.error("Failed to load leads"); }
-    finally { setLoading(false); }
+    } catch {
+      if (quiet) toast.error("Lead Studio could not refresh. Your current view has been kept.");
+      else setLoadError("Nexus could not load the lead pipeline. No opportunity records have been changed.");
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { load(); }, [load]);
@@ -123,6 +133,8 @@ export default function LeadsPage() {
       if (filters.mineOnly && user?.id) {
         if (l.assigned_to !== user.id && l.assigned_to !== user.email) return false;
       }
+      if (filters.unassignedOnly && (l.assigned_to || l.assigned_to_name)) return false;
+      if (filters.withoutValueOnly && Number(l.estimated_value)) return false;
       if (filters.staleOnly) {
         const last = l.last_activity_at || l.updated_at || l.created_at;
         if (!last || (Date.now() - new Date(last).getTime()) / 86400000 < 14) return false;
@@ -159,7 +171,7 @@ export default function LeadsPage() {
       setShowCreate(false);
       setEditingLead(null);
       setForm(EMPTY_FORM);
-      load();
+      load({ quiet: true });
     } catch (e) { toast.error(e?.response?.data?.detail || "Save failed"); }
   };
 
@@ -171,15 +183,25 @@ export default function LeadsPage() {
 
   const toggleSel = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
+  const showDirectory = (nextFilters = {}) => {
+    setSearch("");
+    setStatusFilter("all");
+    setFilters(nextFilters);
+    selectTab("directory");
+  };
+
   const bulkAction = async (action, extra = {}) => {
     if (selected.length === 0) { toast.error("Select leads first"); return; }
     try {
       await axios.post(`${API}/lead-studio/bulk-action`, { lead_ids: selected, action, ...extra }, { headers });
       toast.success(`${action} · ${selected.length} leads`);
       setSelected([]);
-      load();
+      load({ quiet: true });
     } catch { toast.error("Bulk action failed"); }
   };
+
+  if (loading) return <WorkspaceLoadingState label="Loading Lead Studio" />;
+  if (loadError) return <WorkspaceErrorState title="Lead Studio is unavailable" description={loadError} onRetry={load} retryLabel="Retry Lead Studio" />;
 
   return (
     <div className="p-6 space-y-4" data-testid="leads-page">
@@ -190,36 +212,33 @@ export default function LeadsPage() {
         icon={Sparkles}
         tone="emerald"
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=mailbox")} data-testid="leads-email-intake">
-            <Funnel className="w-3.5 h-3.5 mr-1" />Email Intake
+          <Button variant="outline" size="sm" onClick={() => load({ quiet: true })} disabled={refreshing} data-testid="leads-refresh">
+            <RefreshCw className={`w-3.5 h-3.5 mr-1 ${refreshing ? "animate-spin" : ""}`} />Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setPasteOpen(true)} data-testid="leads-quick-add">
-            <Sparkles className="w-3.5 h-3.5 mr-1" />Quick Add by Paste
-          </Button>
-          <Button variant="outline" size="sm" onClick={load} data-testid="leads-refresh">
-            <RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh
-          </Button>
+          <WorkspaceActionMenu testId="leads-more-actions">
+            <WorkspaceActionMenuItem icon={Funnel} onSelect={() => navigate("/settings?tab=mailbox")} testId="leads-email-intake">Email intake</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={Sparkles} onSelect={() => setPasteOpen(true)} testId="leads-quick-add">Quick add by paste</WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
           <Button size="sm" onClick={() => { setEditingLead(null); setForm(EMPTY_FORM); setShowCreate(true); }} data-testid="leads-new-btn">
-            <Plus className="w-3.5 h-3.5 mr-1" />New Lead
+            <Plus className="w-3.5 h-3.5 mr-1" />New lead
           </Button>
         </>}
       />
 
-      {/* Hero stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <HeroTile label="All leads" value={leads.length} icon={Sparkles} glow="violet" onClick={() => { setSearch(""); setStatusFilter("all"); setFilters({}); setTab("directory"); }} testId="stat-total" />
-        <HeroTile label="Open pipeline" value={summary.open} icon={Funnel} glow="sky" onClick={() => { setSearch(""); setStatusFilter("all"); setFilters({ pipelineOnly: true }); setTab("directory"); }} testId="stat-open" />
-        <HeroTile label="Pipeline value" value={money(summary.pipelineValue)} icon={BarChart3} glow="emerald" animated={false} onClick={() => setTab("insights")} testId="stat-pipeline-value" />
-        <HeroTile label="Hot leads" value={summary.hot} icon={Flame} glow="amber" onClick={() => { setSearch(""); setStatusFilter("all"); setFilters({ hotOnly: true }); setTab("directory"); }} testId="stat-hot" />
-      </div>
+      <LeadStudioCommandDeck
+        leads={leads}
+        scores={scores}
+        summary={summary}
+        onOpen={setDrawerLeadId}
+        onShowDirectory={showDirectory}
+        onShowInsights={() => selectTab("insights")}
+      />
 
       <LeadActivityTicker />
 
-      <HotLeadsStrip onOpen={setDrawerLeadId} />
-
       {/* Tabs */}
       <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList className="bg-transparent border-b border-zinc-800 rounded-none w-full justify-start gap-1 p-0 h-auto">
+        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-white/[0.08] bg-zinc-950/55 p-1.5 shadow-[0_12px_35px_rgba(0,0,0,0.16)]">
           {[
             { v: "pipeline", l: "Pipeline", Icon: Funnel },
             { v: "kanban", l: "Kanban", Icon: KanbanSquare },
@@ -229,9 +248,9 @@ export default function LeadsPage() {
             { v: "renewals", l: "Renewals", Icon: Trophy },
           ].map(t => (
             <TabsTrigger key={t.v} value={t.v}
-              className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-violet-500 data-[state=active]:text-zinc-100 text-zinc-500 rounded-none py-2 px-3 text-xs uppercase tracking-wider"
+              className="h-8 shrink-0 gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-zinc-500 shadow-none transition-all hover:bg-white/[0.035] hover:text-zinc-200 data-[state=active]:border-emerald-400/20 data-[state=active]:bg-emerald-400/[0.09] data-[state=active]:text-emerald-100 data-[state=active]:shadow-none"
               data-testid={`leads-tab-${t.v}`}>
-              <t.Icon className="w-3.5 h-3.5 mr-1" />{t.l}
+              <t.Icon className="h-3.5 w-3.5" />{t.l}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -268,7 +287,7 @@ export default function LeadsPage() {
 
         <TabsContent value="directory" className="mt-4 space-y-3">
           <LeadSavedViewsBar currentFilters={{ statusFilter, search, ...filters }} onApply={(f) => setFilters(f)} onPreset={(f) => setFilters(f)} />
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.08] bg-zinc-950/45 p-3">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input className="pl-9" placeholder="Search company / contact / email…" value={search} onChange={e => setSearch(e.target.value)} data-testid="leads-search" />
@@ -379,8 +398,8 @@ export default function LeadsPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={showCreate} onOpenChange={(v) => { if (!v) { setShowCreate(false); setEditingLead(null); } }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] gap-0 overflow-hidden border-violet-500/25 p-0">
-          <DialogHeader className="border-b border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.18),transparent_42%),linear-gradient(135deg,rgba(23,27,38,0.98),rgba(10,12,17,0.98))] px-6 py-5 pr-14">
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 overflow-hidden border-violet-500/25 p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(139,92,246,0.18),transparent_42%),linear-gradient(135deg,rgba(23,27,38,0.98),rgba(10,12,17,0.98))] px-6 py-5 pr-14">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-500/10 shadow-[0_0_28px_rgba(139,92,246,0.15)]">
                 <Sparkles className="h-5 w-5 text-violet-300" />
@@ -399,7 +418,7 @@ export default function LeadsPage() {
             </div>
           </DialogHeader>
 
-          <div className="max-h-[calc(92vh-176px)] overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             <div className="grid gap-4 lg:grid-cols-2">
               <WorkflowSection
                 icon={Building2}
@@ -479,7 +498,7 @@ export default function LeadsPage() {
             </div>
           </div>
 
-          <DialogFooter className="items-center gap-3 border-t border-white/[0.08] bg-black/20 px-6 py-4 sm:justify-between sm:space-x-0">
+          <DialogFooter className="shrink-0 items-center gap-3 border-t border-white/[0.08] bg-black/20 px-6 py-4 sm:justify-between sm:space-x-0">
             <div className="flex items-center gap-2 text-left text-[11px] text-zinc-500">
               <UserRound className="h-3.5 w-3.5 text-violet-300" />
               {form.company_name.trim() ? "Ready to save to the shared revenue timeline." : "Add a company name to make this lead ready."}

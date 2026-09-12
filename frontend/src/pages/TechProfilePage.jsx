@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Loader2, Trophy, Target, Brain, Save, Star, Clock, Award, X, Plus, Bell } from "lucide-react";
 import { PresenceDot } from "@/components/presence/PresenceDot";
+import WorkspaceBackControl from "@/components/WorkspaceBackControl";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
@@ -101,6 +102,7 @@ export default function TechProfilePage() {
     <PageShell>
       <div className="space-y-4" data-testid="tech-profile-page">
         <div>
+          {id && <WorkspaceBackControl className="mb-2" />}
           <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
             <Trophy className="w-3 h-3" />Tech Profile
           </div>

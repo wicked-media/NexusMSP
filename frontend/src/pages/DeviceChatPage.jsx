@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import WorkspaceBackControl from "@/components/WorkspaceBackControl";
 import { toast } from "sonner";
 import { 
   MessageSquare,
@@ -19,12 +20,11 @@ import {
   Monitor,
   User,
   Bot,
-  ArrowLeft,
   RefreshCw,
   Loader2,
   Command
 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 
 const MessageBubble = ({ message, isOwn }) => {
@@ -73,7 +73,6 @@ const MessageBubble = ({ message, isOwn }) => {
 export default function DeviceChatPage() {
   const { token, user } = useAuth();
   const { deviceId } = useParams();
-  const navigate = useNavigate();
   const [device, setDevice] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
@@ -176,9 +175,7 @@ export default function DeviceChatPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
+          <WorkspaceBackControl className="h-9 rounded-lg border border-border/70 bg-background/70 px-2" />
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
               device?.status === 'online' ? 'bg-green-500/10' : 'bg-red-500/10'

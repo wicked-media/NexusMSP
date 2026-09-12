@@ -5,7 +5,7 @@ import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -245,11 +245,11 @@ export function NexusCanaryPanel({ embedded = false }) {
       <Card className="border-sky-500/15 bg-sky-500/[0.025]"><CardContent className="p-4 text-sm text-muted-foreground"><p><strong className="text-sky-100">Operational boundary.</strong> A canary is an early-warning signal, not a substitute for EDR, immutable backups or an incident-response plan. A changed canary creates an audited signal; technicians choose and record the appropriate containment action from the response playbook.</p></CardContent></Card>
 
       <Dialog open={deployOpen} onOpenChange={setDeployOpen}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(760px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="canary-deploy-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><Flame className="h-5 w-5 text-rose-300" />Deploy Nexus Canary</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <p className="text-sm text-muted-foreground">Nexus Agent creates a small decoy text file, stores its expected fingerprint locally, and reports changes every 30 seconds. The file contents never leave the endpoint.</p>
             <CanaryAgentPicker
               agents={agents}
@@ -266,15 +266,21 @@ export function NexusCanaryPanel({ embedded = false }) {
               <Input id="canary-path" className="mt-1 font-mono text-xs" value={filePath} onChange={(event) => setFilePath(event.target.value)} placeholder="Default: C:\\Users\\Public\\Documents\\NexusMSP-[id]-Canary.txt" />
               <p className="mt-1 text-xs text-muted-foreground">Use an absolute Windows .txt path. Leave blank for the protected public-documents default.</p>
             </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setDeployOpen(false)} disabled={acting}>Cancel</Button>
-              <Button onClick={deploy} disabled={acting || deploying || !agentId}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue protected canary</Button>
-            </div>
           </div>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
+            <Button variant="outline" onClick={() => setDeployOpen(false)} disabled={acting}>Cancel</Button>
+            <Button onClick={deploy} disabled={acting || deploying || !agentId}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue protected canary</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!resolving} onOpenChange={(open) => !open && setResolving(null)}><DialogContent className="max-w-lg"><DialogHeader><DialogTitle>Resolve ransomware response signal</DialogTitle></DialogHeader><div className="space-y-4"><p className="text-sm text-muted-foreground">Resolution closes the current investigation record; it does not overwrite the endpoint canary fingerprint or suppress future integrity changes.</p><div><Label htmlFor="canary-resolution-note">Investigation and containment note</Label><Textarea id="canary-resolution-note" className="mt-1" rows={4} value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} placeholder="Record what changed, checks performed, containment action and outcome." /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setResolving(null)} disabled={acting}>Cancel</Button><Button onClick={resolveTrigger} disabled={acting || resolutionNote.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Resolve and audit</Button></div></div></DialogContent></Dialog>
+      <Dialog open={!!resolving} onOpenChange={(open) => !open && setResolving(null)}>
+        <DialogContent className="flex h-[min(620px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="canary-resolution-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12"><DialogTitle>Resolve ransomware response signal</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5"><p className="text-sm text-muted-foreground">Resolution closes the current investigation record; it does not overwrite the endpoint canary fingerprint or suppress future integrity changes.</p><div><Label htmlFor="canary-resolution-note">Investigation and containment note</Label><Textarea id="canary-resolution-note" className="mt-1" rows={4} value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} placeholder="Record what changed, checks performed, containment action and outcome." /></div></div>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4"><Button variant="outline" onClick={() => setResolving(null)} disabled={acting}>Cancel</Button><Button onClick={resolveTrigger} disabled={acting || resolutionNote.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Resolve and audit</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -187,12 +187,12 @@ export default function ScheduledReportsPage({ embedded = false }) {
 
       {/* Create Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-md" aria-describedby="create-sr-desc">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(760px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-md flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="create-sr-desc" data-testid="scheduled-report-create-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><Calendar className="w-5 h-5 text-blue-400" />New Scheduled Report</DialogTitle>
             <DialogDescription id="create-sr-desc">Set up a recurring evidence snapshot. O365 delivery can be enabled when a mailbox route is configured.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <div><Label>Name</Label><Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g., Weekly Client Summary" data-testid="sr-name" /></div>
             <div><Label>Report Type</Label>
               <Select value={form.report_type} onValueChange={v => setForm(p => ({ ...p, report_type: v }))}>
@@ -211,7 +211,7 @@ export default function ScheduledReportsPage({ embedded = false }) {
             </div>
             <div><Label>Recipients (comma-separated emails)</Label><Input value={form.recipients} onChange={e => setForm(p => ({ ...p, recipients: e.target.value }))} placeholder="team@company.com, cfo@client.com" data-testid="sr-recipients" /></div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={createReport} disabled={saving} data-testid="sr-submit">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Create Schedule"}</Button>
           </DialogFooter>
@@ -219,12 +219,12 @@ export default function ScheduledReportsPage({ embedded = false }) {
       </Dialog>
 
       <Dialog open={showOutputs} onOpenChange={setShowOutputs}>
-        <DialogContent className="max-w-3xl" aria-describedby="output-snapshots-desc">
-          <DialogHeader>
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="output-snapshots-desc" data-testid="scheduled-report-snapshots-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12">
             <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5 text-blue-400" />Generated report snapshots</DialogTitle>
             <DialogDescription id="output-snapshots-desc">Evidence retained for {selectedSchedule?.name || "this schedule"}. These records show the data captured at generation time.</DialogDescription>
           </DialogHeader>
-          <div className="max-h-[55vh] overflow-y-auto space-y-3" data-testid="generated-snapshots">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5" data-testid="generated-snapshots">
             {loadingOutputs && <div className="py-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>}
             {!loadingOutputs && outputs.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No snapshots have been generated yet.</p>}
             {!loadingOutputs && outputs.map(output => {
@@ -246,7 +246,7 @@ export default function ScheduledReportsPage({ embedded = false }) {
               </Card>;
             })}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowOutputs(false)}>Close</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4"><Button variant="outline" onClick={() => setShowOutputs(false)}>Close</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

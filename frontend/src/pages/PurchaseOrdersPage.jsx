@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,14 +22,17 @@ import {
   AlertTriangle, Scan, PackageCheck, Box,
   BellRing, Mail, Download, Copy, ThumbsUp, ThumbsDown, MessageSquare,
   BarChart3, TrendingUp, Save, Layers, Check, ChevronsUpDown,
-  MoreHorizontal, ChevronDown, Building2, Paperclip, RotateCcw, Settings2
+  Building2, Paperclip, RotateCcw, Settings2, RefreshCw
 } from "lucide-react";
 import { format } from "date-fns";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
+import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: Clock, glow: "" },
   pending_approval: { label: "Pending Approval", class: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Clock, glow: "ring-1 ring-purple-500/30 animate-pulse" },
@@ -121,6 +123,7 @@ function SearchableSelect({
 }
 
 export default function PurchaseOrdersPage() {
+  const navigate = useNavigate();
   const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [pos, setPos] = useState([]);
@@ -128,9 +131,11 @@ export default function PurchaseOrdersPage() {
   const [clients, setClients] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [documentTemplates, setDocumentTemplates] = useState([]);
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -152,6 +157,7 @@ export default function PurchaseOrdersPage() {
   const scanRef = useRef(null);
   const handledVendorPreset = useRef(false);
   const handledPODetailPreset = useRef("");
+  const hasLoadedData = useRef(false);
   const [approvalDialog, setApprovalDialog] = useState(null);
   const [approvalNotes, setApprovalNotes] = useState("");
   const [approvalApprover, setApprovalApprover] = useState("");
@@ -169,15 +175,18 @@ export default function PurchaseOrdersPage() {
   const [form, setForm] = useState({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
-    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: ""
+    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "",
+    document_label: "", document_terms: "", document_template_id: ""
   });
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    const keepWorkspaceVisible = hasLoadedData.current;
+    if (keepWorkspaceVisible) setRefreshing(true);
+    else setLoading(true);
     try {
-      const [poResult, productResult, clientResult, statsResult, vendorResult, userResult, ticketResult, policyResult] = await Promise.allSettled([
+      const [poResult, productResult, clientResult, statsResult, vendorResult, userResult, ticketResult, policyResult, templateResult] = await Promise.allSettled([
         axios.get(`${API}/purchase-orders`, { headers }),
         axios.get(`${API}/products`, { headers }),
         axios.get(`${API}/clients`, { headers }),
@@ -186,6 +195,7 @@ export default function PurchaseOrdersPage() {
         axios.get(`${API}/users`, { headers }),
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/settings/po-approval`, { headers }),
+        axios.get(`${API}/invoice-templates?include_presets=true`, { headers }),
       ]);
       if (poResult.status !== "fulfilled") throw poResult.reason;
       setPos(poResult.value.data || []);
@@ -196,11 +206,16 @@ export default function PurchaseOrdersPage() {
       setUsers(userResult.status === "fulfilled" ? userResult.value.data : []);
       setTickets(ticketResult.status === "fulfilled" ? ticketResult.value.data : []);
       if (policyResult.status === "fulfilled") setApprovalPolicy(policyResult.value.data);
+      setDocumentTemplates(templateResult.status === "fulfilled" ? templateResult.value.data : []);
+      hasLoadedData.current = true;
       if ([productResult, clientResult, vendorResult, userResult, ticketResult].some(result => result.status === "rejected")) {
         toast.warning("Purchase orders loaded, but one optional lookup is temporarily unavailable");
       }
-    } catch { toast.error("Failed to load purchase orders"); }
-    finally { setLoading(false); }
+    } catch { toast.error(keepWorkspaceVisible ? "Could not refresh purchase orders. Current data remains available." : "Failed to load purchase orders"); }
+    finally {
+      if (keepWorkspaceVisible) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -228,13 +243,14 @@ export default function PurchaseOrdersPage() {
   const resetForm = useCallback(() => setForm({
     vendor: "", vendor_id: "", vendor_contact: "", vendor_email: "", status: "draft",
     line_items: [], notes: "", ship_to: "", expected_delivery: "",
-    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: ""
+    client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "",
+    document_label: "", document_terms: "", document_template_id: ""
   }), []);
 
   const openCreate = useCallback((vendorPreset) => {
     setEditing(null);
     if (vendorPreset) {
-      setForm({ vendor: vendorPreset.name, vendor_id: vendorPreset.id, vendor_contact: vendorPreset.contact_name || "", vendor_email: vendorPreset.email || "", status: "draft", line_items: [], notes: "", ship_to: "", expected_delivery: "", client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "" });
+      setForm({ vendor: vendorPreset.name, vendor_id: vendorPreset.id, vendor_contact: vendorPreset.contact_name || "", vendor_email: vendorPreset.email || "", status: "draft", line_items: [], notes: "", ship_to: "", expected_delivery: "", client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "", document_label: "", document_terms: "", document_template_id: "" });
     } else { resetForm(); }
     setIsFormOpen(true);
   }, [resetForm]);
@@ -276,7 +292,7 @@ export default function PurchaseOrdersPage() {
       return;
     }
     setEditing(null);
-    setForm({ vendor: vendor.name, vendor_id: vendor.id, vendor_contact: vendor.contact_name || "", vendor_email: vendor.email || "", status: "draft", line_items: [], notes: "", ship_to: "", expected_delivery: "", client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "" });
+    setForm({ vendor: vendor.name, vendor_id: vendor.id, vendor_contact: vendor.contact_name || "", vendor_email: vendor.email || "", status: "draft", line_items: [], notes: "", ship_to: "", expected_delivery: "", client_id: "", client_name: "", ticket_id: "", ticket_number: "", ticket_title: "", shipping: "0", assigned_to: "", assigned_to_name: "", document_label: "", document_terms: "", document_template_id: "" });
     setIsFormOpen(true);
     setSearchParams({});
   }, [vendors, searchParams, setSearchParams]); // handles the explicit Vendor → Create PO hand-off once
@@ -292,6 +308,7 @@ export default function PurchaseOrdersPage() {
       ticket_id: po.ticket_id || "", ticket_number: po.ticket_number || "", ticket_title: po.ticket_title || "",
       shipping: String(po.shipping || 0),
       assigned_to: po.assigned_to || "", assigned_to_name: po.assigned_to_name || "",
+      document_label: po.document_label || "", document_terms: po.document_terms || "", document_template_id: po.document_template_id || "",
     });
     setIsFormOpen(true);
   };
@@ -427,25 +444,46 @@ export default function PurchaseOrdersPage() {
   };
 
   // --- PDF ---
+  const resolvePurchaseOrderPdfUrl = (po, download = false) => resolveDocumentPdfUrl({
+    api: API,
+    headers,
+    documentType: "purchase_order",
+    documentId: po.id,
+    token,
+    download,
+  });
+
   const handleDownloadPdf = async (po) => {
     setPdfLoading(true);
     try {
-      const res = await axios.get(`${API}/purchase-orders/${po.id}/pdf`, { headers, responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement("a"); a.href = url;
-      a.download = `PO_${po.po_number}.pdf`; a.click();
-      window.URL.revokeObjectURL(url);
+      const pdfUrl = await resolvePurchaseOrderPdfUrl(po, true);
+      const a = document.createElement("a");
+      a.href = pdfUrl;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 200);
       toast.success("PDF Downloaded");
     } catch { toast.error("Failed to generate PDF"); }
     finally { setPdfLoading(false); }
   };
-  const handlePreviewPdf = (po) => {
-    setPdfViewer({
-      open: true,
-      url: `${API}/purchase-orders/${po.id}/pdf/preview?token=${encodeURIComponent(token)}`,
-      title: `PO ${po.po_number}`,
-      downloadUrl: `${API}/purchase-orders/${po.id}/pdf/preview?token=${encodeURIComponent(token)}&download=true`,
-    });
+  const handlePreviewPdf = async (po) => {
+    setPdfLoading(true);
+    try {
+      const pdfUrl = await resolvePurchaseOrderPdfUrl(po);
+      setPdfViewer({
+        open: true,
+        url: pdfUrl,
+        title: `PO ${po.po_number}`,
+        downloadUrl: "",
+        onDownload: () => handleDownloadPdf(po),
+      });
+    } catch {
+      toast.error("Failed to generate PDF preview");
+    } finally {
+      setPdfLoading(false);
+    }
   };
 
   // --- Email Vendor ---
@@ -682,7 +720,7 @@ export default function PurchaseOrdersPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save variance review"); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading purchase orders" />;
 
   // ========== FORM DIALOG ==========
   const formDialog = (
@@ -770,6 +808,10 @@ export default function PurchaseOrdersPage() {
             <div><Label>Ship To</Label><Input value={form.ship_to} onChange={e => setForm({ ...form, ship_to: e.target.value })} placeholder="Shipping address" /></div>
           </div>
           <div><Label>Vendor Email</Label><Input value={form.vendor_email} onChange={e => setForm({ ...form, vendor_email: e.target.value })} /></div>
+          <div className="rounded-xl border border-violet-400/20 bg-violet-400/[0.035] p-4" data-testid="po-document-controls">
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><Label className="text-sm font-semibold text-violet-100">Vendor-facing document</Label><p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Set a draft-only title, design and terms for the vendor PDF. PO number, approval state, totals, receipts and audit evidence remain system-controlled.</p></div><Link to="/invoice-templates" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Manage document designs</Link></div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3"><div><Label className="text-xs">Document title <span className="font-normal text-muted-foreground">(optional)</span></Label><Input value={form.document_label} onChange={e => setForm({ ...form, document_label: e.target.value })} maxLength={120} placeholder="Defaults to Purchase Order" data-testid="po-document-label" /><p className="mt-1 text-[10px] text-muted-foreground">Displayed on the vendor PDF; it never replaces the PO number.</p></div><div><Label className="text-xs">Document design</Label><Select value={form.document_template_id || "__default"} onValueChange={value => setForm({ ...form, document_template_id: value === "__default" ? "" : value })}><SelectTrigger data-testid="po-document-template"><SelectValue placeholder="Organisation default" /></SelectTrigger><SelectContent><SelectItem value="__default">Organisation default</SelectItem>{documentTemplates.filter(template => template.doc_type === "purchase_order").map(template => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">Choose a saved design for this draft only.</p></div><div><Label className="text-xs">Vendor terms <span className="font-normal text-muted-foreground">(optional)</span></Label><Textarea value={form.document_terms} onChange={e => setForm({ ...form, document_terms: e.target.value })} maxLength={5000} rows={3} placeholder="Delivery, acceptance or payment terms for this purchase order" data-testid="po-document-terms" /></div></div>
+          </div>
           <Separator />
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -872,12 +914,12 @@ export default function PurchaseOrdersPage() {
   // ========== RECEIVE STOCK DIALOG ==========
   const receiveStockDialog = (
     <Dialog open={receiveDialog} onOpenChange={setReceiveDialog}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-emerald-400/15 via-emerald-400/[0.04] to-transparent px-5 py-5 pr-12 md:px-7">
           <DialogTitle className="flex items-center gap-2"><Box className="w-5 h-5 text-green-400" />Receive Stock - {viewPO?.po_number}</DialogTitle>
           <p className="text-sm text-muted-foreground">Enter only what arrived today. The remaining balance stays open on this PO.</p>
         </DialogHeader>
-        <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg border bg-muted/20 px-3 py-2"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Lines open</p><p className="font-mono text-lg font-semibold">{receiveItems.length}</p></div>
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Outstanding</p><p className="font-mono text-lg font-semibold text-amber-400">{receiveItems.reduce((sum, ri) => sum + Math.max(0, ri.quantity - (ri.received_qty || 0)), 0)}</p></div>
@@ -945,7 +987,7 @@ export default function PurchaseOrdersPage() {
             </Card>
           ))}
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4 md:px-7">
           <Button variant="outline" onClick={() => setReceiveItems(prev => prev.map(ri => ({ ...ri, receive_now: ri.quantity - (ri.received_qty || 0) })))}>Receive All</Button>
           <Button variant="success" onClick={handleReceiveStock} data-testid="confirm-receive-btn"><PackageCheck className="w-4 h-4 mr-1" />Confirm Receipt</Button>
         </DialogFooter>
@@ -1091,6 +1133,7 @@ export default function PurchaseOrdersPage() {
       pdfUrl={pdfViewer.url}
       title={pdfViewer.title}
       downloadUrl={pdfViewer.downloadUrl}
+      onDownload={pdfViewer.onDownload}
     />
   );
 
@@ -1579,33 +1622,17 @@ export default function PurchaseOrdersPage() {
         tone="emerald"
         signal={procurementSignal}
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} data-testid="po-analytics-btn">
-            <BarChart3 className="w-4 h-4 mr-1" />Analytics
+          <Button variant="outline" size="sm" onClick={fetchData} disabled={refreshing} data-testid="refresh-purchase-orders">
+            <RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? "animate-spin" : ""}`} />Refresh
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5" data-testid="po-workspace-tools">
-                <MoreHorizontal className="w-4 h-4" />
-                Tools
-                <ChevronDown className="w-3.5 h-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem asChild className="gap-2" data-testid="po-tools-vendors">
-                <Link to="/vendors"><Building2 className="w-4 h-4" />Vendors</Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="gap-2" data-testid="po-tools-vendor-scorecard">
-                <Link to="/vendor-scorecard"><BarChart3 className="w-4 h-4" />Vendor scorecard</Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="gap-2" onSelect={() => setApprovalPolicyOpen(true)} data-testid="po-tools-approval-policy">
-                <Settings2 className="w-4 h-4" />Approval policy
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={handleCheckEscalations} data-testid="check-escalations-btn">
-            <BellRing className="w-4 h-4 mr-1" />Check Escalations
-          </Button>
-          <Button size="sm" onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1.5" />New Purchase Order</Button>
+          <WorkspaceActionMenu testId="po-workspace-tools">
+            <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} testId="po-analytics-btn">Analytics</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={Building2} onSelect={() => navigate("/vendors")} testId="po-tools-vendors">Vendors</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => navigate("/vendor-scorecard")} testId="po-tools-vendor-scorecard">Vendor scorecard</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={Settings2} onSelect={() => setApprovalPolicyOpen(true)} testId="po-tools-approval-policy">Approval policy</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={BellRing} onSelect={handleCheckEscalations} testId="check-escalations-btn">Check escalations</WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
+          <Button size="sm" onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1.5" />New purchase order</Button>
         </>}
       />
 

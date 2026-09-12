@@ -20,7 +20,7 @@ import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
 import {
   ArrowLeft, ChevronRight, MoreVertical, MessageSquareReply, CheckCircle2, AlertTriangle,
   Building2, UserCircle2, Mail, Loader2, History, Search,
-  ArrowLeftRight, Bookmark, X, RotateCcw, Wrench, Receipt, Play, Square,
+  ArrowLeftRight, Bookmark, X, RotateCcw, Wrench, Receipt, Play, Square, PackagePlus,
 } from "lucide-react";
 
 const STATUS_FLOW = ["open", "in_progress", "on_hold", "resolved", "closed"];
@@ -36,6 +36,11 @@ export default function TicketConsoleHeader({
   onMoreAction,
   onOpenTools,
   onInvoice,
+  onAddItems,
+  itemCount = 0,
+  focusMode = false,
+  onToggleFocus,
+  onCatchUp,
   onTitleSave,
   onDescriptionSave,
   onMutate,
@@ -98,7 +103,7 @@ export default function TicketConsoleHeader({
 
   return (
     <>
-      <Card className="nx-ambient-surface sticky top-0 z-30 overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-nx-signal={signal} data-testid="ticket-console-header">
+      <Card className="nx-ambient-surface sticky top-0 z-30 overflow-clip rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_22px_65px_rgba(0,0,0,0.34)] backdrop-blur-xl" data-nx-signal={signal} data-testid="ticket-console-header">
         <CardContent className="p-4 space-y-3">
           {/* Row 1 — Back · ID · Priority · Title · Primary actions · More */}
           <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.17em] text-cyan-300/85"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>Live service record <span className="text-zinc-600">/</span><span className="text-zinc-400">{ticket.ticket_type?.replace("_", " ") || "incident"}</span></div>
@@ -158,6 +163,9 @@ export default function TicketConsoleHeader({
             </div>
 
             <TicketHeaderAction icon={MessageSquareReply} onClick={onReply} data-testid="console-reply-btn">Update client</TicketHeaderAction>
+            {onAddItems && <TicketHeaderAction icon={PackagePlus} onClick={onAddItems} data-testid="console-add-items-btn">Add products{itemCount > 0 ? ` · ${itemCount}` : ""}</TicketHeaderAction>}
+            {onCatchUp && <TicketHeaderAction icon={History} onClick={onCatchUp} data-testid="ticket-catch-up">Catch me up</TicketHeaderAction>}
+            {onToggleFocus && <TicketHeaderAction aria-pressed={focusMode} onClick={onToggleFocus} tone={focusMode ? "accent" : "neutral"} data-testid="ticket-focus-toggle">{focusMode ? "Show full context" : "Focus view"}</TicketHeaderAction>}
             <TicketHeaderAction
               icon={isTimerRunning ? Square : Play}
               tone={isTimerRunning ? "warning" : "compact"}

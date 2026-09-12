@@ -5,7 +5,7 @@ import {
   Mail, FolderKanban, Server, UserCog, ShoppingCart, Wifi, Phone,
   ShieldCheck, Radar, Workflow, TrendingUp, ShieldAlert, GitBranch,
   MessageSquare, HardDrive, Layers, ClipboardList, BrainCircuit,
-  Siren, Sparkles, Bookmark, Briefcase, Boxes,
+  Siren, Sparkles, Bookmark, Briefcase, Boxes, ArrowRightLeft, DatabaseBackup, Database, Activity,
 } from "lucide-react";
 
 export const navGroups = [
@@ -21,7 +21,7 @@ export const navGroups = [
         children: [
           { path: "/triage-queue", label: "Triage queue" },
           { path: "/dispatch-board", label: "Dispatch board" },
-          { path: "/workshop-bench", label: "Workshop bench" },
+          { path: "/workshop-bench", label: "Legacy workshop records" },
           { path: "/escalation-matrix", label: "Escalation management" },
           { path: "/blueprints", label: "Ticket blueprints" },
           { path: "/blueprints?tab=patterns", label: "Pattern discovery" },
@@ -31,7 +31,7 @@ export const navGroups = [
         ],
       },
       {
-        path: "/change-management", icon: GitBranch, label: "Change & Incidents",
+        path: "/change-management", icon: GitBranch, label: "Change Control",
         workspacePaths: ["/change-freezes"],
         children: [
           { path: "/change-management?view=approved", label: "Approved changes" },
@@ -42,8 +42,10 @@ export const navGroups = [
       },
       {
         path: "/team-hub", icon: UserCog, label: "Team",
+        workspacePaths: ["/technician-onboarding", "/nexus-academy"],
         children: [
           { path: "/team-hub?view=directory", label: "Team directory" },
+          { path: "/nexus-academy", label: "Nexus Academy" },
           { path: "/team-hub?view=roster", label: "On-call roster" },
           { path: "/team-hub?view=capacity", label: "Capacity" },
           { path: "/team-hub?view=skills", label: "Skills matrix" },
@@ -52,7 +54,7 @@ export const navGroups = [
       {
         path: "/team-chat", icon: MessageSquare, label: "Collaboration",
         workspacePaths: ["/live-chat", "/script-ticket"],
-        children: [{ path: "/live-chat", label: "Live support chat" }, { path: "/script-ticket", label: "Ticket conversation" }],
+        children: [{ path: "/live-chat", label: "Client live chat" }, { path: "/script-ticket", label: "Ticket automations" }],
       },
       { path: "/onboarding", icon: ClipboardList, label: "Client Onboarding" },
       { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
@@ -63,12 +65,14 @@ export const navGroups = [
     title: "Infrastructure",
     items: [
       {
-        path: "/devices", icon: Monitor, label: "Managed Assets",
+        path: "/devices", icon: Monitor, label: "Devices & RMM",
         workspacePaths: [
-          "/nexus-agent", "/bulk-actions", "/maintenance-scheduler", "/patch-tuesday", "/device-terminal",
+          "/nexus-agent", "/application-manager", "/nexus-remote", "/remote-access", "/bulk-actions", "/maintenance-scheduler", "/patch-tuesday", "/device-terminal",
         ],
         children: [
           { path: "/nexus-agent", label: "Nexus Agent" },
+          { path: "/application-manager", label: "Application Manager" },
+          { path: "/nexus-remote", label: "Nexus Remote" },
           { path: "/bulk-actions", label: "Bulk actions" },
           { path: "/patch-tuesday", label: "Patch management" },
           { path: "/maintenance-scheduler", label: "Maintenance" },
@@ -78,14 +82,13 @@ export const navGroups = [
       {
         path: "/networking", icon: Wifi, label: "Network",
         workspacePaths: [
-          "/topology", "/dns-monitor", "/bandwidth-monitor", "/dmarc-compliance", "/splynx-dashboard", "/web-studio",
+          "/topology", "/dns-monitor", "/bandwidth-monitor", "/dmarc-compliance", "/splynx-dashboard",
         ],
         children: [
           { path: "/topology", label: "Topology" },
           { path: "/dns-monitor", label: "DNS intelligence" },
           { path: "/bandwidth-monitor", label: "Bandwidth" },
           { path: "/dmarc-compliance", label: "DMARC" },
-          { path: "/web-studio", label: "Web Studio" },
           { path: "/splynx-dashboard", label: "ISP operations" },
         ],
       },
@@ -100,7 +103,7 @@ export const navGroups = [
         ],
       },
       {
-        path: "/assets", icon: Package, label: "Inventory Assets",
+        path: "/assets", icon: Package, label: "Client Asset Register",
         workspacePaths: [
           "/qr-assets", "/asset-print-batch", "/asset-lifecycle", "/asset-depreciation", "/procurement-planner",
         ],
@@ -124,15 +127,16 @@ export const navGroups = [
       {
         path: "/automation-hub", icon: Workflow, label: "Automation",
         workspacePaths: [
-          "/diagnostics", "/runbooks", "/scripting", "/git-scripts", "/workflow-automation", "/alert-rules",
+          "/diagnostics", "/scripting", "/git-scripts", "/workflow-automation", "/alert-rules", "/smart-automation", "/nexus-proving-ground",
         ],
         children: [
+          { path: "/smart-automation", label: "Smart automation" },
           { path: "/diagnostics", label: "Diagnostic workspace" },
           { path: "/workflow-automation", label: "Automation Studio" },
           { path: "/workflow-automation?tab=marketplace", label: "Automation marketplace" },
           { path: "/workflow-automation?tab=runtime", label: "Runtime health" },
           { path: "/workflow-automation?tab=simulations", label: "Simulation history" },
-          { path: "/runbooks", label: "Runbooks" },
+          { path: "/nexus-proving-ground", label: "Nexus Proving Ground" },
           { path: "/scripting", label: "Scripts & repair packs" },
           { path: "/git-scripts", label: "Git Scripts Sync" },
           { path: "/alert-rules", label: "Alert rules" },
@@ -146,13 +150,14 @@ export const navGroups = [
     items: [
       {
         path: "/clients", icon: Users, label: "Clients",
-        workspacePaths: ["/client-insights", "/client-compare", "/client-portal"],
+        workspacePaths: ["/client-insights", "/client-compare", "/client-portal", "/web-studio", "/nexus-assurance", "/expected-state"],
         children: [
           { path: "/client-insights", label: "Client insights" },
           { path: "/client-insights?tab=what-changed", label: "What Changed" },
-          { path: "/expected-state", label: "Expected State" },
+          { path: "/nexus-assurance", label: "Nexus Assurance" },
           { path: "/client-compare", label: "Compare clients" },
           { path: "/client-portal", label: "Customer portal" },
+          { path: "/web-studio", label: "Websites & domains" },
         ],
       },
       {
@@ -187,7 +192,7 @@ export const navGroups = [
         ],
       },
       {
-        path: "/products", icon: Package, label: "Products & Inventory",
+        path: "/products", icon: Package, label: "Products & Stock",
         workspacePaths: ["/stocktake", "/stocktake-mobile", "/rentals"],
         children: [
           { path: "/stocktake", label: "Stocktake" },
@@ -214,17 +219,18 @@ export const navGroups = [
       {
         path: "/security-dashboard", icon: Shield, label: "SOC Dashboard",
         workspacePaths: ["/soc-feed", "/soc-realtime", "/threat-timeline", "/identity-threats"],
-        children: [{ path: "/soc-feed", label: "Security feed" }, { path: "/threat-timeline", label: "Threat timeline" }, { path: "/identity-threats", label: "Identity threats" }],
+        children: [{ path: "/soc-feed", label: "Security feed" }, { path: "/soc-realtime", label: "Realtime evidence" }, { path: "/threat-timeline", label: "Threat timeline" }, { path: "/identity-threats", label: "Identity threats" }],
       },
       {
         path: "/nexus-shield", icon: ShieldCheck, label: "Nexus Shield",
         workspacePaths: [
           "/endpoint-security", "/shadow-it", "/vulnerability-scanner", "/nexus-elevate",
-          "/ransomware-canary", "/ransomware-tabletop", "/remediation-playbooks", "/dr-plans", "/mail-shield",
+          "/ransomware-canary", "/ransomware-tabletop", "/remediation-playbooks", "/dr-plans", "/mail-shield", "/nexus-exposure",
         ],
         children: [
           { path: "/endpoint-security", label: "Endpoint protection" },
           { path: "/vulnerability-scanner", label: "Vulnerability scanner" },
+          { path: "/nexus-exposure", label: "Nexus Exposure" },
           { path: "/ransomware-canary", label: "Nexus Canary" },
           { path: "/nexus-elevate", label: "Nexus Elevate" },
           { path: "/remediation-playbooks", label: "Response playbooks" },
@@ -315,14 +321,20 @@ export const navGroups = [
         children: [{ path: "/channel-mode", label: "Channel Mode" }],
       },
       {
+        path: "/nexus-switchboard", icon: ArrowRightLeft, label: "Nexus Switchboard",
+      },
+      { path: "/nexus-continuity", icon: DatabaseBackup, label: "Platform Recovery" },
+      { path: "/nexus-data-quality", icon: Database, label: "Data Quality" },
+      { path: "/nexus-pulse", icon: Activity, label: "Nexus Pulse" },
+      {
         path: "/control-plane", icon: Layers, label: "Nexus Control Plane",
         workspacePaths: ["/cipp", "/m365"],
         children: [
-          { path: "/control-plane?module=microsoft365&view=capabilities", label: "Microsoft 365" },
-          { path: "/control-plane?module=microsoft365", label: "Tenant operations" },
-          { path: "/control-plane?module=microsoft365&view=connections", label: "Microsoft connections" },
-          { path: "/control-plane?module=microsoft365&view=actions", label: "Microsoft actions" },
-          { path: "/control-plane?module=microsoft365&view=security", label: "Microsoft security posture" },
+          { path: "/control-plane?module=microsoft365&view=connections", label: "Microsoft tenant setup" },
+          { path: "/control-plane?module=microsoft365", label: "Tenant directory" },
+          { path: "/control-plane?module=microsoft365&view=actions", label: "Action centre" },
+          { path: "/control-plane?module=microsoft365&view=security", label: "Security & guardrails" },
+          { path: "/control-plane?module=microsoft365&view=capabilities", label: "Capability map" },
           { path: "/control-plane?module=foundation", label: "Nexus Foundation" },
         ],
       },

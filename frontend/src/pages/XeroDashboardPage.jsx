@@ -26,7 +26,9 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart as RePieChart,
   Pie, Cell, Legend, AreaChart, Area
 } from "recharts";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
+import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
 
 const STATUS_COLORS = {
   PAID: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30" },
@@ -40,7 +42,6 @@ const STATUS_COLORS = {
   CONVERTED: { bg: "bg-purple-500/10", text: "text-purple-400", border: "border-purple-500/30" },
 };
 const PIE_COLORS = ["#10b981", "#3b82f6", "#6b7280", "#ef4444", "#f59e0b", "#8b5cf6"];
-const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", yearly: "Annually" };
 const FREQ_SHORT = { weekly: "wk", fortnightly: "2wk", monthly: "mo", quarterly: "qtr", yearly: "yr" };
 
 function StatusBadge({ status }) {
@@ -185,7 +186,7 @@ export default function XeroDashboardPage() {
     try {
       await axios.put(`${API}/invoice-themes/active`, { theme_id: themeId }, { headers });
       setActivePdfTheme(themeId);
-      toast.success("Invoice PDF theme updated");
+      toast.success("Legacy theme preference saved. Standard invoice PDFs are configured in Organisation Branding.");
     } catch { toast.error("Failed to update theme"); }
     finally { setSavingTheme(false); }
   };
@@ -194,7 +195,7 @@ export default function XeroDashboardPage() {
     setSavingBranding(true);
     try {
       await axios.put(`${API}/doc-branding/settings/${activeBrandingDoc}`, brandingForm, { headers });
-      toast.success(`${activeBrandingDoc.replace("_", " ")} branding saved`);
+      toast.success(`Legacy ${activeBrandingDoc.replace("_", " ")} preference saved. Standard documents use Organisation Branding.`);
       fetchBranding();
     } catch { toast.error("Failed to save branding"); }
     finally { setSavingBranding(false); }
@@ -265,28 +266,77 @@ export default function XeroDashboardPage() {
   };
 
   // PDF viewer state
-  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "", emailInvoiceId: null });
+  const [pdfViewer, setPdfViewer] = useState({ open: false, url: "", title: "", downloadUrl: "", onDownload: null, emailInvoiceId: null });
 
   // PDF download & preview
-  const downloadPdf = (inv) => {
+  const resolveFinancialPdfUrl = (documentType, documentId, download = false) => resolveDocumentPdfUrl({
+    api: API,
+    headers,
+    documentType,
+    documentId,
+    token,
+    download,
+  });
+
+  const openPdfDownload = (pdfUrl) => {
     const a = document.createElement("a");
-    a.href = `${API}/invoices/${inv.id}/pdf/download?token=${token}`;
+    a.href = pdfUrl;
     a.target = "_blank";
     a.rel = "noopener";
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     setTimeout(() => document.body.removeChild(a), 200);
-    toast.success(`Downloading ${inv.invoice_number}.pdf`);
   };
-  const previewPdf = (inv) => {
-    setPdfViewer({
-      open: true,
-      url: `${API}/invoices/${inv.id}/pdf?token=${token}`,
-      title: `Invoice ${inv.invoice_number}`,
-      downloadUrl: `${API}/invoices/${inv.id}/pdf/download?token=${token}`,
-      emailInvoiceId: inv.id,
-    });
+
+  const downloadPdf = async (inv) => {
+    try {
+      openPdfDownload(await resolveFinancialPdfUrl("invoice", inv.id, true));
+      toast.success(`Downloading ${inv.invoice_number}.pdf`);
+    } catch {
+      toast.error("Failed to download invoice PDF");
+    }
+  };
+
+  const previewPdf = async (inv) => {
+    try {
+      const pdfUrl = await resolveFinancialPdfUrl("invoice", inv.id);
+      setPdfViewer({
+        open: true,
+        url: pdfUrl,
+        title: `Invoice ${inv.invoice_number}`,
+        downloadUrl: "",
+        onDownload: () => downloadPdf(inv),
+        emailInvoiceId: inv.id,
+      });
+    } catch {
+      toast.error("Failed to generate invoice PDF preview");
+    }
+  };
+
+  const downloadEstimatePdf = async (estimate) => {
+    try {
+      openPdfDownload(await resolveFinancialPdfUrl("estimate", estimate.id, true));
+      toast.success(`Downloading ${estimate.estimate_number}.pdf`);
+    } catch {
+      toast.error("Failed to download estimate PDF");
+    }
+  };
+
+  const previewEstimatePdf = async (estimate) => {
+    try {
+      const pdfUrl = await resolveFinancialPdfUrl("estimate", estimate.id);
+      setPdfViewer({
+        open: true,
+        url: pdfUrl,
+        title: `Estimate ${estimate.estimate_number}`,
+        downloadUrl: "",
+        onDownload: () => downloadEstimatePdf(estimate),
+        emailInvoiceId: null,
+      });
+    } catch {
+      toast.error("Failed to generate estimate PDF preview");
+    }
   };
   const previewThemePdf = (themeId) => {
     setPdfViewer({
@@ -294,6 +344,7 @@ export default function XeroDashboardPage() {
       url: `${API}/invoice-themes/${themeId}/preview-pdf?token=${token}`,
       title: `Theme Preview`,
       downloadUrl: "",
+      onDownload: null,
       emailInvoiceId: null,
     });
   };
@@ -352,19 +403,11 @@ export default function XeroDashboardPage() {
 
   return (
     <div className="space-y-5" data-testid="xero-dashboard">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Finance Center</h1>
-          <p className="text-muted-foreground">Xero-powered accounting, invoicing & recurring billing</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {d.last_sync && <span className="text-xs text-muted-foreground">Last sync: {new Date(d.last_sync).toLocaleString()}</span>}
+      <OperationalPageHeader eyebrow="Accounting integration · Xero" title="Finance Center" description="Operate accounting, invoicing and recurring billing with clear Xero synchronisation evidence." icon={DollarSign} tone="emerald" signal={d.last_sync ? "connected" : undefined} meta={d.last_sync ? [`Last sync ${new Date(d.last_sync).toLocaleString()}`] : []} actions={
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} data-testid="sync-xero-btn">
             <RefreshCw className={`w-4 h-4 mr-1 ${syncing ? "animate-spin" : ""}`} />{syncing ? "Syncing..." : "Sync Xero"}
           </Button>
-        </div>
-      </div>
+        } />
 
       {/* Summary Stats */}
       <div className="grid grid-cols-5 gap-3">
@@ -530,7 +573,7 @@ export default function XeroDashboardPage() {
         <TabsContent value="estimates" className="space-y-3">
           <div className="flex items-center gap-3">
             <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9" placeholder="Search estimates..." value={estSearch} onChange={e => setEstSearch(e.target.value)} data-testid="search-estimates" /></div>
-            <Button size="sm" onClick={() => setCreateEstDialog(true)} data-testid="create-estimate-btn"><Plus className="w-4 h-4 mr-1" />New Estimate</Button>
+            <Button size="sm" onClick={() => setCreateEstDialog(true)} data-testid="create-estimate-btn"><Plus className="w-4 h-4 mr-1" />New estimate</Button>
           </div>
           <Card>
             <ScrollArea className="h-[420px]">
@@ -544,8 +587,8 @@ export default function XeroDashboardPage() {
                       <TableCell className="text-right font-mono">${est.total?.toLocaleString("en", { minimumFractionDigits: 2 })}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setPdfViewer({ open: true, url: `${API}/estimates/${est.id}/pdf?token=${token}`, title: `Estimate ${est.estimate_number}`, downloadUrl: `${API}/estimates/${est.id}/pdf/download?token=${token}` })} title="Preview PDF"><Eye className="w-3.5 h-3.5 text-violet-400" /></Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { const a = document.createElement("a"); a.href = `${API}/estimates/${est.id}/pdf/download?token=${token}`; a.target = "_blank"; document.body.appendChild(a); a.click(); setTimeout(() => document.body.removeChild(a), 200); }} title="Download PDF"><Download className="w-3.5 h-3.5 text-blue-400" /></Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => previewEstimatePdf(est)} title="Preview PDF"><Eye className="w-3.5 h-3.5 text-violet-400" /></Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => downloadEstimatePdf(est)} title="Download PDF"><Download className="w-3.5 h-3.5 text-blue-400" /></Button>
                           {est.status !== "CONVERTED" && est.status !== "DECLINED" && <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px]" onClick={() => handleConvertEstimate(est)} data-testid={`convert-${est.id}`}><ArrowRight className="w-3 h-3 mr-1 text-purple-400" />Convert</Button>}
                         </div>
                       </TableCell>
@@ -606,7 +649,7 @@ export default function XeroDashboardPage() {
             <div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" /><Input className="pl-9" placeholder="Search templates..." value={recSearch} onChange={e => setRecSearch(e.target.value)} data-testid="search-recurring" /></div>
             <Select value={recFilter} onValueChange={setRecFilter}><SelectTrigger className="w-[130px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="paused">Paused</SelectItem></SelectContent></Select>
             {dueCount > 0 && <Button size="sm" variant="outline" onClick={handleBatchGenerate} disabled={batchGenerating} data-testid="batch-generate-btn"><Zap className={`w-4 h-4 mr-1 ${batchGenerating ? "animate-pulse" : ""}`} />Generate Due ({dueCount})</Button>}
-            <Button size="sm" onClick={() => openRecDialog()} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Template</Button>
+            <Button size="sm" onClick={() => openRecDialog()} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New template</Button>
           </div>
 
           {/* Template Cards */}
@@ -899,8 +942,8 @@ export default function XeroDashboardPage() {
         <TabsContent value="branding" className="space-y-4" data-testid="branding-tab-content">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold">Document Branding & Templates</h3>
-              <p className="text-sm text-muted-foreground">Customize the look of your invoices, purchase orders, estimates, and letterheads</p>
+              <h3 className="text-lg font-bold">Legacy Finance Center Branding Preview</h3>
+              <p className="text-sm text-muted-foreground">Compatibility-only preview preferences. Standard customer documents use Organisation Branding and the document template studio.</p>
             </div>
           </div>
 
@@ -925,7 +968,7 @@ export default function XeroDashboardPage() {
           <div className="grid grid-cols-[1fr_350px] gap-4">
             {/* Settings Form */}
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-sm">Company Details & Settings</CardTitle></CardHeader>
+              <CardHeader className="pb-3"><CardTitle className="text-sm">Legacy Preview Details</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div><Label className="text-xs">Company Name</Label><Input value={brandingForm.company_name || ""} onChange={e => setBrandingForm(p => ({...p, company_name: e.target.value}))} placeholder="Your Company Pty Ltd" data-testid="branding-company-name" /></div>
@@ -944,7 +987,7 @@ export default function XeroDashboardPage() {
                 <div><Label className="text-xs">Terms & Conditions</Label><Textarea rows={2} value={brandingForm.terms_conditions || ""} onChange={e => setBrandingForm(p => ({...p, terms_conditions: e.target.value}))} placeholder="Payment due within 30 days..." /></div>
                 <Button onClick={handleSaveBranding} disabled={savingBranding} className="w-full" data-testid="save-branding-btn">
                   {savingBranding ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <CheckCircle className="w-4 h-4 mr-1" />}
-                  Save {activeBrandingDoc.replace("_", " ")} Settings
+                  Save Legacy {activeBrandingDoc.replace("_", " ")} Preference
                 </Button>
               </CardContent>
             </Card>
@@ -1005,8 +1048,8 @@ export default function XeroDashboardPage() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h3 className="text-lg font-bold flex items-center gap-2"><Palette className="w-5 h-5" />Invoice PDF Theme</h3>
-                <p className="text-sm text-muted-foreground">Choose the visual style for generated PDF invoices</p>
+                <h3 className="text-lg font-bold flex items-center gap-2"><Palette className="w-5 h-5" />Legacy Invoice Theme Preview</h3>
+                <p className="text-sm text-muted-foreground">Compatibility-only preference; it does not alter standard invoice PDFs.</p>
               </div>
               {savingTheme && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
             </div>
@@ -1123,9 +1166,9 @@ export default function XeroDashboardPage() {
 
       {/* Recurring Template Dialog (Create/Edit) */}
       <Dialog open={recDialog.open} onOpenChange={v => { if (!v) setRecDialog({ open: false, editing: null }); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{recDialog.editing ? "Edit Recurring Template" : "New Recurring Template"}</DialogTitle><DialogDescription>Configure automated recurring invoicing for a client</DialogDescription></DialogHeader>
-          <div className="space-y-4">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>{recDialog.editing ? "Edit Recurring Template" : "New Recurring Template"}</DialogTitle><DialogDescription>Configure automated recurring invoicing for a client</DialogDescription></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Client Name *</Label><Input value={recForm.client_name} onChange={e => setRecForm(p => ({ ...p, client_name: e.target.value }))} data-testid="rec-client" /></div>
               <div><Label>Billing Email</Label><Input type="email" value={recForm.email} onChange={e => setRecForm(p => ({ ...p, email: e.target.value }))} placeholder="billing@client.com" /></div>
@@ -1158,7 +1201,7 @@ export default function XeroDashboardPage() {
             <Separator />
             <LineItemsEditor items={recForm.line_items} onChange={items => setRecForm(p => ({ ...p, line_items: items }))} />
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
             <Button variant="outline" onClick={() => setRecDialog({ open: false, editing: null })}>Cancel</Button>
             <Button onClick={handleSaveRecurring} data-testid="submit-recurring-btn">{recDialog.editing ? <><Pencil className="w-4 h-4 mr-1" />Update Template</> : <><Plus className="w-4 h-4 mr-1" />Create Template</>}</Button>
           </DialogFooter>
@@ -1203,6 +1246,7 @@ export default function XeroDashboardPage() {
         pdfUrl={pdfViewer.url}
         title={pdfViewer.title}
         downloadUrl={pdfViewer.downloadUrl}
+        onDownload={pdfViewer.onDownload}
         onEmail={pdfViewer.emailInvoiceId ? async (email) => {
           try {
             await axios.post(`${API}/xero/invoices/${pdfViewer.emailInvoiceId}/email`, { to_email: email, subject: `Invoice - ${pdfViewer.title}`, message: `Please find attached ${pdfViewer.title}.` }, { headers });

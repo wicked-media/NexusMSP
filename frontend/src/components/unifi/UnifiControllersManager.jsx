@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import { useClientContext } from "@/contexts/ClientContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,9 @@ import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 export default function UnifiControllersManager() {
   const { token } = useAuth();
+  const clientContext = useClientContext();
+  const clients = clientContext?.clients || [];
+  const activeClientId = clientContext?.activeClientId || "";
   const headers = { Authorization: `Bearer ${token}` };
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -21,7 +25,7 @@ export default function UnifiControllersManager() {
   const [testing, setTesting] = useState(null);
   const [removeTarget, setRemoveTarget] = useState(null);
 
-  const blank = { name: "", controller_url: "", api_key: "", network_site_id: "default", verify_tls: true, notes: "" };
+  const blank = { name: "", controller_url: "", api_key: "", network_site_id: "default", verify_tls: true, notes: "", client_id: activeClientId, global_scope: false };
 
   const load = async () => {
     setLoading(true);
@@ -37,15 +41,19 @@ export default function UnifiControllersManager() {
   const save = async () => {
     if (!editing.name || !editing.controller_url) { toast.error("Name + controller URL required"); return; }
     if (!editing.id && !editing.api_key) { toast.error("API key required for new controllers"); return; }
+    if (!editing.id && !editing.client_id && !editing.global_scope) { toast.error("Choose the client this controller belongs to, or explicitly mark it MSP-global"); return; }
     setBusy(true);
     try {
       if (editing.id) {
         const body = { ...editing };
+        delete body.global_scope;
         if (!body.api_key) delete body.api_key;
         await axios.put(`${API}/unifi/controllers/${editing.id}`, body, { headers });
         toast.success("Controller updated");
       } else {
-        await axios.post(`${API}/unifi/controllers`, editing, { headers });
+        const body = { ...editing };
+        delete body.global_scope;
+        await axios.post(`${API}/unifi/controllers`, body, { headers });
         toast.success("Controller added");
       }
       setEditing(null);
@@ -111,7 +119,7 @@ export default function UnifiControllersManager() {
                     {testing === c.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                     <span className="ml-1">Test</span>
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setEditing({ ...c, api_key: "" })} data-testid={`unifi-controller-edit-${c.id}`}><Pencil className="w-3 h-3" /></Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setEditing({ ...c, api_key: "", global_scope: !c.client_id })} data-testid={`unifi-controller-edit-${c.id}`}><Pencil className="w-3 h-3" /></Button>
                   <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-400" onClick={() => setRemoveTarget(c)} data-testid={`unifi-controller-remove-${c.id}`}><Trash2 className="w-3 h-3" /></Button>
                 </div>
               </div>
@@ -133,6 +141,29 @@ export default function UnifiControllersManager() {
               <div>
                 <Label>Site name *</Label>
                 <Input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="e.g. AusRock HQ" data-testid="unifi-controller-name" />
+              </div>
+              <div>
+                <Label>Client workspace {editing.global_scope ? "" : "*"}</Label>
+                <select
+                  value={editing.client_id || ""}
+                  disabled={Boolean(editing.id) || editing.global_scope}
+                  onChange={(e) => setEditing({ ...editing, client_id: e.target.value, global_scope: false })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  data-testid="unifi-controller-client"
+                >
+                  <option value="">Select a client</option>
+                  {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+                <div className="mt-2 flex items-center gap-2">
+                  <Checkbox
+                    id="unifi-controller-global"
+                    checked={Boolean(editing.global_scope)}
+                    disabled={Boolean(editing.id)}
+                    onCheckedChange={(checked) => setEditing({ ...editing, global_scope: Boolean(checked), client_id: checked ? "" : (editing.client_id || activeClientId) })}
+                  />
+                  <Label htmlFor="unifi-controller-global" className="cursor-pointer text-xs text-muted-foreground">MSP-global controller (requires global access)</Label>
+                </div>
+                {editing.id && <p className="mt-1 text-[10px] text-muted-foreground">Controller ownership is fixed after creation; use an approved transfer workflow to change it.</p>}
               </div>
               <div>
                 <Label>Controller URL *</Label>

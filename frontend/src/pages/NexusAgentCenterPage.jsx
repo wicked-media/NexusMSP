@@ -11,7 +11,7 @@
  *
  * Per-device telemetry/management lives on the Devices page (single source of truth).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { Link, useNavigate } from "react-router-dom";
 import { API, useAuth } from "@/App";
@@ -492,11 +492,12 @@ function InstallerBuilder({ open, onClose }) {
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) { onClose?.(); setResult(null); } }}>
-      <DialogContent className="max-w-lg" data-testid="installer-builder-dialog">
-        <DialogHeader>
+      <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="installer-builder-dialog">
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12">
           <DialogTitle className="flex items-center gap-2"><Download className="w-4 h-4" />Generate Agent Installer</DialogTitle>
           <DialogDescription>Build a client-bound Windows package with a unique enrolment token, Nexus Shield, Nexus Canary, secure Client Chat, Nexus Elevate, and the staged Nexus DNS endpoint channel.</DialogDescription>
         </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {!result ? (
           <div className="space-y-3">
             <div>
@@ -537,7 +538,8 @@ function InstallerBuilder({ open, onClose }) {
           </div>
         )}
         {loadError && <InlineError>{loadError}</InlineError>}
-        <DialogFooter>
+        </div>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
           {!result ? (
             <>
               <Button variant="ghost" onClick={() => onClose?.()}>Cancel</Button>
@@ -564,15 +566,15 @@ function AgentTrustCard({ canOperate }) {
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
 
-  const load = () => axios.get(`${API}/nexus-agent/trust/overview`, { headers })
+  const load = useCallback(() => axios.get(`${API}/nexus-agent/trust/overview`, { headers })
     .then(r => { setData(r.data || { counts: {}, attention: [] }); setError(""); })
-    .catch(() => setError("Agent trust evidence is unavailable."));
+    .catch(() => setError("Agent trust evidence is unavailable.")), [headers]);
 
   useEffect(() => {
     load();
     const timer = setInterval(load, 10000);
     return () => clearInterval(timer);
-  }, [headers]);
+  }, [load]);
 
   const repair = async (deviceId) => {
     setBusyId(deviceId);

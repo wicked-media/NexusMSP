@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Loader2, Zap, RefreshCw, ArrowRight } from "lucide-react";
-import { differenceInHours } from "date-fns";
+import { Sparkles, Loader2, Zap, RefreshCw, ArrowRight, Clock3, UserRoundCheck, ShieldAlert } from "lucide-react";
+import { differenceInHours, formatDistanceToNowStrict } from "date-fns";
 import { API } from "@/App";
 
 /**
@@ -19,6 +19,18 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [burndown, setBurndown] = useState(null);
+  const [summaryError, setSummaryError] = useState("");
+  const summaryRequest = useRef(0);
+  const sourceVersion = JSON.stringify([ticket.id, ticket.title, ticket.description, ticket.updated_at, ticket.note_count]);
+  const summaryStale = summary && summary.sourceVersion !== sourceVersion;
+  useEffect(() => {
+    summaryRequest.current += 1;
+    setSummary(null);
+    setSummaryError("");
+    setLoading(false);
+    setBurndown(null);
+    return () => { summaryRequest.current += 1; };
+  }, [ticket.id]);
   const deviceState = typeof deviceStatus?.status === "string" ? deviceStatus.status.toLowerCase() : null;
 
   useEffect(() => {
@@ -31,33 +43,38 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
   }, [ticket?.id, headers]);
 
   const generateSummary = async () => {
+    const requestId = ++summaryRequest.current;
     setLoading(true);
+    setSummaryError("");
     try {
       const r = await axios.post(`${API}/ai/proofread`, { text: `Summarise this support ticket in 1 sentence. Title: ${ticket.title}. Description: ${(ticket.description || "").slice(0, 1500)}` }, { headers });
       const d = r.data || {};
       const text = typeof d === "string" ? d : (d.improved || d.corrected || d.text || d.summary || null);
-      setSummary(typeof text === "string" ? text : null);
-    } catch { /* graceful fallback to heuristics */ }
-    finally { setLoading(false); }
+      if (requestId !== summaryRequest.current) return;
+      if (typeof text === "string" && text.trim()) setSummary({ text: text.trim(), sourceVersion, generatedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+      else setSummaryError("No summary was returned. The original request remains available below.");
+    } catch { if (requestId === summaryRequest.current) setSummaryError("Summary unavailable. You can continue working from the original request."); }
+    finally { if (requestId === summaryRequest.current) setLoading(false); }
   };
 
-  // Heuristic next-best-action
+  // Heuristic next-best-action. This stays deliberately evidence-led: it
+  // describes the operational fact that needs attention, not an AI diagnosis.
   const nextAction = (() => {
     const assignedTechnician = ticket.assignee_id || ticket.assigned_to || ticket.assigned_to_id;
     const isCompleted = ["resolved", "closed"].includes(ticket.status);
-    if (ticket.blocked_by_ticket_number) return { label: `Resolve ${ticket.blocked_by_ticket_number} first`, tone: "rose", target: "blocker" };
-    if (isCompleted && !ticket.csat_sent) return { label: "Send CSAT survey", tone: "emerald", target: "csat" };
-    if (isCompleted) return { label: "Completed — review the audit record", tone: "emerald", target: "none" };
-    if (burndown?.breach) return { label: "SLA breached — escalate now", tone: "rose", target: "escalate" };
-    if (burndown?.pct >= 75 && !burndown?.is_resolved) return { label: `${burndown.pct}% of SLA used — pick this up`, tone: "amber", target: "ack" };
-    if (deviceState && deviceState !== "online") return { label: "Device is offline — try Wake-on-LAN", tone: "amber", target: "wol" };
-    if (deviceStatus?.needs_reboot) return { label: "Device needs reboot — schedule a window", tone: "cyan", target: "reboot" };
-    if (deviceStatus?.checks_failing > 0) return { label: `${deviceStatus.checks_failing} check${deviceStatus.checks_failing === 1 ? "" : "s"} failing — investigate`, tone: "amber", target: "checks" };
-    if (deviceStatus?.patches_pending > 0) return { label: `${deviceStatus.patches_pending} patches pending — install`, tone: "cyan", target: "patches" };
-    if (!assignedTechnician) return { label: "Unassigned — pick this up or route", tone: "violet", target: "assign" };
-    if (ticket.status === "open") return { label: "Acknowledge with first reply", tone: "violet", target: "reply" };
-    if (ticket.status === "in_progress" && ticket.note_count === 0) return { label: "Add a status update note", tone: "violet", target: "note" };
-    return { label: "Continue working — looks healthy", tone: "emerald", target: "none" };
+    if (ticket.blocked_by_ticket_number) return { label: `Resolve ${ticket.blocked_by_ticket_number} first`, detail: "This work is explicitly blocked by a linked service record.", tone: "rose", target: "blocker" };
+    if (isCompleted && !ticket.csat_sent) return { label: "Send CSAT survey", detail: "The service work is complete and client feedback has not been requested.", tone: "emerald", target: "csat" };
+    if (isCompleted) return { label: "Review the audit record", detail: "This service record is complete and retained for review.", tone: "emerald", target: "none" };
+    if (burndown?.breach) return { label: "Escalate the SLA breach", detail: "The recorded SLA due time has passed.", tone: "rose", target: "escalate" };
+    if (burndown?.pct >= 75 && !burndown?.is_resolved) return { label: "Pick this up now", detail: `${burndown.pct}% of the recorded SLA allowance has been used.`, tone: "amber", target: "ack" };
+    if (deviceState && deviceState !== "online") return { label: "Investigate the offline device", detail: "The linked endpoint is not reporting online.", tone: "amber", target: "wol" };
+    if (deviceStatus?.needs_reboot) return { label: "Plan the required reboot", detail: "The linked endpoint reports that a reboot is required.", tone: "cyan", target: "reboot" };
+    if (deviceStatus?.checks_failing > 0) return { label: "Investigate failing checks", detail: `${deviceStatus.checks_failing} linked endpoint check${deviceStatus.checks_failing === 1 ? " is" : "s are"} failing.`, tone: "amber", target: "checks" };
+    if (deviceStatus?.patches_pending > 0) return { label: "Review pending patches", detail: `${deviceStatus.patches_pending} patch${deviceStatus.patches_pending === 1 ? " is" : "es are"} pending on the linked endpoint.`, tone: "cyan", target: "patches" };
+    if (!assignedTechnician) return { label: "Set an accountable technician", detail: "No technician owns the next move on this ticket yet.", tone: "violet", target: "assign" };
+    if (ticket.status === "open") return { label: "Send the first client update", detail: "The ticket is open and has an accountable technician.", tone: "violet", target: "reply" };
+    if (ticket.status === "in_progress" && ticket.note_count === 0) return { label: "Record the first work update", detail: "Work is in progress, but no technician update is recorded yet.", tone: "violet", target: "note" };
+    return { label: "Review the conversation and continue", detail: "The current service record needs the technician’s next documented action.", tone: "cyan", target: "reply" };
   })();
 
   const toneStyle = {
@@ -68,61 +85,82 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
     emerald: { bar: "from-emerald-500/20 to-emerald-500/0", chip: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" },
   }[nextAction.tone];
 
-  const ageHours = ticket.created_at ? Math.max(0, differenceInHours(new Date(), new Date(ticket.created_at))) : null;
+  const createdAt = ticket.created_at ? new Date(ticket.created_at) : null;
+  const hasCreatedAt = createdAt && Number.isFinite(createdAt.getTime());
+  const ageHours = hasCreatedAt ? Math.max(0, differenceInHours(new Date(), createdAt)) : null;
   const ageLabel = ageHours == null ? "" : ageHours < 24 ? `${ageHours}h old` : `${Math.round(ageHours / 24)}d old`;
+  const assignedTechnician = ticket.assigned_to_name || ticket.assignee_name || ticket.assigned_to_display_name || (ticket.assigned_to ? "Assigned" : null);
+  const activityAt = ticket.last_activity_at || ticket.updated_at || ticket.created_at;
+  const activityDate = activityAt ? new Date(activityAt) : null;
+  const hasActivityDate = activityDate && Number.isFinite(activityDate.getTime());
+  const activityLabel = hasActivityDate ? formatDistanceToNowStrict(activityDate, { addSuffix: true }) : "No recorded activity";
+  const slaLabel = burndown?.available ? `${burndown.pct}% used` : "No SLA target";
+  const slaTone = burndown?.breach ? "text-rose-300" : burndown?.pct >= 75 ? "text-amber-300" : "text-zinc-200";
 
   return (
-    <div data-testid="ai-copilot-strip" className={`relative overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-r ${toneStyle.bar}`}>
-
-      <div className="relative flex items-center gap-3 px-4 py-3">
-        {/* Brand icon */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center shadow-[0_8px_18px_rgba(139,92,246,0.16)]">
-            <Sparkles className="w-3.5 h-3.5 text-violet-300" />
+    <section data-testid="ai-copilot-strip" className={`relative overflow-hidden rounded-2xl border border-white/[0.08] bg-gradient-to-r ${toneStyle.bar}`} aria-label="Nexus case briefing">
+      <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-violet-300 via-cyan-300 to-transparent opacity-80" />
+      <div className="relative grid gap-3 px-4 py-3.5 xl:grid-cols-[minmax(170px,0.72fr)_minmax(260px,1.3fr)_minmax(310px,1fr)_auto] xl:items-center">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-300/20 bg-gradient-to-br from-violet-500/25 to-cyan-500/20 shadow-[0_8px_18px_rgba(139,92,246,0.16)]">
+            <Sparkles className="h-3.5 w-3.5 text-violet-200" />
           </div>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Next best action</span>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Nexus case briefing</p>
+            <p className="mt-0.5 truncate text-[11px] text-zinc-500">{ageLabel ? `${ageLabel} · ` : ""}facts first, judgement stays human</p>
+          </div>
         </div>
 
-        {/* Stats strip */}
-        <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-          {ageLabel && <span data-testid="copilot-age">{ageLabel}</span>}
-          {burndown?.available && (
-            <span data-testid="copilot-sla">
-              SLA <span className={burndown.breach ? "text-rose-400" : burndown.pct > 75 ? "text-amber-400" : "text-emerald-400"}>{burndown.pct}%</span>
-            </span>
-          )}
-          {ticket.note_count != null && <span>{ticket.note_count} notes</span>}
-          {deviceState && <span className={`${deviceState === "online" ? "text-emerald-400" : "text-rose-400"}`}>● {deviceStatus.status}</span>}
+        <div className="min-w-0 rounded-xl border border-white/[0.07] bg-black/15 px-3 py-2.5">
+          <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.13em] text-zinc-500"><Zap className="h-3 w-3 text-violet-300" />Recommended next move</div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <button
+              disabled={nextAction.target === "none"}
+              onClick={() => onActionClick?.(nextAction.target)}
+              className={`group/cta inline-flex min-w-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${toneStyle.chip} transition-[transform,background-color] hover:scale-[1.01] disabled:cursor-default disabled:hover:scale-100`}
+              data-testid={`copilot-action-${nextAction.target}`}
+            >
+              <span className="truncate">{nextAction.label}</span>
+              {nextAction.target !== "none" && <ArrowRight className="h-3 w-3 shrink-0 opacity-55 transition-transform group-hover/cta:translate-x-0.5" />}
+            </button>
+            <span className="min-w-0 text-[11px] leading-4 text-zinc-400">{nextAction.detail}</span>
+          </div>
         </div>
 
-        <div className="flex-1" />
+        <div className="grid grid-cols-3 gap-1.5" data-testid="copilot-operational-signals">
+          <div className="min-w-0 rounded-lg border border-white/[0.06] bg-black/10 px-2.5 py-2">
+            <p className="flex items-center gap-1 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-600"><UserRoundCheck className="h-2.5 w-2.5" />Owner</p>
+            <p className={`mt-1 truncate text-[10px] font-medium ${assignedTechnician ? "text-zinc-200" : "text-violet-200"}`}>{assignedTechnician || "Unassigned"}</p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-white/[0.06] bg-black/10 px-2.5 py-2">
+            <p className="flex items-center gap-1 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-600"><ShieldAlert className="h-2.5 w-2.5" />Service level</p>
+            <p className={`mt-1 truncate text-[10px] font-medium ${slaTone}`} data-testid="copilot-sla">{slaLabel}</p>
+          </div>
+          <div className="min-w-0 rounded-lg border border-white/[0.06] bg-black/10 px-2.5 py-2">
+            <p className="flex items-center gap-1 text-[8px] font-semibold uppercase tracking-[0.1em] text-zinc-600"><Clock3 className="h-2.5 w-2.5" />Latest signal</p>
+            <p className="mt-1 truncate text-[10px] font-medium text-zinc-200" title={hasActivityDate ? activityDate.toLocaleString() : undefined}>{activityLabel}</p>
+          </div>
+        </div>
 
-        {/* Optional summary text */}
-        {summary && (
-          <span className="text-[12px] text-zinc-300 truncate max-w-md italic" data-testid="copilot-summary">"{summary}"</span>
-        )}
-
-        {/* Next best action chip */}
-        <button
-          onClick={() => onActionClick?.(nextAction.target)}
-          className={`group/cta flex items-center gap-1.5 px-3 py-1.5 rounded-lg border ${toneStyle.chip} text-[11px] font-semibold hover:scale-[1.02] transition-transform`}
-          data-testid={`copilot-action-${nextAction.target}`}
-        >
-          <Zap className="w-3 h-3" />
-          {nextAction.label}
-          <ArrowRight className="w-3 h-3 opacity-50 group-hover/cta:translate-x-0.5 transition-transform" />
-        </button>
-
-        {/* Summarise toggle */}
         <Button
-          variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:text-violet-300 hover:bg-violet-500/10"
+          variant="ghost" size="sm" className="h-8 shrink-0 justify-self-start px-2.5 text-[10px] font-mono uppercase tracking-wider text-zinc-400 hover:bg-violet-500/10 hover:text-violet-200 xl:justify-self-end"
           onClick={generateSummary} disabled={loading}
           data-testid="copilot-summarize"
         >
-          {loading ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : summary ? <RefreshCw className="w-3 h-3 mr-1" /> : <Sparkles className="w-3 h-3 mr-1" />}
-          {summary ? "Re-summarise" : "Summarise"}
+          {loading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : summary ? <RefreshCw className="mr-1 h-3 w-3" /> : <Sparkles className="mr-1 h-3 w-3" />}
+          {summary ? "Refresh brief" : "Summarise"}
         </Button>
       </div>
-    </div>
+      {(summary || summaryError || summaryStale) && (
+        <div className="relative space-y-2 border-t border-white/[0.06] px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{summary ? `AI request summary · generated ${summary.generatedAt}` : "Summary unavailable. The original request remains the source of truth."}</span>
+            {summaryStale && <span role="status" className="text-amber-300">Ticket changed · refresh this brief</span>}
+          </div>
+          {summary && <><p className="whitespace-pre-wrap text-sm leading-6 text-foreground" data-testid="copilot-summary">{summary.text}</p><p className="text-xs text-muted-foreground">Source: ticket title and first 1,500 characters of the description. Does not include conversation or work history; review before using.</p><details className="text-xs"><summary className="cursor-pointer text-cyan-300">View current source request</summary><p className="mt-2 whitespace-pre-wrap text-muted-foreground">{ticket.title}{"\n"}{(ticket.description || "").slice(0, 1500)}</p></details></>}
+          {summaryError && <p role="status" className="text-xs text-amber-300">{summaryError}</p>}
+        </div>
+      )}
+    </section>
   );
 }

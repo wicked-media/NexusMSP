@@ -1,5 +1,5 @@
-import { useState, useEffect, lazy, Suspense } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useMemo, lazy, Suspense } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,6 +19,7 @@ import ServiceTiersSettings from "@/components/settings/ServiceTiersSettings";
 import ContractTypesSettings from "@/components/settings/ContractTypesSettings";
 import WeatherClockSettingsCard from "@/components/settings/WeatherClockSettingsCard";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import O365SetupPage from "./O365SetupPage";
 import { toast } from "sonner";
 import { 
@@ -26,7 +27,7 @@ import {
   Clock, CalendarDays, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
   Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
   CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
-  Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun
+  Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun, DatabaseBackup
 } from "lucide-react";
 
 const TABS = [
@@ -35,17 +36,17 @@ const TABS = [
   { id: "contract-types", label: "Contract Types", description: "Agreement defaults, billing cadence, and SLA rules.", icon: FileText, group: "organisation", tone: "amber" },
   { id: "white-label", label: "White Label", description: "Client-facing naming, domains, and presentation.", icon: Image, group: "organisation", tone: "cyan" },
   { id: "channel", label: "Channel / MSP Mode", description: "MSP tenancy and partner operating model.", icon: Building, group: "organisation", tone: "violet" },
-  { id: "tickets", label: "Ticket Defaults", description: "Numbering, workflows, templates, SLA, and routing.", icon: FileText, group: "operations", tone: "amber" },
+  { id: "tickets", label: "Ticket Defaults", description: "Numbering, categories, issue types, and work prefixes.", icon: FileText, group: "operations", tone: "amber" },
   { id: "ping", label: "Ping & Escalation", description: "Attention rules, sounds, and escalation signals.", icon: Activity, group: "operations", tone: "rose" },
   { id: "calendar", label: "Dispatch Calendar", description: "Microsoft 365 calendar sync, scheduling guardrails, and booking visibility.", icon: CalendarDays, group: "operations", tone: "emerald" },
   { id: "weather", label: "Weather & Local Clock", description: "Dashboard forecast, temperature units, and the office timezone.", icon: CloudSun, group: "operations", tone: "cyan" },
   { id: "mailbox", label: "Mailbox & Email", description: "Microsoft 365 inboxes, sending, intake, and delivery.", icon: Mail, group: "operations", tone: "cyan" },
-  { id: "notifications", label: "Notifications", description: "Organisation-wide notification policies and alerts.", icon: Bell, group: "operations", tone: "violet" },
+  { id: "notifications", label: "No-notes escalation", description: "Escalate unattended tickets when technician notes are missing.", icon: Bell, group: "operations", tone: "violet" },
   { id: "auth", label: "Authentication", description: "Microsoft sign-in and user provisioning controls.", icon: KeyRound, group: "security", tone: "violet" },
-  { id: "twofa", label: "2FA & Security", description: "Multi-factor authentication and protection policy.", icon: Shield, group: "security", tone: "emerald" },
-  { id: "tokens", label: "API Tokens", description: "Secure API access and integration credentials.", icon: Server, group: "security", tone: "cyan" },
+  { id: "twofa", label: "My 2FA & Security", description: "Your authenticator, password and active session controls.", icon: Shield, group: "security", tone: "emerald", route: "/my-settings?tab=security" },
   { id: "audit", label: "Audit Trail", description: "Review recorded platform activity and accountability.", icon: ClipboardCheck, group: "security", tone: "amber", route: "/audit-trail" },
-  { id: "integrations", label: "Integrations", description: "Connected platforms, vendors, and credentials.", icon: Plug, group: "platform", tone: "cyan" },
+  { id: "integrations", label: "Integrations", description: "Connection credentials, policies, and setup ownership.", icon: Plug, group: "platform", tone: "cyan" },
+  { id: "platform-recovery", label: "Platform Backup & Recovery", description: "Nexus Core restore points, isolated recovery proof, and fresh-host cutover planning.", icon: DatabaseBackup, group: "platform", tone: "emerald", route: "/nexus-continuity" },
   { id: "ai", label: "AI & Automation", description: "AI provider, model, and automation controls.", icon: Brain, group: "platform", tone: "violet" },
   { id: "comms", label: "Notify Channels", description: "Slack, Teams, and external notification channels.", icon: MessageSquare, group: "platform", tone: "emerald" },
   { id: "my-settings", label: "My Workspace", description: "Your profile, signature, schedule, and preferences.", icon: Settings2, group: "workspace", tone: "rose" },
@@ -64,12 +65,11 @@ const LazyTicketSettings = lazy(() => import("./TicketSettingsPage"));
 const LazyTicketPingSettings = lazy(() => import("./TicketPingSettingsPage"));
 const LazyWhiteLabel = lazy(() => import("./WhiteLabelPage"));
 const LazyChannelMode = lazy(() => import("./ChannelModePage"));
-const LazyApiTokens = lazy(() => import("./ApiTokensPage"));
-const LazySecurity2FA = lazy(() => import("./Security2FAPage"));
 const LazyNotifyChannels = lazy(() => import("./NotifyChannelsPage"));
 const LazyTechSettings = lazy(() => import("./TechSettingsPage"));
 
-// Search index: maps keywords -> (tab, card anchor, human label)
+// Search index: maps keywords -> (tab, card anchor, human label). A route is
+// used for settings that deliberately live in a technician's personal workspace.
 const SETTINGS_INDEX = [
   // Branding
   { tab: "branding", anchor: "branding-section", label: "Platform Branding", keywords: "branding logo company name colors favicon login tagline" },
@@ -83,54 +83,86 @@ const SETTINGS_INDEX = [
   { tab: "auth", anchor: "auth-sso-card", label: "Microsoft SSO", keywords: "sso microsoft azure ad entra single sign on oauth" },
   // Mailbox
   { tab: "mailbox", anchor: "mailbox-o365-card", label: "Microsoft 365 Inbox", keywords: "mailbox o365 office365 inbox ticket email to ticket" },
-  { tab: "mailbox", anchor: "mailbox-signature-card", label: "Email Signature", keywords: "email signature reply template" },
+  { tab: "my-settings", route: "/my-settings?tab=signature", label: "Email Signature", keywords: "email signature reply template technician personal sign off" },
   { tab: "calendar", anchor: "dispatch-calendar-settings", label: "Dispatch Calendar", keywords: "calendar booking dispatch schedule microsoft 365 availability appointment conflict technician" },
   { tab: "weather", anchor: "weather-clock-settings-card", label: "Weather & Local Clock", keywords: "weather forecast temperature local time clock office location timezone celsius fahrenheit" },
   // Integrations
+  { tab: "integrations", route: "/integrations", label: "Integration health & activity", keywords: "integration status health diagnostics sync activity monitoring provider vendor connection" },
   { tab: "integrations", anchor: "xero-settings-card", label: "Xero Accounting", keywords: "xero accounting integration invoice sync" },
   { tab: "integrations", anchor: "synergy-wholesale-settings-card", label: "Synergy Wholesale", keywords: "synergy wholesale domains dns hosting cpanel wordpress ssl certificate renewal register transfer" },
   { tab: "integrations", anchor: "stripe-api-key", label: "Stripe Payments", keywords: "stripe payment checkout card api key invoice" },
-  { tab: "integrations", anchor: "microsoft365-delivery-card", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications" },
+  { tab: "mailbox", anchor: "microsoft365-outbound-role-routing", label: "Microsoft 365 Email Delivery", keywords: "microsoft 365 office 365 graph email mailbox transactional onboarding welcome email notifications sender routing audit" },
   { tab: "integrations", anchor: "sms-settings-card", label: "SMS Messaging (MobileMessage)", keywords: "sms text message mobilemessage mobile message webhook inbound phone send receive balance credits" },
   { tab: "integrations", anchor: "acronis-settings-card", label: "Acronis Cyber Cloud", keywords: "acronis backup cyber cloud protect tenant" },
   { tab: "integrations", anchor: "pax8-settings-card", label: "Pax8 (Microsoft / CSP)", keywords: "pax8 microsoft csp m365 defender azure licenses subscriptions billing" },
   { tab: "integrations", anchor: "huntress-settings-card", label: "Huntress (Security)", keywords: "huntress security soc edr mdr managed detection incidents agents signals endpoint" },
   { tab: "integrations", anchor: "suped-settings-card", label: "SupED", keywords: "suped" },
   { tab: "integrations", anchor: "supabase-storage-card", label: "Nexus Artifact Storage", keywords: "supabase storage private files pdf attachments reports retention" },
-  { tab: "integrations", anchor: "cipp-settings-card", label: "Nexus Control Plane (Microsoft 365)", keywords: "control plane cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding" },
+  { tab: "integrations", anchor: "cipp-settings-card", label: "Microsoft compatibility adapter (advanced)", keywords: "control plane cipp cyberdrain m365 microsoft 365 tenant management users licenses offboarding compatibility adapter" },
   { tab: "integrations", anchor: "unifi-settings-card", label: "UniFi", keywords: "unifi ubiquiti network sites devices clients access points switches" },
   { tab: "integrations", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", keywords: "nexus agent rmm in-house windows agent patches scripts splashtop" },
   { tab: "integrations", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", keywords: "privilege elevation admin request approval uac keeper epm endpoint privilege manager" },
   { tab: "integrations", anchor: "splynx-settings-card", label: "Splynx ISP billing", keywords: "splynx isp billing telco" },
   { tab: "integrations", anchor: "hudu-settings-card", label: "Hudu documentation", keywords: "hudu documentation passwords knowledge base" },
   { tab: "integrations", anchor: "syncro-settings-card", label: "Syncro PSA", keywords: "syncro psa migration import" },
+  { tab: "platform-recovery", route: "/nexus-continuity", label: "Platform Backup & Recovery", keywords: "nexus backup platform restore point recovery server move fresh install migration import mongodump mongorestore continuity" },
   // AI
   { tab: "ai", anchor: "ai-config-card", label: "AI Provider & Model", keywords: "ai openai gpt model provider api key" },
   // Notifications
-  { tab: "notifications", anchor: "notifications-prefs-card", label: "Email Alerts & Preferences", keywords: "notification email alerts preferences sla warnings device offline" },
+  { tab: "notifications", anchor: "general-threshold-card", label: "No-notes escalation", keywords: "ticket notes escalation unattended threshold senior technician" },
 ];
+
+const findSettingAnchor = (anchor) => {
+  if (!anchor || typeof document === "undefined") return null;
+  const escapedAnchor = typeof CSS !== "undefined" && typeof CSS.escape === "function"
+    ? CSS.escape(anchor)
+    : String(anchor).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  return document.querySelector(`[data-testid="${escapedAnchor}"]`);
+};
+
+const INTEGRATION_SETTING_CATEGORIES = [
+  { id: "all", label: "All connections" },
+  { id: "commercial", label: "Commercial" },
+  { id: "customer", label: "Customer services" },
+  { id: "security", label: "Security & protection" },
+  { id: "operations", label: "Operations" },
+  { id: "platform", label: "Nexus platform" },
+];
+
+const connectionState = (ready, readyLabel = "Configured") => ready
+  ? { label: readyLabel, className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" }
+  : { label: "Needs setup", className: "border-amber-500/30 bg-amber-500/10 text-amber-200" };
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState("branding");
   const [settingSearch, setSettingSearch] = useState("");
+  const [integrationSearch, setIntegrationSearch] = useState("");
+  const [integrationCategory, setIntegrationCategory] = useState("all");
   const [highlightAnchor, setHighlightAnchor] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Honour deep-links: /settings?tab=integrations&anchor=huntress-settings-card
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const tab = params.get("tab");
     const anchor = params.get("anchor");
+    if (tab === "twofa") {
+      navigate("/my-settings?tab=security", { replace: true });
+      return undefined;
+    }
     if (tab) setActiveTab(tab);
     if (anchor) {
       setHighlightAnchor(anchor);
-      setTimeout(() => {
-        document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const timeout = setTimeout(() => {
+        findSettingAnchor(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 400);
+      return () => clearTimeout(timeout);
     }
-  }, []);
+    return undefined;
+  }, [location.search, navigate]);
   const [users, setUsers] = useState([]);
   const [branding, setBranding] = useState({
     company_name: "NexusMSP", company_logo_url: "", company_icon_url: "",
@@ -168,18 +200,12 @@ export default function SettingsPage() {
   const [huntressBusy, setHuntressBusy] = useState(false);
   const [suped, setSuped] = useState({ api_key: "", configured: false });
   const [supedSaving, setSupedSaving] = useState(false);
-  const [cipp, setCipp] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [cipp, setCipp] = useState({ base_url: "", api_key: "", configured: false, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [cippBusy, setCippBusy] = useState(false);
-  const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+  const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, migration_required: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [unifiBusy, setUnifiBusy] = useState(false);
-  const [trmm] = useState({ configured: false }); // legacy - TRMM removed, kept for backwards-compat with old loadAll
-  const trmmBusy = false;
-  const setTrmmBusy = () => {};
-  const trmmNotif = { configured: false, slack_webhook_url: "", teams_webhook_url: "", notify_on: "all" };
-  const trmmNotifBusy = false;
-  const setTrmm = () => {};
+  const [, setTrmm] = useState({ configured: false }); // Legacy compatibility while old connection checks remain.
   const setTrmmNotif = () => {};
-  const setTrmmNotifBusy = () => {};
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -218,7 +244,7 @@ export default function SettingsPage() {
   const [synergy, setSynergy] = useState({ reseller_id: "", api_key: "", api_key_set: false, wsdl: "", configured: false, readiness: "not_configured" });
   const [synergyBusy, setSynergyBusy] = useState("");
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const refreshArtifactStorage = async () => {
     setArtifactStorageBusy(true);
@@ -296,32 +322,35 @@ export default function SettingsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
+      // Settings are independent surfaces. A provider outage must not prevent the
+      // rest of the administration workspace from loading.
+      const getOptional = (url, fallback) => axios.get(url, { headers }).catch(() => ({ data: fallback }));
       const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
-          axios.get(`${API}/users`, { headers }),
-          axios.get(`${API}/settings/no-notes-threshold`, { headers }),
-          axios.get(`${API}/settings/xero`, { headers }),
-          axios.get(`${API}/settings/stripe`, { headers }),
-          axios.get(`${API}/settings/suped`, { headers }),
-          axios.get(`${API}/settings/splynx`, { headers }),
-          axios.get(`${API}/settings/hudu`, { headers }),
-          axios.get(`${API}/ai/config`, { headers }),
-          axios.get(`${API}/syncro/settings`, { headers }).catch(() => ({ data: { subdomain: "", api_key: "", enabled: false } })),
-          axios.get(`${API}/settings/job-numbering`, { headers }).catch(() => ({ data: { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" } })),
-          axios.get(`${API}/settings/microsoft-sso`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/settings/o365-mailbox`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
-          axios.get(`${API}/settings/branding`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/acronis/config`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/settings/pax8`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/huntress/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/cipp/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/unifi/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/trmm/status`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/trmm/notifications/settings`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/scheduling/calendar-connection`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/nexus-elevate/settings`, { headers }).catch(() => ({ data: null })),
-          axios.get(`${API}/settings/synergy-wholesale`, { headers }).catch(() => ({ data: null })),
+          getOptional(`${API}/users`, []),
+          getOptional(`${API}/settings/no-notes-threshold`, {}),
+          getOptional(`${API}/settings/xero`, {}),
+          getOptional(`${API}/settings/stripe`, {}),
+          getOptional(`${API}/settings/suped`, {}),
+          getOptional(`${API}/settings/splynx`, {}),
+          getOptional(`${API}/settings/hudu`, {}),
+          getOptional(`${API}/ai/config`, {}),
+          getOptional(`${API}/syncro/settings`, { subdomain: "", api_key: "", enabled: false }),
+          getOptional(`${API}/settings/job-numbering`, { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" }),
+          getOptional(`${API}/settings/microsoft-sso`, {}),
+          getOptional(`${API}/settings/o365-mailbox`, null),
+          getOptional(`${API}/o365/email-leads`, []),
+          getOptional(`${API}/settings/branding`, {}),
+          getOptional(`${API}/acronis/config`, {}),
+          getOptional(`${API}/settings/sms`, null),
+          getOptional(`${API}/settings/pax8`, null),
+          getOptional(`${API}/huntress/status`, null),
+          getOptional(`${API}/cipp/status`, null),
+          getOptional(`${API}/unifi/status`, null),
+          getOptional(`${API}/trmm/status`, null),
+          getOptional(`${API}/trmm/notifications/settings`, null),
+          getOptional(`${API}/scheduling/calendar-connection`, null),
+          getOptional(`${API}/nexus-elevate/settings`, null),
+          getOptional(`${API}/settings/synergy-wholesale`, null),
         ]);
         setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
         setThreshold(prev => ({ ...prev, ...(thresholdRes.data || {}) }));
@@ -381,7 +410,7 @@ export default function SettingsPage() {
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
-  }, []);
+  }, [headers, user.id]);
 
   const handleProfileSave = async () => {
     setLoading(true);
@@ -500,10 +529,37 @@ export default function SettingsPage() {
       ).slice(0, 8)
     : [];
 
+  const integrationConnections = [
+    { id: "artifact-storage", anchor: "supabase-storage-card", label: "Private artifact storage", description: "Private document, evidence and attachment storage.", category: "platform", icon: Cloud, state: connectionState(artifactStorage.ready, "Ready") },
+    { id: "synergy", anchor: "synergy-wholesale-settings-card", label: "Synergy Wholesale", description: "Domains, DNS, hosting and certificate lifecycle.", category: "customer", icon: Globe, state: connectionState(synergy.configured) },
+    { id: "xero", anchor: "xero-settings-card", label: "Xero", description: "Accounting credentials and invoice sync authorisation.", category: "commercial", icon: FileText, state: connectionState(xero.connected, "Connected") },
+    { id: "stripe", anchor: "stripe-settings-card", label: "Stripe", description: "Restricted payment credential for invoice checkout.", category: "commercial", icon: CreditCard, state: connectionState(stripe.configured, "Configured") },
+    { id: "microsoft365-delivery", route: "/settings?tab=mailbox&anchor=microsoft365-outbound-role-routing", label: "Microsoft 365 delivery", description: "Mailbox ownership, sender roles and delivery policies.", category: "customer", icon: Mail, state: connectionState(mailboxConnected, "Connected") },
+    { id: "sms", anchor: "sms-settings-card", label: "MobileMessage SMS", description: "Approved senders, inbound replies and delivery policy.", category: "customer", icon: Smartphone, state: connectionState(sms.enabled && sms.password_set) },
+    { id: "acronis", anchor: "acronis-settings-card", label: "Acronis", description: "Backup provider credentials and tenant access.", category: "security", icon: DatabaseBackup, state: connectionState(acronis.connected, "Connected") },
+    { id: "pax8", anchor: "pax8-settings-card", label: "Pax8", description: "CSP identity, licensing and billing connection.", category: "commercial", icon: Building, state: connectionState(pax8.enabled) },
+    { id: "huntress", anchor: "huntress-settings-card", label: "Huntress", description: "Read-only security signal access and credential policy.", category: "security", icon: ShieldCheck, state: connectionState(huntress.configured) },
+    { id: "suped", anchor: "suped-settings-card", label: "SupED", description: "DMARC and deliverability provider credential.", category: "security", icon: Shield, state: connectionState(suped.configured) },
+    { id: "cipp", anchor: "cipp-settings-card", label: "Microsoft compatibility adapter", description: "Optional CIPP execution adapter for Nexus Control Plane.", category: "operations", icon: Plug, state: connectionState(cipp.configured, "Adapter configured") },
+    { id: "unifi", anchor: "unifi-settings-card", label: "UniFi", description: "Controller access for network topology and actions.", category: "operations", icon: Wifi, state: connectionState(unifi.configured) },
+    { id: "nexus-elevate", anchor: "nexus-elevate-settings-card", label: "Nexus Elevate", description: "Privilege policy and approved elevation controls.", category: "platform", icon: ShieldCheck, state: connectionState(nexusElevate.native_enabled, "Included") },
+    { id: "nexus-agent", anchor: "nexus-agent-settings-card", label: "NexusOps Agent", description: "Endpoint agent rollout and management policy.", category: "platform", icon: Server, state: connectionState(true, "Built in") },
+    { id: "splynx", anchor: "splynx-settings-card", label: "Splynx", description: "ISP billing and telecom provider credentials.", category: "commercial", icon: CreditCard, state: connectionState(splynx.configured) },
+    { id: "hudu", anchor: "hudu-settings-card", label: "Hudu", description: "Documentation import and knowledge connection.", category: "operations", icon: BookOpen, state: connectionState(hudu.configured) },
+    { id: "syncro", anchor: "syncro-settings-card", label: "Syncro", description: "Optional PSA/RMM migration and import connection.", category: "operations", icon: RefreshCw, state: connectionState(syncro.enabled) },
+  ];
+
+  const visibleIntegrationConnections = integrationConnections.filter((connection) => {
+    const searchTerm = integrationSearch.trim().toLowerCase();
+    const matchesCategory = integrationCategory === "all" || connection.category === integrationCategory;
+    const matchesSearch = !searchTerm || `${connection.label} ${connection.description} ${connection.category}`.toLowerCase().includes(searchTerm);
+    return matchesCategory && matchesSearch;
+  });
+
   // Apply/remove highlight CSS class to the targeted card
   useEffect(() => {
     if (!highlightAnchor) return;
-    const el = document.querySelector(`[data-testid="${highlightAnchor}"]`);
+    const el = findSettingAnchor(highlightAnchor);
     if (!el) return;
     el.setAttribute("data-settings-highlight", "true");
     const t = setTimeout(() => el.removeAttribute("data-settings-highlight"), 2200);
@@ -511,12 +567,17 @@ export default function SettingsPage() {
   }, [highlightAnchor, activeTab]);
 
   const jumpToSetting = (item) => {
-    setActiveTab(item.tab);
     setSettingSearch("");
+    if (item.route) {
+      setHighlightAnchor("");
+      navigate(item.route);
+      return;
+    }
+    setActiveTab(item.tab);
     setHighlightAnchor(item.anchor);
     // Wait for the target tab's DOM to mount, then scroll
     setTimeout(() => {
-      const el = document.querySelector(`[data-testid="${item.anchor}"]`);
+      const el = findSettingAnchor(item.anchor);
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -524,16 +585,38 @@ export default function SettingsPage() {
     }, 150);
   };
 
+  const openIntegrationConnection = (connection) => {
+    setIntegrationSearch("");
+    if (connection.route) {
+      navigate(connection.route);
+      return;
+    }
+
+    setActiveTab("integrations");
+    setHighlightAnchor(connection.anchor);
+    const params = new URLSearchParams(location.search);
+    params.set("tab", "integrations");
+    params.set("anchor", connection.anchor);
+    navigate({ pathname: location.pathname, search: `?${params.toString()}` });
+
+    setTimeout(() => {
+      findSettingAnchor(connection.anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+  };
+
   return (
     <div className="nx-page-stage max-w-6xl space-y-5" data-testid="settings-page">
-      {/* Header */}
-      <div className="nx-ambient-surface rounded-2xl border border-violet-500/15 bg-gradient-to-br from-violet-500/[0.09] via-background to-background p-5 md:p-6" data-nx-signal="recommendation">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-500/25 bg-violet-500/10"><Settings2 className="h-5 w-5 text-violet-300" /></span><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">NexusOps administration</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Settings</h1><p className="mt-1 text-sm text-muted-foreground">Configure your workspace, integrations, security, and service standards.</p></div></div>
-          <Badge variant="outline" className="w-fit border-emerald-500/25 bg-emerald-500/10 text-emerald-300">Changes save per section</Badge>
-        </div>
-        {/* Quick search */}
-        <div className="relative mt-5 w-full md:max-w-xl">
+      <OperationalPageHeader
+        eyebrow="NexusOps administration"
+        title="Settings"
+        description="Configure your workspace, integrations, security, and service standards."
+        icon={Settings2}
+        tone="violet"
+        signal="recommendation"
+        actions={<Badge variant="outline" className="w-fit border-emerald-500/25 bg-emerald-500/10 text-emerald-300">Changes save per section</Badge>}
+      />
+      <section className="relative rounded-2xl border border-violet-500/15 bg-card/55 p-3 shadow-sm" aria-label="Find a setting">
+        <div className="relative w-full md:max-w-xl">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input
             value={settingSearch}
@@ -568,7 +651,7 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {/* Settings directory */}
       <div className="space-y-5" data-testid="settings-tabs">
@@ -656,7 +739,7 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div><Label>Company / Platform Name</Label><Input value={branding.company_name || ""} onChange={e => setBranding(p => ({ ...p, company_name: e.target.value }))} placeholder="Your Company Name" data-testid="branding-company-name" /><p className="text-[10px] text-muted-foreground mt-1">Replaces "NexusMSP" in the sidebar, login page, and browser tab</p></div>
-              <div><Label>Email Sender Name</Label><Input value={branding.email_sender_name || ""} onChange={e => setBranding(p => ({ ...p, email_sender_name: e.target.value }))} placeholder="Your Company IT Support" /><p className="text-[10px] text-muted-foreground mt-1">Used as the "From" name in outgoing emails</p></div>
+              <div><Label>Email brand name</Label><Input value={branding.email_sender_name || ""} onChange={e => setBranding(p => ({ ...p, email_sender_name: e.target.value }))} placeholder="Your Company IT Support" /><p className="text-[10px] text-muted-foreground mt-1">Shown in the Nexus organisation footer. The actual From name stays under the Microsoft 365 mailbox profile.</p></div>
             </div>
 
             <Separator />
@@ -765,14 +848,14 @@ export default function SettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />Invoice & Email Branding</CardTitle>
-            <CardDescription>Customize text that appears on invoices and outgoing emails</CardDescription>
+            <CardDescription>Customize organisation-wide text that appears on invoices and Microsoft 365 email.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div><Label>Invoice Header Text</Label><Input value={branding.invoice_header_text || ""} onChange={e => setBranding(p => ({ ...p, invoice_header_text: e.target.value }))} placeholder="Your Company Pty Ltd | ABN 12 345 678 901" /></div>
               <div><Label>Invoice Footer Text</Label><Input value={branding.invoice_footer_text || ""} onChange={e => setBranding(p => ({ ...p, invoice_footer_text: e.target.value }))} placeholder="Payment terms: Net 30 | BSB: 123-456 | Acc: 12345678" /></div>
             </div>
-            <div><Label>Email Footer Text</Label><Input value={branding.email_footer_text || ""} onChange={e => setBranding(p => ({ ...p, email_footer_text: e.target.value }))} placeholder="Your Company | 123 Main St | support@company.com" /></div>
+            <div><Label>Email Footer Text</Label><Input value={branding.email_footer_text || ""} onChange={e => setBranding(p => ({ ...p, email_footer_text: e.target.value }))} placeholder="Your Company | 123 Main St | support@company.com" /><p className="mt-1 text-[10px] text-muted-foreground">Appended once to Microsoft 365 messages after any technician signature.</p></div>
           </CardContent>
         </Card>
 
@@ -1435,7 +1518,80 @@ export default function SettingsPage() {
       {/* ==================== INTEGRATIONS TAB ==================== */}
       {activeTab === "integrations" && (<>
 
-      <SetupGuideCallout title="Connect integrations safely" source="Every provider has its own credential source and permission model. Use the setup guidance shown in each connection dialog, save only the required credentials, then run its connection test before enabling sync or billing automation." steps={["Create a dedicated service account or API key where the provider supports it.", "Use the minimum permissions needed for the NexusMSP workflow.", "Record the owner and renewal/expiry date in your credential process, then test the connection."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />
+      <section className="overflow-hidden rounded-2xl border border-cyan-500/25 bg-[linear-gradient(135deg,rgba(6,182,212,0.1),rgba(15,23,42,0.34)_52%,rgba(139,92,246,0.07))] shadow-[0_18px_42px_-32px_rgba(34,211,238,0.8)]" data-testid="integration-settings-overview">
+        <div className="border-b border-cyan-500/15 p-5 md:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-200">Connection configuration</Badge>
+                <span className="text-xs font-medium text-muted-foreground">Credentials · approval policy · ownership</span>
+              </div>
+              <div className="mt-3 flex items-start gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10"><Plug className="h-5 w-5 text-cyan-200" /></span>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight">Integration connections</h2>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">Configure the credential, sender, callback and approval rules that Nexus needs to use a provider. Live health, sync activity, incidents and operational queues stay in the Integration Centre.</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setActiveTab("mailbox")} data-testid="open-mail-delivery-settings"><Mail className="mr-2 h-4 w-4" />Email delivery</Button>
+              <Button onClick={() => navigate("/integrations")} data-testid="open-integrations-command-centre"><Activity className="mr-2 h-4 w-4" />Open Integration Centre</Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 border-b border-cyan-500/10 p-4 md:grid-cols-2 md:p-5">
+          <div className="rounded-xl border border-cyan-500/15 bg-background/40 p-4">
+            <div className="flex items-start gap-3"><Settings2 className="mt-0.5 h-4 w-4 text-cyan-300" /><div><p className="text-sm font-medium">Configure in Settings</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Provider credentials, webhook URLs, default senders, sync policy, approved scopes and commercial approval requirements.</p></div></div>
+          </div>
+          <div className="rounded-xl border border-violet-500/15 bg-background/40 p-4">
+            <div className="flex items-start gap-3"><Activity className="mt-0.5 h-4 w-4 text-violet-300" /><div><p className="text-sm font-medium">Operate in Integration Centre</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Connection health, live provider data, sync outcomes, diagnostics, activity and actions that require technician attention.</p></div></div>
+          </div>
+        </div>
+
+        <div className="space-y-4 p-4 md:p-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div className="w-full xl:max-w-md">
+              <Label htmlFor="integration-connection-search" className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Find a connection</Label>
+              <div className="relative mt-2"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input id="integration-connection-search" value={integrationSearch} onChange={(event) => setIntegrationSearch(event.target.value)} placeholder="Search providers, billing, security or endpoint…" className="border-cyan-500/15 bg-background/65 pl-9" data-testid="integration-settings-search" /></div>
+            </div>
+            <div className="flex flex-wrap gap-2" aria-label="Filter integration connections">
+              {INTEGRATION_SETTING_CATEGORIES.map((category) => (
+                <Button key={category.id} type="button" size="sm" variant={integrationCategory === category.id ? "default" : "outline"} onClick={() => setIntegrationCategory(category.id)} aria-pressed={integrationCategory === category.id} className={integrationCategory === category.id ? "bg-cyan-500 text-slate-950 hover:bg-cyan-400" : "border-border/70 bg-background/35"}>
+                  {category.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-live="polite" data-testid="integration-settings-connection-list">
+            {visibleIntegrationConnections.map((connection) => {
+              const Icon = connection.icon;
+              const category = INTEGRATION_SETTING_CATEGORIES.find((item) => item.id === connection.category);
+              return (
+                <button key={connection.id} type="button" onClick={() => openIntegrationConnection(connection)} className="group flex min-h-32 items-start gap-3 rounded-xl border border-border/70 bg-background/35 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-cyan-500/35 hover:bg-cyan-500/[0.045]" data-testid={`integration-settings-jump-${connection.id}`}>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/[0.08]"><Icon className="h-4 w-4 text-cyan-200" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-start justify-between gap-2"><span className="font-medium text-foreground">{connection.label}</span><ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-cyan-200" /></span>
+                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">{connection.description}</span>
+                    <span className="mt-2 flex flex-wrap items-center gap-1.5"><Badge variant="outline" className={connection.state.className}>{connection.state.label}</Badge><span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">{category?.label}</span></span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {visibleIntegrationConnections.length === 0 && <div className="rounded-xl border border-dashed border-border/70 bg-background/25 p-5 text-sm text-muted-foreground" data-testid="integration-settings-search-empty">No connection matches this filter. Clear the search or choose <span className="font-medium text-foreground">All connections</span>.</div>}
+          <p className="text-xs text-muted-foreground">Selecting a connection updates the Settings link so the exact configuration card can be shared or revisited without searching through the page.</p>
+        </div>
+      </section>
+
+      <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-muted/[0.18] p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div><p className="text-sm font-medium">Connection details</p><p className="mt-1 text-xs text-muted-foreground">Save and test provider credentials below. Test outcomes are evidence of a connection check, not permission to perform commercial or security-sensitive actions.</p></div>
+        <Badge variant="outline" className="w-fit border-border/70 text-muted-foreground">{integrationConnections.length} connection settings</Badge>
+      </div>
+
+      <SetupGuideCallout title="Before you save a provider" source="Each provider has its own credential source and permission model. This page stores configuration; the Integration Centre shows operational status after a connection is in place." steps={["Use a dedicated service account or API key where the provider supports it.", "Grant only the permissions needed for the NexusMSP workflow.", "Record the credential owner and renewal/expiry date, then run the connection test before enabling sync or billing automation."]} securityNote="Never paste production secrets into tickets, chat, contracts, or client notes. Replace or revoke a credential immediately if it is exposed." />
 
       <Card id="supabase-storage-card" className="border-cyan-500/20 bg-[linear-gradient(120deg,rgba(6,182,212,0.08),transparent_55%)]" data-testid="supabase-storage-card">
         <CardHeader className="pb-3"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2"><Cloud className="h-5 w-5 text-cyan-300" /><div><CardTitle>Private Artifact Storage</CardTitle><CardDescription className="mt-1">Nexus retains generated documents, customer files and ticket evidence privately through Supabase Storage.</CardDescription></div></div><Badge variant="outline" className={artifactStorage.ready ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}>{artifactStorage.ready ? "Ready" : artifactStorage.configured ? "Needs attention" : "Not configured"}</Badge></div></CardHeader>
@@ -1961,6 +2117,12 @@ export default function SettingsPage() {
               <Badge variant="outline" className="text-[10px]">Synced: {new Date(huntress.last_synced_at).toLocaleString()}</Badge>
             )}
           </div>
+          {unifi.migration_required && (
+            <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-100" data-testid="unifi-migration-required">
+              <p className="font-semibold">Credential re-save required</p>
+              <p className="mt-1 text-amber-100/80">This legacy UniFi Site Manager connection is not yet bound to this Nexus tenant. Re-enter its current API key and save it once to encrypt and bind it before using site data or actions.</p>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <Label>API Key</Label>
@@ -2093,27 +2255,27 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Nexus Control Plane Microsoft tenant provider */}
+      {/* Optional CIPP compatibility adapter. Nexus Control Plane is the primary technician experience. */}
       <Card id="cipp-settings-card" data-testid="cipp-settings-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="w-5 h-5 text-cyan-400" />
-            <CardTitle>Nexus Control Plane · Microsoft 365 provider</CardTitle>
+            <CardTitle>Microsoft compatibility adapter · advanced</CardTitle>
           </div>
           <CardDescription>
-            Connect the Microsoft tenant provider used by Nexus Control Plane to manage tenants, users,
-            licences, security posture and offboarding from NexusMSP.
+            Use an existing CIPP deployment as an optional execution adapter while Nexus Control Plane remains the single technician workspace for tenant setup, discovery, evidence and governed actions.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <SetupGuideCallout title="Connect the Microsoft tenant provider" source="Use the Azure Function base URL and a dedicated function host key from your existing hosted tenant-management provider." steps={["Confirm the provider URL ends in /api.", "Create a dedicated host key for NexusMSP instead of reusing a general administrator key.", "Save and test the connection, then confirm the expected tenant list in Nexus Control Plane before enabling technician actions."]} securityNote="This key can perform high-impact Microsoft 365 actions. Store it only in NexusMSP, restrict provider permissions, and rotate it after any suspected exposure." />
+          <div className="flex flex-col gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><p className="text-sm font-medium">Start in Nexus Control Plane</p><p className="mt-1 text-xs text-muted-foreground">Connect Partner Center, discover tenants, confirm the client relationship, then verify GDAP or consent before turning on operational work.</p></div>
+            <Button variant="outline" size="sm" onClick={() => navigate("/control-plane?module=microsoft365&view=connections")}>Open tenant setup</Button>
+          </div>
+          <SetupGuideCallout title="Configure the optional CIPP adapter" source="Use the Azure Function base URL and a dedicated function host key from your existing hosted CIPP deployment." steps={["Confirm the provider URL ends in /api.", "Create a dedicated host key for NexusMSP instead of reusing a general administrator key.", "Save and test the adapter, then confirm the expected tenant list in Nexus Control Plane before enabling technician actions."]} securityNote="This key can perform high-impact Microsoft 365 actions. Store it only in NexusMSP, restrict provider permissions, and rotate it after any suspected exposure." />
           <div className="flex items-center gap-2 flex-wrap">
             <Badge className={cipp.configured ? "bg-green-500/20 text-green-400 border-green-500/30" : "bg-red-500/20 text-red-400 border-red-500/30"} data-testid="cipp-status-badge">
               {cipp.configured ? "Configured" : "Not Configured"}
             </Badge>
-            {cipp.api_key_preview && (
-              <Badge variant="outline" className="font-mono text-[10px]">Key: {cipp.api_key_preview}</Badge>
-            )}
             {cipp.last_test_status && (
               <Badge variant="outline" className="text-[10px]">Last test: {cipp.last_test_status}</Badge>
             )}
@@ -2202,7 +2364,7 @@ export default function SettingsPage() {
                   setCippBusy(true);
                   try {
                     await axios.delete(`${API}/cipp/settings`, { headers });
-                    setCipp({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    setCipp({ base_url: "", api_key: "", configured: false, last_test_status: null, last_tested_at: null, last_synced_at: null });
                     toast.success("Microsoft tenant provider credentials removed");
                   } catch (e) { toast.error(e.response?.data?.detail || e.message); }
                   finally { setCippBusy(false); }
@@ -2292,7 +2454,7 @@ export default function SettingsPage() {
               disabled={unifiBusy}
               data-testid="unifi-save-btn"
             >
-              {unifiBusy ? "Saving..." : "Save credentials"}
+              {unifiBusy ? "Saving..." : unifi.migration_required ? "Bind and save credentials" : "Save credentials"}
             </Button>
             <Button
               variant="outline"
@@ -2320,7 +2482,7 @@ export default function SettingsPage() {
                   setUnifiBusy(true);
                   try {
                     await axios.delete(`${API}/unifi/settings`, { headers });
-                    setUnifi({ base_url: "", api_key: "", configured: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
+                    setUnifi({ base_url: "", api_key: "", configured: false, migration_required: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
                     toast.success("UniFi credentials removed");
                   } catch (e) { toast.error(e.response?.data?.detail || e.message); }
                   finally { setUnifiBusy(false); }
@@ -2774,16 +2936,6 @@ export default function SettingsPage() {
       {activeTab === "channel" && (
         <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading channel mode...</div>}>
           <LazyChannelMode />
-        </Suspense>
-      )}
-      {activeTab === "tokens" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading API tokens...</div>}>
-          <LazyApiTokens />
-        </Suspense>
-      )}
-      {activeTab === "twofa" && (
-        <Suspense fallback={<div className="p-8 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 inline mr-2 animate-spin" />Loading 2FA settings...</div>}>
-          <LazySecurity2FA />
         </Suspense>
       )}
       {activeTab === "comms" && (

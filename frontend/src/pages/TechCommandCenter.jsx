@@ -3,7 +3,7 @@
  * Matches the Devices Command Center / Clients module aesthetic.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import TechRosterPage from "./TechRosterPage";
@@ -31,7 +31,7 @@ import {
   Crown, Lock, Unlock, History, Target, RefreshCw,
   TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
   Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Trophy,
-  CheckCircle2, XCircle, Clock, Upload, Building2, MapPin,
+  CheckCircle2, XCircle, Clock, Upload, Building2, MapPin, ClipboardCheck,
 } from "lucide-react";
 
 // ---------- Constants ----------
@@ -131,17 +131,41 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
   const titles = useMemo(() => Array.from(new Set(techs.map(t => t.job_title).filter(Boolean))), [techs]);
 
   const filtered = useMemo(() => {
+    const urgency = { overloaded: 0, busy: 1, active: 2, idle: 3 };
     return techs.filter(t => {
+      const workload = t.workload || {};
       if (filterTitle !== "all" && t.job_title !== filterTitle) return false;
       if (filterStatus === "active" && t.archived) return false;
       if (filterStatus === "archived" && !t.archived) return false;
+      if (filterStatus === "attention" && (t.archived || (!workload.overdue && !["busy", "overloaded"].includes(workload.state)))) return false;
+      if (filterStatus === "on_call" && (t.archived || !t.on_call_status)) return false;
       if (search) {
         const q = search.toLowerCase();
-        return (t.name || "").toLowerCase().includes(q) || (t.email || "").toLowerCase().includes(q);
+        return [
+          t.name,
+          t.email,
+          t.job_title,
+          t.role,
+          t.phone,
+          t.mobile,
+          t.teams_email,
+          t.slack_handle,
+          ...(t.specialties || []),
+        ].some(value => String(value || "").toLowerCase().includes(q));
       }
       return true;
+    }).sort((left, right) => {
+      if (Boolean(left.archived) !== Boolean(right.archived)) return Number(Boolean(left.archived)) - Number(Boolean(right.archived));
+      const leftUrgency = urgency[left.workload?.state] ?? 4;
+      const rightUrgency = urgency[right.workload?.state] ?? 4;
+      if (leftUrgency !== rightUrgency) return leftUrgency - rightUrgency;
+      if ((right.workload?.overdue || 0) !== (left.workload?.overdue || 0)) return (right.workload?.overdue || 0) - (left.workload?.overdue || 0);
+      return String(left.name || "").localeCompare(String(right.name || ""));
     });
   }, [techs, filterTitle, filterStatus, search]);
+
+  const filtersApplied = search.trim() || filterTitle !== "all" || filterStatus !== "active";
+  const clearFilters = () => { setSearch(""); setFilterTitle("all"); setFilterStatus("active"); };
 
   const restore = async tech => {
     try {
@@ -153,32 +177,39 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
 
   return (
     <div className="space-y-4" data-testid="directory-tab">
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-md">
+      <section className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Find a technician">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row">
+        <div className="relative min-w-[200px] flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-          <Input aria-label="Search team members" className="pl-9" placeholder="Search name or email…" value={search} onChange={e => setSearch(e.target.value)} data-testid="directory-search" />
+          <Input aria-label="Search team members" className="pl-9" placeholder="Search name, role, email or mobile…" value={search} onChange={e => setSearch(e.target.value)} data-testid="directory-search" />
         </div>
         <Select value={filterTitle} onValueChange={setFilterTitle}>
-          <SelectTrigger aria-label="Filter team members by role" className="w-[180px]" data-testid="directory-title-filter"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Filter team members by role" className="w-full sm:w-[180px]" data-testid="directory-title-filter"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Roles</SelectItem>
             {titles.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger aria-label="Filter team members by status" className="w-[140px]" data-testid="directory-status-filter"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Filter team members by status" className="w-full sm:w-[170px]" data-testid="directory-status-filter"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="attention">Needs attention</SelectItem>
+            <SelectItem value="on_call">On-call now</SelectItem>
             <SelectItem value="archived">Archived</SelectItem>
             <SelectItem value="all">All</SelectItem>
           </SelectContent>
         </Select>
-      </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+          <span data-testid="directory-result-count">{filtered.length} of {techs.length} shown</span>
+          {filtersApplied && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={clearFilters}>Clear</Button>}
+        </div>
+      </section>
 
       {/* Tech grid — same style as Devices grid */}
       {filtered.length === 0 ? (
-        <Card><CardContent className="flex flex-col items-center py-12 text-center"><Search className="h-6 w-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">No team members match</p><p className="mt-1 text-xs text-muted-foreground">Clear the search and filters to return to the complete directory.</p><Button variant="outline" size="sm" className="mt-4" onClick={() => { setSearch(""); setFilterTitle("all"); setFilterStatus("active"); }}>Clear filters</Button></CardContent></Card>
+        <Card><CardContent className="flex flex-col items-center py-12 text-center"><Search className="h-6 w-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">No team members match</p><p className="mt-1 text-xs text-muted-foreground">Clear the search and filters to return to the complete directory.</p><Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Clear filters</Button></CardContent></Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map(t => (
@@ -205,9 +236,12 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
   const wl = tech.workload || {};
   const stateClass = STATE_COLORS[wl.state] || STATE_COLORS.active;
   const archived = !!tech.archived;
+  const needsAttention = !archived && (wl.overdue > 0 || ["busy", "overloaded"].includes(wl.state));
+  const canManageActive = typeof onEdit === "function" || typeof onArchive === "function";
+  const canManageArchived = typeof onRestore === "function" || typeof onDelete === "function";
 
   return (
-    <Card className={`border-border/80 bg-card/80 transition-colors ${archived ? "border-amber-500/25 opacity-85" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
+    <Card className={`border-border/80 bg-card/80 transition-colors ${archived ? "border-amber-500/25 opacity-85" : needsAttention ? "border-amber-500/35 shadow-[0_12px_28px_-24px_rgba(245,158,11,0.8)] hover:border-amber-500/50" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           <div className="relative shrink-0">
@@ -222,6 +256,7 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
               <span className="truncate font-medium text-foreground">{tech.name}</span>
               {tech.is_admin && <Crown className="h-3 w-3 text-amber-600 dark:text-amber-400" aria-label="Administrator" />}
               {archived && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[9px] uppercase text-amber-700 dark:text-amber-200">Archived</Badge>}
+              {needsAttention && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[9px] uppercase text-amber-700 dark:text-amber-200">Review</Badge>}
             </div>
             <div className="truncate font-mono text-[11px] text-muted-foreground">{tech.job_title || "Technician"}</div>
             <div className="truncate text-[10px] text-muted-foreground">{tech.email}</div>
@@ -238,19 +273,46 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
           <div><div className="font-mono text-base font-bold text-emerald-700 dark:text-emerald-300">{tech.on_call_status ? "ON" : "—"}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">on-call</div></div>
         </div>
 
-        {archived ? (
+        {archived && canManageArchived ? (
           <div className="mt-3 flex items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px] text-emerald-300 hover:bg-emerald-500/10" onClick={onRestore} data-testid={`tech-restore-${tech.id}`}><RotateCcw className="mr-1 h-3 w-3" />Restore</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={onDelete} data-testid={`tech-delete-${tech.id}`}><Trash2 className="mr-1 h-3 w-3" />Delete</Button>
+            {typeof onRestore === "function" && <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px] text-emerald-300 hover:bg-emerald-500/10" onClick={onRestore} data-testid={`tech-restore-${tech.id}`}><RotateCcw className="mr-1 h-3 w-3" />Restore</Button>}
+            {typeof onDelete === "function" && <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={onDelete} data-testid={`tech-delete-${tech.id}`}><Trash2 className="mr-1 h-3 w-3" />Delete</Button>}
           </div>
-        ) : (
+        ) : !archived && canManageActive ? (
           <div className="mt-3 flex items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px]" aria-label={`Manage ${tech.name}`} onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1 h-3 w-3" />Manage</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-amber-700 hover:bg-amber-500/10 dark:text-amber-300" aria-label={`Archive ${tech.name}`} onClick={onArchive} data-testid={`tech-archive-${tech.id}`}><Archive className="mr-1 h-3 w-3" />Archive</Button>
+            {typeof onEdit === "function" && <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px]" aria-label={`Manage ${tech.name}`} onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1 h-3 w-3" />Manage</Button>}
+            {typeof onArchive === "function" && <Button size="sm" variant="ghost" className="h-7 text-[10px] text-amber-700 hover:bg-amber-500/10 dark:text-amber-300" aria-label={`Archive ${tech.name}`} onClick={onArchive} data-testid={`tech-archive-${tech.id}`}><Archive className="mr-1 h-3 w-3" />Archive</Button>}
           </div>
-        )}
+        ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function TechnicianReadinessSignal({ readiness }) {
+  const summary = readiness?.summary;
+  if (!summary) return null;
+
+  const total = summary.total || 0;
+  const compliant = summary.compliant || 0;
+  const required = summary.required || 0;
+  const healthy = total > 0 && required === 0;
+
+  return (
+    <section className={`flex flex-col gap-4 rounded-2xl border p-4 shadow-[0_14px_34px_-30px_rgba(34,197,94,0.9)] sm:flex-row sm:items-center sm:justify-between ${healthy ? "border-emerald-500/25 bg-emerald-500/[0.045]" : "border-amber-500/25 bg-amber-500/[0.045]"}`} data-testid="technician-readiness-signal">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${healthy ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" : "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-300"}`}><ClipboardCheck className="h-5 w-5" /></span>
+        <div>
+          <p className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${healthy ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>Technician readiness</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{healthy ? "Every active technician has completed the required first-use guide." : `${required} technician${required === 1 ? "" : "s"} still need to complete the required first-use guide.`}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Training attestations are retained separately from the ticket, change, billing and remote-work evidence created during real operations.</p>
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className={`font-mono text-base font-semibold ${healthy ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>{compliant}/{total}</p><p className="text-[9px] uppercase tracking-wider text-muted-foreground">ready</p></div>
+        <Button size="sm" variant="outline" asChild data-testid="technician-readiness-link"><Link to="/technician-onboarding"><ClipboardCheck className="mr-1.5 h-4 w-4" />Review readiness</Link></Button>
+      </div>
+    </section>
   );
 }
 
@@ -871,7 +933,7 @@ function TechFinderTab({ headers, capacity }) {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {display.map(t => <TechCard key={t.id} tech={t} onEdit={() => {}} headers={headers} onChanged={() => {}} />)}
+        {display.map(t => <TechCard key={t.id} tech={t} />)}
       </div>
     </div>
   );
@@ -959,7 +1021,8 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
     const stem = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "team_role";
     let value = `custom_${stem}`;
     let suffix = 2;
-    while (roles.some(role => role.value === value)) { value = `custom_${stem.slice(0, 37)}_${suffix}`; suffix += 1; }
+    const existingValues = new Set(roles.map(role => role.value));
+    while (existingValues.has(value)) { value = `custom_${stem.slice(0, 37)}_${suffix}`; suffix += 1; }
     const startingPermissions = roles.find(role => role.value === "technician")?.action_permissions || [];
     setRoles(current => [...current, { value, id: value, label, description, custom: true, protected: false, action_permissions: [...startingPermissions], action_permissions_explicit: true }]);
     setSelectedRoleId(value);
@@ -1503,6 +1566,7 @@ export default function TechCommandCenter() {
   const [capacity, setCapacity] = useState(null);
   const [presets, setPresets] = useState({});
   const [roleOptions, setRoleOptions] = useState(ROLE_OPTIONS);
+  const [onboardingReadiness, setOnboardingReadiness] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -1524,7 +1588,22 @@ export default function TechCommandCenter() {
     } catch { /* retain safe defaults while the role catalogue loads */ }
   }, [headers]);
 
-  useEffect(() => { loadCapacity(); loadPresets(); loadRoles(); }, [loadCapacity, loadPresets, loadRoles]);
+  const loadOnboardingReadiness = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API}/technician-onboarding/technicians`, { headers });
+      setOnboardingReadiness(response.data || null);
+    } catch {
+      // Readiness is an admin-only, additive signal. The Team Hub remains usable
+      // if the current role cannot view it or the endpoint is temporarily unavailable.
+      setOnboardingReadiness(null);
+    }
+  }, [headers]);
+
+  const refreshTeamData = useCallback(async () => {
+    await Promise.all([loadCapacity(), loadOnboardingReadiness()]);
+  }, [loadCapacity, loadOnboardingReadiness]);
+
+  useEffect(() => { loadCapacity(); loadPresets(); loadRoles(); loadOnboardingReadiness(); }, [loadCapacity, loadPresets, loadRoles, loadOnboardingReadiness]);
 
   useEffect(() => {
     const requested = searchParams.get("view");
@@ -1552,7 +1631,7 @@ export default function TechCommandCenter() {
         description="Directory, invitations, capacity, permissions, access drift, just-in-time elevation, and audit controls."
         icon={Sparkles}
         tone="violet"
-        actions={<><Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="header-invite-btn"><Mail className="mr-1.5 h-4 w-4" />Invite</Button><Button size="sm" onClick={() => setAddOpen(true)} data-testid="header-add-btn"><UserPlus className="mr-1.5 h-4 w-4" />Add user</Button><Button size="sm" variant="outline" onClick={loadCapacity}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button></>}
+        actions={<><Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="header-invite-btn"><Mail className="mr-1.5 h-4 w-4" />Invite</Button><Button size="sm" onClick={() => setAddOpen(true)} data-testid="header-add-btn"><UserPlus className="mr-1.5 h-4 w-4" />Add user</Button><Button size="sm" variant="outline" onClick={refreshTeamData}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button></>}
       />
       {/* HeroTile metric strip — same shape as Devices */}
       <MetricStrip columns={6}>
@@ -1563,6 +1642,7 @@ export default function TechCommandCenter() {
         <MetricTile label="Overloaded" value={summary.overloaded || 0} accent={summary.overloaded ? "rose" : "zinc"} icon={<AlertTriangle className={`w-2.5 h-2.5 ${summary.overloaded ? "text-rose-400" : "text-zinc-400"}`} />} testid="tcc-tile-overloaded" />
         <MetricTile label="Avg utilisation" value={`${summary.avg_util}%`} accent="violet" icon={<TrendingUp className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-util" />
       </MetricStrip>
+      <TechnicianReadinessSignal readiness={onboardingReadiness} />
       </>}
 
       {/* Tabs */}
@@ -1582,21 +1662,21 @@ export default function TechCommandCenter() {
           ))}
         </TabsList>
 
-        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} roleOptions={roleOptions} onChanged={loadCapacity} /></TabsContent>
+        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} roleOptions={roleOptions} onChanged={refreshTeamData} /></TabsContent>
         <TabsContent value="invites" className="mt-4"><InvitesTab headers={headers} /></TabsContent>
         <TabsContent value="find" className="mt-4"><TechFinderTab headers={headers} capacity={capacity} /></TabsContent>
         <TabsContent value="capacity" className="mt-4"><CapacityTab capacity={capacity} /></TabsContent>
         <TabsContent value="matrix" className="mt-4"><PermissionMatrixTab headers={headers} presets={presets} roleOptions={roleOptions} onRolesChanged={setRoleOptions} /></TabsContent>
         <TabsContent value="drift" className="mt-4"><RoleDriftTab headers={headers} /></TabsContent>
-        <TabsContent value="jit" className="mt-4"><JITTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} /></TabsContent>
+        <TabsContent value="jit" className="mt-4"><JITTab headers={headers} capacity={capacity} presets={presets} onChanged={refreshTeamData} /></TabsContent>
         <TabsContent value="audit" className="mt-4"><AuditTab headers={headers} /></TabsContent>
         <TabsContent value="roster" className="mt-4"><TechRosterPage /></TabsContent>
         <TabsContent value="skills" className="mt-4"><SkillsMatrixPage /></TabsContent>
         <TabsContent value="leaderboard" className="mt-4"><LeaderboardPage /></TabsContent>
       </Tabs>
 
-      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
-      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={refreshTeamData} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={refreshTeamData} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
     </div>
   );
 }

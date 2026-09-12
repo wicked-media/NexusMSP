@@ -36,7 +36,7 @@ const categories = [
 ];
 
 export default function KnowledgeBasePage() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -48,8 +48,8 @@ export default function KnowledgeBasePage() {
   const [activeTab, setActiveTab] = useState("all");
   const [huduSyncing, setHuduSyncing] = useState(false);
   const [installingLibrary, setInstallingLibrary] = useState(false);
-  const [huduArticles, setHuduArticles] = useState([]);
-  const [showHuduPanel, setShowHuduPanel] = useState(false);
+  const [_huduArticles, setHuduArticles] = useState([]);
+  const [_showHuduPanel, _setShowHuduPanel] = useState(false);
   const [formData, setFormData] = useState({
     title: "", summary: "", content: "", category: "general", tags: "",
     is_public: false, is_pinned: false, related_article_ids: [], content_format: "html"
@@ -68,7 +68,7 @@ export default function KnowledgeBasePage() {
 
   useEffect(() => { fetchArticles(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchHuduArticles = async () => {
+  const _fetchHuduArticles = async () => {
     try {
       const res = await axios.get(`${API}/hudu/articles`, { headers });
       setHuduArticles(res.data.articles || res.data || []);
@@ -106,7 +106,7 @@ export default function KnowledgeBasePage() {
     } catch { toast.error("Failed to save article"); }
   };
 
-  const handleDelete = async (id) => {
+  const _handleDelete = async (id) => {
     if (!window.confirm("Delete this article?")) return;
     try {
       await axios.delete(`${API}/kb/articles/${id}`, { headers });
@@ -124,7 +124,7 @@ export default function KnowledgeBasePage() {
     } catch { toast.error("Failed"); }
   };
 
-  const togglePin = async (article) => {
+  const _togglePin = async (article) => {
     try {
       await axios.put(`${API}/kb/articles/${article.id}`, { is_pinned: !article.is_pinned }, { headers });
       toast.success(article.is_pinned ? "Unpinned" : "Pinned");
@@ -132,7 +132,7 @@ export default function KnowledgeBasePage() {
     } catch { toast.error("Failed"); }
   };
 
-  const toggleVisibility = async (article) => {
+  const _toggleVisibility = async (article) => {
     try {
       await axios.put(`${API}/kb/articles/${article.id}`, { is_public: !article.is_public }, { headers });
       toast.success(article.is_public ? "Made internal" : "Made public");
@@ -185,57 +185,63 @@ export default function KnowledgeBasePage() {
   if (viewArticle) {
     return (
       <div className="space-y-6" data-testid="kb-article-view">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="sm" onClick={() => setViewArticle(null)} data-testid="back-to-kb"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              {viewArticle.is_pinned && <Pin className="w-4 h-4 text-amber-500" />}
-              <h1 className="text-2xl font-bold">{viewArticle.title}</h1>
+        <section className="nx-page-stage nx-ambient-surface overflow-hidden rounded-2xl border border-sky-400/20 bg-gradient-to-br from-sky-400/[0.08] via-background to-background shadow-[0_24px_70px_-46px_rgba(56,189,248,0.58)]" data-nx-signal="knowledge-record">
+          <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
+            <Button variant="ghost" size="sm" className="-ml-1 h-8 text-muted-foreground hover:bg-sky-400/10 hover:text-sky-200" onClick={() => setViewArticle(null)} data-testid="back-to-kb"><ArrowLeft className="mr-1 h-4 w-4" />Back to knowledge library</Button>
+            <span className="text-border">/</span><span className="truncate text-sm font-medium text-muted-foreground">Article record</span>
+          </div>
+          <div className="flex flex-col gap-5 px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Operational knowledge</p>
+              <div className="mt-1 flex min-w-0 items-start gap-2">
+                {viewArticle.is_pinned && <Pin className="mt-1 h-4 w-4 shrink-0 text-amber-300" />}
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{viewArticle.title}</h1>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Badge className={`rounded-full ${getCategoryStyle(viewArticle.category)}`}>{categories.find(c => c.value === viewArticle.category)?.label || viewArticle.category}</Badge>
+                <Badge variant="outline" className="gap-1 rounded-full border-border/70 bg-background/35">{viewArticle.is_public ? <><Globe className="h-3 w-3" />Public</> : <><Lock className="h-3 w-3" />Internal</>}</Badge>
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Eye className="h-3.5 w-3.5 text-sky-300" />{viewArticle.views || 0} views</span>
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><ThumbsUp className="h-3.5 w-3.5 text-emerald-300" />{viewArticle.helpful_count || 0} helpful</span>
+              </div>
             </div>
-            <div className="flex items-center gap-3 mt-1">
-              <Badge className={getCategoryStyle(viewArticle.category)}>{categories.find(c => c.value === viewArticle.category)?.label || viewArticle.category}</Badge>
-              <Badge variant="outline" className="gap-1">{viewArticle.is_public ? <><Globe className="w-3 h-3" />Public</> : <><Lock className="w-3 h-3" />Internal</>}</Badge>
-              <span className="text-xs text-muted-foreground flex items-center gap-1"><Eye className="w-3 h-3" />{viewArticle.views || 0} views</span>
-              <span className="text-xs text-muted-foreground flex items-center gap-1"><ThumbsUp className="w-3 h-3" />{viewArticle.helpful_count || 0} helpful</span>
+            <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => handleHelpful(viewArticle.id)} data-testid="helpful-btn"><ThumbsUp className="mr-1 h-4 w-4" />Helpful</Button>
+              <Button variant="outline" size="sm" className="rounded-xl" onClick={() => openEdit(viewArticle)}><Edit className="mr-1 h-4 w-4" />Edit</Button>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => handleHelpful(viewArticle.id)} data-testid="helpful-btn"><ThumbsUp className="w-4 h-4 mr-1" />Helpful</Button>
-            <Button variant="outline" size="sm" onClick={() => openEdit(viewArticle)}><Edit className="w-4 h-4 mr-1" />Edit</Button>
-          </div>
-        </div>
+        </section>
 
-        <div className="grid grid-cols-12 gap-6">
-          <div className="col-span-9">
-            <Card>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(18rem,0.75fr)]">
+          <div>
+            <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.95)]">
               <CardContent className="p-6">
-                {viewArticle.summary && <p className="mb-5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">{viewArticle.summary}</p>}
+                {viewArticle.summary && <p className="mb-5 rounded-xl border border-sky-400/20 bg-sky-400/[0.055] p-4 text-sm leading-6 text-muted-foreground">{viewArticle.summary}</p>}
                 {viewArticle.content_format === "html" ? (
                   <div className="prose prose-sm max-w-none dark:prose-invert" data-testid="article-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(viewArticle.content || "") }} />
                 ) : <div className="prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap" data-testid="article-content">{viewArticle.content}</div>}
               </CardContent>
             </Card>
             {viewArticle.tags?.length > 0 && (
-              <div className="flex items-center gap-2 mt-4">
-                <Tag className="w-4 h-4 text-muted-foreground" />
-                {viewArticle.tags.map((tag, i) => (<Badge key={`k-${i}`} variant="outline" className="text-xs">{tag}</Badge>))}
+              <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-card/55 p-3">
+                <Tag className="h-4 w-4 text-sky-300" />
+                {viewArticle.tags.map((tag, i) => (<Badge key={`k-${i}`} variant="outline" className="rounded-full border-border/70 bg-background/35 text-xs">{tag}</Badge>))}
               </div>
             )}
-            <div className="flex items-center gap-4 mt-4 text-xs text-muted-foreground">
+            <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1"><User className="w-3 h-3" />{viewArticle.author_name || "Admin"}</span>
               {viewArticle.created_at && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{formatDistanceToNow(new Date(viewArticle.created_at), { addSuffix: true })}</span>}
             </div>
           </div>
-          <div className="col-span-3 space-y-4">
+          <div className="space-y-4">
             <ConfidenceLens entityType="documentation" entityId={viewArticle.id} token={token} API={API} variant="compact" className="w-full" />
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-1"><Link2 className="w-4 h-4" />Related Articles</CardTitle></CardHeader>
+            <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.95)]">
+              <CardHeader className="border-b border-border/60 bg-gradient-to-r from-muted/50 to-transparent pb-3"><CardTitle className="flex items-center gap-2 text-sm"><span className="flex h-8 w-8 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-400/[0.08]"><Link2 className="h-4 w-4 text-violet-300" /></span>Related articles</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {relatedArticles.length > 0 ? relatedArticles.map(a => (
-                  <div key={a.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 cursor-pointer" onClick={() => setViewArticle(a)} data-testid={`related-${a.id}`}>
+                  <button key={a.id} type="button" className="flex w-full items-center gap-2 rounded-xl p-2 text-left transition-colors hover:bg-sky-400/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60" onClick={() => setViewArticle(a)} data-testid={`related-${a.id}`}>
                     <FileText className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                     <span className="text-xs truncate">{a.title}</span>
-                  </div>
+                  </button>
                 )) : <p className="text-xs text-muted-foreground">No related articles</p>}
               </CardContent>
             </Card>
@@ -259,9 +265,10 @@ export default function KnowledgeBasePage() {
           <Button variant="outline" onClick={fetchArticles}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
           <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
             <Button onClick={() => setIsDialogOpen(true)} data-testid="create-article-btn"><Plus className="w-4 h-4 mr-2" />New Article</Button>
-            <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
-              <DialogHeader><DialogTitle>{selectedArticle ? "Edit knowledge article" : "Create knowledge article"}</DialogTitle><p className="text-sm text-muted-foreground">A structured, Hudu-style workspace with rich content, tables, links, screenshots, HTML source, and publication controls.</p></DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
+            <DialogContent className="flex h-[min(920px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+              <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>{selectedArticle ? "Edit knowledge article" : "Create knowledge article"}</DialogTitle><p className="text-sm text-muted-foreground">A structured, Hudu-style workspace with rich content, tables, links, screenshots, HTML source, and publication controls.</p></DialogHeader>
+              <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
                 <div className="grid gap-4 md:grid-cols-[1fr_280px]">
                   <div className="space-y-2"><Label>Article title *</Label><Input value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="How to reset a Windows password" required /></div>
                   <div className="space-y-2"><Label>Tags</Label><Input value={formData.tags} onChange={e => setFormData({ ...formData, tags: e.target.value })} placeholder="password, windows, reset" /></div>
@@ -282,7 +289,8 @@ export default function KnowledgeBasePage() {
                   <div className="flex items-center gap-2"><Switch checked={formData.is_public} onCheckedChange={v => setFormData({ ...formData, is_public: v })} /><Label className="flex items-center gap-1">{formData.is_public ? <Globe className="w-4 h-4" /> : <Lock className="w-4 h-4" />}{formData.is_public ? "Public" : "Internal Only"}</Label></div>
                   <div className="flex items-center gap-2"><Switch checked={formData.is_pinned} onCheckedChange={v => setFormData({ ...formData, is_pinned: v })} /><Label className="flex items-center gap-1"><Pin className="w-4 h-4" />Pin to Top</Label></div>
                 </div>
-                <DialogFooter><Button type="submit">{selectedArticle ? "Update" : "Create Article"}</Button></DialogFooter>
+                </div>
+                <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button variant="outline" type="button" onClick={() => { setIsDialogOpen(false); resetForm(); }}>Cancel</Button><Button type="submit">{selectedArticle ? "Update" : "Create Article"}</Button></DialogFooter>
               </form>
             </DialogContent>
           </Dialog>
@@ -301,6 +309,10 @@ export default function KnowledgeBasePage() {
       <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card/50 p-3 sm:flex-row sm:items-center sm:justify-between">
         <div><p className="text-sm font-semibold">Knowledge library</p><p className="text-xs text-muted-foreground">Build runbooks with rich text, screenshots, links, tables, and safe HTML source.</p></div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={syncFromHudu} disabled={huduSyncing} data-testid="hudu-sync-toolbar">
+            {huduSyncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Sync Hudu
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchArticles} data-testid="refresh-kb-toolbar"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
           <Button variant="outline" size="sm" onClick={installTechnicianLibrary} disabled={installingLibrary} data-testid="install-technician-library-toolbar">
             {installingLibrary ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BookOpen className="w-4 h-4 mr-2" />}Install starter library
           </Button>
@@ -328,8 +340,8 @@ export default function KnowledgeBasePage() {
           ) : filteredArticles.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
               {filteredArticles.map(article => (
-                <Card key={article.id} className={`cursor-pointer hover:border-primary/30 transition-all hover:shadow-md ${article.is_pinned ? "border-amber-500/30" : ""}`}
-                  onClick={() => setViewArticle(article)} data-testid={`kb-article-${article.id}`}>
+                <Card key={article.id} role="button" tabIndex={0} className={`cursor-pointer overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] transition-all hover:-translate-y-0.5 hover:border-sky-400/35 hover:shadow-[0_22px_42px_-34px_rgba(56,189,248,0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 ${article.is_pinned ? "border-amber-400/30" : ""}`}
+                  onClick={() => setViewArticle(article)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setViewArticle(article); } }} data-testid={`kb-article-${article.id}`}>
                   <CardContent className="p-5">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">

@@ -28,7 +28,7 @@ export default function BillingProPage() {
 }
 
 /* ============== Numbering Panel ============== */
-function NumberingPanel({ headers }) {
+function _NumberingPanel({ headers }) {
   const [cfg, setCfg] = useState(null);
   const [preview, setPreview] = useState("");
   const [saving, setSaving] = useState(false);
@@ -92,7 +92,7 @@ function NumberingPanel({ headers }) {
 }
 
 /* ============== Approval Panel ============== */
-function ApprovalPanel({ headers }) {
+function _ApprovalPanel({ headers }) {
   const [cfg, setCfg] = useState(null);
   useEffect(() => { axios.get(`${API}/billing-pro/settings/approval`, { headers }).then(r => setCfg(r.data)); }, []); // eslint-disable-line
   const save = async () => {
@@ -129,7 +129,7 @@ function ApprovalPanel({ headers }) {
 }
 
 /* ============== Tax / GST Compliance Panel ============== */
-function TaxPanel({ headers }) {
+function _TaxPanel({ headers }) {
   const [cfg, setCfg] = useState(null);
   useEffect(() => { axios.get(`${API}/billing-pro/settings/tax-compliance`, { headers }).then(r => setCfg(r.data)); }, []); // eslint-disable-line
   const save = async () => {
@@ -182,7 +182,7 @@ function TaxPanel({ headers }) {
 }
 
 /* ============== MRR Analytics Panel ============== */
-function MRRPanel({ headers }) {
+function _MRRPanel({ headers }) {
   const [data, setData] = useState(null);
   useEffect(() => { axios.get(`${API}/billing-pro/recurring/mrr-analytics`, { headers }).then(r => setData(r.data)); }, []); // eslint-disable-line
   if (!data) return <Loader2 className="w-6 h-6 animate-spin mx-auto my-12" />;
@@ -217,7 +217,7 @@ function MRRPanel({ headers }) {
 }
 
 /* ============== Generation Calendar ============== */
-function CalendarPanel({ headers }) {
+function _CalendarPanel({ headers }) {
   const [data, setData] = useState(null);
   useEffect(() => { axios.get(`${API}/billing-pro/recurring/calendar?months=3`, { headers }).then(r => setData(r.data)); }, []); // eslint-disable-line
   if (!data) return <Loader2 className="w-6 h-6 animate-spin mx-auto my-12" />;
@@ -245,7 +245,7 @@ function CalendarPanel({ headers }) {
 }
 
 /* ============== Warehouses ============== */
-function WarehousesPanel({ headers }) {
+function _WarehousesPanel({ headers }) {
   const [items, setItems] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -299,7 +299,7 @@ function WarehousesPanel({ headers }) {
 }
 
 /* ============== Purchase Orders ============== */
-function POPanel({ headers }) {
+function _POPanel({ headers }) {
   const [pos, setPos] = useState([]);
   const fetch = () => axios.get(`${API}/billing-pro/purchase-orders`, { headers }).then(r => setPos(r.data));
   useEffect(() => { fetch(); }, []); // eslint-disable-line
@@ -328,7 +328,7 @@ function POPanel({ headers }) {
 }
 
 /* ============== Inventory Snapshot ============== */
-function SnapshotPanel({ headers }) {
+function _SnapshotPanel({ headers }) {
   const [data, setData] = useState(null);
   const [creatingPo, setCreatingPo] = useState(null);
   const fetch = () => axios.get(`${API}/billing-pro/products/inventory/snapshot`, { headers }).then(r => setData(r.data));
@@ -373,7 +373,7 @@ function SnapshotPanel({ headers }) {
 }
 
 /* ============== Bulk CSV Import ============== */
-function BulkImportPanel({ headers }) {
+function _BulkImportPanel({ headers }) {
   const [csv, setCsv] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);

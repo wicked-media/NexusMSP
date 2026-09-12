@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { DollarSign, HardDrive, Users, Loader2, TrendingUp, Database, BarChart3, Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function UsageBillingPage() {
   const { token } = useAuth();
@@ -28,16 +29,10 @@ export default function UsageBillingPage() {
 
   return (
     <div className="space-y-6" data-testid="usage-billing-page">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><Database className="w-4 h-4 text-sky-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">Usage Billing</h1><p className="text-sm text-muted-foreground">Metered services, device counts, and per-unit revenue by client.</p></div>
-        </div>
-        <div className="flex gap-2">
+      <OperationalPageHeader eyebrow="Billing operations · metered evidence" title="Usage Billing" description="Review metered services, device counts and per-unit revenue with a clear route to recurring billing." icon={Database} tone="sky" signal={(s.overages_this_month || 0) > 0 ? "attention" : "ready"} actions={<>
           <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")} data-testid="usage-go-recurring"><TrendingUp className="w-4 h-4 mr-1" />Recurring</Button>
           <Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="usage-go-invoices"><DollarSign className="w-4 h-4 mr-1" />Invoices</Button>
-        </div>
-      </div>
+        </>} />
 
       <div className="grid grid-cols-4 gap-3">
         <HeroTile label="Usage MRR" value={`$${(s.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/recurring-invoices")} testId="usage-metric-mrr" />

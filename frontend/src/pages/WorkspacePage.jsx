@@ -30,7 +30,7 @@ const taskAccentClasses = {
 };
 
 export default function WorkspacePage() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

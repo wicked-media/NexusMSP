@@ -16,9 +16,9 @@ import { toast } from "sonner";
 import {
   Laptop, Monitor, Server, Wifi, WifiOff, Settings, RefreshCw, Loader2,
   Copy, Search, Play, Shield,
-  Link2, Unlink, Eye, EyeOff, Pencil, Check, History, Zap, Globe,
+  Link2, Unlink, Eye, Pencil, Check, History, Globe,
   Rocket, CheckCircle, AlertCircle, SquareCheckBig, XCircle,
-  Plug, TestTube, Save, BookOpen
+  Plug, TestTube, Save, BookOpen, Wrench
 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
@@ -26,7 +26,7 @@ import { MetricStrip, MetricTile } from "@/components/design-system";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
 import RemoteAccessButton from "@/components/devices/RemoteAccessButton";
-import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
@@ -52,18 +52,15 @@ export default function RemoteAccessPage() {
   const [filterType, setFilterType] = useState("all");
   const [filterRegistered, setFilterRegistered] = useState("all");
   const [tab, setTab] = useState("devices");
-  const [quickId, setQuickId] = useState("");
   const [showAssign, setShowAssign] = useState(null);
   const [assignForm, setAssignForm] = useState({ rustdesk_id: "", rustdesk_password: "" });
   const [showSettings, setShowSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState({ server_url: "", api_key: "", relay_server: "", enabled: true, auto_sync: true });
-  const [showPassword, setShowPassword] = useState({});
-  const [connecting, setConnecting] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [selectedDevices, setSelectedDevices] = useState(new Set());
   const [focusedDevice, setFocusedDevice] = useState(null);
   const [focusedTicketId, setFocusedTicketId] = useState(null);
-  const [connectDialog, setConnectDialog] = useState(null);
+  const [focusedWorkSessionId, setFocusedWorkSessionId] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState(null);
@@ -133,6 +130,7 @@ export default function RemoteAccessPage() {
       } else {
         setFocusedDevice(requestedDevice);
         setFocusedTicketId(searchParams.get("ticket"));
+        setFocusedWorkSessionId(searchParams.get("workSession"));
         setSearch(requestedDevice.name || requestedDevice.hostname || requestedDevice.client_name || "");
         setFilterType("all");
         setFilterRegistered("all");
@@ -144,6 +142,7 @@ export default function RemoteAccessPage() {
     nextParams.delete("assignDevice");
     nextParams.delete("device");
     nextParams.delete("ticket");
+    nextParams.delete("workSession");
     setSearchParams(nextParams, { replace: true });
   }, [devices, loading, searchParams, setSearchParams]);
   useEffect(() => {
@@ -194,51 +193,14 @@ export default function RemoteAccessPage() {
     finally { setTestingProvider(null); }
   };
 
-  // Launch RustDesk connection via protocol handler (no blank tab)
-  const launchRustDesk = (rdId, relayServer) => {
-    let uri;
-    if (relayServer) {
-      const host = relayServer.replace(/^https?:\/\//, "").split("/")[0].split(":")[0];
-      uri = `rustdesk://${rdId}@${host}`;
-    } else {
-      uri = `rustdesk://${rdId}`;
-    }
-    const a = document.createElement("a");
-    a.href = uri;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => document.body.removeChild(a), 100);
-  };
-
-  // Quick connect
-  const quickConnect = async () => {
-    if (!quickId.trim()) return;
-    setConnecting("quick");
-    try {
-      const res = await axios.post(`${API}/rustdesk/quick-connect`, { rustdesk_id: quickId }, { headers });
-      // Show connection dialog with options
-      setConnectDialog({
-        rustdesk_id: quickId,
-        connection_url: res.data.connection_url,
-        web_client_url: res.data.web_client_url,
-        relay_server: res.data.relay_server,
-        device_name: quickId,
-      });
-      setQuickId("");
-      fetchData();
-    } catch (e) { toast.error(getRemoteMessage(e.response?.data?.detail, "Connection failed")); }
-    finally { setConnecting(null); }
-  };
-
-  // Assign RustDesk ID
+  // Link the current RustDesk transport identity to a Nexus-managed asset.
   const assignRustdeskId = async (e) => {
     e.preventDefault();
-    if (!assignForm.rustdesk_id.trim()) { toast.error("RustDesk ID is required"); return; }
+    if (!assignForm.rustdesk_id.trim()) { toast.error("A transport ID is required"); return; }
     setSubmitting(true);
     try {
       await axios.put(`${API}/rustdesk/assign/${showAssign.id}`, assignForm, { headers });
-      toast.success(`RustDesk ID assigned to ${showAssign.name || showAssign.hostname}`);
+      toast.success(`Remote transport identity linked to ${showAssign.name || showAssign.hostname}`);
       setShowAssign(null);
       setAssignForm({ rustdesk_id: "", rustdesk_password: "" });
       fetchData();
@@ -269,7 +231,7 @@ export default function RemoteAccessPage() {
     });
   };
 
-  // Live sync from RustDesk server
+  // Live sync from the configured RustDesk transport server.
   const syncFromServer = async () => {
     setSyncing(true);
     try {
@@ -282,15 +244,12 @@ export default function RemoteAccessPage() {
     finally { setSyncing(false); }
   };
 
-  // Test RustDesk server connection (tests what's in the form, not saved config)
+  // Provider tests use the server-owned configuration; save edits before testing.
   const testConnection = async () => {
     setTestingConnection(true);
     setConnectionResult(null);
     try {
-      const params = new URLSearchParams();
-      if (settingsForm.server_url) params.set("server_url", settingsForm.server_url);
-      if (settingsForm.api_key) params.set("api_key", settingsForm.api_key);
-      const res = await axios.get(`${API}/rustdesk/live/test-connection?${params.toString()}`, { headers });
+      const res = await axios.get(`${API}/rustdesk/live/test-connection`, { headers });
       setConnectionResult(res.data);
       if (res.data.authorized ?? res.data.connected) {
         toast.success(res.data.message);
@@ -336,7 +295,7 @@ export default function RemoteAccessPage() {
         { managed_device_id: device.id },
         { headers },
       );
-      toast.success(data.message || "RustDesk record linked");
+      toast.success(data.message || "Remote transport record linked");
       setLinkPeer(null);
       setLinkSearch("");
       await fetchData();
@@ -369,17 +328,18 @@ export default function RemoteAccessPage() {
     <div className="space-y-5" data-testid="remote-access-page">
       <OperationalPageHeader
         eyebrow="Managed access"
-        title="Remote Access"
-        description="Connect technicians to managed assets, govern provider access, and keep each remote session traceable."
+        title="Nexus Remote"
+        description="The first-party session desk for governed support: endpoint context, technician approval, client consent, transport hand-off and durable work evidence."
         icon={Laptop}
         tone="sky"
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Server settings</Button>
+          <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Transport settings</Button>
           <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-remote-access"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
         </>}
       />
 
-      {/* Connection Status Bar */}
+      {/* Nexus Remote control-plane status. The transport remains explicit: Nexus owns
+          policy, identity, consent and evidence; a configured provider carries pixels. */}
       <Card className={`border ${serverConfigured ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"}`}>
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -387,9 +347,10 @@ export default function RemoteAccessPage() {
               <div className={`w-3 h-3 rounded-full ${serverConfigured ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
               <div>
                 <span className={`text-sm font-semibold ${serverConfigured ? "text-emerald-400" : "text-amber-400"}`}>
-                  {serverConfigured ? "RustDesk Server Configured" : "Server Not Configured"}
+                  {serverConfigured ? "Nexus Remote transport connected" : "Nexus Remote needs a transport"}
                 </span>
                 {config?.server_url && <span className="text-xs text-muted-foreground ml-2">{config.server_url}</span>}
+                {serverConfigured && <Badge variant="outline" className="ml-2 text-[10px] text-cyan-300 border-cyan-400/25">RustDesk transport</Badge>}
                 {livePeers && <span className="text-xs text-blue-400 ml-2">({livePeers.count} live peers)</span>}
                 {config?.auto_sync !== false && serverConfigured && <Badge variant="outline" className="ml-2 text-[10px] text-emerald-400 border-emerald-500/30">Auto-Sync ON</Badge>}
                 {config?.last_auto_sync && <span className="text-xs text-muted-foreground ml-2">Last auto-sync: {new Date(config.last_auto_sync).toLocaleString()}</span>}
@@ -407,7 +368,7 @@ export default function RemoteAccessPage() {
                   </Button>
                 </>
               )}
-              {!serverConfigured && <Button size="sm" onClick={() => { setSettingsForm(config || {}); setShowSettings(true); }} data-testid="configure-remote-access">Configure server</Button>}
+              {!serverConfigured && <Button size="sm" onClick={() => { setSettingsForm(config || {}); setShowSettings(true); }} data-testid="configure-remote-access">Configure transport</Button>}
             </div>
           </div>
           {connectionResult && (
@@ -428,29 +389,47 @@ export default function RemoteAccessPage() {
             <div className="flex min-w-0 items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><Monitor className="h-5 w-5 text-cyan-300" /></div>
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold">{focusedDevice.name || focusedDevice.hostname}</p><Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-[10px] text-cyan-200">Remote-ready focus</Badge>{focusedTicketId && <Badge variant="outline" className="text-[10px]">Ticket {focusedTicketId}</Badge>}</div>
+                <div className="flex flex-wrap items-center gap-2"><p className="truncate font-semibold">{focusedDevice.name || focusedDevice.hostname}</p><Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-[10px] text-cyan-200">Remote-ready focus</Badge>{focusedTicketId && <Badge variant="outline" className="text-[10px]">Ticket {focusedTicketId}</Badge>}{focusedWorkSessionId && <Badge variant="outline" className="border-violet-400/30 bg-violet-400/10 text-[10px] text-violet-100">Work Session time owner</Badge>}</div>
                 <p className="mt-1 text-xs text-muted-foreground">{focusedDevice.client_name || "Unassigned client"} · {focusedDevice.os || focusedDevice.operating_system || "Operating system not reported"} · Remote ID {focusedDevice.rustdesk_id || focusedDevice.rd_id}</p>
-                <p className="mt-1 text-[11px] text-cyan-100/70">Opened from operational context. Technician authorisation, consent, provider handoff and session evidence remain in one governed workflow.</p>
+                <p className="mt-1 text-[11px] text-cyan-100/70">{focusedWorkSessionId ? "Opened from Nexus Work Session. Remote evidence remains here; time is reviewed once in the completion pack." : "Opened from operational context. Technician authorisation, consent, provider handoff and session evidence remain in one governed workflow."}</p>
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => navigate(`/devices/${focusedDevice.id}`)}><Eye className="mr-1.5 h-4 w-4" />Device record</Button>
-              <RemoteAccessButton device={{ ...focusedDevice, rustdesk_id: focusedDevice.rustdesk_id || focusedDevice.rd_id }} status={focusedDevice.status} ticketId={focusedTicketId} testid="focused-device-remote" />
-              <Button variant="ghost" size="icon" aria-label="Clear focused device" onClick={() => { setFocusedDevice(null); setFocusedTicketId(null); setSearch(""); }}><XCircle className="h-4 w-4" /></Button>
+              {canStartWorkSession(focusedTicketId) && <Button variant="outline" size="sm" className="border-violet-400/30 bg-violet-500/[0.05] text-violet-700 hover:bg-violet-500/10 dark:text-violet-100" onClick={() => navigate(workSessionPath(focusedTicketId))} data-testid="start-work-from-remote"><Wrench className="mr-1.5 h-4 w-4" />{focusedWorkSessionId ? "Open work" : "Start work"}</Button>}
+              <RemoteAccessButton device={{ ...focusedDevice, rustdesk_id: focusedDevice.rustdesk_id || focusedDevice.rd_id }} status={focusedDevice.status} ticketId={focusedTicketId} workSessionId={focusedWorkSessionId} testid="focused-device-remote" />
+              <Button variant="ghost" size="icon" aria-label="Clear focused device" onClick={() => { setFocusedDevice(null); setFocusedTicketId(null); setFocusedWorkSessionId(null); setSearch(""); }}><XCircle className="h-4 w-4" /></Button>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Quick Connect Bar */}
-      <Card className="border-sky-500/20 bg-sky-500/[0.03]">
+      {/* Governed remote-access handoff */}
+      <Card className="border-cyan-400/20 bg-cyan-400/[0.035]">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-3 sm:min-w-[220px]"><div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sky-500/10"><Zap className="w-4 h-4 text-sky-300" /></div><div><p className="text-sm font-semibold">Unlinked quick connect</p><p className="text-xs text-muted-foreground">Break-glass access by RustDesk ID</p></div></div>
-            <Input placeholder="Enter RustDesk ID (for example 842931675)" value={quickId} onChange={e => setQuickId(e.target.value)} onKeyDown={e => e.key === "Enter" && quickConnect()} className="flex-1 font-mono" data-testid="quick-connect-input" />
-            <Button onClick={quickConnect} disabled={!quickId.trim() || connecting === "quick"} className="sm:min-w-28" data-testid="quick-connect-btn">
-              {connecting === "quick" ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}Connect
-            </Button>
+            <div className="flex items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-cyan-400/10"><Shield className="w-4 h-4 text-cyan-300" /></div><div><p className="text-sm font-semibold">Governed remote access</p><p className="text-xs text-muted-foreground">Select a managed asset so Nexus can enforce scope, consent, ticket context and session evidence.</p></div></div>
+            <Button variant="outline" className="sm:ml-auto sm:min-w-40" onClick={() => navigate("/devices")} data-testid="choose-managed-asset-btn"><Monitor className="mr-1.5 h-4 w-4" />Choose managed asset</Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden border-cyan-400/20 bg-[linear-gradient(112deg,rgba(14,116,144,0.12),rgba(15,23,42,0.88)_48%,rgba(30,64,175,0.08))]" data-testid="nexus-remote-control-plane">
+        <CardContent className="p-4 md:p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-[10px] uppercase tracking-[0.16em] text-cyan-100">Nexus-owned control plane</Badge>
+                <span className="text-xs text-muted-foreground">Provider-neutral by design</span>
+              </div>
+              <p className="mt-2 text-base font-semibold tracking-tight">One safe remote journey, regardless of the screen transport.</p>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Nexus owns device scope, technician identity, consent, ticket and Work Session context, repair requests and audit evidence. RustDesk is the current configured screen transport; a future Nexus-native companion will plug into this same governed session boundary rather than bypass it.</p>
+            </div>
+            <div className="grid shrink-0 gap-2 sm:grid-cols-3 xl:w-[34rem]">
+              <div className="rounded-xl border border-cyan-400/15 bg-black/10 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">1. Prepare</p><p className="mt-1 text-xs text-muted-foreground">Endpoint, ticket and agent readiness</p></div>
+              <div className="rounded-xl border border-cyan-400/15 bg-black/10 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">2. Authorise</p><p className="mt-1 text-xs text-muted-foreground">Consent, purpose and policy check</p></div>
+              <div className="rounded-xl border border-cyan-400/15 bg-black/10 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">3. Prove</p><p className="mt-1 text-xs text-muted-foreground">Session, outcome, time and audit</p></div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -458,11 +437,11 @@ export default function RemoteAccessPage() {
       {/* Stats */}
       <MetricStrip columns={5}>
         {[
-          { label: "Managed Assets", value: managedDevices.length, icon: Monitor, color: "text-sky-400", accent: "sky" },
-          { label: "Remote Ready", value: managedRegistered.length, icon: Link2, color: "text-emerald-400", accent: "emerald" },
-          { label: "Needs Setup", value: managedUnregistered.length, icon: Unlink, color: "text-amber-400", accent: "amber" },
-          { label: "Provider Only", value: providerOnlyDevices.length, icon: Globe, color: "text-violet-400", accent: "violet" },
-          { label: "Live Online", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400", accent: "cyan" },
+          { label: "Nexus Fleet", value: managedDevices.length, icon: Monitor, color: "text-sky-400", accent: "sky" },
+          { label: "Session Ready", value: managedRegistered.length, icon: Link2, color: "text-emerald-400", accent: "emerald" },
+          { label: "Needs Enrolment", value: managedUnregistered.length, icon: Unlink, color: "text-amber-400", accent: "amber" },
+          { label: "Transport-only", value: providerOnlyDevices.length, icon: Globe, color: "text-violet-400", accent: "violet" },
+          { label: "Live Peers", value: livePeers ? livePeers.peers.filter(p => p.online).length : online.length, icon: Wifi, color: "text-cyan-400", accent: "cyan" },
         ].map(st => (
           <MetricTile key={st.label} label={st.label} value={st.value} accent={st.accent} icon={<st.icon className={`w-2.5 h-2.5 ${st.color}`} />} testid={`remote-metric-${st.label.toLowerCase().replace(/\s+/g, "-")}`} />
         ))}
@@ -470,18 +449,18 @@ export default function RemoteAccessPage() {
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
-          <TabsTrigger value="devices">Managed Assets ({managedDevices.length})</TabsTrigger>
-          <TabsTrigger value="registered">Provider Registry ({registered.length})</TabsTrigger>
-          <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Integrations ({providers.length})</TabsTrigger>
-          {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Peers ({livePeers.count})</TabsTrigger>}
-          <TabsTrigger value="sessions">Sessions ({sessions.length})</TabsTrigger>
+          <TabsTrigger value="devices">Nexus Fleet ({managedDevices.length})</TabsTrigger>
+          <TabsTrigger value="registered">Transport Registry ({registered.length})</TabsTrigger>
+          <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Transport Connectors ({providers.length})</TabsTrigger>
+          {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Transport ({livePeers.count})</TabsTrigger>}
+          <TabsTrigger value="sessions">Session Evidence ({sessions.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="devices" className="mt-4 space-y-3">
           <div className="flex items-center gap-3">
             <div className="relative flex-1 max-w-sm">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input placeholder="Search by name, hostname, ID, or client..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" data-testid="device-search" />
+              <Input placeholder="Search fleet by device, hostname, transport ID or client..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" data-testid="device-search" />
             </div>
             <Select value={filterType} onValueChange={setFilterType}>
               <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
@@ -521,7 +500,7 @@ export default function RemoteAccessPage() {
                 <TableHeader><TableRow>
                   <TableHead className="w-10"></TableHead>
                   <TableHead>Device</TableHead><TableHead>Client</TableHead><TableHead>Type / OS</TableHead>
-                  <TableHead>Status</TableHead><TableHead>RustDesk ID</TableHead><TableHead className="hidden xl:table-cell">Agent</TableHead><TableHead className="hidden xl:table-cell">Last Connected</TableHead><TableHead></TableHead>
+                  <TableHead>Status</TableHead><TableHead>Transport ID</TableHead><TableHead className="hidden xl:table-cell">Agent</TableHead><TableHead className="hidden xl:table-cell">Last Connected</TableHead><TableHead></TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {filtered.length === 0 ? (
@@ -629,7 +608,7 @@ export default function RemoteAccessPage() {
               <div className="relative w-full sm:max-w-md">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search provider records by device, client, or RustDesk ID..."
+                  placeholder="Search transport records by device, client, or transport ID..."
                   value={search}
                   onChange={event => setSearch(event.target.value)}
                   className="pl-9"
@@ -637,13 +616,13 @@ export default function RemoteAccessPage() {
                 />
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
-                <Badge variant="outline" className="border-emerald-500/25 text-emerald-300">{managedRegistered.length} linked to managed assets</Badge>
-                <Badge variant="outline" className="border-violet-500/25 text-violet-300">{providerOnlyDevices.length} provider-only</Badge>
+                <Badge variant="outline" className="border-emerald-500/25 text-emerald-300">{managedRegistered.length} linked to Nexus assets</Badge>
+                <Badge variant="outline" className="border-violet-500/25 text-violet-300">{providerOnlyDevices.length} transport-only</Badge>
               </div>
             </CardContent>
           </Card>
           {registered.length === 0 ? (
-            <Card className="border-dashed"><CardContent className="py-12 text-center"><Unlink className="w-12 h-12 mx-auto text-muted-foreground/20 mb-3" /><p className="text-muted-foreground">No devices registered with RustDesk IDs yet</p><p className="text-xs text-muted-foreground mt-1">Go to All Devices and click "Assign ID" to register</p></CardContent></Card>
+            <Card className="border-dashed"><CardContent className="py-12 text-center"><Unlink className="w-12 h-12 mx-auto text-muted-foreground/20 mb-3" /><p className="text-muted-foreground">No remote transport identities are linked yet</p><p className="text-xs text-muted-foreground mt-1">Open Nexus Fleet and link the endpoint’s RustDesk transport ID.</p></CardContent></Card>
           ) : registryFiltered.length === 0 ? (
             <Card className="border-dashed"><CardContent className="py-12 text-center"><Search className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" /><p className="text-muted-foreground">No provider records match your search</p></CardContent></Card>
           ) : (
@@ -703,7 +682,7 @@ export default function RemoteAccessPage() {
         <TabsContent value="integrations" className="mt-4 space-y-4" data-testid="integrations-tab">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">Configure remote access providers. Enable the tools your team uses and enter API credentials.</p>
+              <p className="text-sm text-muted-foreground">Configure screen transports behind the Nexus Remote control plane. Enable only approved providers and keep their credentials server-side.</p>
             </div>
             <Badge variant="outline" className="text-xs">{providers.filter(p => p.active).length} Active / {providers.length} Available</Badge>
           </div>
@@ -712,12 +691,12 @@ export default function RemoteAccessPage() {
             <CardContent className="py-4">
               <div className="flex flex-col xl:flex-row xl:items-center gap-4 justify-between">
                 <div>
-                  <p className="font-medium text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" />Remote access policy</p>
+                  <p className="font-medium text-sm flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" />Nexus Remote policy</p>
                   <p className="text-xs text-muted-foreground mt-1">Sets the default technician path, consent controls, and audit behaviour for every device.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-36">
-                    <Label className="text-[10px] uppercase text-muted-foreground">Default tool</Label>
+                    <Label className="text-[10px] uppercase text-muted-foreground">Default transport</Label>
                     <Select value={remotePolicy.default_provider} onValueChange={v => setRemotePolicy(p => ({ ...p, default_provider: v }))}>
                       <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="rustdesk">RustDesk</SelectItem><SelectItem value="splashtop">Splashtop</SelectItem></SelectContent>
@@ -800,19 +779,19 @@ export default function RemoteAccessPage() {
         {livePeers && (
           <TabsContent value="live-peers" className="mt-4 space-y-3" data-testid="live-peers-tab">
             <div className="flex items-center justify-between mb-2">
-              <p className="text-sm text-muted-foreground">Real-time peer data from <span className="font-mono text-xs">{livePeers.server_url}</span> {livePeers.source && <Badge variant="outline" className="ml-1 text-[10px]">via {livePeers.source}</Badge>}</p>
+              <p className="text-sm text-muted-foreground">Real-time transport data from <span className="font-mono text-xs">{livePeers.server_url}</span> {livePeers.source && <Badge variant="outline" className="ml-1 text-[10px]">via {livePeers.source}</Badge>}</p>
               <Button size="sm" variant="outline" onClick={syncFromServer} disabled={syncing}>{syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync to NexusMSP</Button>
             </div>
             <Card className="border-border/40">
               <CardContent className="p-0">
                 <Table>
                   <TableHeader><TableRow>
-                    <TableHead>RustDesk ID</TableHead><TableHead>Hostname</TableHead><TableHead>OS</TableHead>
+                    <TableHead>Transport ID</TableHead><TableHead>Hostname</TableHead><TableHead>OS</TableHead>
                     <TableHead>Status</TableHead><TableHead>Version</TableHead><TableHead>Alias</TableHead><TableHead>Linked</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
                     {livePeers.peers.length === 0 ? (
-                      <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No peers found on RustDesk server. Check API key permissions.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No peers found on the configured transport. Check the server API permissions.</TableCell></TableRow>
                     ) : livePeers.peers.map(p => {
                       const matchedDevice = devices.find(d => d.rd_id === String(p.id));
                       return (
@@ -849,7 +828,7 @@ export default function RemoteAccessPage() {
           <Card className="border-border/40">
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-sm flex items-center gap-2"><History className="w-4 h-4 text-sky-400" />Remote session evidence</CardTitle>
+                <CardTitle className="text-sm flex items-center gap-2"><History className="w-4 h-4 text-sky-400" />Nexus session evidence</CardTitle>
                 <p className="mt-1 text-xs text-muted-foreground">Technician, endpoint, client, status, and launch time retained for operational review.</p>
               </div>
               <Badge variant="outline" className="shrink-0">{sessions.length} records</Badge>
@@ -867,7 +846,7 @@ export default function RemoteAccessPage() {
                           <p className="truncate text-sm font-medium">
                             <span className="text-muted-foreground">{s.user_name}</span>{" "}
                             {s.status === "completed" ? "completed a session with" : "prepared remote access to"}{" "}
-                            <span className="text-foreground">{s.device_name || "RustDesk endpoint"}</span>
+                            <span className="text-foreground">{s.device_name || "managed endpoint"}</span>
                           </p>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
                             <span>{s.client_name || (s.client_id ? `Client ${s.client_id}` : "Unlinked quick connect")}</span>
@@ -889,18 +868,18 @@ export default function RemoteAccessPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Assign RustDesk ID Dialog */}
+      {/* Link a known transport identity to the canonical Nexus asset. */}
       <Dialog open={!!linkPeer} onOpenChange={open => { if (!open) { setLinkPeer(null); setLinkSearch(""); } }}>
-        <DialogContent className="max-w-xl border-cyan-400/20 bg-[#071019]" aria-describedby="link-provider-record-desc">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Link2 className="h-5 w-5 text-cyan-300" />Link provider record</DialogTitle>
-            <DialogDescription id="link-provider-record-desc">Attach this RustDesk identity to one canonical NexusMSP managed asset. The relationship is retained in the audit trail.</DialogDescription>
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-xl flex-col gap-0 overflow-hidden border-cyan-400/20 bg-[#071019] p-0 sm:rounded-2xl" aria-describedby="link-provider-record-desc">
+          <DialogHeader className="shrink-0 border-b border-cyan-400/15 bg-cyan-400/[0.04] px-5 py-5 pr-12">
+            <DialogTitle className="flex items-center gap-2"><Link2 className="h-5 w-5 text-cyan-300" />Link transport identity</DialogTitle>
+            <DialogDescription id="link-provider-record-desc">Attach this RustDesk transport identity to one canonical NexusMSP managed asset. Nexus retains the relationship and session evidence in its audit trail.</DialogDescription>
           </DialogHeader>
           {linkPeer && (
-            <div className="space-y-4">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
               <div className="grid gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.04] p-4 sm:grid-cols-2">
-                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Provider record</p><p className="mt-1 text-sm font-semibold">{linkPeer.name || "Unlinked device"}</p></div>
-                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">RustDesk ID</p><p className="mt-1 font-mono text-sm text-cyan-200">{linkPeer.rd_id}</p></div>
+                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Transport record</p><p className="mt-1 text-sm font-semibold">{linkPeer.name || "Unlinked device"}</p></div>
+                <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">RustDesk transport ID</p><p className="mt-1 font-mono text-sm text-cyan-200">{linkPeer.rd_id}</p></div>
               </div>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -910,7 +889,7 @@ export default function RemoteAccessPage() {
                 {linkCandidates.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border/70 p-8 text-center">
                     <p className="text-sm font-medium">No available assets match</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Only managed assets without an existing RustDesk identity are shown.</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Only managed assets without an existing transport identity are shown.</p>
                   </div>
                 ) : linkCandidates.map(device => (
                   <div key={device.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/40 p-3">
@@ -927,21 +906,21 @@ export default function RemoteAccessPage() {
               </div>
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => { setLinkPeer(null); setLinkSearch(""); }}>Cancel</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-cyan-400/15 bg-black/10 px-5 py-4"><Button variant="outline" onClick={() => { setLinkPeer(null); setLinkSearch(""); }}>Cancel</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!showAssign} onOpenChange={() => setShowAssign(null)}>
         <DialogContent className="max-w-sm" aria-describedby="assign-rd-desc">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Link2 className="w-5 h-5 text-blue-400" />{showAssign?.rd_id ? "Edit" : "Assign"} RustDesk ID</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><Link2 className="w-5 h-5 text-blue-400" />{showAssign?.rd_id ? "Edit" : "Link"} remote transport</DialogTitle>
             <DialogDescription id="assign-rd-desc">{showAssign?.name || showAssign?.hostname} — {showAssign?.client_name}</DialogDescription>
           </DialogHeader>
           <form onSubmit={assignRustdeskId} className="space-y-4">
             <div className="space-y-2">
-              <Label>RustDesk ID *</Label>
+              <Label>RustDesk transport ID *</Label>
               <Input value={assignForm.rustdesk_id} onChange={e => setAssignForm({ ...assignForm, rustdesk_id: e.target.value })} placeholder="e.g., 842931675" className="font-mono" required data-testid="assign-rd-id" />
-              <p className="text-[10px] text-muted-foreground">The 9-digit ID shown in the RustDesk client on this device</p>
+              <p className="text-[10px] text-muted-foreground">The identity shown in the RustDesk transport client installed on this endpoint.</p>
             </div>
             <div className="space-y-2">
               <Label>Password (optional)</Label>
@@ -961,21 +940,21 @@ export default function RemoteAccessPage() {
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
         <DialogContent className="max-w-md" aria-describedby="settings-desc">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Settings className="w-5 h-5 text-muted-foreground" />RustDesk Server Settings</DialogTitle>
-            <DialogDescription id="settings-desc">Configure your RustDesk server connection</DialogDescription>
+            <DialogTitle className="flex items-center gap-2"><Settings className="w-5 h-5 text-muted-foreground" />Nexus Remote transport settings</DialogTitle>
+            <DialogDescription id="settings-desc">Configure the RustDesk transport behind Nexus Remote. Nexus keeps policy, consent and session evidence separate from this provider connection.</DialogDescription>
           </DialogHeader>
           <form onSubmit={saveSettings} className="space-y-4">
-            <SetupGuideCallout title="Prepare your RustDesk server" source="NexusMSP uses the RustDesk Server Pro web-console API for live peer status and synchronisation. Generate an API token in the RustDesk Web Console under Settings → API Tokens." steps={["Enter the web-console API URL, normally including port 21114.", "Generate a least-privileged API token in the RustDesk web console.", "Use Test Connection before saving so the peer endpoint is confirmed."]} securityNote="Keep the API token in NexusMSP only. The open-source RustDesk server does not expose the Server Pro REST API used by this workspace." />
-            <div className="space-y-2"><Label>Server URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="https://your-server:21114" required data-testid="settings-server" /><p className="text-[10px] text-muted-foreground">The full URL of your RustDesk API server, including port (default RustDesk Pro API port is 21114)</p></div>
-            <div className="space-y-2"><Label>API Key</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="Your RustDesk API key" type="password" data-testid="settings-key" /><p className="text-[10px] text-muted-foreground">Generate from RustDesk Web Console → Settings → API Tokens (required for peer list &amp; sync)</p></div>
+            <SetupGuideCallout title="Connect a RustDesk transport" source="Nexus Remote uses the RustDesk Server Pro web-console API only for transport peer status and synchronisation. Nexus itself owns the technician journey, policy and audit trail." steps={["Enter the approved web-console API URL, normally including port 21114.", "Generate a least-privileged API token in the RustDesk web console.", "Save the approved configuration, then run Test Connection before enabling use."]} securityNote="Keep the API token in NexusMSP only. The open-source RustDesk server does not expose the Server Pro REST API used for live transport status." />
+            <div className="space-y-2"><Label>RustDesk transport URL *</Label><Input value={settingsForm.server_url} onChange={e => setSettingsForm({ ...settingsForm, server_url: e.target.value })} placeholder="https://your-server:21114" required data-testid="settings-server" /><p className="text-[10px] text-muted-foreground">The approved RustDesk API origin, including port where required. Save first; Nexus only tests the stored, server-owned configuration.</p></div>
+            <div className="space-y-2"><Label>Transport API token</Label><Input value={settingsForm.api_key} onChange={e => setSettingsForm({ ...settingsForm, api_key: e.target.value })} placeholder="RustDesk API token" type="password" data-testid="settings-key" /><p className="text-[10px] text-muted-foreground">Generated in RustDesk Web Console → Settings → API Tokens. It is used for peer list and synchronisation only.</p></div>
             <div className="space-y-2"><Label>Relay Server (optional)</Label><Input value={settingsForm.relay_server} onChange={e => setSettingsForm({ ...settingsForm, relay_server: e.target.value })} placeholder="relay.yourdomain.com" data-testid="settings-relay" /><p className="text-[10px] text-muted-foreground">Only needed if your relay runs on a separate host from the ID server</p></div>
             <div className="flex items-center justify-between py-2">
               <div><Label>Auto-Sync (every 5 min)</Label><p className="text-xs text-muted-foreground">Automatically pull live peer status from server</p></div>
               <Switch checked={settingsForm.auto_sync !== false} onCheckedChange={v => setSettingsForm({ ...settingsForm, auto_sync: v })} data-testid="settings-auto-sync" />
             </div>
             <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
-              <p className="font-medium text-blue-400 mb-1">RustDesk Server Pro Required</p>
-              <p>NexusMSP requires <strong>RustDesk Server Pro</strong> for the live API. The OSS server does not expose a REST API. Enter the Web Console API URL (default port <code>21114</code>) and generate a token from Settings → API.</p>
+              <p className="font-medium text-blue-400 mb-1">Transport capability boundary</p>
+              <p>Live peer inventory requires <strong>RustDesk Server Pro</strong>. The OSS server does not expose the REST API Nexus uses for transport visibility. This setting does not weaken Nexus policy or create unattended access by itself.</p>
             </div>
             {connectionResult && (
               <div className={`p-3 rounded-lg text-xs border ${(connectionResult.authorized ?? connectionResult.connected) ? "bg-emerald-500/5 border-emerald-500/20" : connectionResult.connected ? "bg-amber-500/5 border-amber-500/20" : "bg-red-500/5 border-red-500/20"}`}>
@@ -990,94 +969,11 @@ export default function RemoteAccessPage() {
               </div>
             )}
             <DialogFooter className="gap-2">
-              <Button type="button" variant="outline" onClick={testConnection} disabled={testingConnection || !settingsForm.server_url} data-testid="test-settings-btn">{testingConnection ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Wifi className="w-4 h-4 mr-1" />}Test Connection</Button>
+              <Button type="button" variant="outline" onClick={testConnection} disabled={testingConnection || !config?.server_url || settingsForm.server_url !== config?.server_url} data-testid="test-settings-btn">{testingConnection ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Wifi className="w-4 h-4 mr-1" />}Test saved configuration</Button>
               <Button type="submit" disabled={submitting} data-testid="save-settings-btn">{submitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}Save Settings</Button>
             </DialogFooter>
           </form>
         </DialogContent>
-      </Dialog>
-
-      {/* Remote Connection Dialog */}
-      <Dialog open={!!connectDialog} onOpenChange={v => { if (!v) setConnectDialog(null); }}>
-        <NexusWorkflowDialog eyebrow="Remote session" title={`Connect to ${connectDialog?.device_name || "device"}`} description="Choose how to connect to this device. Nexus will retain the session context alongside the managed asset." icon={Play} tone="emerald" className="max-w-md" data-testid="remote-connect-workflow" footer={<Button variant="outline" onClick={() => setConnectDialog(null)}>Close</Button>}>
-          {connectDialog && (
-            <div className="space-y-4">
-              {/* Device Info */}
-              <Card className="bg-zinc-800/50 border-border/30">
-                <CardContent className="py-3 px-4 space-y-1.5">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">RustDesk ID</span>
-                    <span className="font-mono font-bold text-emerald-400">{connectDialog.rustdesk_id}</span>
-                  </div>
-                  {connectDialog.rustdesk_password && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Password</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-xs">{showPassword["connect"] ? connectDialog.rustdesk_password : "********"}</span>
-                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setShowPassword(p => ({ ...p, connect: !p.connect }))}>
-                          {showPassword["connect"] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_password); toast.success("Password copied"); }}>
-                          <Copy className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {connectDialog.relay_server && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Relay Server</span>
-                      <span className="font-mono text-xs text-muted-foreground">{connectDialog.relay_server}</span>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Connection Methods */}
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Launch Connection</Label>
-
-                {/* Native RustDesk Client */}
-                <Button className="w-full justify-start h-12" variant="default" onClick={() => { launchRustDesk(connectDialog.rustdesk_id, connectDialog.relay_server || connectDialog.web_client_url); toast.success("Launching RustDesk client..."); }} data-testid="launch-native-rustdesk">
-                  <Monitor className="w-5 h-5 mr-3" />
-                  <div className="text-left">
-                    <p className="text-sm font-medium">Open in RustDesk Client</p>
-                    <p className="text-[10px] opacity-70">Requires RustDesk installed on this computer</p>
-                  </div>
-                </Button>
-
-                {/* Web Client (if server configured) */}
-                {connectDialog.web_client_url && (
-                  <Button className="w-full justify-start h-12" variant="outline" onClick={() => { window.open(connectDialog.web_client_url, "_blank"); toast.success("Opening web client..."); }} data-testid="launch-web-rustdesk">
-                    <Globe className="w-5 h-5 mr-3" />
-                    <div className="text-left">
-                      <p className="text-sm font-medium">Open Web Client</p>
-                      <p className="text-[10px] text-muted-foreground">Connect via browser at {connectDialog.web_client_url}</p>
-                    </div>
-                  </Button>
-                )}
-
-                {/* Copy ID for manual connection */}
-                <Button className="w-full justify-start h-12" variant="outline" onClick={() => { navigator.clipboard.writeText(connectDialog.rustdesk_id); toast.success(`ID ${connectDialog.rustdesk_id} copied — paste into RustDesk`); }} data-testid="copy-rustdesk-id">
-                  <Copy className="w-5 h-5 mr-3" />
-                  <div className="text-left">
-                    <p className="text-sm font-medium">Copy ID to Clipboard</p>
-                    <p className="text-[10px] text-muted-foreground">Manually paste into your RustDesk client</p>
-                  </div>
-                </Button>
-              </div>
-
-              <div className="text-xs text-muted-foreground bg-muted/10 p-3 rounded-lg">
-                <p className="font-medium mb-1">Troubleshooting</p>
-                <ul className="space-y-0.5 list-disc pl-3">
-                  <li>Ensure the RustDesk client is installed and running on your machine</li>
-                  <li>The target device must be online with RustDesk running</li>
-                  <li>If the native launch doesn't work, copy the ID and connect manually</li>
-                  {connectDialog.relay_server && <li>Your relay server is: <code className="font-mono text-emerald-400">{connectDialog.relay_server}</code></li>}
-                </ul>
-              </div>
-            </div>
-          )}
-        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Provider Configuration Dialog */}

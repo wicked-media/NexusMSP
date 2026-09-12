@@ -18,7 +18,10 @@ const DOC_TABS = [
 ];
 
 function EmbeddedWorkspace({ children }) {
-  return <div className="[&>[data-testid]>:first-child]:hidden">{children}</div>;
+  // Each embedded workspace already has its own standalone header. Hide that
+  // list-level header inside the hub, but keep focused record/detail headers
+  // visible so technicians always retain title, context and a way back.
+  return <div className="[&>[data-testid=knowledge-base-page]>:first-child]:hidden [&>[data-testid=documentation-page]>:first-child]:hidden [&>[data-testid=auto-documentation-page]>:first-child]:hidden [&>[data-testid=help-center-page]>:first-child]:hidden [&>[data-testid=capacity-planner-page]>:first-child]:hidden">{children}</div>;
 }
 
 export default function DocumentationHubPage() {

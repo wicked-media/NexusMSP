@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Plus, GripVertical, Trash2, Save, Layout, BarChart3, PieChart, Activity, Settings } from "lucide-react";
@@ -114,7 +114,7 @@ function WidgetRenderer({ widget }) {
 
 export default function DashboardBuilderPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [layouts, setLayouts] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [activeLayout, setActiveLayout] = useState(null);
@@ -127,9 +127,9 @@ export default function DashboardBuilderPage() {
       setCatalog(r.data.available_widgets || []);
       if (!activeLayout && r.data.layouts?.length) setActiveLayout(r.data.layouts[0]);
     });
-  }, []);
+  }, [activeLayout, headers]);
 
-  useEffect(() => { loadLayouts(); }, []);
+  useEffect(() => { loadLayouts(); }, [loadLayouts]);
 
   const saveLayout = async () => {
     if (!activeLayout) return;

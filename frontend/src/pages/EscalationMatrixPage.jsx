@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog } from "@/components/ui/dialog";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { AlertTriangle, Bell, RefreshCw, Settings, ShieldCheck, Zap } from "lucide-react";
 import { toast } from "sonner";
 
@@ -19,16 +20,16 @@ export default function EscalationMatrixPage() {
   const [tab, setTab] = useState("rules");
   const [checking, setChecking] = useState(false);
   const [checkConfirmationOpen, setCheckConfirmationOpen] = useState(false);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = () => {
+  const fetchData = useCallback(() => {
     Promise.all([
       axios.get(`${API}/escalation-matrix/rules`, { headers }),
       axios.get(`${API}/escalation-matrix/log`, { headers }),
     ]).then(([r, l]) => { setRules(r.data); setLogs(l.data); }).catch(() => {});
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const runCheck = async () => {
     setChecking(true);
@@ -52,16 +53,17 @@ export default function EscalationMatrixPage() {
 
   return (
     <div className="space-y-6" data-testid="escalation-matrix-page">
-      <div className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-gradient-to-br from-violet-500/[0.10] via-background to-background p-5 shadow-sm md:flex-row md:items-center md:justify-between">
-        <div className="min-w-0">
-          <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.2em] text-violet-400">Service desk guardrail</p>
-          <h1 className="text-2xl font-bold tracking-tight">Escalation Matrix</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Keep ownership visible when a ticket needs a faster response. Review the rules, then run a controlled check.</p>
-        </div>
-        <Button onClick={() => setCheckConfirmationOpen(true)} disabled={checking} data-testid="run-escalation-check">
+      <OperationalPageHeader
+        eyebrow="Service desk guardrail"
+        title="Escalation Matrix"
+        description="Keep ownership visible when a ticket needs a faster response. Review the rules, then run a controlled check."
+        icon={ShieldCheck}
+        tone="violet"
+        signal="escalation-coverage"
+        actions={<Button onClick={() => setCheckConfirmationOpen(true)} disabled={checking} data-testid="run-escalation-check">
           <Zap className="mr-2 h-4 w-4" />Run escalation check
-        </Button>
-      </div>
+        </Button>}
+      />
 
       <MetricStrip columns={3}>
         <MetricTile label="Escalation rules" value={rules.length} accent="violet" icon={<Settings className="w-2.5 h-2.5 text-violet-400" />} testid="escalation-metric-rules" />

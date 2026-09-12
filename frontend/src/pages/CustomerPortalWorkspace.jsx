@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import PortalTechnicianConnections from "@/components/portal/PortalTechnicianConnections";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,25 +16,45 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { keyboardKeyLower } from "@/lib/keyboard";
 import {
-  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Bell, BookOpen, Check, CheckCircle2, ChevronDown, ChevronRight,
+  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Bell, BookOpen, Check, CheckCircle2, ChevronRight,
   CircleDollarSign, Copy, CreditCard, Download, FileCheck2, FileText,
   Gauge, HardDrive, Headphones, HeartPulse, History, Home, Layers3,
   LifeBuoy, Loader2, LockKeyhole, LogOut, Menu, MessageSquareText, Monitor, Network, PackageCheck, Plus, Power,
   ReceiptText, RefreshCw, Search, Send, Settings2, ShieldCheck,
-  Sparkles, Ticket, UserRound, Wifi, WifiOff, X, XCircle,
+  Sparkles, Ticket, UserRound, UsersRound, Wifi, WifiOff, X, XCircle,
 } from "lucide-react";
 
-const NAV_ITEMS = [
-  { id: "overview", label: "Overview", icon: Home },
-  { id: "requests", label: "Requests", icon: Ticket },
-  { id: "assets", label: "Managed assets", icon: Monitor },
-  { id: "services", label: "Services", icon: Layers3 },
-  { id: "billing", label: "Billing", icon: ReceiptText },
-  { id: "protection", label: "Protection", icon: ShieldCheck },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen },
-  { id: "documents", label: "Documents", icon: FileText },
-  { id: "account", label: "Account", icon: UserRound },
+// The portal deliberately follows the Nexus workspace pattern, but keeps its
+// navigation customer-safe. Technicians use the internal workspace navigation;
+// clients see only the service records and actions they are allowed to access.
+const PORTAL_NAV_GROUPS = [
+  {
+    label: "Service workspace",
+    items: [
+      { id: "overview", label: "Overview", icon: Home },
+      { id: "requests", label: "Requests", icon: Ticket },
+      { id: "technicians", label: "My technicians", icon: UsersRound },
+    ],
+  },
+  {
+    label: "Your technology",
+    items: [
+      { id: "assets", label: "Managed assets", icon: Monitor },
+      { id: "services", label: "Services", icon: Layers3 },
+      { id: "protection", label: "Protection", icon: ShieldCheck },
+    ],
+  },
+  {
+    label: "Records and guidance",
+    items: [
+      { id: "billing", label: "Billing", icon: ReceiptText },
+      { id: "documents", label: "Documents", icon: FileText },
+      { id: "knowledge", label: "Knowledge", icon: BookOpen },
+    ],
+  },
 ];
+
+const PORTAL_NAV_ITEMS = PORTAL_NAV_GROUPS.flatMap((group) => group.items);
 
 const STATUS_STYLES = {
   open: "border-sky-400/25 bg-sky-400/10 text-sky-300",
@@ -283,6 +304,10 @@ export default function CustomerPortalWorkspace() {
         event.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
+      }
+      if (event.key === "Escape") {
+        setMobileNav(false);
+        setQuery("");
       }
     };
     window.addEventListener("keydown", focusSearch);
@@ -608,6 +633,18 @@ export default function CustomerPortalWorkspace() {
   const stats = dashboard.stats || {};
   const serviceHealth = dashboard.service_health || {};
   const openRequests = tickets.filter((ticket) => !["resolved", "closed"].includes(ticket.status));
+  const isPortalNavItemVisible = (item) => {
+    if (item.id === "billing") return canViewInvoices && features.can_view_invoices !== false;
+    if (item.id === "assets") return permissions.can_view_assets !== false && features.can_view_devices !== false;
+    if (item.id === "services") return features.can_view_contracts !== false;
+    if (item.id === "knowledge") return features.can_view_kb !== false;
+    return true;
+  };
+  const visiblePortalNavGroups = PORTAL_NAV_GROUPS
+    .map((group) => ({ ...group, items: group.items.filter(isPortalNavItemVisible) }))
+    .filter((group) => group.items.length > 0);
+  const activePortalNavItem = PORTAL_NAV_ITEMS.find((item) => item.id === view)
+    || PORTAL_NAV_ITEMS[0];
   const outstanding = invoices.reduce((total, invoice) =>
     total + Math.max(Number(invoice.total || 0) - Number(invoice.amount_paid || 0), 0), 0);
   const attentionItems = [
@@ -675,11 +712,6 @@ export default function CustomerPortalWorkspace() {
               Everything your organisation needs from {mspName}: support, managed assets, billing, protection, documents, and service history in one secure workspace.
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
-              {canCreateTickets && (
-                <Button variant="success" onClick={() => setShowRequest(true)} className="h-10 rounded-xl px-4 font-semibold">
-                  <Plus className="mr-2 h-4 w-4" />New request
-                </Button>
-              )}
               <Button variant="outline" onClick={() => selectView("knowledge")} className="h-10 rounded-xl border-white/10 bg-white/[0.035] text-slate-200 hover:bg-white/[0.07]">
                 <Search className="mr-2 h-4 w-4" />Find an answer
               </Button>
@@ -754,7 +786,6 @@ export default function CustomerPortalWorkspace() {
             <p className="mt-1 text-[11px] text-slate-500">Common tasks, one click away</p>
             <div className="mt-4 grid gap-2">
               {[
-                { label: "Report an issue", detail: "Start a tracked support request", icon: LifeBuoy, action: () => setShowRequest(true), show: canCreateTickets },
                 { label: "Review assets", detail: "Check device status and support", icon: Monitor, action: () => selectView("assets"), show: true },
                 { label: "View invoices", detail: "Statements, balances and payments", icon: CreditCard, action: () => selectView("billing"), show: canViewInvoices },
                 { label: "Service documents", detail: "Access approved shared records", icon: FileCheck2, action: () => selectView("documents"), show: true },
@@ -917,11 +948,6 @@ export default function CustomerPortalWorkspace() {
             eyebrow="Service desk"
             title="Requests"
             description="Create, track, and continue every service conversation without losing the audit trail."
-            action={canCreateTickets ? (
-              <Button variant="success" onClick={() => setShowRequest(true)} className="h-10 rounded-xl font-semibold">
-                <Plus className="mr-2 h-4 w-4" />New request
-              </Button>
-            ) : null}
           />
           <div className="grid gap-3 sm:grid-cols-3">
             <MetricTile icon={Ticket} label="Open" value={openRequests.length} detail="In the active service queue" tone="sky" onClick={() => setRequestStatus("open")} />
@@ -973,6 +999,16 @@ export default function CustomerPortalWorkspace() {
         </>
       )}
     </div>
+  );
+
+  const renderTechnicians = () => (
+    <PortalTechnicianConnections
+      api={API}
+      headers={headers}
+      tickets={tickets}
+      devices={devices}
+      companyName={companyName}
+    />
   );
 
   const renderAssets = () => (
@@ -1387,6 +1423,7 @@ export default function CustomerPortalWorkspace() {
   const viewContent = {
     overview: renderOverview,
     requests: renderRequests,
+    technicians: renderTechnicians,
     assets: renderAssets,
     services: renderServices,
     billing: renderBilling,
@@ -1404,43 +1441,52 @@ export default function CustomerPortalWorkspace() {
         <div className="portal-orb portal-orb-one" />
         <div className="portal-orb portal-orb-two" />
       </div>
-      <aside className={cx("portal-sidebar fixed inset-y-0 left-0 z-50 w-[270px] border-r border-white/[0.07] bg-[#0a1016]/95 p-4 backdrop-blur-xl transition-transform lg:translate-x-0", mobileNav ? "translate-x-0" : "-translate-x-full")}>
+      <aside className={cx("portal-sidebar fixed inset-y-0 left-0 z-50 w-[270px] border-r border-white/[0.07] bg-[#0a1016]/95 p-4 backdrop-blur-xl transition-transform duration-300 ease-out lg:translate-x-0", mobileNav ? "translate-x-0" : "-translate-x-full")} data-testid="portal-workspace-navigation">
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between px-2 py-2">
-            <button type="button" onClick={() => selectView("overview")} className="flex min-w-0 items-center gap-3 text-left">
+            <button type="button" onClick={() => selectView("overview")} className="flex min-w-0 items-center gap-3 rounded-xl text-left outline-none transition focus-visible:ring-2 focus-visible:ring-emerald-300/50">
               {mspLogo && !logoFailed ? <img src={mspLogo} alt={mspName} onError={() => setLogoFailed(true)} className="h-9 w-9 rounded-xl object-contain" /> : <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400 text-sm font-black text-emerald-950">{initials(mspName)}</div>}
               <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{mspName}</p><p className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-emerald-300">Client workspace</p></div>
             </button>
-            <Button variant="ghost" size="icon" onClick={() => setMobileNav(false)} className="h-8 w-8 text-slate-500 lg:hidden"><X className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="icon" onClick={() => setMobileNav(false)} className="h-8 w-8 text-slate-500 lg:hidden" aria-label="Close navigation"><X className="h-4 w-4" /></Button>
           </div>
-          <div className="mt-5 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3">
+          <div className="mt-5 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3 shadow-[0_16px_34px_-30px_rgba(0,0,0,0.9)]">
             <div className="flex items-center gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400/20 to-sky-400/10 text-[11px] font-bold text-emerald-200 ring-1 ring-emerald-400/15">{initials(companyName)}</div>
-              <div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-200">{companyName}</p><p className="mt-0.5 truncate text-[10px] text-slate-600">Signed in as {userName}</p></div>
+              <div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-200">{companyName}</p><p className="mt-0.5 truncate text-[10px] text-slate-600">Secure client access</p></div>
             </div>
           </div>
-          <nav className="mt-5 space-y-1">
-            {NAV_ITEMS.filter((item) => {
-              if (item.id === "billing") return canViewInvoices && features.can_view_invoices !== false;
-              if (item.id === "assets") return permissions.can_view_assets !== false && features.can_view_devices !== false;
-              if (item.id === "services") return features.can_view_contracts !== false;
-              if (item.id === "knowledge") return features.can_view_kb !== false;
-              return true;
-            }).map(({ id, label, icon: Icon }) => (
-              <button key={id} type="button" onClick={() => selectView(id)} className={cx("portal-nav-item group flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-medium transition",
-                view === id ? "bg-emerald-400/10 text-emerald-200 ring-1 ring-emerald-400/15" : "text-slate-500 hover:bg-white/[0.035] hover:text-slate-200")}>
-                <Icon className={cx("h-4 w-4", view === id ? "text-emerald-300" : "text-slate-600 group-hover:text-slate-400")} />
-                <span className="flex-1">{label}</span>
-                {id === "requests" && openRequests.length > 0 && <span className="rounded-full bg-sky-400/10 px-2 py-0.5 text-[9px] font-bold text-sky-300">{openRequests.length}</span>}
-                {id === "protection" && (backups.summary?.failed || 0) > 0 && <span className="h-2 w-2 rounded-full bg-amber-300" />}
-              </button>
+          <div className="portal-navigation-scroll mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+            {visiblePortalNavGroups.map((group, groupIndex) => (
+              <section key={group.label} className={cx(groupIndex > 0 && "mt-5")}>
+                <p className="px-3 pb-1.5 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-600">{group.label}</p>
+                <nav className="space-y-1" aria-label={group.label}>
+                  {group.items.map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => selectView(id)}
+                      aria-current={view === id ? "page" : undefined}
+                      data-testid={`portal-nav-${id}`}
+                      className={cx("portal-nav-item group flex h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/50",
+                        view === id ? "bg-emerald-400/10 text-emerald-100 ring-1 ring-emerald-400/20" : "text-slate-500 hover:bg-white/[0.035] hover:text-slate-200")}
+                    >
+                      <span className={cx("flex h-6 w-6 items-center justify-center rounded-lg transition", view === id ? "bg-emerald-400/10 text-emerald-300" : "text-slate-600 group-hover:bg-white/[0.04] group-hover:text-slate-400")}>
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="flex-1">{label}</span>
+                      {id === "requests" && openRequests.length > 0 && <span className="rounded-full bg-sky-400/10 px-2 py-0.5 text-[9px] font-bold text-sky-300">{openRequests.length}</span>}
+                      {id === "protection" && (backups.summary?.failed || 0) > 0 && <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.8)]" aria-label="Protection needs attention" />}
+                    </button>
+                  ))}
+                </nav>
+              </section>
             ))}
-          </nav>
-          <div className="mt-auto">
+          </div>
+          <div className="mt-4">
             <div className="rounded-2xl border border-emerald-400/12 bg-emerald-400/[0.035] p-4">
               <div className="flex items-center gap-2 text-emerald-300"><Headphones className="h-4 w-4" /><p className="text-xs font-semibold">Need support?</p></div>
-              <p className="mt-2 text-[10px] leading-5 text-slate-600">Create a tracked request and keep every update in one place.</p>
-              {canCreateTickets && <Button variant="success" onClick={() => setShowRequest(true)} className="mt-3 h-8 w-full rounded-lg text-[11px] font-semibold"><Plus className="mr-1.5 h-3.5 w-3.5" />New request</Button>}
+              <p className="mt-2 text-[10px] leading-5 text-slate-600">Use New request in the workspace header. Every update stays together in one secure record.</p>
             </div>
             <button type="button" onClick={logout} className="mt-3 flex h-9 w-full items-center gap-3 rounded-xl px-3 text-xs text-slate-600 transition hover:bg-rose-400/[0.05] hover:text-rose-300"><LogOut className="h-4 w-4" />Sign out</button>
           </div>
@@ -1453,10 +1499,14 @@ export default function CustomerPortalWorkspace() {
         <header className="portal-topbar sticky top-0 z-30 border-b border-white/[0.07] bg-[#080d12]/88 px-4 py-3 backdrop-blur-xl sm:px-6">
           <div className="mx-auto flex max-w-[1500px] items-center gap-3">
             <Button variant="ghost" size="icon" onClick={() => setMobileNav(true)} className="h-9 w-9 shrink-0 text-slate-400 lg:hidden"><Menu className="h-5 w-5" /></Button>
+            <div className="hidden min-w-[148px] border-r border-white/[0.07] pr-4 lg:block">
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">Client workspace</p>
+              <p className="mt-0.5 truncate text-sm font-semibold text-slate-100">{activePortalNavItem.label}</p>
+            </div>
             <div className="relative max-w-2xl flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
               <Input ref={searchInputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search requests, assets, services, invoices, documents, and guides…" className="h-10 rounded-xl border-white/[0.07] bg-white/[0.025] pl-10 pr-14 text-sm shadow-none" data-testid="portal-global-search" />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded border border-white/[0.08] px-1.5 py-0.5 text-[9px] text-slate-600">Ctrl K</span>
+              <span className="absolute right-3 top-1/2 hidden -translate-y-1/2 rounded border border-white/[0.08] px-1.5 py-0.5 text-[9px] text-slate-600 sm:block">Ctrl K</span>
               {query.trim().length >= 2 && (
                 <div className="absolute left-0 right-0 top-12 z-50 overflow-hidden rounded-2xl border border-white/10 bg-[#101820] shadow-2xl shadow-black/60">
                   {globalResults.length ? globalResults.map((result, index) => (
@@ -1469,6 +1519,18 @@ export default function CustomerPortalWorkspace() {
                 </div>
               )}
             </div>
+            {canCreateTickets && (
+              <Button
+                variant="success"
+                onClick={() => setShowRequest(true)}
+                className="h-10 shrink-0 rounded-xl px-3 font-semibold sm:px-4"
+                aria-label="Create a new service request"
+                data-testid="portal-new-request-action"
+              >
+                <Plus className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">New request</span>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -1484,10 +1546,10 @@ export default function CustomerPortalWorkspace() {
                 </span>
               )}
             </Button>
-            <button type="button" onClick={() => selectView("account")} className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-2.5 text-left transition hover:bg-white/[0.04]">
+            <button type="button" onClick={() => selectView("account")} className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.025] px-2.5 text-left outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-emerald-300/50" aria-label="Open account and security" data-testid="portal-account-button">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-400/10 text-[9px] font-bold text-emerald-200">{initials(userName)}</span>
-              <span className="hidden max-w-[120px] truncate text-xs font-medium text-slate-300 sm:block">{userName}</span>
-              <ChevronDown className="hidden h-3.5 w-3.5 text-slate-700 sm:block" />
+              <span className="hidden max-w-[120px] sm:block"><span className="block truncate text-xs font-medium text-slate-300">{userName}</span><span className="block truncate text-[9px] text-slate-600">Account and security</span></span>
+              <ChevronRight className="hidden h-3.5 w-3.5 text-slate-700 sm:block" />
             </button>
           </div>
         </header>
@@ -1694,7 +1756,7 @@ export default function CustomerPortalWorkspace() {
       </Dialog>
 
       <Dialog open={showSecurity} onOpenChange={setShowSecurity}>
-        <DialogContent className="border-white/10 bg-[#101820] p-0 sm:max-w-[590px]" aria-describedby="portal-security-description">
+        <DialogContent className="flex h-[min(700px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-[590px] flex-col gap-0 overflow-hidden border-white/10 bg-[#101820] p-0 sm:rounded-2xl" aria-describedby="portal-security-description">
           <DialogHeader className="border-b border-white/[0.07] bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.12),transparent_40%)] p-6 text-left">
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/20"><ShieldCheck className="h-5 w-5" /></div>
             <DialogTitle className="pt-3 text-2xl font-semibold tracking-tight text-white">
@@ -1706,7 +1768,7 @@ export default function CustomerPortalWorkspace() {
                 : "Add this account to Microsoft Authenticator, Google Authenticator, Keeper, or another TOTP-compatible app."}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-5 p-6">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-6">
             {!profile?.totp_enabled && (
               <div className="rounded-2xl border border-white/[0.08] bg-black/15 p-4">
                 <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">Authenticator setup key</p>
@@ -1735,7 +1797,7 @@ export default function CustomerPortalWorkspace() {
               <p className="text-[11px] leading-5 text-slate-500">Security changes are applied only to your portal identity and are retained in the client access record.</p>
             </div>
           </div>
-          <DialogFooter className="border-t border-white/[0.07] bg-black/10 p-4 sm:px-6">
+          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/10 p-4 sm:px-6">
             <Button variant="ghost" onClick={() => setShowSecurity(false)} className="rounded-xl">Cancel</Button>
             <Button onClick={updateTwoFactor} disabled={securityLoading || securityCode.length !== 6} className={cx("rounded-xl font-semibold", profile?.totp_enabled ? "bg-rose-500 text-white hover:bg-rose-400" : "bg-emerald-400 text-emerald-950 hover:bg-emerald-300")}>
               {securityLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}

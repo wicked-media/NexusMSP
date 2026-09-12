@@ -9,7 +9,6 @@ import {
   Clock,
   DollarSign,
   FileText,
-  Loader2,
   Receipt,
   RefreshCw,
   Search,
@@ -19,6 +18,7 @@ import {
 import { API, useAuth } from "@/App";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -179,7 +179,7 @@ export default function BillingReconPage() {
   );
 
   if (loading) {
-    return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-amber-300" /></div>;
+    return <WorkspaceLoadingState label="Loading billing reconciliation" />;
   }
 
   const actionCount = d.action_count ?? (

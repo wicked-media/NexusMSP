@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +27,7 @@ import {
   ArrowLeft,
   AtSign,
   Bell,
+  Building2,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -54,10 +56,10 @@ import {
   Trash2,
   UserRoundCheck,
   Users,
+  Wrench,
   X,
   XCircle,
 } from "lucide-react";
-import OperationalPageHeader from "@/components/OperationalPageHeader";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   chatAuthorName,
@@ -70,6 +72,12 @@ import {
   repairDisplayText,
   totalUnread,
 } from "@/lib/teamChatHelpers";
+import {
+  directChatRequestContext,
+  isPendingDirectChatRequest,
+  normaliseDirectChatRequest,
+} from "@/lib/chatConnections";
+import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "👀"];
 const TICKET_REGEX = /\/ticket\s+([\w-]+)/gi;
@@ -144,7 +152,9 @@ export default function TeamChatPage() {
   const [mode, setMode] = useState("teams");
   const [activeTab, setActiveTab] = useState("posts");
   const [query, setQuery] = useState("");
+  const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState(null);
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [channelLoading, setChannelLoading] = useState(false);
@@ -164,6 +174,13 @@ export default function TeamChatPage() {
   const [referenceMatches, setReferenceMatches] = useState([]);
   const [referenceIndex, setReferenceIndex] = useState(0);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
+  const [directRequests, setDirectRequests] = useState([]);
+  const [directRequestSummary, setDirectRequestSummary] = useState({});
+  const [directRequestState, setDirectRequestState] = useState("loading");
+  const [directRequestError, setDirectRequestError] = useState("");
+  const [directRequestDialog, setDirectRequestDialog] = useState(null);
+  const [directRequestResponse, setDirectRequestResponse] = useState("");
+  const [directRequestDecision, setDirectRequestDecision] = useState("");
   const scrollRef = useRef(null);
   const activeIdRef = useRef(null);
   const nearBottomRef = useRef(true);
@@ -207,11 +224,40 @@ export default function TeamChatPage() {
     }
   }, [headers, requestedChannelId, token]);
 
+  const loadDirectRequests = useCallback(async ({ quiet = false } = {}) => {
+    if (!token) return;
+    if (!quiet) setDirectRequestState("loading");
+    try {
+      const response = await axios.get(`${API}/chat-connections/requests`, { headers });
+      const payload = response.data || {};
+      const rows = Array.isArray(payload) ? payload : payload.requests || [];
+      setDirectRequests(rows.map(normaliseDirectChatRequest).filter(request => request.id));
+      setDirectRequestSummary(Array.isArray(payload) ? {} : payload.summary || {});
+      setDirectRequestError("");
+      setDirectRequestState("ready");
+    } catch (requestError) {
+      const status = requestError?.response?.status;
+      if (status === 404 || status === 501) {
+        setDirectRequestState("unavailable");
+        setDirectRequestError("");
+        return;
+      }
+      setDirectRequestState("error");
+      setDirectRequestError(requestError?.response?.data?.detail || "Direct requests could not be refreshed.");
+    }
+  }, [headers, token]);
+
   useEffect(() => {
     loadWorkspace();
     const timer = setInterval(() => loadWorkspace({ quiet: true }), 8000);
     return () => clearInterval(timer);
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    loadDirectRequests();
+    const timer = setInterval(() => loadDirectRequests({ quiet: true }), 15_000);
+    return () => clearInterval(timer);
+  }, [loadDirectRequests]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -318,6 +364,58 @@ export default function TeamChatPage() {
     setShowInfo(false);
   };
 
+  const openDirectRequestDialog = request => {
+    setDirectRequestDialog(normaliseDirectChatRequest(request));
+    setDirectRequestResponse("");
+  };
+
+  const decideDirectRequest = async decision => {
+    if (!directRequestDialog || directRequestDecision) return;
+    const responseText = directRequestResponse.trim();
+    if (decision === "decline" && responseText.length < 3) {
+      toast.error("Add a short, respectful reason before declining.");
+      return;
+    }
+    setDirectRequestDecision(decision);
+    try {
+      const response = await axios.post(
+        `${API}/chat-connections/requests/${encodeURIComponent(directRequestDialog.id)}/decision`,
+        { decision, response: responseText || undefined },
+        { headers },
+      );
+      const result = response.data || {};
+      const nextRequest = normaliseDirectChatRequest(result.request || {
+        ...directRequestDialog,
+        status: decision === "accept" ? "accepted" : "declined",
+      });
+      setDirectRequests(current => current.map(request => request.id === directRequestDialog.id ? nextRequest : request));
+      setDirectRequestDialog(null);
+      setDirectRequestResponse("");
+      if (decision === "decline") {
+        toast.success("Request declined and recorded.");
+        return;
+      }
+
+      const channel = result.channel || result.conversation;
+      const channelId = result.channel_id || channel?.id;
+      if (channel?.id) {
+        setChannels(current => [channel, ...current.filter(existing => existing.id !== channel.id)]);
+      }
+      await Promise.all([loadWorkspace({ quiet: true }), loadDirectRequests({ quiet: true })]);
+      setMode("chat");
+      if (channelId) {
+        selectChannel(channelId);
+        toast.success("Private customer conversation approved.");
+      } else {
+        toast.success("Request approved. The private conversation is being prepared.");
+      }
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "The request could not be updated.");
+    } finally {
+      setDirectRequestDecision("");
+    }
+  };
+
   const sendTyping = () => {
     if (!activeId || Date.now() - typingAtRef.current < 2000) return;
     typingAtRef.current = Date.now();
@@ -361,12 +459,13 @@ export default function TeamChatPage() {
   };
 
   const searchMessages = async () => {
-    const term = query.trim();
+    const term = messageSearchQuery.trim();
     if (!term) { setSearchResults(null); return; }
     setSearching(true);
     try {
       const response = await axios.get(`${API}/chat/search`, { headers, params: { q: term } });
       setSearchResults(response.data || []);
+      setShowMessageSearch(false);
     } catch (requestError) {
       toast.error(requestError?.response?.data?.detail || "Search failed");
     } finally {
@@ -517,6 +616,12 @@ export default function TeamChatPage() {
   };
 
   const unread = totalUnread(channels);
+  const pendingDirectRequests = useMemo(
+    () => directRequests.filter(isPendingDirectChatRequest),
+    [directRequests],
+  );
+  const directSubscriberValue = directRequestSummary?.subscriber_count ?? directRequestSummary?.subscribers ?? 0;
+  const directSubscriberCount = Array.isArray(directSubscriberValue) ? directSubscriberValue.length : Number(directSubscriberValue) || 0;
   const activePresence = activeChannel?.other_user_id ? presenceFor(activeChannel.other_user_id) : null;
   const activeTeammates = users.filter(candidate => candidate.id !== user?.id && isLivePresence(presenceFor(candidate.id))).length;
   const activePeople = activeTeammates + (isLivePresence(myPresence) ? 1 : 0);
@@ -531,39 +636,34 @@ export default function TeamChatPage() {
   };
 
   return (
-    <div className="space-y-4" data-testid="team-chat-page">
-      <OperationalPageHeader
-        eyebrow="Nexus Connect · conversation that performs the work"
-        title="Nexus Connect"
-        description="Coordinate technicians, pass ownership, act on live Nexus objects and preserve every operational decision in one auditable workspace."
-        icon={MessageCircle}
-        tone="emerald"
-        actions={<>
-          <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-3 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>{activePeople} active</span>
-          <Button variant="outline" size="sm" onClick={() => { loadWorkspace({ quiet: true }); refreshChannel({ quiet: true }); }} disabled={loading || channelLoading} data-testid="refresh-team-chat-btn"><RefreshCw className={`mr-1.5 h-4 w-4 ${(loading || channelLoading) ? "animate-spin" : ""}`} />Refresh</Button>
-          <Button size="sm" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn"><MessageSquarePlus className="mr-1.5 h-4 w-4" />New conversation</Button>
-        </>}
-      />
+    <div className="flex h-full min-h-0 flex-col" data-testid="team-chat-page">
+      <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-cyan-500/15 bg-[#0d141b] text-zinc-100 shadow-2xl shadow-black/25">
+        <header className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-[82px] flex-wrap items-center justify-between gap-3 border-b border-cyan-500/10 bg-[radial-gradient(circle_at_15%_10%,rgba(34,211,238,0.10),transparent_28%),linear-gradient(110deg,rgba(13,24,31,0.98),rgba(13,20,27,0.94))] px-4 py-3 md:px-5`}>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Nexus Connect</p>
+            <div className="mt-1 flex items-center gap-2.5">
+              <span className="grid h-8 w-8 place-items-center rounded-lg border border-emerald-400/25 bg-emerald-500/[0.10] text-emerald-300 shadow-lg shadow-emerald-950/30"><MessageCircle className="h-4 w-4" /></span>
+              <div>
+                <h1 className="text-lg font-semibold tracking-tight text-white md:text-xl">Conversations</h1>
+                <p className="hidden max-w-xl text-xs text-zinc-400 lg:block">Coordinate the next action, carry the right context, and keep the outcome auditable.</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-2.5 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>{activePeople} active</span>
+            <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setShowMessageSearch(true)} aria-label="Search messages"><Search className="h-3.5 w-3.5" /></Button>
+            <Button variant="outline" size="sm" className="h-8 px-2.5" onClick={() => { loadWorkspace({ quiet: true }); refreshChannel({ quiet: true }); }} disabled={loading || channelLoading} data-testid="refresh-team-chat-btn"><RefreshCw className={`h-3.5 w-3.5 ${(loading || channelLoading) ? "animate-spin" : ""}`} /><span className="ml-1.5 hidden sm:inline">Refresh</span></Button>
+            <Button size="sm" className="h-8 px-3" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn"><MessageSquarePlus className="mr-1.5 h-3.5 w-3.5" />New conversation</Button>
+          </div>
+        </header>
 
-      <section className="h-[calc(100vh-255px)] min-h-[620px] overflow-hidden rounded-2xl border border-border/80 bg-[#0f151c] text-zinc-100 shadow-2xl shadow-black/20">
-      <div className="flex h-full overflow-hidden">
-      <nav className="hidden md:flex w-[72px] shrink-0 flex-col items-center border-r border-cyan-500/10 bg-[#121a21] py-3" aria-label="Nexus Chat sections">
-        <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-600 shadow-lg shadow-emerald-950/40">
-          <MessageCircle className="h-5 w-5 text-white" />
-        </div>
-        <RailButton icon={Activity} label="Inbox" active={mode === "activity"} badge={unread} onClick={() => setMode("activity")} />
-        <RailButton icon={MessageCircle} label="Direct" active={mode === "chat"} onClick={() => setMode("chat")} />
-        <RailButton icon={Users} label="Channels" active={mode === "teams"} onClick={() => setMode("teams")} />
-        <RailButton icon={FileText} label="Work rooms" active={mode === "work"} onClick={() => setMode("work")} />
-        <div className="mt-auto px-2 text-center text-[9px] uppercase tracking-[0.16em] text-zinc-600">Nexus<br />Chat</div>
-      </nav>
-
-      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[320px] shrink-0 flex-col border-r border-cyan-500/10 bg-[#151e27]`}>
+      <div className={`flex overflow-hidden ${mobileConversationOpen ? "h-full md:h-[calc(100%-82px)]" : "h-[calc(100%-82px)]"}`}>
+      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[288px] xl:w-[320px] shrink-0 flex-col border-r border-cyan-500/10 bg-[#141d26]`}>
         <div className="border-b border-cyan-500/10 px-4 pb-3 pt-4">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Nexus collaboration</p>
-              <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct messages"}</h1>
+              <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct connections"}</h1>
             </div>
             <div className="flex items-center gap-1.5">
               <DropdownMenu>
@@ -574,11 +674,30 @@ export default function TeamChatPage() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuItem asChild><Link to="/live-chat"><MessageCircle className="mr-2 h-4 w-4" />Client live chat</Link></DropdownMenuItem>
-                  <DropdownMenuItem asChild><Link to="/script-ticket"><FileText className="mr-2 h-4 w-4" />Script-to-ticket</Link></DropdownMenuItem>
+                  <DropdownMenuItem asChild><Link to="/script-ticket"><FileText className="mr-2 h-4 w-4" />Ticket automations</Link></DropdownMenuItem>
                   <DropdownMenuItem asChild><Link to="/voice"><Phone className="mr-2 h-4 w-4" />Voice services</Link></DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.06] bg-black/15 p-1" aria-label="Nexus Chat sections">
+            {[
+              ["activity", "Inbox", Activity, unread],
+              ["chat", "Direct", MessageCircle, pendingDirectRequests.length],
+              ["teams", "Channels", Users, 0],
+              ["work", "Work rooms", FileText, 0],
+            ].map(([value, label, Icon, badge]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setMode(value)}
+                aria-current={mode === value ? "page" : undefined}
+                className={`relative flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 ${mode === value ? "bg-cyan-500/[0.14] text-cyan-100 shadow-sm shadow-cyan-950/30" : "text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200"}`}
+              >
+                <Icon className="h-3.5 w-3.5" />{label}
+                {badge > 0 && <span className="rounded-full bg-rose-500 px-1.5 text-[9px] font-bold leading-4 text-white">{badge > 99 ? "99+" : badge}</span>}
+              </button>
+            ))}
           </div>
           <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-500">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>{activePeople} active now</span>
@@ -588,9 +707,8 @@ export default function TeamChatPage() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <Input
               value={query}
-              onChange={event => { setQuery(event.target.value); if (!event.target.value) setSearchResults(null); }}
-              onKeyDown={event => event.key === "Enter" && searchMessages()}
-              placeholder="Search chats and messages"
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Filter conversations"
               className="h-9 border-white/5 bg-black/20 pl-9 pr-9 text-sm placeholder:text-zinc-600 focus-visible:ring-emerald-500/50"
               data-testid="chat-search"
             />
@@ -618,6 +736,16 @@ export default function TeamChatPage() {
 
         <ScrollArea className="flex-1">
           <div className="p-2">
+            {mode === "chat" && (
+              <DirectRequestInbox
+                requests={pendingDirectRequests}
+                state={directRequestState}
+                error={directRequestError}
+                subscriberCount={directSubscriberCount}
+                onRetry={() => loadDirectRequests()}
+                onReview={openDirectRequestDialog}
+              />
+            )}
             {loading ? (
               <ConversationSkeleton />
             ) : visibleChannels.length === 0 ? (
@@ -667,7 +795,7 @@ export default function TeamChatPage() {
         </DropdownMenu>
       </aside>
 
-      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col bg-[#0e151c]`}>
+      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col bg-[#0e151c]`}>
         {!activeChannel ? (
           <EmptyWorkspace onNew={() => setShowNewDialog(true)} />
         ) : (
@@ -684,6 +812,8 @@ export default function TeamChatPage() {
                   <p className="truncate text-xs text-zinc-500">
                     {activeChannel.kind === "dm"
                       ? PRESENCE_META[activePresence || "offline"].label
+                      : activeChannel.kind === "client_direct"
+                        ? activeChannel.client_name || activeChannel.description || "Approved customer connection"
                       : activeChannel.description || `${activeChannel.member_count || 0} members`}
                   </p>
                 </div>
@@ -708,8 +838,11 @@ export default function TeamChatPage() {
                 activeTechnicians={activeChannelTechnicians}
                 context={operationalContext}
                 pinnedCount={pinned.length}
-                onDraftCommand={draftOperationalCommand}
               />
+            )}
+
+            {activeTab === "posts" && !searchResults && activeChannel.kind === "client_direct" && (
+              <CustomerConnectionPulse channel={activeChannel} />
             )}
 
             {searchResults ? (
@@ -833,26 +966,30 @@ export default function TeamChatPage() {
                         if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); }
                       }}
                       placeholder={`Message ${channelDisplayName(activeChannel)}`}
-                      className="min-h-[64px] resize-none border-0 bg-transparent px-4 pb-2 pt-3 text-sm shadow-none focus-visible:ring-0"
+                      className="min-h-[52px] resize-none border-0 bg-transparent px-4 pb-1 pt-2.5 text-sm shadow-none focus-visible:ring-0"
                       aria-label={`Message ${channelDisplayName(activeChannel)}`}
                       data-testid="chat-input"
                     />
-                    <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1.5 text-[10px]">
-                      <span className="mr-1 uppercase tracking-[0.14em] text-zinc-600">Turn chat into work</span>
-                      <button type="button" onClick={() => setInput("/ticket ")} className="rounded-md border border-cyan-500/20 bg-cyan-500/[0.08] px-2 py-1 font-medium text-cyan-100 transition hover:border-cyan-400/45 hover:bg-cyan-500/[0.16]">Link ticket</button>
-                      <button type="button" onClick={() => setInput("/summarize")} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.08] px-2 py-1 font-medium text-emerald-100 transition hover:border-emerald-400/45 hover:bg-emerald-500/[0.16]">AI summary</button>
+                    <div className="flex items-center gap-1.5 px-3 pb-1.5 text-[10px]">
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild><button type="button" className="inline-flex items-center gap-1 rounded-md border border-white/5 bg-white/[0.03] px-2 py-1 text-zinc-400 transition hover:border-white/15 hover:bg-white/[0.07] hover:text-zinc-100">More actions<ChevronDown className="h-3 w-3" /></button></DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" className="w-48">
-                          <DropdownMenuLabel>Operational actions</DropdownMenuLabel>
+                        <DropdownMenuTrigger asChild>
+                          <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-cyan-500/20 bg-cyan-500/[0.08] px-2 py-1 font-medium text-cyan-100 transition hover:border-cyan-400/45 hover:bg-cyan-500/[0.16]">
+                            <Sparkles className="h-3 w-3" />Work actions<ChevronDown className="h-3 w-3" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-52">
+                          <DropdownMenuLabel>Turn this conversation into work</DropdownMenuLabel>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => setInput("/invoice ")}><FileText className="mr-2 h-3.5 w-3.5" />Link invoice</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setInput("/po ")}><FileText className="mr-2 h-3.5 w-3.5" />Link purchase order</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setInput("/note ")}><Edit3 className="mr-2 h-3.5 w-3.5" />Add internal note</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => draftOperationalCommand("/ticket ")}><FileText className="mr-2 h-3.5 w-3.5" />Link ticket</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => draftOperationalCommand("/invoice ")}><FileText className="mr-2 h-3.5 w-3.5" />Link invoice</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => draftOperationalCommand("/po ")}><FileText className="mr-2 h-3.5 w-3.5" />Link purchase order</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => draftOperationalCommand("/note ")}><Edit3 className="mr-2 h-3.5 w-3.5" />Add internal note</DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={() => setInput("/page ")}><Bell className="mr-2 h-3.5 w-3.5" />Page on-call</DropdownMenuItem>
+                          <DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={() => draftOperationalCommand("/page ")}><Bell className="mr-2 h-3.5 w-3.5" />Page on-call</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                      <button type="button" onClick={() => draftOperationalCommand("/summarize")} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.08] px-2 py-1 font-medium text-emerald-100 transition hover:border-emerald-400/45 hover:bg-emerald-500/[0.16]">Summarise conversation</button>
+                      <span className="hidden text-zinc-600 md:inline">Actions add context without leaving the conversation.</span>
                     </div>
                     <div className="flex items-center gap-1 px-2 pb-2">
                       <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
@@ -904,13 +1041,93 @@ export default function TeamChatPage() {
           setShowNewDialog(false);
         }}
       />
+      <Dialog open={showMessageSearch} onOpenChange={setShowMessageSearch}>
+        <NexusWorkflowDialog
+          eyebrow="Find operational context"
+          title="Search messages"
+          description="Search across conversations without changing the conversation filter or losing your current place."
+          icon={Search}
+          tone="cyan"
+          footer={<><Button variant="outline" onClick={() => setShowMessageSearch(false)}>Cancel</Button><Button onClick={searchMessages} disabled={!messageSearchQuery.trim() || searching}>{searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}Search messages</Button></>}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="message-search-query" className="text-xs">Words, ticket references, or people</Label>
+            <Input
+              id="message-search-query"
+              value={messageSearchQuery}
+              onChange={event => setMessageSearchQuery(event.target.value)}
+              onKeyDown={event => event.key === "Enter" && searchMessages()}
+              placeholder="e.g. INC-0015, backup, Alex"
+              autoFocus
+            />
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+      <Dialog
+        open={Boolean(directRequestDialog)}
+        onOpenChange={open => {
+          if (!open && !directRequestDecision) {
+            setDirectRequestDialog(null);
+            setDirectRequestResponse("");
+          }
+        }}
+      >
+        <NexusWorkflowDialog
+          eyebrow="Customer connection approval"
+          title={directRequestDialog ? `Review ${directRequestDialog.customerName}'s request` : "Review direct request"}
+          description="Approve a private customer conversation only when the context is appropriate. Nexus records the decision and preserves the supplied work context."
+          icon={UserRoundCheck}
+          tone="cyan"
+          data-testid="direct-request-workflow"
+          footer={(
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDirectRequestDialog(null);
+                  setDirectRequestResponse("");
+                }}
+                disabled={Boolean(directRequestDecision)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                className="border-rose-500/30 text-rose-200 hover:bg-rose-500/10 hover:text-rose-100"
+                onClick={() => decideDirectRequest("decline")}
+                disabled={Boolean(directRequestDecision)}
+                data-testid="decline-direct-request"
+              >
+                {directRequestDecision === "decline" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
+                Decline
+              </Button>
+              <Button
+                onClick={() => decideDirectRequest("accept")}
+                disabled={Boolean(directRequestDecision)}
+                data-testid="accept-direct-request"
+              >
+                {directRequestDecision === "accept" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                Approve & open chat
+              </Button>
+            </>
+          )}
+        >
+          {directRequestDialog && (
+            <DirectRequestDecisionForm
+              request={directRequestDialog}
+              response={directRequestResponse}
+              onResponse={setDirectRequestResponse}
+            />
+          )}
+        </NexusWorkflowDialog>
+      </Dialog>
       </div>
       </section>
     </div>
   );
 }
 
-function NexusOperationsPulse({ activeTechnicians, context, pinnedCount, onDraftCommand }) {
+function NexusOperationsPulse({ activeTechnicians, context, pinnedCount }) {
   const liveLabel = activeTechnicians.length === 1 ? "1 technician active" : `${activeTechnicians.length} technicians active`;
   const contextMetrics = [
     ["Tickets", context.tickets, "border-cyan-500/20 bg-cyan-500/[0.06] text-cyan-100"],
@@ -920,40 +1137,126 @@ function NexusOperationsPulse({ activeTechnicians, context, pinnedCount, onDraft
   ];
 
   return (
-    <section className="border-b border-cyan-500/10 bg-gradient-to-r from-cyan-500/[0.08] via-emerald-500/[0.045] to-transparent px-3 py-2.5 md:px-5" aria-label="Nexus operations pulse">
-      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2.5 rounded-xl border border-cyan-500/10 bg-[#101a22]/70 px-3 py-2 shadow-inner shadow-cyan-950/20">
+    <section className="border-b border-cyan-500/10 bg-gradient-to-r from-cyan-500/[0.06] via-emerald-500/[0.035] to-transparent px-3 py-2 md:px-5" aria-label="Nexus operations pulse">
+      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 pr-1">
-          <span className="relative grid h-8 w-8 place-items-center rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">
-            <span className="absolute h-2 w-2 animate-ping rounded-full bg-emerald-400/70" /><Activity className="relative h-4 w-4" />
+          <span className="relative grid h-7 w-7 place-items-center rounded-md border border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">
+            <span className="absolute h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400/70" /><Activity className="relative h-3.5 w-3.5" />
           </span>
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-300">Nexus operations pulse</p>
-            <p className="text-xs text-zinc-500">{liveLabel}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-300">Work context</p>
+            <p className="text-[11px] text-zinc-500">{liveLabel}</p>
           </div>
         </div>
-        <div className="flex flex-wrap gap-1.5" aria-label="Linked work in this channel">
+        <div className="flex flex-wrap gap-1" aria-label="Linked work in this channel">
           {contextMetrics.map(([label, value, className]) => (
-            <span key={label} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] ${className}`}>
-              <strong className="text-xs leading-none">{value}</strong>{label}
+            <span key={label} className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] ${className}`}>
+              <strong className="text-[11px] leading-none">{value}</strong>{label}
             </span>
           ))}
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <button type="button" onClick={() => onDraftCommand("/ticket ")} className="rounded-md border border-white/8 bg-white/[0.03] px-2 py-1 text-[10px] font-medium text-zinc-300 transition hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-100">Link work</button>
-          <button type="button" onClick={() => onDraftCommand("/page high")} className="rounded-md border border-rose-500/15 bg-rose-500/[0.05] px-2 py-1 text-[10px] font-medium text-rose-200 transition hover:border-rose-400/40 hover:bg-rose-500/10">Page team</button>
-          <button type="button" onClick={() => onDraftCommand("/summarize")} className="rounded-md border border-emerald-500/15 bg-emerald-500/[0.05] px-2 py-1 text-[10px] font-medium text-emerald-100 transition hover:border-emerald-400/40 hover:bg-emerald-500/10">Handoff brief</button>
         </div>
       </div>
     </section>
   );
 }
 
-function RailButton({ icon: Icon, label, active, badge = 0, onClick }) {
+function DirectRequestInbox({ requests, state, error, subscriberCount, onRetry, onReview }) {
+  if (state === "loading") {
+    return (
+      <section className="mb-2 overflow-hidden rounded-xl border border-cyan-500/15 bg-cyan-500/[0.035] p-3" aria-label="Loading direct requests" data-testid="direct-request-loading">
+        <div className="flex items-center gap-2"><span className="h-7 w-7 animate-pulse rounded-lg bg-cyan-400/15" /><div className="space-y-1"><div className="h-2.5 w-24 animate-pulse rounded bg-cyan-100/10" /><div className="h-2 w-40 animate-pulse rounded bg-white/5" /></div></div>
+      </section>
+    );
+  }
+
+  if (state === "unavailable") {
+    return (
+      <section className="mb-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-3" data-testid="direct-request-unavailable">
+        <div className="flex items-start gap-2">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+          <div className="min-w-0 flex-1"><p className="text-xs font-semibold text-amber-100">Direct request inbox is not ready</p><p className="mt-1 text-[11px] leading-4 text-amber-100/70">Customer Connections needs to be available before technicians can approve private conversations.</p></div>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px] text-amber-100" onClick={onRetry}>Retry</Button>
+        </div>
+      </section>
+    );
+  }
+
+  if (state === "error") {
+    return (
+      <section className="mb-2 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] p-3" data-testid="direct-request-error">
+        <div className="flex items-start gap-2"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" /><div className="min-w-0 flex-1"><p className="text-xs font-semibold text-rose-100">Direct requests could not refresh</p><p className="mt-1 text-[11px] leading-4 text-rose-100/70">{error || "Keep your current chats open and try again."}</p></div><Button size="sm" variant="ghost" className="h-7 px-2 text-[11px] text-rose-100" onClick={onRetry}>Retry</Button></div>
+      </section>
+    );
+  }
+
   return (
-    <button onClick={onClick} aria-current={active ? "page" : undefined} className={`relative mb-2 flex w-full flex-col items-center gap-1 border-l-2 py-2 text-[10px] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/60 ${active ? "border-cyan-500 bg-cyan-500/[0.05] text-cyan-200" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
-      <Icon className="h-5 w-5" />{label}
-      {badge > 0 && <span className="absolute right-3 top-0 min-w-4 rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">{badge > 99 ? "99+" : badge}</span>}
-    </button>
+    <section className="mb-2 overflow-hidden rounded-xl border border-cyan-500/20 bg-[linear-gradient(135deg,rgba(6,182,212,0.10),rgba(16,185,129,0.045))] shadow-sm shadow-cyan-950/20" aria-label="Direct customer requests" data-testid="direct-request-inbox">
+      <div className="flex items-start justify-between gap-3 border-b border-cyan-500/15 px-3 py-2.5">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2"><span className="grid h-6 w-6 place-items-center rounded-md border border-cyan-400/25 bg-cyan-400/[0.10] text-cyan-200"><MessageSquarePlus className="h-3.5 w-3.5" /></span><p className="text-xs font-semibold text-cyan-50">Direct requests</p>{requests.length > 0 && <Badge className="h-5 bg-cyan-400/15 px-1.5 text-[9px] text-cyan-100 hover:bg-cyan-400/15">{requests.length} waiting</Badge>}</div>
+          <p className="mt-1 text-[10px] leading-4 text-cyan-100/60">Favourite technician requests stay private until you approve them.</p>
+        </div>
+        {subscriberCount > 0 && <span className="shrink-0 rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-2 py-1 text-[9px] font-medium text-emerald-100">Preferred by {subscriberCount}</span>}
+      </div>
+      {requests.length === 0 ? (
+        <div className="px-3 py-4 text-center" data-testid="direct-request-empty"><CheckCircle2 className="mx-auto h-5 w-5 text-emerald-300/70" /><p className="mt-1.5 text-xs font-medium text-zinc-200">No direct requests waiting</p><p className="mt-1 text-[10px] leading-4 text-zinc-500">When a customer chooses you as a preferred technician, their request appears here with the work context attached.</p></div>
+      ) : (
+        <div className="divide-y divide-cyan-500/10">
+          {requests.map(request => <DirectRequestRow key={request.id} request={request} onReview={() => onReview(request)} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DirectRequestRow({ request, onReview }) {
+  const context = directChatRequestContext(request);
+  return (
+    <article className="group px-3 py-3 transition hover:bg-white/[0.025]" data-testid={`direct-request-${request.id}`}>
+      <div className="flex gap-2.5">
+        <TechnicianAvatar name={request.customerName} className="h-8 w-8" fallbackClassName="text-[10px]" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-zinc-100">{request.customerName}</p><p className="truncate text-[10px] text-zinc-500">{request.clientName || request.customerEmail || "Customer connection"}</p></div><span className="shrink-0 text-[10px] text-zinc-600">{formatRelative(request.createdAt)}</span></div>
+          <p className="mt-2 truncate text-xs font-medium text-cyan-100">{request.subject}</p>
+          {request.message && <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-zinc-400">{request.message}</p>}
+          {context.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{context.map(item => <span key={`${item.label}-${item.value}`} className={`inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] ${item.tone === "violet" ? "border-violet-400/20 bg-violet-400/[0.08] text-violet-100" : item.tone === "emerald" ? "border-emerald-400/20 bg-emerald-400/[0.08] text-emerald-100" : "border-cyan-400/20 bg-cyan-400/[0.08] text-cyan-100"}`}><span className="font-semibold opacity-70">{item.label}</span><span className="max-w-[108px] truncate">{item.value}</span></span>)}</div>}
+          <div className="mt-2.5 flex justify-end"><Button size="sm" variant="outline" className="h-7 border-cyan-400/25 bg-cyan-400/[0.07] px-2.5 text-[10px] text-cyan-100 hover:bg-cyan-400/[0.14]" onClick={onReview} data-testid={`review-direct-request-${request.id}`}><UserRoundCheck className="mr-1 h-3 w-3" />Review request</Button></div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function DirectRequestDecisionForm({ request, response, onResponse }) {
+  const context = directChatRequestContext(request);
+  return (
+    <div className="space-y-5" data-testid="direct-request-decision-form">
+      <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.055] p-4">
+        <div className="flex items-start gap-3"><TechnicianAvatar name={request.customerName} className="h-10 w-10" /><div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground">{request.customerName}</p><p className="mt-0.5 text-xs text-muted-foreground">{request.customerEmail || "Customer contact"}{request.clientName ? ` · ${request.clientName}` : ""}</p><p className="mt-3 text-sm font-medium text-cyan-100">{request.subject}</p>{request.message && <p className="mt-1.5 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{request.message}</p>}</div></div>
+        {context.length > 0 && <div className="mt-4 flex flex-wrap gap-2">{context.map(item => <span key={`${item.label}-${item.value}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-background/35 px-2.5 py-1.5 text-xs"><span className="font-medium text-muted-foreground">{item.label}</span><span className="font-mono text-foreground">{item.value}</span></span>)}</div>}
+      </section>
+      <section className="rounded-xl border border-border/70 bg-muted/[0.10] p-4">
+        <div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" /><div><p className="text-sm font-medium">Connection boundary</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Approving opens one private conversation. It does not grant customer access to device controls, billing, records, or other technicians.</p></div></div>
+      </section>
+      <div className="space-y-2"><Label htmlFor="direct-request-response">Response to customer <span className="text-muted-foreground">(optional to approve, required to decline)</span></Label><Textarea id="direct-request-response" value={response} onChange={event => onResponse(event.target.value.slice(0, 1200))} placeholder="For example: I can help with this. I will review the linked ticket and reply here." className="min-h-28" data-testid="direct-request-response" /><p className="text-[11px] text-muted-foreground">Nexus records your decision and this response with the request context for audit.</p></div>
+    </div>
+  );
+}
+
+function CustomerConnectionPulse({ channel }) {
+  const requestContext = channel.request_context || channel.context || {};
+  const context = [
+    requestContext.ticket_reference || channel.ticket_reference || requestContext.ticket_id || channel.ticket_id,
+    requestContext.device_name || channel.device_name || requestContext.device_id || channel.device_id,
+  ].filter(Boolean);
+  return (
+    <section className="border-b border-cyan-500/10 bg-gradient-to-r from-cyan-500/[0.08] via-violet-500/[0.035] to-transparent px-3 py-2 md:px-5" aria-label="Customer connection context" data-testid="customer-connection-pulse">
+      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-cyan-400/25 bg-cyan-400/[0.08] px-2 py-1 text-[10px] font-semibold text-cyan-100"><Lock className="h-3 w-3" />Approved customer connection</span>
+        <span className="text-[10px] text-zinc-500">Private by default · decision and context retained for audit</span>
+        {context.map((item, index) => <span key={`${item}-${index}`} className="rounded-md border border-white/10 bg-white/[0.035] px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">{item}</span>)}
+      </div>
+    </section>
   );
 }
 
@@ -965,7 +1268,7 @@ function ConversationRow({ channel, active, presence, onClick }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className={`truncate text-sm ${channel.unread_count ? "font-semibold text-white" : "font-medium text-zinc-300"}`}>{name}</p>
-          <span className="ml-auto shrink-0 text-[10px] text-zinc-600">{formatRelative(channel.last_message?.ts || channel.updated_at || channel.created_at)}</span>
+          <span className="ml-auto shrink-0 text-[10px] text-zinc-500">{formatRelative(channel.last_message?.ts || channel.updated_at || channel.created_at)}</span>
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <p className={`truncate text-xs ${channel.unread_count ? "text-zinc-300" : "text-zinc-600"}`}>
@@ -992,6 +1295,11 @@ function ChannelAvatar({ channel, presence, size = "sm" }) {
         <Avatar className={dimension}>
           <AvatarFallback className="border border-emerald-500/25 bg-emerald-500/10 text-emerald-200"><FileText className="h-4 w-4" /></AvatarFallback>
         </Avatar>
+      ) : channel.kind === "client_direct" ? (
+        <Avatar className={dimension}>
+          {channel.avatar && <AvatarImage src={channel.avatar} alt={`${name} profile`} className="object-cover" />}
+          <AvatarFallback className="border border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-100"><MessageCircle className="h-4 w-4" /></AvatarFallback>
+        </Avatar>
       ) : <TechnicianAvatar name={name} avatarUrl={channel.avatar} className={dimension} />}
       {statusMeta && <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-[#1d1f26] ${statusMeta.dot}`} />}
     </div>
@@ -1014,6 +1322,7 @@ function PresenceLabel({ status, detail }) {
 
 function MessageRow({ message, compact, own, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload }) {
   const [hovered, setHovered] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   if (message.is_system) {
     const text = repairDisplayText(message.body);
     const isWarning = /unknown command|not found|could not|couldn't|invalid|failed|error/i.test(text);
@@ -1027,10 +1336,10 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
     );
   }
   return (
-    <div className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? "border border-emerald-500/10 bg-emerald-500/[0.035]" : "hover:bg-cyan-500/[0.025]"} ${compact ? "mt-0.5" : "mt-2"} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <div className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? "border border-emerald-500/10 bg-emerald-500/[0.035]" : "hover:bg-cyan-500/[0.025]"} ${compact ? "mt-0.5" : "mt-2"} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setActionsOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setActionsOpen(false); }}>
       <div className="w-9 shrink-0">{!compact && <TechnicianAvatar name={message.user_name} avatarUrl={message.avatar_url || message.avatar} className="h-9 w-9" />}</div>
       <div className="min-w-0 flex-1">
-        {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span><span className="text-[10px] text-zinc-600">{formatTime(message.ts)}</span>{message.edited && <span className="text-[9px] text-zinc-600">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
+        {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span><span className="text-[10px] text-zinc-500">{formatTime(message.ts)}</span>{message.edited && <span className="text-[9px] text-zinc-500">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
         {editing ? (
           <div className="flex gap-2"><Input value={editingText} onChange={event => onEditingText(event.target.value)} onKeyDown={event => event.key === "Enter" && onSaveEdit()} autoFocus className="h-9 border-white/10 bg-black/20" /><Button size="sm" onClick={onSaveEdit}>Save</Button><Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button></div>
         ) : (
@@ -1045,7 +1354,10 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
         )}
         <div className="mt-1.5 flex flex-wrap items-center gap-2">{message.thread_count > 0 && onThread && <button onClick={onThread} className="flex items-center gap-1 text-xs font-medium text-cyan-300 hover:text-cyan-200"><CornerDownRight className="h-3.5 w-3.5" />{message.thread_count} {message.thread_count === 1 ? "reply" : "replies"}</button>}<MessageReadReceipt message={message} currentUserId={currentUserId} receipts={readReceipts} /></div>
       </div>
-      {hovered && !editing && !message.pending && !message.deleted && (onReact || onThread || onCopyMessageLink || onPin || onStartEdit || onDelete) && (
+      {!editing && !message.pending && !message.deleted && (onReact || onThread || onCopyMessageLink || onPin || onStartEdit || onDelete) && (
+        <button type="button" onClick={() => setActionsOpen(current => !current)} aria-expanded={actionsOpen} aria-label="Open message actions" className="absolute right-3 top-2 rounded-md p-1.5 text-zinc-500 opacity-0 transition hover:bg-white/10 hover:text-zinc-100 focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 group-hover:opacity-100"><MoreHorizontal className="h-3.5 w-3.5" /></button>
+      )}
+      {(hovered || actionsOpen) && !editing && !message.pending && !message.deleted && (onReact || onThread || onCopyMessageLink || onPin || onStartEdit || onDelete) && (
         <div className="absolute right-3 top-0 flex -translate-y-1/2 items-center rounded-lg border border-white/10 bg-[#252832] p-0.5 shadow-xl">
           {onReact && <MessageAction icon={Smile} label="React" onClick={onEmojiOpen} />}
           {onThread && <MessageAction icon={Reply} label="Reply" onClick={onThread} />}
@@ -1113,6 +1425,7 @@ function TicketCard({ ticketNumber, headers, presence, currentUserId, channelId 
       </Link>
       <div className="flex items-center gap-2 border-t border-white/5 px-3 py-2">
         <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-cyan-200"><Link to={`/tickets?ticket=${encodeURIComponent(ticket.ticket_number)}`}>Open ticket</Link></Button>
+        {canStartWorkSession(ticket) && <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-violet-200 hover:text-violet-100"><Link to={workSessionPath(ticket)}><Wrench className="mr-1.5 h-3.5 w-3.5" />Start work</Link></Button>}
         <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-200" onClick={() => setPassOpen(true)}><ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />Pass ticket</Button>
       </div>
       <div className="px-3 pb-2"><WorkPresence kind="ticket" reference={ticket.ticket_number} presence={presence} headers={headers} /></div>
@@ -1406,6 +1719,7 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpda
     <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
       <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close conversation details"><X className="h-4 w-4" /></Button></div>
       {canManageMembers && <div className="border-b border-white/5 bg-cyan-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-cyan-100">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
+      {channel.kind === "client_direct" && <div className="border-b border-cyan-500/15 bg-cyan-500/[0.045] p-4" data-testid="customer-connection-details"><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" /><div className="min-w-0"><p className="text-xs font-medium text-cyan-100">Approved customer connection</p><p className="mt-1 truncate text-sm text-zinc-100">{channel.customer_name || channelDisplayName(channel)}</p>{channel.customer_email && <p className="mt-0.5 truncate text-[11px] text-zinc-500">{channel.customer_email}</p>}<p className="mt-2 text-[10px] leading-4 text-zinc-500">Private customer access is limited to this technician and remains linked to the approval record.</p></div></div></div>}
       <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div></ScrollArea>
     </aside>
   );

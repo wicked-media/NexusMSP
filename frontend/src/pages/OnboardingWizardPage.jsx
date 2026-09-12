@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -222,7 +222,7 @@ function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
               <Rocket className="w-14 h-14 mx-auto text-muted-foreground/20 mb-4" />
               <p className="text-lg font-semibold mb-1">No Onboarding Sessions</p>
               <p className="text-sm text-muted-foreground mb-5">Start your first client onboarding to get going.</p>
-              <Button onClick={onNew}><Plus className="w-4 h-4 mr-2" />Start Onboarding</Button>
+              <Button onClick={onNew}><Plus className="w-4 h-4 mr-2" />Start onboarding</Button>
             </CardContent>
           </Card>
         ) : (
@@ -234,7 +234,7 @@ function SessionListView({ sessions, stats, onSelect, onNew, loading }) {
             <Rocket className="w-14 h-14 mx-auto text-muted-foreground/20 mb-4" />
             <p className="text-lg font-semibold mb-1">No Onboarding Sessions</p>
             <p className="text-sm text-muted-foreground mb-5">Start your first client onboarding to get going.</p>
-            <Button onClick={onNew}><Plus className="w-4 h-4 mr-2" />Start Onboarding</Button>
+            <Button onClick={onNew}><Plus className="w-4 h-4 mr-2" />Start onboarding</Button>
           </CardContent>
         </Card>
       ) : (
@@ -857,7 +857,7 @@ function DocumentationForm({ data, onChange }) {
 function OnboardingTicketPlanForm({ session, onPlanCreated }) {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const headers = { Authorization: "Bearer " + token };
+  const headers = useMemo(() => ({ Authorization: "Bearer " + token }), [token]);
   const [blueprints, setBlueprints] = useState([]);
   const [selectedBlueprintId, setSelectedBlueprintId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -870,7 +870,7 @@ function OnboardingTicketPlanForm({ session, onPlanCreated }) {
       .catch(() => { if (current) toast.error("Could not load delivery blueprints"); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
-  }, [token]);
+  }, [headers]);
 
   const selectedBlueprint = blueprints.find((blueprint) => blueprint.id === selectedBlueprintId);
   const childTemplates = selectedBlueprint?.child_templates || [];
@@ -1039,7 +1039,7 @@ function GoLiveForm({ session, preflight, onPreflightChange, firstTicket, onFirs
 function WizardView({ session: initialSession, onBack, onRefresh }) {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [session, setSession] = useState(initialSession);
   const [stepData, setStepData] = useState({});
   const [notes, setNotes] = useState("");
@@ -1060,15 +1060,7 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
       setStepData(existing);
       setNotes(session.steps[currentKey].notes || "");
     }
-  }, [currentStepIdx, session?.id]);
-
-  const refreshSession = async () => {
-    try {
-      const res = await axios.get(`${API}/onboarding-enhanced/sessions/${session.id}`, { headers });
-      setSession(res.data);
-      setPreflight(res.data.preflight || {});
-    } catch { /* ignore */ }
-  };
+  }, [currentKey, session?.steps]);
 
   const navigateStep = (stepNum) => {
     setSession(prev => ({ ...prev, current_step: stepNum }));
@@ -1326,7 +1318,7 @@ function WizardView({ session: initialSession, onBack, onRefresh }) {
 // ─── Main Component ────────────────────────────────────────────────────────────
 export default function OnboardingWizardPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSessionId = searchParams.get("session");
   const [sessions, setSessions] = useState([]);
@@ -1343,23 +1335,21 @@ export default function OnboardingWizardPage() {
       setStats(res.data.stats || {});
     } catch { toast.error("Failed to fetch sessions"); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [headers]);
 
   useEffect(() => { fetchSessions(); }, [fetchSessions]);
 
-  const loadSession = async (id) => {
+  const loadSession = useCallback(async (id) => {
     try {
       const res = await axios.get(`${API}/onboarding-enhanced/sessions/${id}`, { headers });
       setActiveSession(res.data);
     } catch { toast.error("Failed to load session"); }
-  };
+  }, [headers]);
 
   useEffect(() => {
     if (!requestedSessionId || activeSession?.id === requestedSessionId) return;
     loadSession(requestedSessionId);
-    // The requested session is only set by navigation from a client workflow.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedSessionId]);
+  }, [activeSession?.id, loadSession, requestedSessionId]);
 
   const createSession = async (data) => {
     try {

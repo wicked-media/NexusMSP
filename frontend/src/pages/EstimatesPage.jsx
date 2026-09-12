@@ -14,13 +14,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, FileText, ArrowLeft, Send, CheckCircle,
+  Plus, Search, FileText, ArrowLeft, Send, CheckCircle,
   XCircle, Eye, Trash2, DollarSign, Clock, Receipt,
   History, CircleDot, RefreshCw, X
 } from "lucide-react";
 import { EstimateFollowupButton } from "@/components/ai/EstimateFollowupButton";
 import { EstimateAIBundle } from "@/components/ai/EstimateAIBundle";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const STATUS_CONFIG = {
   draft: { label: "Draft", class: "bg-zinc-500/20 text-zinc-400 border-zinc-500/30", icon: CircleDot, pulse: false },
@@ -63,6 +65,7 @@ export default function EstimatesPage() {
   const [clients, setClients] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -75,8 +78,9 @@ export default function EstimatesPage() {
   });
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
+  const fetchAll = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const requestHeaders = { Authorization: `Bearer ${token}` };
       const [eRes, cRes, sRes] = await Promise.all([
@@ -87,8 +91,11 @@ export default function EstimatesPage() {
       setEstimates(eRes.data);
       setClients(cRes.data);
       setStats(sRes.data);
-    } catch { toast.error("Failed to fetch estimates"); }
-    finally { setLoading(false); }
+    } catch { toast.error(quiet ? "Could not refresh estimates. Current results remain visible." : "Failed to fetch estimates"); }
+    finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [token]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
@@ -106,7 +113,7 @@ export default function EstimatesPage() {
       toast.success(`Estimate ${res.data.estimate_number} created`);
       setIsCreateOpen(false);
       resetForm();
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch { toast.error("Failed to create estimate"); }
   };
 
@@ -120,7 +127,7 @@ export default function EstimatesPage() {
         const aRes = await axios.get(`${API}/estimates/${id}/audit-log`, { headers });
         setAuditLog(aRes.data);
       }
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
@@ -128,7 +135,7 @@ export default function EstimatesPage() {
     try {
       const res = await axios.post(`${API}/estimates/${id}/convert-to-invoice`, {}, { headers });
       toast.success(res.data.message);
-      fetchAll();
+      fetchAll({ quiet: true });
       if (viewing) {
         const r = await axios.get(`${API}/estimates/${id}`, { headers });
         setViewing(r.data);
@@ -142,7 +149,7 @@ export default function EstimatesPage() {
       await axios.delete(`${API}/estimates/${id}`, { headers });
       toast.success("Estimate deleted");
       setViewing(null);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch { toast.error("Failed to delete"); }
   };
 
@@ -171,7 +178,7 @@ export default function EstimatesPage() {
     return true;
   });
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading estimates" />;
 
   // ========== DETAIL VIEW ==========
   if (viewing) {
@@ -282,16 +289,17 @@ export default function EstimatesPage() {
 
   return (
     <div className="space-y-6" data-testid="estimates-page">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><FileText className="w-4 h-4 text-sky-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">Estimates</h1><p className="text-sm text-muted-foreground">{estimates.length} estimates · ${stats?.total_value?.toLocaleString() || 0} total value</p></div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-estimate-btn"><Plus className="w-4 h-4 mr-1" />New Estimate</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Commercial operations"
+        title="Estimates"
+        description={`${estimates.length} estimate${estimates.length === 1 ? "" : "s"} · $${stats?.total_value?.toLocaleString() || 0} total value ready for review and conversion.`}
+        icon={FileText}
+        tone="sky"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => fetchAll({ quiet: true })} disabled={refreshing} data-testid="refresh-estimates"><RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+          <Button onClick={() => setIsCreateOpen(true)} data-testid="create-estimate-btn"><Plus className="w-4 h-4 mr-1" />New estimate</Button>
+        </>}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-5 gap-3">
@@ -361,9 +369,9 @@ export default function EstimatesPage() {
 
       {/* CREATE DIALOG */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />New Estimate</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-cyan-400/15 via-cyan-400/[0.04] to-transparent px-5 py-5 pr-12 md:px-7"><DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5 text-cyan-300" />New Estimate</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 md:px-7 md:py-6">
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Title</Label><Input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Estimate title" data-testid="est-title" /></div>
               <div><Label>Client</Label>
@@ -403,7 +411,7 @@ export default function EstimatesPage() {
             </div>
             <div><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} placeholder="Internal notes" /></div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4 md:px-7">
             <Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
             <Button onClick={handleCreate} data-testid="save-estimate-btn"><FileText className="w-4 h-4 mr-1" />Create Estimate</Button>
           </DialogFooter>

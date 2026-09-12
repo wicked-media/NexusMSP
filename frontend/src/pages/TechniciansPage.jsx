@@ -709,9 +709,9 @@ export default function TechniciansPage() {
       <>
         {/* CREATE/EDIT DIALOG */}
         <Dialog open={isCreateOpen} onOpenChange={v => { setIsCreateOpen(v); if (!v) setEditingTech(null); }}>
-          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-            <DialogHeader><DialogTitle>{editingTech ? "Edit Technician" : "Add Technician"}</DialogTitle><DialogDescription>Fill in the details below.</DialogDescription></DialogHeader>
-            <div className="space-y-3">
+          <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+            <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>{editingTech ? "Edit Technician" : "Add Technician"}</DialogTitle><DialogDescription>Fill in the details below.</DialogDescription></DialogHeader>
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Full Name</Label><Input value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} data-testid="tech-name" /></div>
                 <div><Label>Email</Label><Input value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} data-testid="tech-email" /></div>
@@ -758,7 +758,7 @@ export default function TechniciansPage() {
                 <div className="flex gap-2"><Input className="flex-1" placeholder="e.g. Networking, Azure" value={specialtyInput} onChange={e => setSpecialtyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && (e.preventDefault(), addSpecialty())} /><Button type="button" variant="outline" size="sm" onClick={addSpecialty}>Add</Button></div>
               </div>
             </div>
-            <DialogFooter><Button onClick={handleCreate} data-testid="save-tech-btn">{editingTech ? "Update" : "Add"} Technician</Button></DialogFooter>
+            <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button onClick={handleCreate} data-testid="save-tech-btn">{editingTech ? "Update" : "Add"} Technician</Button></DialogFooter>
           </DialogContent>
         </Dialog>
 
@@ -1317,9 +1317,9 @@ function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminTogg
 
   return (
     <Dialog open onOpenChange={v => { if (!v) setPermDialog(false); }}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Manage Permissions - {permTarget?.name}</DialogTitle><DialogDescription>Configure module access permissions.</DialogDescription></DialogHeader>
-        <div className="space-y-4">
+      <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-amber-400/15 via-amber-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>Manage Permissions - {permTarget?.name}</DialogTitle><DialogDescription>Configure module access permissions.</DialogDescription></DialogHeader>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
           <div className="flex items-center justify-between p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
             <div className="flex items-center gap-3">
               <Crown className="w-5 h-5 text-amber-500" />
@@ -1391,7 +1391,7 @@ function PermissionsDialog({ permTarget, permData, isAdminToggle, setIsAdminTogg
             </TableBody>
           </Table>
         </div>
-        <DialogFooter><Button onClick={handleSavePermissions} data-testid="save-permissions-btn">Save Permissions</Button></DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button onClick={handleSavePermissions} data-testid="save-permissions-btn">Save Permissions</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1402,9 +1402,9 @@ function SignatureDialog({ sigConfig, setSigConfig, handleSaveSignature, setSigD
   const c = sigConfig;
   return (
     <Dialog open onOpenChange={v => { if (!v) setSigDialog(false); }}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader><DialogTitle>Email Signature Builder</DialogTitle><DialogDescription>Design your email signature.</DialogDescription></DialogHeader>
-        <div className="grid grid-cols-2 gap-6">
+      <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+        <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>Email Signature Builder</DialogTitle><DialogDescription>Design your email signature.</DialogDescription></DialogHeader>
+        <div className="grid min-h-0 flex-1 grid-cols-2 gap-6 overflow-y-auto px-5 py-5">
           <div className="space-y-3">
             <div><Label>Template Style</Label>
               <Select value={c.template} onValueChange={v => setSigConfig({ ...c, template: v })}>
@@ -1434,7 +1434,7 @@ function SignatureDialog({ sigConfig, setSigConfig, handleSaveSignature, setSigD
             <p className="text-xs text-muted-foreground mt-2">This signature will be used in outgoing emails from the ticket system.</p>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleSaveSignature} data-testid="save-signature-btn"><Mail className="w-4 h-4 mr-1" />Save Signature</Button></DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button onClick={handleSaveSignature} data-testid="save-signature-btn"><Mail className="w-4 h-4 mr-1" />Save Signature</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1515,7 +1515,7 @@ function RemoteSessionsTab({ sessions, techName }) {
 }
 
 // ========== ACTIVITY LOG TAB ==========
-function ActivityLogTab({ activity, techName, navigate }) {
+function ActivityLogTab({ activity, techName, navigate: _navigate }) {
   if (!activity) return <div className="text-center py-12 text-muted-foreground">Loading activity...</div>;
   const { activity_logs = [], remote_sessions = [] } = activity;
   const allEvents = [
@@ -1582,7 +1582,7 @@ function AchievementIcon({ icon, className = "w-4 h-4" }) {
 }
 
 // ========== ACHIEVEMENTS TAB ==========
-function AchievementsTab({ earned = [], allDefs = [], techName, techId, onAward }) {
+function AchievementsTab({ earned = [], allDefs = [], techName, techId: _techId, onAward }) {
   const earnedIds = new Set(earned.map(e => e.achievement_id));
   const categories = [...new Set(allDefs.map(d => d.category))];
   return (

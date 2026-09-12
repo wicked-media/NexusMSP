@@ -194,7 +194,7 @@ export function ChatPanel() {
             {activeCh?.display_name || activeCh?.name}
           </div>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setOpen(false); navigate("/team-chat"); }} title="Open Team Chat"><Maximize2 className="w-3.5 h-3.5" /></Button>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setOpen(false); navigate(activeId ? `/team-chat?channel=${encodeURIComponent(activeId)}` : "/team-chat"); }} title="Open Team Chat"><Maximize2 className="w-3.5 h-3.5" /></Button>
             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setOpen(false)} data-testid="chat-close-btn"><X className="w-3.5 h-3.5" /></Button>
           </div>
         </div>

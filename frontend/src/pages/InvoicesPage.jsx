@@ -18,6 +18,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -34,6 +37,7 @@ import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
 import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
 import { InvoiceAIBundle } from "@/components/ai/InvoiceAIBundle";
 import { InvoiceDetailSmartActions } from "@/components/invoices/InvoicesSmartBar";
+import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
 
 const PAYMENT_STATUS = {
   unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
@@ -243,8 +247,10 @@ export default function InvoicesPage() {
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [documentTemplates, setDocumentTemplates] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -300,6 +306,7 @@ export default function InvoicesPage() {
   const [bulkConfirmAction, setBulkConfirmAction] = useState(null);
   const [form, setForm] = useState({
     client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
+    document_label: "", document_terms: "", document_template_id: "",
     line_items: [], tax_rate: "0", discount_pct: "0", discount_amount: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
@@ -308,11 +315,12 @@ export default function InvoicesPage() {
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
+  const fetchAll = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     setLoadError(null);
     try {
-      const [invResult, clientResult, productResult, ticketResult, statsResult, xeroResult, reconciliationResult] = await Promise.allSettled([
+      const [invResult, clientResult, productResult, ticketResult, statsResult, xeroResult, reconciliationResult, templateResult] = await Promise.allSettled([
         axios.get(`${API}/invoices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/products`, { headers }),
@@ -320,6 +328,7 @@ export default function InvoicesPage() {
         axios.get(`${API}/invoices/stats/summary`, { headers }),
         axios.get(`${API}/xero/status`, { headers }),
         axios.get(`${API}/billing/reconciliation/summary`, { headers }),
+        axios.get(`${API}/invoice-templates?include_presets=true`, { headers }),
       ]);
       if (invResult.status !== "fulfilled") throw invResult.reason;
       setInvoices((invResult.value.data || []).map(normaliseInvoice));
@@ -329,20 +338,28 @@ export default function InvoicesPage() {
       setStats(statsResult.status === "fulfilled" ? statsResult.value.data : {});
       setXeroStatus(xeroResult.status === "fulfilled" ? xeroResult.value.data : { connected: false, configured: false, org_name: null });
       setReconciliation(reconciliationResult.status === "fulfilled" ? reconciliationResult.value.data : { pending_count: 0, pending_total: 0, by_method: [] });
+      setDocumentTemplates(templateResult.status === "fulfilled" ? templateResult.value.data : []);
       if ([clientResult, productResult, ticketResult].some(result => result.status === "rejected")) {
         toast.warning("Invoices loaded, but one optional client, product, or ticket lookup is temporarily unavailable");
       }
     } catch {
-      setLoadError("NexusMSP could not load invoices and the required billing records. No invoice changes have been made.");
-      toast.error("Failed to load invoices");
+      if (quiet) toast.error("Invoices could not refresh. The current billing view has been kept.");
+      else {
+        setLoadError("NexusMSP could not load invoices and the required billing records. No invoice changes have been made.");
+        toast.error("Failed to load invoices");
+      }
     }
-    finally { setLoading(false); }
+    finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const resetForm = () => setForm({
     client_id: "", contract_id: "", ticket_id: "", ticket_number: "", ticket_title: "", invoice_name: "", due_date: "", notes: "",
+    document_label: "", document_terms: "", document_template_id: "",
     line_items: [], tax_rate: "0",
     is_recurring: false, recurring_interval: "monthly",
     recurring_start_date: "", recurring_end_date: ""
@@ -393,7 +410,7 @@ export default function InvoicesPage() {
     axios.get(`${API}/invoices/${inv.id}/payment-status?session_id=${sessionId}`, { headers })
       .then(() => {
         toast.success("Payment processed successfully!");
-        return fetchAll();
+        return fetchAll({ quiet: true });
       })
       .catch(error => {
         processedStripeSession.current = null;
@@ -404,7 +421,7 @@ export default function InvoicesPage() {
     setEditing(inv);
     setForm({
       client_id: inv.client_id, contract_id: inv.contract_id || "", ticket_id: inv.ticket_id || "", ticket_number: inv.ticket_number || "", ticket_title: inv.ticket_title || "", due_date: inv.due_date,
-      invoice_name: inv.invoice_name || "", notes: inv.notes || "", line_items: normaliseInvoice(inv).line_items, tax_rate: String(inv.tax_rate || 0),
+      invoice_name: inv.invoice_name || "", document_label: inv.document_label || "", document_terms: inv.document_terms || "", document_template_id: inv.document_template_id || "", notes: inv.notes || "", line_items: normaliseInvoice(inv).line_items, tax_rate: String(inv.tax_rate || 0),
       is_recurring: inv.is_recurring || false, recurring_interval: inv.recurring_interval || "monthly",
       recurring_start_date: inv.recurring_start_date || "", recurring_end_date: inv.recurring_end_date || ""
     });
@@ -440,7 +457,7 @@ export default function InvoicesPage() {
       toast.success(`${action.replace("_", " ")} → ${n} invoice(s)`);
       setSelectedIds(new Set());
       setBulkConfirmAction(null);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Bulk action failed"); }
     finally { setBulkBusy(false); }
   };
@@ -493,12 +510,12 @@ export default function InvoicesPage() {
         await axios.post(`${API}/invoices`, payload, { headers });
         toast.success("Invoice created");
       }
-      setIsFormOpen(false); fetchAll();
+      setIsFormOpen(false); fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save"); }
   };
 
   const handleDelete = async (id) => {
-    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); setDeleteTarget(null); fetchAll(); if (viewInvoice?.id === id) setViewInvoice(null); }
+    try { await axios.delete(`${API}/invoices/${id}`, { headers }); toast.success("Deleted"); setDeleteTarget(null); fetchAll({ quiet: true }); if (viewInvoice?.id === id) setViewInvoice(null); }
     catch { toast.error("Failed"); }
   };
 
@@ -506,7 +523,7 @@ export default function InvoicesPage() {
     try {
       await axios.put(`${API}/invoices/${inv.id}`, { status }, { headers });
       toast.success(status === "sent" ? "Invoice marked as sent" : `Status: ${status}`);
-      fetchAll();
+      fetchAll({ quiet: true });
       if (viewInvoice?.id === inv.id) setViewInvoice({ ...viewInvoice, status, ...(status === "sent" ? { sent_at: new Date().toISOString() } : {}) });
     } catch (e) { toast.error(e.response?.data?.detail || "Unable to update invoice status"); }
   };
@@ -539,7 +556,7 @@ export default function InvoicesPage() {
       await axios.put(`${API}/clients/${billingProfileClient}/billing-profile`, billingProfile, { headers });
       toast.success("Client billing profile saved");
       setBillingProfileOpen(false);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (error) { toast.error(error.response?.data?.detail || "Could not save billing profile"); }
   };
 
@@ -547,7 +564,7 @@ export default function InvoicesPage() {
     try {
       const response = await axios.post(`${API}/billing/reconciliation/settlements`, settlementForm, { headers });
       toast.success(`Settlement ${response.data.id} created — ready for Xero reconciliation`);
-      setSettlementOpen(false); setSettlementForm(f => ({ ...f, reference: "" })); fetchAll();
+      setSettlementOpen(false); setSettlementForm(f => ({ ...f, reference: "" })); fetchAll({ quiet: true });
     } catch (error) { toast.error(error.response?.data?.detail || "Could not close settlement"); }
   };
 
@@ -563,7 +580,7 @@ export default function InvoicesPage() {
       );
       toast.success("Payment recorded");
       setIsPaymentOpen(false);
-      fetchAll();
+      fetchAll({ quiet: true });
       if (viewInvoice?.id === payingInvoice.id) {
         const updated = await axios.get(`${API}/invoices/${payingInvoice.id}`, { headers });
         setViewInvoice(updated.data);
@@ -615,7 +632,7 @@ export default function InvoicesPage() {
       setSplitAllocations([]);
       setViewInvoice(response.data.parent);
       setDetailTab("split");
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (error) {
       toast.error(error.response?.data?.detail || "Could not create split-billing invoices");
     } finally {
@@ -643,7 +660,7 @@ export default function InvoicesPage() {
     if (!moveTarget) { toast.error("Select a target client"); return; }
     try {
       const res = await axios.post(`${API}/invoices/${movingInvoice.id}/move-client`, { client_id: moveTarget }, { headers });
-      toast.success(res.data.message); setMoveDialog(false); fetchAll();
+      toast.success(res.data.message); setMoveDialog(false); fetchAll({ quiet: true });
       if (viewInvoice?.id === movingInvoice.id) { const updated = await axios.get(`${API}/invoices/${movingInvoice.id}`, { headers }); setViewInvoice(updated.data); }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to move invoice"); }
   };
@@ -651,7 +668,7 @@ export default function InvoicesPage() {
   const handleVoidInvoice = async () => {
     try {
       await axios.post(`${API}/invoices/${voidingInvoice.id}/void`, { reason: voidReason }, { headers });
-      toast.success("Invoice voided"); setVoidDialog(false); fetchAll();
+      toast.success("Invoice voided"); setVoidDialog(false); fetchAll({ quiet: true });
       if (viewInvoice?.id === voidingInvoice.id) { const updated = await axios.get(`${API}/invoices/${voidingInvoice.id}`, { headers }); setViewInvoice(updated.data); }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to void invoice"); }
   };
@@ -715,7 +732,7 @@ export default function InvoicesPage() {
       // Refresh invoice to show last_sms_reminder_at
       const updated = await axios.get(`${API}/invoices/${viewInvoice.id}`, { headers });
       setViewInvoice(updated.data);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to send SMS");
     } finally {
@@ -728,7 +745,7 @@ export default function InvoicesPage() {
     try {
       const res = await axios.post(`${API}/invoices/${inv.id}/clone`, {}, { headers });
       toast.success(`Cloned as ${res.data.invoice_number}`);
-      fetchAll();
+      fetchAll({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to clone"); }
   };
 
@@ -748,11 +765,20 @@ export default function InvoicesPage() {
   };
 
   // --- PDF ---
+  const resolveInvoicePdfUrl = (inv, download = false) => resolveDocumentPdfUrl({
+    api: API,
+    headers,
+    documentType: "invoice",
+    documentId: inv.id,
+    token,
+    download,
+  });
+
   const handlePdfPreview = async (inv) => {
     setPdfLoading(true); setPdfPreviewInvoice(inv);
     try {
-      const urlWithToken = `${API}/invoices/${inv.id}/pdf?token=${encodeURIComponent(token)}`;
-      const res = await axios.get(urlWithToken, { headers, responseType: "blob" });
+      const pdfUrl = await resolveInvoicePdfUrl(inv);
+      const res = await axios.get(pdfUrl, { responseType: "blob" });
       if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       setPdfPreviewUrl(url);
@@ -762,8 +788,8 @@ export default function InvoicesPage() {
 
   const handlePdfDownload = async (inv) => {
     try {
-      const urlWithToken = `${API}/invoices/${inv.id}/pdf/download?token=${encodeURIComponent(token)}`;
-      const res = await axios.get(urlWithToken, { headers, responseType: "blob" });
+      const pdfUrl = await resolveInvoicePdfUrl(inv, true);
+      const res = await axios.get(pdfUrl, { responseType: "blob" });
       if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       const a = document.createElement("a"); a.href = url; a.download = `${inv.invoice_number || "invoice"}.pdf`; a.click();
@@ -796,7 +822,7 @@ export default function InvoicesPage() {
     return inv.status;
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading invoices" />;
 
   if (loadError) {
     return (
@@ -827,6 +853,10 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-4 rounded-xl border border-cyan-400/15 bg-cyan-400/[0.035] p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4"><div className="min-w-0 flex-1"><Label>Invoice name <span className="font-normal text-muted-foreground">(internal)</span></Label><Input value={form.invoice_name} onChange={e => setForm({ ...form, invoice_name: e.target.value })} maxLength={160} placeholder="e.g. July 2026 managed services" data-testid="invoice-name" /><p className="mt-1 text-[10px] leading-relaxed text-cyan-200/75">A searchable workspace label for technicians. It does not replace the formal invoice number or client-facing notes.</p></div><Badge variant="outline" className="shrink-0 border-cyan-400/20 bg-cyan-400/[0.05] text-[10px] text-cyan-100">Optional</Badge></div>
+              </div>
+              <div className="col-span-4 rounded-xl border border-violet-400/20 bg-violet-400/[0.035] p-4" data-testid="invoice-document-controls">
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><Label className="text-sm font-semibold text-violet-100">Client-facing document</Label><p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Set a draft-only title and terms for this invoice. The formal invoice number, totals, tax, payment history, and audit record remain system-controlled.</p></div><Link to="/invoice-templates" className="text-xs font-medium text-cyan-300 hover:text-cyan-200">Manage document designs</Link></div>
+                <div className="mt-3 grid gap-3 md:grid-cols-3"><div><Label className="text-xs">Document title <span className="font-normal text-muted-foreground">(optional)</span></Label><Input value={form.document_label} onChange={e => setForm({ ...form, document_label: e.target.value })} maxLength={120} placeholder="Defaults to Tax Invoice" data-testid="invoice-document-label" /><p className="mt-1 text-[10px] text-muted-foreground">Shown on the client PDF; it never replaces the invoice number.</p></div><div><Label className="text-xs">Document design</Label><Select value={form.document_template_id || "__default"} onValueChange={value => setForm({ ...form, document_template_id: value === "__default" ? "" : value })}><SelectTrigger data-testid="invoice-document-template"><SelectValue placeholder="Organisation default" /></SelectTrigger><SelectContent><SelectItem value="__default">Organisation default</SelectItem>{documentTemplates.filter(template => template.doc_type === "invoice").map(template => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent></Select><p className="mt-1 text-[10px] text-muted-foreground">Choose a saved design for this draft only.</p></div><div><Label className="text-xs">Document terms <span className="font-normal text-muted-foreground">(optional)</span></Label><Textarea value={form.document_terms} onChange={e => setForm({ ...form, document_terms: e.target.value })} maxLength={5000} rows={3} placeholder="Delivery, payment, or service terms for this invoice" data-testid="invoice-document-terms" /></div></div>
               </div>
               <div className="col-span-2">
                 <div className="flex items-center justify-between"><Label>Client *</Label>{form.client_id && <button type="button" className="text-[11px] font-medium text-emerald-300 hover:text-emerald-200" onClick={() => openBillingProfile(form.client_id)}>Billing profile</button>}</div>
@@ -992,14 +1022,14 @@ export default function InvoicesPage() {
 
       {/* MANUAL PAYMENT */}
       <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
-        <DialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-3xl overflow-hidden p-0">
-          <DialogHeader className="border-b border-border/80 px-6 py-5">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-emerald-400/15 via-emerald-400/[0.04] to-transparent px-6 py-5">
             <div className="flex items-start gap-3 pr-6">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10"><Banknote className="h-5 w-5 text-emerald-300" /></span>
               <div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Billing workflow</p><DialogTitle className="mt-1">Record customer payment</DialogTitle><DialogDescription className="mt-1">Create the auditable payment record here, then reconcile it with Xero once the bank feed or terminal settlement is available.</DialogDescription></div>
             </div>
           </DialogHeader>
-          <div className="space-y-5 px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {payingInvoice && <div className="grid gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 sm:grid-cols-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">Invoice</p><p className="mt-1 font-mono text-sm font-semibold">{payingInvoice.invoice_number}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Client</p><p className="mt-1 truncate text-sm font-medium">{payingInvoice.client_name || "Unassigned client"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Remaining balance</p><p className="mt-1 text-sm font-semibold text-emerald-300">${Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)).toFixed(2)}</p></div></div>}
             <div className="grid gap-4 sm:grid-cols-2"><div><Label>Payment amount ($)</Label><Input className="mt-1" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div><div><Label>Payment date</Label><Input className="mt-1" type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div></div>
             <div><Label>Payment method</Label>
@@ -1019,7 +1049,7 @@ export default function InvoicesPage() {
             <div><Label>Reference</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
             <div><Label>Internal notes</Label><Textarea className="mt-1" value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional reconciliation, remittance, or customer notes" rows={3} /></div>
           </div>
-          <DialogFooter className="border-t border-border/80 px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1345,7 +1375,7 @@ export default function InvoicesPage() {
             <InvoiceDetailSmartActions invoice={inv} onReload={async () => {
               const updated = await axios.get(`${API}/invoices/${inv.id}`, { headers });
               setViewInvoice(updated.data);
-              fetchAll();
+              fetchAll({ quiet: true });
             }} />
           </CardContent>
         </Card>
@@ -1721,26 +1751,24 @@ export default function InvoicesPage() {
   return (
     <PageShell className="nx-page-stage" data-testid="invoices-page">
       <div className="flex-1 space-y-6 overflow-y-auto">
-      <div className="nx-ambient-surface flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_36%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_16px_42px_rgba(0,0,0,0.18)]" data-nx-signal={(stats.unpaid || 0) > 0 || (stats.total_outstanding || 0) > 0 ? "attention" : "healthy"}>
-        <div>
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Finance operations</p>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><Receipt className="h-5 w-5 text-emerald-300" /></span>
-            <div><h1 className="text-2xl font-bold tracking-tight">Invoices</h1><p className="text-sm text-muted-foreground">Billing command centre · {invoices.length} invoices</p></div>
-          </div>
-        </div>
-        <div className="flex w-full flex-wrap gap-2 xl:w-auto xl:justify-end">
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Zap className="w-3.5 h-3.5 mr-1.5" />Billing Command</Button>
-          <Button variant="info" size="sm" className="h-9 rounded-lg" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="invoice-xero-button"><Building2 className="w-3.5 h-3.5 mr-1.5" />{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => navigate("/reports?tab=commercial")} data-testid="aging-report-btn">
-            <Timer className="w-4 h-4 mr-1" />Receivables Report
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn">
-            <BarChart3 className="w-4 h-4 mr-1" />Revenue Analytics
-          </Button>
-          <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New Invoice</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Finance operations"
+        title="Invoices"
+        description={`Billing command centre · ${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`}
+        icon={Receipt}
+        tone="emerald"
+        signal={(stats.unpaid || 0) > 0 || (stats.total_outstanding || 0) > 0 ? "attention" : "healthy"}
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => fetchAll({ quiet: true })} disabled={refreshing} data-testid="refresh-invoices"><RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+          <WorkspaceActionMenu testId="invoice-more-actions">
+            <WorkspaceActionMenuItem icon={Zap} onSelect={() => navigate("/billing-dashboard")} testId="goto-billing-command">Billing command</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={Building2} onSelect={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} testId="invoice-xero-button">{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={Timer} onSelect={() => navigate("/reports?tab=commercial")} testId="aging-report-btn">Receivables report</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => { setTopView("revenue"); setRevenueAnalytics(null); }} testId="revenue-analytics-btn">Revenue analytics</WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
+          <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New invoice</Button>
+        </>}
+      />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <HeroTile label="All invoices" value={stats.total || 0} icon={FileText} glow="cyan" testId="stat-total" />

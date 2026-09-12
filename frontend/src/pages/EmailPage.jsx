@@ -6,18 +6,12 @@ import { formatDistanceToNow } from "date-fns";
 import { API, useAuth } from "@/App";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,38 +66,6 @@ const STATUS_CONFIG = {
   failed: { label: "Delivery failed", className: "border-rose-500/25 bg-rose-500/10 text-rose-200" },
   received: { label: "Received", className: "border-sky-500/25 bg-sky-500/10 text-sky-200" },
 };
-
-const WORKFLOW_TONES = {
-  cyan: {
-    background: "bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.17),transparent_45%),linear-gradient(135deg,rgba(6,182,212,0.10),transparent)]",
-    icon: "border-cyan-400/25 bg-cyan-400/10 text-cyan-300",
-    eyebrow: "text-cyan-300",
-    badge: "border-cyan-400/30 bg-cyan-400/5 text-cyan-200",
-  },
-  emerald: {
-    background: "bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.10),transparent)]",
-    icon: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
-    eyebrow: "text-emerald-300",
-    badge: "border-emerald-500/30 bg-emerald-500/5 text-emerald-300",
-  },
-};
-
-function WorkflowDialogHeader({ icon: Icon, eyebrow, title, description, badge, tone = "cyan" }) {
-  const palette = WORKFLOW_TONES[tone] || WORKFLOW_TONES.cyan;
-  return (
-    <DialogHeader className={`shrink-0 border-b border-white/[0.07] px-6 py-5 text-left ${palette.background}`}>
-      <p className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${palette.eyebrow}`}>{eyebrow}</p>
-      <div className="mt-1 flex flex-wrap items-center gap-2">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-xl border ${palette.icon}`}>
-          <Icon className="h-4 w-4" />
-        </span>
-        <DialogTitle className="text-2xl tracking-tight text-zinc-100">{title}</DialogTitle>
-        {badge && <Badge variant="outline" className={`text-[10px] ${palette.badge}`}>{badge}</Badge>}
-      </div>
-      <DialogDescription className="mt-2 max-w-3xl">{description}</DialogDescription>
-    </DialogHeader>
-  );
-}
 
 function ClientAutocomplete({ clients, value, onValueChange }) {
   const [open, setOpen] = useState(false);
@@ -585,15 +547,23 @@ export default function EmailPage() {
       <Dialog open={isComposeOpen} onOpenChange={(open) => {
         if (!saving) setIsComposeOpen(open);
       }}>
-        <DialogContent className="max-h-[92vh] max-w-3xl gap-0 overflow-hidden p-0" data-testid="email-compose-dialog">
-          <WorkflowDialogHeader
+        <NexusWorkflowDialog
             icon={Send}
             eyebrow="Auditable correspondence"
             title="Compose client email"
-            badge={status.configured ? "Microsoft 365 ready" : "Draft only"}
             tone={status.configured ? "emerald" : "cyan"}
             description="Link the message to a client, confirm every recipient, and retain its delivery outcome in the NexusMSP communications ledger."
-          />
+            className="max-w-3xl"
+            contentClassName="p-0"
+            data-testid="email-compose-dialog"
+            headerAccessory={<Badge variant="outline" className={status.configured ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}>{status.configured ? "Microsoft 365 ready" : "Draft only"}</Badge>}
+            footer={<>
+              <Button type="button" variant="outline" onClick={resetCompose} disabled={saving}>Cancel</Button>
+              {!status.configured && <Button type="button" variant="outline" onClick={() => navigate("/settings?tab=mailbox")} disabled={saving}><Settings className="mr-1.5 h-4 w-4" />Mailbox settings</Button>}
+              <Button type="button" variant="outline" onClick={() => persistEmail()} disabled={saving}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Clock className="mr-1.5 h-4 w-4" />}Save draft</Button>
+              <Button type="button" onClick={() => persistEmail({ sendNow: true })} disabled={saving || !status.configured}>{saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send now</Button>
+            </>}
+          >
           <ScrollArea className="max-h-[calc(92vh-190px)]">
             <div className="space-y-5 px-6 py-5">
               <div className="grid gap-4 md:grid-cols-2">
@@ -660,36 +630,29 @@ export default function EmailPage() {
               </div>
             </div>
           </ScrollArea>
-          <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/15 px-6 py-4">
-            <Button type="button" variant="outline" onClick={resetCompose} disabled={saving}>Cancel</Button>
-            {!status.configured && (
-              <Button type="button" variant="outline" onClick={() => navigate("/settings?tab=mailbox")} disabled={saving}>
-                <Settings className="mr-1.5 h-4 w-4" />Mailbox settings
-              </Button>
-            )}
-            <Button type="button" variant="outline" onClick={() => persistEmail()} disabled={saving}>
-              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Clock className="mr-1.5 h-4 w-4" />}Save draft
-            </Button>
-            <Button type="button" onClick={() => persistEmail({ sendNow: true })} disabled={saving || !status.configured}>
-              {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send now
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <Dialog open={Boolean(selectedEmail)} onOpenChange={(open) => {
         if (!open && !sendingId) setSelectedEmail(null);
       }}>
-        <DialogContent className="max-h-[92vh] max-w-3xl gap-0 overflow-hidden p-0" data-testid="email-detail-dialog">
-          {selectedEmail && (
-            <>
-              <WorkflowDialogHeader
+        {selectedEmail && (
+          <NexusWorkflowDialog
                 icon={selectedEmail.direction === "inbound" ? ArrowDownLeft : ArrowUpRight}
                 eyebrow={selectedEmail.direction === "inbound" ? "Inbound correspondence" : "Outbound correspondence"}
                 title={selectedEmail.subject || "(No subject)"}
-                badge={(STATUS_CONFIG[selectedEmail.status] || STATUS_CONFIG.draft).label}
+                tone={selectedEmail.status === "failed" ? "amber" : selectedEmail.direction === "inbound" ? "cyan" : "emerald"}
                 description={`${selectedEmail.direction === "inbound" ? "Received" : "Created"} ${relativeTime(selectedEmail.received_at || selectedEmail.sent_at || selectedEmail.created_at)}${selectedEmail.client_name ? ` · linked to ${selectedEmail.client_name}` : ""}.`}
-              />
+                className="max-w-3xl"
+                contentClassName="p-0"
+                data-testid="email-detail-dialog"
+                headerAccessory={<Badge variant="outline" className={(STATUS_CONFIG[selectedEmail.status] || STATUS_CONFIG.draft).className}>{(STATUS_CONFIG[selectedEmail.status] || STATUS_CONFIG.draft).label}</Badge>}
+                footer={<>
+                  {selectedEmail.client_id && <Button variant="outline" onClick={() => navigate(`/clients?client=${selectedEmail.client_id}`)}><UserRound className="mr-1.5 h-4 w-4" />Open client</Button>}
+                  <Button variant="outline" onClick={() => setSelectedEmail(null)} disabled={Boolean(sendingId)}>Close</Button>
+                  {selectedEmail.status === "draft" && <Button onClick={() => handleSend(selectedEmail.id)} disabled={Boolean(sendingId) || !status.configured}>{sendingId === selectedEmail.id ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}Send through Microsoft 365</Button>}
+                </>}
+              >
               <ScrollArea className="max-h-[calc(92vh-190px)]">
                 <div className="space-y-5 px-6 py-5">
                   <div className="grid gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-4 text-sm md:grid-cols-2">
@@ -724,23 +687,8 @@ export default function EmailPage() {
                   )}
                 </div>
               </ScrollArea>
-              <DialogFooter className="shrink-0 border-t border-white/[0.07] bg-black/15 px-6 py-4">
-                {selectedEmail.client_id && (
-                  <Button variant="outline" onClick={() => navigate(`/clients?client=${selectedEmail.client_id}`)}>
-                    <UserRound className="mr-1.5 h-4 w-4" />Open client
-                  </Button>
-                )}
-                <Button variant="outline" onClick={() => setSelectedEmail(null)} disabled={Boolean(sendingId)}>Close</Button>
-                {selectedEmail.status === "draft" && (
-                  <Button onClick={() => handleSend(selectedEmail.id)} disabled={Boolean(sendingId) || !status.configured}>
-                    {sendingId === selectedEmail.id ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
-                    Send through Microsoft 365
-                  </Button>
-                )}
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
+          </NexusWorkflowDialog>
+        )}
       </Dialog>
     </div>
   );

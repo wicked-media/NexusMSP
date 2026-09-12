@@ -1,16 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { toast } from "sonner";
 import {
-  Wrench, Search, RefreshCw, Loader2, Clock, AlertTriangle, Plus, GripVertical, Monitor, Timer
+  Wrench, Search, RefreshCw, Loader2, Clock, AlertTriangle, GripVertical, Monitor, Timer, Ticket, ArrowRight
 } from "lucide-react";
 
 const BENCH_COLUMNS = [
@@ -71,14 +69,12 @@ function BenchColumn({ col, jobs, onDrop, onDragStart, dragOver, setDragOver }) 
 
 export default function WorkshopBenchPage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [dragOver, setDragOver] = useState(null);
   const [dragging, setDragging] = useState(null);
-  const [showNew, setShowNew] = useState(false);
-  const [newForm, setNewForm] = useState({ title: "", description: "", client_name: "", device_name: "", assigned_to_name: "" });
-  const [creating, setCreating] = useState(false);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const fetchJobs = useCallback(async () => {
@@ -96,25 +92,12 @@ export default function WorkshopBenchPage() {
 
   const handleDrop = async (newStage) => {
     if (!dragging || dragging.bench_stage === newStage) { setDragging(null); return; }
-    const oldStage = dragging.bench_stage;
     setJobs(prev => prev.map(j => j.id === dragging.id ? { ...j, bench_stage: newStage } : j));
     try {
       await axios.put(`${API}/workshop/bench/move`, { job_id: dragging.id, stage: newStage }, { headers });
       toast.success(`Moved to ${newStage.replace("_", " ")}`);
     } catch { toast.error("Move failed"); fetchJobs(); }
     setDragging(null);
-  };
-
-  const createJob = async () => {
-    if (!newForm.title) { toast.error("Title is required"); return; }
-    setCreating(true);
-    try {
-      await axios.post(`${API}/workshop/bench`, newForm, { headers });
-      toast.success("Workshop job created");
-      setShowNew(false); setNewForm({ title: "", description: "", client_name: "", device_name: "", assigned_to_name: "" });
-      fetchJobs();
-    } catch { toast.error("Failed to create"); }
-    finally { setCreating(false); }
   };
 
   const byStage = {};
@@ -133,26 +116,31 @@ export default function WorkshopBenchPage() {
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center"><Wrench className="w-5 h-5 text-primary" /></div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">Workshop Bench</h1>
-            <p className="text-muted-foreground text-xs mt-0.5">Drag cards across the repair flow to keep the floor current.</p>
+            <div className="flex flex-wrap items-center gap-2"><h1 className="text-xl font-bold tracking-tight">Workshop Bench</h1><Badge variant="outline" className="border-amber-400/25 bg-amber-400/[0.08] text-[10px] text-amber-100">Legacy records</Badge></div>
+            <p className="text-muted-foreground text-xs mt-0.5">Track retained bench work here. New workshop requests start in Service Desk with a Workshop Repair Kit.</p>
           </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchJobs} disabled={loading}><RefreshCw className={`w-4 h-4 mr-1 ${loading ? "animate-spin" : ""}`} />Refresh</Button>
-          <Button size="sm" onClick={() => setShowNew(true)} data-testid="new-bench-job"><Plus className="w-4 h-4 mr-1" />Add bench job</Button>
+          <Button size="sm" onClick={() => navigate("/tickets?new=workshop_repair")} data-testid="create-workshop-service-kit"><Ticket className="w-4 h-4 mr-1" />Create through Service Desk<ArrowRight className="ml-1.5 h-3.5 w-3.5" /></Button>
         </div>
       </div>
 
+      <div className="flex flex-col gap-3 rounded-xl border border-cyan-400/18 bg-cyan-400/[0.035] px-4 py-3 sm:flex-row sm:items-center sm:justify-between" data-testid="workshop-bench-service-desk-note">
+        <div className="flex min-w-0 items-start gap-3"><div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-400/[0.08]"><Ticket className="h-4 w-4 text-cyan-100" /></div><div><p className="text-sm font-medium text-cyan-50">Service Desk owns the customer request</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">The Workshop Repair Kit creates structured repair evidence beneath its parent ticket. This board keeps pre-existing standalone records available without splitting new work into a second queue.</p></div></div>
+        <Button variant="outline" size="sm" className="shrink-0 border-cyan-300/25 bg-cyan-400/[0.04] text-cyan-100 hover:bg-cyan-400/[0.12]" onClick={() => navigate("/tickets?new=workshop_repair")}>New kit</Button>
+      </div>
+
       <MetricStrip columns={4}>
-        <MetricTile label="On bench" value={jobs.length} accent="violet" icon={<Wrench className="w-2.5 h-2.5 text-violet-400" />} testid="bench-metric-total" />
+        <MetricTile label="Legacy bench" value={jobs.length} accent="violet" icon={<Wrench className="w-2.5 h-2.5 text-violet-400" />} testid="bench-metric-total" />
         <MetricTile label="In progress" value={totalActive} accent="sky" icon={<Timer className="w-2.5 h-2.5 text-sky-400" />} testid="bench-metric-active" />
         <MetricTile label="Avg turnaround" value={`${avgDays}d`} accent="emerald" icon={<Clock className="w-2.5 h-2.5 text-emerald-400" />} testid="bench-metric-turnaround" />
         <MetricTile label="Needs attention" value={jobs.filter(j => j.created_at && (Date.now() - new Date(j.created_at)) >= 3 * 86400000).length} accent="rose" icon={<AlertTriangle className="w-2.5 h-2.5 text-rose-400" />} testid="bench-metric-attention" />
       </MetricStrip>
 
       <div className="flex items-center gap-3 rounded-xl border bg-card/60 p-3">
-        <div className="relative flex-1 max-w-sm"><Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" /><Input placeholder="Search job, customer or device..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 h-9" data-testid="bench-search" /></div>
-        <span className="text-xs text-muted-foreground hidden sm:block">{search ? "Filtered repair board" : "Live repair board"}</span>
+        <div className="relative flex-1 max-w-sm"><Search className="absolute left-3 top-2.5 w-4 h-4 text-muted-foreground" /><Input placeholder="Search retained job, customer or device..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9 h-9" data-testid="bench-search" /></div>
+        <span className="text-xs text-muted-foreground hidden sm:block">{search ? "Filtered legacy board" : "Legacy repair board"}</span>
       </div>
 
       {loading ? (
@@ -164,23 +152,6 @@ export default function WorkshopBenchPage() {
           ))}
         </div>
       )}
-
-      {/* New Job Dialog */}
-      <Dialog open={showNew} onOpenChange={setShowNew}>
-        <DialogContent aria-describedby="new-bench-job-desc">
-          <DialogHeader><DialogTitle>New Workshop Job</DialogTitle><DialogDescription id="new-bench-job-desc">Create a workshop repair/service job</DialogDescription></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Job Title *</Label><Input value={newForm.title} onChange={e => setNewForm({ ...newForm, title: e.target.value })} placeholder="e.g. Replace laptop screen" data-testid="bench-title" /></div>
-            <div><Label>Description</Label><Textarea value={newForm.description} onChange={e => setNewForm({ ...newForm, description: e.target.value })} rows={2} placeholder="Details of the repair" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Client</Label><Input value={newForm.client_name} onChange={e => setNewForm({ ...newForm, client_name: e.target.value })} placeholder="Client name" /></div>
-              <div><Label>Device</Label><Input value={newForm.device_name} onChange={e => setNewForm({ ...newForm, device_name: e.target.value })} placeholder="Device name/model" /></div>
-            </div>
-            <div><Label>Assign To</Label><Input value={newForm.assigned_to_name} onChange={e => setNewForm({ ...newForm, assigned_to_name: e.target.value })} placeholder="Technician name" /></div>
-          </div>
-          <DialogFooter><Button onClick={createJob} disabled={creating} data-testid="create-bench-btn">{creating ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Plus className="w-4 h-4 mr-1" />}Create Job</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

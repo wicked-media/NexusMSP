@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { BarChart3, Users, Monitor, DollarSign, Ticket } from "lucide-react";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function ClientComparePage() {
   const { token } = useAuth();
@@ -38,10 +39,7 @@ export default function ClientComparePage() {
 
   return (
     <div className="space-y-6" data-testid="client-compare-page">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Client Comparison Dashboard</h1>
-        <p className="text-muted-foreground text-sm mt-1">Multi-tenant comparison of all client metrics</p>
-      </div>
+      <OperationalPageHeader eyebrow="Client intelligence · portfolio comparison" title="Client Comparison Dashboard" description="Compare permitted client health, revenue, devices and service demand from one operational view." icon={BarChart3} tone="violet" signal={sorted.some(client => client.open_tickets > 0) ? "working" : "ready"} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <HeroTile label="Total Clients" value={data.total} icon={Users} glow="violet" testId="compare-total-clients" />

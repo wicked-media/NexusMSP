@@ -213,8 +213,9 @@ export function TicketChildrenTab({ childTickets, fetchTicketDetail, statusConfi
 
 /* ============== Time Tab ============== */
 export function TicketTimeTab({ timeEntries }) {
-  const totalMinutes = timeEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
-  const billableMinutes = timeEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+  const authoritativeEntries = timeEntries.filter(entry => entry.authoritative !== false);
+  const totalMinutes = authoritativeEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+  const billableMinutes = authoritativeEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
   const formatDuration = (minutes) => minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60 ? `${minutes % 60}m` : ""}` : `${minutes}m`;
   if (!timeEntries.length) return <div className="rounded-xl border border-dashed border-white/[0.10] bg-black/[0.08] py-12 text-center"><Clock className="mx-auto mb-3 h-9 w-9 text-violet-300/35" /><p className="text-sm text-zinc-300">No time entries recorded</p><p className="mt-1 text-[11px] text-zinc-500">Log technician effort to keep billing and service reporting accurate.</p></div>;
   return (
@@ -225,14 +226,15 @@ export function TicketTimeTab({ timeEntries }) {
       </div>
       <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-black/[0.08]">
         <Table>
-          <TableHeader><TableRow className="border-white/[0.06]"><TableHead>Technician</TableHead><TableHead>Duration</TableHead><TableHead>Work performed</TableHead><TableHead>Billing</TableHead><TableHead>Logged</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow className="border-white/[0.06]"><TableHead>Technician</TableHead><TableHead>Duration</TableHead><TableHead>Work performed</TableHead><TableHead>Labour</TableHead><TableHead>Billing</TableHead><TableHead>Logged</TableHead></TableRow></TableHeader>
           <TableBody>
             {timeEntries.map(te => (
-              <TableRow key={te.id} className="border-white/[0.06] hover:bg-white/[0.025]"><TableCell className="font-medium text-zinc-200">{te.user_name || "Technician"}</TableCell><TableCell className="font-mono text-violet-200">{formatDuration(Number(te.minutes || 0))}</TableCell><TableCell className="max-w-[360px] truncate text-zinc-300">{te.description || "No description"}</TableCell><TableCell>{te.billable ? <Badge className="border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">Billable</Badge> : <Badge variant="outline" className="border-zinc-700 text-zinc-500">Internal</Badge>}</TableCell><TableCell className="text-xs text-zinc-500">{te.created_at && formatDistanceToNow(new Date(te.created_at), { addSuffix: true })}</TableCell></TableRow>
+              <TableRow key={te.id} className="border-white/[0.06] hover:bg-white/[0.025]"><TableCell className="font-medium text-zinc-200">{te.user_name || "Technician"}</TableCell><TableCell className="font-mono text-violet-200">{formatDuration(Number(te.minutes || 0))}</TableCell><TableCell className="max-w-[300px] truncate text-zinc-300">{te.description || "No description"}</TableCell><TableCell><div className="min-w-[120px]"><p className="text-xs text-zinc-200">{te.labour_type_name || "Technician default"}</p>{te.labour_type_code && <p className="mt-0.5 font-mono text-[9px] text-zinc-500">{te.labour_type_code}</p>}</div></TableCell><TableCell><div className="flex flex-wrap items-center gap-1.5">{te.billable ? <Badge className="border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">Billable</Badge> : <Badge variant="outline" className="border-zinc-700 text-zinc-500">Internal</Badge>}{te.invoiced && <Badge variant="outline" className="border-sky-400/20 text-sky-200">Invoiced</Badge>}</div></TableCell><TableCell className="text-xs text-zinc-500"><span className="block">{te.created_at && formatDistanceToNow(new Date(te.created_at), { addSuffix: true })}</span>{te.performed_at && <span className="mt-0.5 block text-[10px] text-zinc-600">Performed {formatDistanceToNow(new Date(te.performed_at), { addSuffix: true })}</span>}</TableCell></TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+      {timeEntries.some(entry => entry.authoritative === false) && <p className="px-1 text-[10px] text-zinc-500">Legacy time history is retained below for context and excluded from the canonical effort and billing totals above.</p>}
     </div>
   );
 }
@@ -250,6 +252,9 @@ export function TicketAuditTab({ auditLog }) {
     maintenance_scheduled: { label: "Scheduled maintenance", Icon: CalendarClock, tone: "border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-300" },
     converted_to_change: { label: "Converted to change", Icon: GitPullRequest, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
     device_action: { label: "Device action", Icon: MonitorCog, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
+    ticket_attachment_added: { label: "Attached evidence", Icon: Paperclip, tone: "border-sky-500/25 bg-sky-500/[0.10] text-sky-300" },
+    ticket_attachment_deleted: { label: "Removed evidence", Icon: Trash2, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
+    ticket_attachment_downloaded: { label: "Downloaded evidence", Icon: Download, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
     blocked_on: { label: "Marked blocked", Icon: History, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
     unblocked: { label: "Removed blocker", Icon: CheckCircle, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
     csat_sent: { label: "Sent satisfaction survey", Icon: BellRing, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },

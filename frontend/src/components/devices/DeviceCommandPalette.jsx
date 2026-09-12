@@ -7,17 +7,19 @@ import { Command, ArrowRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { keyboardKey, keyboardKeyLower } from "@/lib/keyboard";
 
-// Lightweight grammar: "reboot <name>", "iso <name>", "diagnose <name>", "wake <client>", "open <name>", "ticket <name>"
+// Lightweight grammar for navigation and verified diagnostic work. Endpoint-changing
+// commands deliberately live in the Nexus Agent control plane, where policy,
+// approval and returned evidence can be reviewed.
 function parse(query, devices) {
   const q = query.trim();
   if (!q) return { kind: "search", suggestions: [] };
   const lower = q.toLowerCase();
-  const verbs = ["reboot", "isolate", "iso", "diagnose", "wake", "open", "ticket", "script"];
+  const verbs = ["diagnose", "open", "ticket", "agent", "script"];
   let verb = null;
   let rest = lower;
   for (const v of verbs) {
     if (lower.startsWith(v + " ") || lower === v) {
-      verb = v === "iso" ? "isolate" : v;
+      verb = v === "script" ? "agent" : v;
       rest = lower.slice(v.length).trim();
       break;
     }
@@ -31,14 +33,8 @@ function parse(query, devices) {
     return { kind: "search", suggestions: matches };
   }
   const target = rest;
-  if (verb === "wake") {
-    const clientMatches = [...new Set(devices.map(d => d.client_name).filter(Boolean))]
-      .filter(c => c.toLowerCase().includes(target))
-      .slice(0, 5)
-      .map(c => ({ kind: "wake-client", client: c, label: `Wake all of ${c}`, sub: "broadcast WoL" }));
-    return { kind: "verb", verb, suggestions: clientMatches };
-  }
   const targetDevices = devices
+    .filter(d => !d.archived && d.status !== "archived")
     .filter(d => (d.name || "").toLowerCase().includes(target) || (d.client_name || "").toLowerCase().includes(target))
     .slice(0, 6)
     .map(d => ({ kind: verb, device: d, label: `${verb} ${d.name}`, sub: d.client_name || "" }));
@@ -77,26 +73,20 @@ export default function DeviceCommandPalette({ devices = [] }) {
         setOpen(false);
         return;
       }
-      if (s.kind === "wake-client") {
-        toast.success(`Wake-on-LAN broadcast queued for ${s.client}`);
+      if (s.kind === "agent") {
+        navigate(`/nexus-agent?deviceId=${encodeURIComponent(s.device.id)}${s.device.client_id ? `&clientId=${encodeURIComponent(s.device.client_id)}` : ""}`);
         setOpen(false);
         return;
       }
-      // diagnose, reboot, isolate, script — call existing endpoints
+      // Diagnose analyses recorded endpoint evidence. It does not run or queue a command.
       const headers = { Authorization: `Bearer ${token}` };
       if (s.kind === "diagnose") {
-        await axios.post(`${API}/devices/${s.device.id}/ai-diagnose`, {}, { headers });
-        toast.success(`Diagnose requested for ${s.device.name}`);
-      } else if (s.kind === "reboot") {
-        await axios.post(`${API}/devices/quick-scripts/run`, { script_id: "qs-restart-agent", device_ids: [s.device.id] }, { headers });
-        toast.success(`Reboot queued for ${s.device.name}`);
-      } else if (s.kind === "isolate") {
-        toast.success(`Isolation requested for ${s.device.name} (review in Devices)`);
-      } else if (s.kind === "script") {
-        navigate(`/devices/${s.device.id}?action=quick-script`);
+        const response = await axios.post(`${API}/devices/${s.device.id}/ai-diagnose`, {}, { headers });
+        if (!response.data?.generated_at) throw new Error("No diagnostic evidence returned");
+        toast.success(`Diagnostic evidence is ready for ${s.device.name}`);
       }
       setOpen(false);
-    } catch { toast.error("Action failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Nexus could not complete that action"); }
     finally { setBusy(false); }
   };
 
@@ -109,7 +99,7 @@ export default function DeviceCommandPalette({ devices = [] }) {
           <Command className="w-4 h-4 text-violet-300" />
           <input
             autoFocus
-            placeholder="reboot ws-001 · iso ACME-SRV · diagnose laptop-7 · wake Acme · ticket SRV-01"
+            placeholder="open ws-001 · diagnose laptop-7 · ticket SRV-01 · agent DC-01"
             className="flex-1 bg-transparent outline-none text-sm text-zinc-100 placeholder-zinc-600"
             value={query}
             onChange={e => setQuery(e.target.value)}
@@ -121,7 +111,7 @@ export default function DeviceCommandPalette({ devices = [] }) {
         <div className="max-h-[55vh] overflow-y-auto py-1">
           {parsed.suggestions.length === 0 && (
             <p className="px-3 py-4 text-xs text-zinc-500">
-              Type a device name to <strong className="text-zinc-300">open</strong>, or start with a verb: <code className="text-violet-300">reboot</code>, <code className="text-violet-300">iso</code>, <code className="text-violet-300">diagnose</code>, <code className="text-violet-300">wake</code>, <code className="text-violet-300">ticket</code>, <code className="text-violet-300">script</code>.
+              Type a device name to <strong className="text-zinc-300">open</strong>, or start with a verb: <code className="text-violet-300">diagnose</code>, <code className="text-violet-300">ticket</code>, <code className="text-violet-300">agent</code> or <code className="text-violet-300">script</code>. Endpoint-changing work belongs in the Nexus Agent control plane so its approval and returned evidence can be reviewed.
             </p>
           )}
           {parsed.suggestions.map((s, i) => (

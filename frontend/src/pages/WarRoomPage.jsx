@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import axios from "axios";
-import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -205,14 +205,12 @@ function WarRoomList() {
 function WarRoomDetail({ wrId }) {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const [search] = useSearchParams();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [wr, setWr] = useState(null);
   const [msg, setMsg] = useState("");
   const [sending, setSending] = useState(false);
   const [etaDraft, setEtaDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState("");
-  const [updating, setUpdating] = useState(false);
   const [pageOpen, setPageOpen] = useState(false);
   const messagesRef = useRef(null);
 
@@ -255,12 +253,11 @@ function WarRoomDetail({ wrId }) {
   };
 
   const updateStatus = async (patch) => {
-    setUpdating(true);
     try {
       await axios.post(`${API}/warroom/${wrId}/status`, patch, { headers });
       load();
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
-    finally { setUpdating(false); }
+    finally { /* the refreshed incident state is the completion signal */ }
   };
 
   const resolve = async () => {

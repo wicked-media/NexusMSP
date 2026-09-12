@@ -2,8 +2,9 @@ import { Link, useLocation } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
+import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -22,21 +23,28 @@ const MODULE_ICONS = {
   dispatch: MapPinned,
 };
 
-export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", actions, children }) {
+export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", actions, children, signal, signalLabel, signalDescription }) {
   const location = useLocation();
   const active = ticketModuleForPath(location.pathname);
   const activeTool = ticketWorkspaceToolForPath(location.pathname);
+  const ActiveIcon = MODULE_ICONS[active] || LayoutList;
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.07] bg-[#111318] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-testid="ticket-module-header">
-      <div className="flex flex-col gap-4 border-b border-white/[0.06] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400">{eyebrow}</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-100">{title}</h1>
-          {subtitle && <p className="mt-1 max-w-3xl text-sm text-zinc-500">{subtitle}</p>}
-        </div>
-        {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-      </div>
-      <nav className="flex items-center gap-1 overflow-x-auto px-3 py-2" aria-label="Ticketing modules">
+    <section className="nx-ticket-module-shell" data-testid="ticket-module-header">
+      <NexusWorkspaceHeader
+        eyebrow={eyebrow}
+        title={title}
+        description={subtitle}
+        icon={ActiveIcon}
+        tone="violet"
+        actions={actions}
+        signal={signal}
+        signalLabel={signalLabel}
+        signalDescription={signalDescription}
+        showBack={false}
+        variant="module"
+        testId="ticket-workspace-header"
+      />
+      <nav className="nx-ticket-module-nav" aria-label="Ticketing modules">
         {TICKET_MODULES.map(module => {
           const Icon = MODULE_ICONS[module.id];
           const selected = active === module.id;
@@ -44,24 +52,34 @@ export function TicketModuleHeader({ title, subtitle, eyebrow = "Service desk", 
             <Link
               key={module.id}
               to={module.path}
-              className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-xs font-medium transition ${selected ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/25" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"}`}
+              className="nx-ticket-module-nav__item"
+              data-active={selected ? "true" : "false"}
               aria-current={selected ? "page" : undefined}
               data-testid={`ticket-module-${module.id}`}
             >
-              <Icon className="h-3.5 w-3.5" />{module.label}
+              <Icon />
+              <span><strong>{module.label}</strong><small>{module.description}</small></span>
             </Link>
           );
         })}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className={`h-9 shrink-0 gap-1.5 px-3 text-xs ${activeTool ? "bg-violet-500/15 text-violet-200 ring-1 ring-violet-500/25" : "text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-200"}`} data-testid="ticket-module-more">
-              <MoreHorizontal className="h-3.5 w-3.5" />{activeTool?.label || "More"}<ChevronDown className="h-3 w-3 opacity-60" />
+            <Button variant="outline" size="sm" className={`nx-ticket-module-nav__tools ${activeTool ? "is-active" : ""}`} data-testid="ticket-module-more">
+              <MoreHorizontal className="h-3.5 w-3.5" />{activeTool?.label || "Desk tools"}<ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            {TICKET_WORKSPACE_TOOLS.map(tool => <DropdownMenuItem key={tool.id} asChild className={activeTool?.id === tool.id ? "bg-violet-500/10 text-violet-200" : ""}>
-              <Link to={tool.path}>{tool.label}</Link>
-            </DropdownMenuItem>)}
+          <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-2">
+            {["Repeatable work", "Assignment & escalation", "Historical records"].map(group => (
+              <DropdownMenuGroup key={group}>
+                <DropdownMenuLabel className="pb-1 pt-3 text-[10px] uppercase tracking-wider text-muted-foreground">{group}</DropdownMenuLabel>
+                {TICKET_WORKSPACE_TOOLS.filter(tool => tool.group === group).map(tool => <DropdownMenuItem key={tool.id} asChild className={`rounded-lg px-3 py-2.5 ${activeTool?.id === tool.id ? "bg-violet-500/10 text-violet-200" : ""}`}>
+                  <Link to={tool.path} className="flex flex-col items-start gap-1" aria-current={activeTool?.id === tool.id ? "page" : undefined}>
+                    <span className="text-xs font-medium">{tool.label}</span>
+                    <span className="text-[11px] leading-4 text-muted-foreground">{tool.description}</span>
+                  </Link>
+                </DropdownMenuItem>)}
+              </DropdownMenuGroup>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
         {children}

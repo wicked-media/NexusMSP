@@ -81,7 +81,7 @@ export default function RunbooksPage() {
 
   const testRunbook = async (id) => {
     try {
-      const res = await axios.post(`${API}/automation/${id}/test`, {}, { headers });
+      await axios.post(`${API}/automation/${id}/test`, {}, { headers });
       toast.success("Runbook test completed");
       fetchAll();
     } catch { toast.error("Test failed"); }
@@ -234,15 +234,15 @@ export default function RunbooksPage() {
       )}
 
       <Dialog open={!!editingKnowledgeRunbook} onOpenChange={(open) => !open && setEditingKnowledgeRunbook(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-sky-400" />Refine knowledge runbook</DialogTitle></DialogHeader>
-          {editingKnowledgeRunbook && <div className="space-y-3">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle className="flex items-center gap-2"><BookOpen className="h-4 w-4 text-sky-400" />Refine knowledge runbook</DialogTitle></DialogHeader>
+          {editingKnowledgeRunbook && <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <div><Label>Title</Label><Input value={editingKnowledgeRunbook.title || ""} onChange={(event) => setEditingKnowledgeRunbook({ ...editingKnowledgeRunbook, title: event.target.value })} /></div>
             <div><Label>Summary</Label><Textarea rows={2} value={editingKnowledgeRunbook.summary || ""} onChange={(event) => setEditingKnowledgeRunbook({ ...editingKnowledgeRunbook, summary: event.target.value })} /></div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><Label>Category</Label><Input value={editingKnowledgeRunbook.category || ""} onChange={(event) => setEditingKnowledgeRunbook({ ...editingKnowledgeRunbook, category: event.target.value })} /></div><div><Label>Tags</Label><Input placeholder="windows, defender, patching" value={editingKnowledgeRunbook.tagsText || ""} onChange={(event) => setEditingKnowledgeRunbook({ ...editingKnowledgeRunbook, tagsText: event.target.value })} /></div></div>
             <div><Label>Steps</Label><Textarea rows={7} className="font-mono text-xs" placeholder="Step title | Detail\nValidate result | Confirm the issue is resolved" value={editingKnowledgeRunbook.stepsText || ""} onChange={(event) => setEditingKnowledgeRunbook({ ...editingKnowledgeRunbook, stepsText: event.target.value })} /><p className="mt-1 text-[11px] text-muted-foreground">One step per line. Put the explanatory detail after a vertical bar.</p></div>
           </div>}
-          <DialogFooter><Button variant="outline" onClick={() => setEditingKnowledgeRunbook(null)}>Cancel</Button><Button onClick={saveKnowledgeRunbook}>Save changes</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button variant="outline" onClick={() => setEditingKnowledgeRunbook(null)}>Cancel</Button><Button onClick={saveKnowledgeRunbook}>Save changes</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

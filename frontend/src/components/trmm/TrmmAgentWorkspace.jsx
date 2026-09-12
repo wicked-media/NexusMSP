@@ -64,6 +64,7 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
   const [autoscroll, setAutoscroll] = useState(true);
   const outputRef = useRef(null);
   const inputRef = useRef(null);
+  const loadRunsRef = useRef(null);
 
   // ─────────── Scripts ───────────
   const [scripts, setScripts] = useState([]);
@@ -152,7 +153,7 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
       if (!stdout && !stderr) appendLines([{ kind: "info", text: `(no output · exit ${retcode ?? "—"} · ${dur ?? "?"}ms)`, ts: Date.now() }]);
       else appendLines([{ kind: "info", text: `── exit ${retcode ?? "—"} · ${dur ?? "?"}ms`, ts: Date.now() }]);
       if (res.data?.success === false) toast.error(res.data.message || "Command failed");
-      loadRuns();
+      loadRunsRef.current?.();
     } catch (e) {
       appendLines([{ kind: "err", text: e.response?.data?.detail || e.message, ts: Date.now() }]);
     } finally {
@@ -262,14 +263,15 @@ export default function TrmmAgentWorkspace({ agent, open, onClose }) {
     } finally { setScriptRunning(null); }
   };
 
-  const loadRuns = useCallback(async () => {
+  async function loadRuns() {
     if (!agentId) return;
     setRunsLoading(true);
     try {
       const res = await axios.get(`${API}/trmm/agents/${agentId}/runs?limit=30`, { headers });
       setRuns(res.data || []);
     } catch {} finally { setRunsLoading(false); }
-  }, [agentId, headers]);
+  }
+  loadRunsRef.current = loadRuns;
 
   // ─────────── Services ───────────
   const loadServices = useCallback(async () => {

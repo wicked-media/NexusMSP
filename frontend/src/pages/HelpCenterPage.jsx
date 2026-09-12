@@ -3,6 +3,7 @@ import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
+import WorkspaceBackControl from "@/components/WorkspaceBackControl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -361,7 +362,7 @@ export default function HelpCenterPage() {
         toast.error(error.response?.data?.detail || "Guide not found");
       })
       .finally(() => setLoadingArticle(false));
-  }, [slug, library.articles, active?.slug, api]);
+  }, [slug, library.articles, active?.slug, api, navigate]);
 
   const categories = useMemo(() => Object.entries(library.by_category || {}).sort(([left], [right]) => left.localeCompare(right)), [library.by_category]);
   const matchingArticles = useMemo(() => {
@@ -456,6 +457,7 @@ export default function HelpCenterPage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
         <header className="flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.11] via-card to-cyan-500/[0.05] p-5">
           <div>
+            {slug && <WorkspaceBackControl className="mb-2" />}
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">NexusMSP knowledge</p>
             <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><CircleHelp className="h-6 w-6 text-emerald-300" />Help Centre</h1>
             <p className="mt-1 text-sm text-muted-foreground">Task-first guides for safe, consistent service delivery — with verification and audit built in.</p>

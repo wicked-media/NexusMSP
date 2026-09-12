@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -32,8 +32,10 @@ import {
   , PackageCheck, Smartphone, Pencil, RotateCcw, Undo2
 } from "lucide-react";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
+import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
 import { PageShell } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const slaShieldConfig = {
   platinum: { label: "Platinum", color: "text-slate-300", bg: "bg-gradient-to-b from-slate-200 to-slate-400", border: "border-slate-400/50", fill: "#e2e8f0" },
@@ -46,7 +48,6 @@ const slaShieldConfig = {
 const SLAShieldBadge = ({ tier, size = "sm" }) => {
   const config = slaShieldConfig[tier] || slaShieldConfig.standard;
   const s = size === "lg" ? "w-8 h-8" : "w-5 h-5";
-  const textSize = size === "lg" ? "text-[8px]" : "text-[5px]";
   return (
     <div className="relative inline-flex items-center gap-1.5" title={`${config.label} SLA`}>
       <div className="relative">
@@ -90,7 +91,7 @@ export default function ContractsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [contractFilter, setContractFilter] = useState("all");
   const [renewalAlerts, setRenewalAlerts] = useState([]);
-  const [contractSummary, setContractSummary] = useState(null);
+  const [, setContractSummary] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLineItemDialogOpen, setIsLineItemDialogOpen] = useState(false);
   const [editingLineItem, setEditingLineItem] = useState(null);
@@ -120,9 +121,9 @@ export default function ContractsPage() {
     , line_type: "standard", asset_id: "", term_start: "", term_end: "", supplier_cost: "", buyout_value: ""
   });
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const [contractsRes, clientsRes, lineItemsRes, assetsRes, typesRes, renewalsRes, summaryRes] = await Promise.all([
@@ -146,11 +147,11 @@ export default function ContractsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [headers]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -214,6 +215,46 @@ export default function ContractsPage() {
       fetchData();
     } catch (error) {
       toast.error("Failed to delete contract");
+    }
+  };
+
+  const resolveContractPdfUrl = (contract, download = false) => resolveDocumentPdfUrl({
+    api: API,
+    headers,
+    documentType: "contract",
+    documentId: contract.id,
+    token,
+    download,
+  });
+
+  const handleContractPdfDownload = async (contract) => {
+    try {
+      const pdfUrl = await resolveContractPdfUrl(contract, true);
+      const a = document.createElement("a");
+      a.href = pdfUrl;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => document.body.removeChild(a), 200);
+      toast.success("Downloading contract PDF");
+    } catch {
+      toast.error("Failed to download contract PDF");
+    }
+  };
+
+  const handleContractPdfPreview = async (contract) => {
+    try {
+      const pdfUrl = await resolveContractPdfUrl(contract);
+      setPdfViewer({
+        open: true,
+        url: pdfUrl,
+        title: contract.name,
+        downloadUrl: "",
+        onDownload: () => handleContractPdfDownload(contract),
+      });
+    } catch {
+      toast.error("Failed to generate contract PDF preview");
     }
   };
 
@@ -363,22 +404,10 @@ export default function ContractsPage() {
   return (
     <PageShell data-testid="contracts-page">
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center"><Shield className="w-4 h-4 text-violet-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">Contracts</h1><p className="text-sm text-muted-foreground">Service agreements, renewals, and recurring billing.</p></div>
-        </div>
-        <Button variant="outline" onClick={() => window.location.assign("/contract-profit")}><TrendingUp className="mr-2 h-4 w-4 text-emerald-400" />Profitability</Button>
+      <OperationalPageHeader eyebrow="Commercial governance · service agreements" title="Contracts" description="Manage service agreements, renewal work and the recurring billing commitments linked to client delivery." icon={Shield} tone="violet" signal={renewalAlerts.length > 0 ? "attention" : contracts.length ? "ready" : undefined} actions={<><Button variant="outline" onClick={() => window.location.assign("/contract-profit")}><TrendingUp className="mr-2 h-4 w-4 text-emerald-400" />Profitability</Button><Button onClick={() => setIsDialogOpen(true)} data-testid="create-contract-button"><Plus className="w-4 h-4 mr-2" />New contract</Button></>} />
         <Dialog open={isDialogOpen} onOpenChange={(open) => { setIsDialogOpen(open); if (!open) resetForm(); }}>
-          <DialogTrigger asChild>
-            <Button data-testid="create-contract-button">
-              <Plus className="w-4 h-4 mr-2" />
-              New Contract
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-4xl overflow-hidden border-violet-500/20 bg-background/95 p-0">
-            <DialogHeader className="border-b border-border/80 px-6 py-5">
+          <DialogContent className="flex h-[min(920px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-4xl flex-col gap-0 overflow-hidden border-violet-500/20 bg-background/95 p-0 sm:rounded-2xl">
+            <DialogHeader className="shrink-0 border-b border-border/80 px-6 py-5">
               <div className="flex items-start gap-3 pr-6">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/30 bg-violet-500/10"><FileText className="h-5 w-5 text-violet-300" /></span>
                 <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Agreement workspace</p><DialogTitle className="mt-1">{selectedContract ? "Update contract record" : "Create service agreement"}</DialogTitle><p className="mt-1 text-sm text-muted-foreground">{selectedContract ? "Review commercial terms, renewal settings, billing inclusions, and the service commitment in one place." : "Capture the commercial commitment first, then add inclusions and create the linked recurring invoice when it is ready."}</p></div>
@@ -550,7 +579,7 @@ export default function ContractsPage() {
                 </div>
               )}
               </div>
-              <DialogFooter className="border-t border-border/80 px-6 py-4">
+              <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4">
                 <Button type="button" variant="outline" onClick={() => { setIsDialogOpen(false); resetForm(); }}>Cancel</Button>
                 <Button type="submit" data-testid="contract-submit-button">
                   {selectedContract ? "Save contract" : "Create contract"}
@@ -559,7 +588,6 @@ export default function ContractsPage() {
             </form>
           </DialogContent>
         </Dialog>
-      </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <HeroTile label="All contracts" value={contracts.length} subtitle="View full register" icon={FileText} glow="cyan" active={contractFilter === "all"} onClick={() => setContractFilter("all")} testId="contracts-metric-total" />
@@ -622,8 +650,8 @@ export default function ContractsPage() {
 
       {/* Line Item Dialog */}
       <Dialog open={isLineItemDialogOpen} onOpenChange={setIsLineItemDialogOpen}>
-        <DialogContent className="max-h-[92vh] w-[calc(100vw-2rem)] max-w-3xl overflow-hidden p-0">
-          <DialogHeader className="border-b border-border/80 px-6 py-5">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 px-6 py-5">
             <DialogTitle className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><PackageCheck className="h-4 w-4 text-emerald-300" /></span>{editingLineItem ? "Update billing inclusion" : "Add billing inclusion"}</DialogTitle>
             <p className="mt-1 text-sm text-muted-foreground">Define the billable service, live source, or serial-locked asset commitment that belongs to this agreement.</p>
           </DialogHeader>
@@ -685,7 +713,7 @@ export default function ContractsPage() {
               </div>
             </div>
             </div>
-            <DialogFooter className="border-t border-border/80 px-6 py-4">
+            <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4">
               <Button type="button" variant="outline" onClick={() => { setIsLineItemDialogOpen(false); setEditingLineItem(null); }}>Cancel</Button><Button type="submit">{editingLineItem ? "Save inclusion" : "Add inclusion"}</Button>
             </DialogFooter>
           </form>
@@ -757,10 +785,10 @@ export default function ContractsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setPdfViewer({ open: true, url: `${API}/contracts/${contract.id}/pdf?token=${token}`, title: contract.name, downloadUrl: `${API}/contracts/${contract.id}/pdf/download?token=${token}` })}>
+                              <DropdownMenuItem onClick={() => handleContractPdfPreview(contract)}>
                                 <Eye className="w-3.5 h-3.5 mr-2" />Preview PDF
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => { const a = document.createElement("a"); a.href = `${API}/contracts/${contract.id}/pdf/download?token=${token}`; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); setTimeout(() => document.body.removeChild(a), 200); toast.success("Downloading contract PDF"); }}>
+                              <DropdownMenuItem onClick={() => handleContractPdfDownload(contract)}>
                                 <Download className="w-3.5 h-3.5 mr-2" />Download PDF
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => openEditDialog(contract)}>
@@ -817,15 +845,16 @@ export default function ContractsPage() {
         pdfUrl={pdfViewer.url}
         title={pdfViewer.title}
         downloadUrl={pdfViewer.downloadUrl}
+        onDownload={pdfViewer.onDownload}
       />
 
       {/* Convert to Recurring Dialog */}
       <Dialog open={!!convertDialog} onOpenChange={v => !v && setConvertDialog(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl overflow-hidden p-0" aria-describedby="convert-desc">
-          <DialogHeader className="border-b border-border/80 px-6 py-5">
+        <DialogContent className="flex h-[min(700px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" aria-describedby="convert-desc">
+          <DialogHeader className="shrink-0 border-b border-border/80 px-6 py-5">
             <div className="flex items-start gap-3 pr-6"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><Repeat className="h-5 w-5 text-emerald-300" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Billing workflow</p><DialogTitle className="mt-1">Create recurring invoice</DialogTitle><p id="convert-desc" className="mt-1 text-sm text-muted-foreground">Create a linked recurring invoice template from this contract’s {lineItems.filter(li => li.contract_id === convertDialog?.id).length} inclusions. The first run will use the settings confirmed below.</p></div></div>
           </DialogHeader>
-          <div className="space-y-5 px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             <div>
               <Label className="text-xs">Billing Frequency</Label>
               <Select value={convertForm.frequency} onValueChange={v => setConvertForm({ ...convertForm, frequency: v })}>
@@ -859,7 +888,7 @@ export default function ContractsPage() {
               />
             </div>
           </div>
-          <DialogFooter className="border-t border-border/80 px-6 py-4">
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4">
             <Button variant="outline" onClick={() => setConvertDialog(null)}>Cancel</Button>
             <Button onClick={handleConvertToRecurring} disabled={converting} data-testid="confirm-convert-btn">
               {converting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Repeat className="w-4 h-4 mr-1" />}
@@ -869,13 +898,15 @@ export default function ContractsPage() {
         </DialogContent>
       </Dialog>
       <Dialog open={!!assetAction} onOpenChange={v => !v && setAssetAction(null)}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl overflow-hidden p-0">
-          <DialogHeader className="border-b border-border/80 px-6 py-5"><div className="flex items-start gap-3 pr-6"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${assetAction?.type === "replace" ? "border-violet-500/25 bg-violet-500/10" : "border-amber-500/25 bg-amber-500/10"}`}>{assetAction?.type === "replace" ? <RotateCcw className="h-5 w-5 text-violet-300" /> : <Undo2 className="h-5 w-5 text-amber-300" />}</span><div><p className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${assetAction?.type === "replace" ? "text-violet-300" : "text-amber-300"}`}>Asset billing control</p><DialogTitle className="mt-1">{assetAction?.type === "replace" ? "Replace locked asset" : "Return locked asset"}</DialogTitle><p className="mt-1 text-sm text-muted-foreground">{assetAction?.type === "replace" ? "The original serial stays in the audit trail and the billing lock moves to the replacement." : "Release the serial and exclude it from the next recurring-invoice sync."}</p></div></div></DialogHeader>
-          <form onSubmit={handleAssetAction} className="space-y-5 px-6 py-5">
+        <DialogContent className="flex h-[min(700px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 px-6 py-5"><div className="flex items-start gap-3 pr-6"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${assetAction?.type === "replace" ? "border-violet-500/25 bg-violet-500/10" : "border-amber-500/25 bg-amber-500/10"}`}>{assetAction?.type === "replace" ? <RotateCcw className="h-5 w-5 text-violet-300" /> : <Undo2 className="h-5 w-5 text-amber-300" />}</span><div><p className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${assetAction?.type === "replace" ? "text-violet-300" : "text-amber-300"}`}>Asset billing control</p><DialogTitle className="mt-1">{assetAction?.type === "replace" ? "Replace locked asset" : "Return locked asset"}</DialogTitle><p className="mt-1 text-sm text-muted-foreground">{assetAction?.type === "replace" ? "The original serial stays in the audit trail and the billing lock moves to the replacement." : "Release the serial and exclude it from the next recurring-invoice sync."}</p></div></div></DialogHeader>
+          <form onSubmit={handleAssetAction} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {assetAction?.type === "replace" && <div className="space-y-2"><Label>Replacement asset</Label><Select value={assetAction.asset_id} onValueChange={asset_id => setAssetAction({ ...assetAction, asset_id })}><SelectTrigger><SelectValue placeholder="Select an available client asset" /></SelectTrigger><SelectContent>{assets.filter(asset => asset.client_id === assetAction.item.client_id && !asset.billing_lock).map(asset => <SelectItem key={asset.id} value={asset.id}>{asset.name} · {asset.serial_number || "No serial"}{asset.imei ? ` · ${asset.imei}` : ""}</SelectItem>)}</SelectContent></Select></div>}
             <div className="space-y-2"><Label>Effective date</Label><Input type="date" value={assetAction?.effective_date || ""} onChange={e => setAssetAction({ ...assetAction, effective_date: e.target.value })} required /></div>
             <div className="space-y-2"><Label>Reason</Label><Textarea value={assetAction?.reason || ""} onChange={e => setAssetAction({ ...assetAction, reason: e.target.value })} placeholder="e.g., Warranty replacement" required /></div>
-            <DialogFooter className="border-t border-border/80 pt-5"><Button type="button" variant="outline" onClick={() => setAssetAction(null)}>Cancel</Button><Button type="submit" disabled={assetAction?.type === "replace" && !assetAction.asset_id}>{assetAction?.type === "replace" ? "Transfer billing lock" : "Confirm return"}</Button></DialogFooter>
+            </div>
+            <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button type="button" variant="outline" onClick={() => setAssetAction(null)}>Cancel</Button><Button type="submit" disabled={assetAction?.type === "replace" && !assetAction.asset_id}>{assetAction?.type === "replace" ? "Transfer billing lock" : "Confirm return"}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

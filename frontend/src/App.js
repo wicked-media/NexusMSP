@@ -31,6 +31,11 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || (
     : window.location.origin
 );
 export const API = `${BACKEND_URL}/api`;
+// A protected route must not remain on its global loading spinner forever when
+// the local API is restarting or an intermediary leaves the socket open. The
+// recovery state below preserves the session and gives the technician an
+// explicit retry instead.
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 10_000;
 
 // Theme Context
 const ThemeContext = createContext(null);
@@ -179,7 +184,8 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: AUTH_BOOTSTRAP_TIMEOUT_MS,
       });
       setUser(response.data);
       setAuthServiceUnavailable(false);
@@ -315,6 +321,16 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Newly invited technicians complete the versioned readiness flow before
+  // entering operational workspaces. The server derives this flag from the
+  // account-owned checklist, so a browser cannot bypass the requirement by
+  // hiding or changing the UI.
+  const isOnboardingLearningRoute = ["/technician-onboarding", "/nexus-academy"].includes(location.pathname)
+    || (location.pathname === "/documentation-hub" && new URLSearchParams(location.search).get("tab") === "help");
+  if (user.onboarding_required && !isOnboardingLearningRoute) {
+    return <Navigate to="/nexus-academy" state={{ from: location }} replace />;
+  }
+
   return children;
 };
 
@@ -325,6 +341,11 @@ const MainLayout = ({ children }) => {
   const [focusMode, setFocusMode] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const location = useLocation();
+  const collaborationWorkspace = location.pathname === "/team-chat";
+  const deviceRecordWorkspace = /^\/devices\/[^/]+$/.test(location.pathname);
+  const restoreSidebarCollapsed = useCallback((value) => {
+    setSidebarCollapsed(Boolean(value));
+  }, []);
 
   useEffect(() => {
     const openCopilot = () => setCopilotOpen(true);
@@ -347,7 +368,7 @@ const MainLayout = ({ children }) => {
   useEffect(() => {
     setFocusMode(false);
     setMobileNavigationOpen(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     document.documentElement.dataset.focusMode = focusMode ? "true" : "false";
@@ -361,7 +382,7 @@ const MainLayout = ({ children }) => {
   }, [focusMode]);
 
   return (
-    <div className="min-h-screen bg-background flex" style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
+    <div className={`${collaborationWorkspace ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex`} style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
       {!focusMode && mobileNavigationOpen && (
         <button
           type="button"
@@ -370,7 +391,14 @@ const MainLayout = ({ children }) => {
           onClick={() => setMobileNavigationOpen(false)}
         />
       )}
-      {!focusMode && <Sidebar collapsed={sidebarCollapsed} mobileOpen={mobileNavigationOpen} onMobileClose={() => setMobileNavigationOpen(false)} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} onCopilotToggle={() => setCopilotOpen(o => !o)} />}
+      {!focusMode && <Sidebar
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileNavigationOpen}
+        onMobileClose={() => setMobileNavigationOpen(false)}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
+        onCopilotToggle={() => setCopilotOpen(o => !o)}
+        onCollapsedPreferenceRestore={restoreSidebarCollapsed}
+      />}
       {!focusMode && (
         <div className="fixed inset-x-0 top-0 z-20 flex h-14 items-center gap-3 border-b border-border/80 bg-background/90 px-3 backdrop-blur-xl md:hidden">
           <button
@@ -391,10 +419,10 @@ const MainLayout = ({ children }) => {
           </button>
         </div>
       )}
-      <main className={`min-w-0 flex-1 transition-all duration-300 ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
-        <div className={`${focusMode ? 'p-4 md:p-8' : 'px-4 pb-24 pt-20 md:p-8'}`}>
-          {!focusMode && <ClientContextBar />}
-          <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""}`}>
+      <main className={`min-w-0 flex-1 transition-all duration-300 ${collaborationWorkspace ? "flex min-h-0 flex-col overflow-hidden" : ""} ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
+        <div className={collaborationWorkspace ? 'flex min-h-0 flex-1 flex-col px-3 pb-3 pt-[68px] md:p-4' : focusMode ? 'p-4 md:p-8' : deviceRecordWorkspace ? 'px-4 pb-24 pt-20 md:px-7 md:pb-7 md:pt-0' : 'px-4 pb-24 pt-20 md:p-8'}>
+          {!focusMode && !deviceRecordWorkspace && <ClientContextBar compact={collaborationWorkspace} />}
+          <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""} ${collaborationWorkspace ? "flex min-h-0 flex-1 flex-col" : ""}`}>
             {children}
           </div>
         </div>
@@ -434,17 +462,6 @@ const buildRouteElement = (route) => {
 
 // App Component
 function App() {
-  useEffect(() => {
-    const seedData = async () => {
-      try {
-        await axios.post(`${API}/seed`);
-      } catch (error) {
-        // Ignore if already seeded
-      }
-    };
-    seedData();
-  }, []);
-
   return (
     <ThemeProvider>
     <AuthProvider>

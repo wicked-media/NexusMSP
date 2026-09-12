@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,13 +21,13 @@ export default function NLPQueryPage() {
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [queryHistory, setQueryHistory] = useState([]);
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   useEffect(() => {
     axios.get(`${API}/nlp-query/search?q=`, { headers }).then(r => setSuggestions(r.data.suggestions || []));
     const saved = localStorage.getItem("nlp_query_history");
     if (saved) setQueryHistory(JSON.parse(saved).slice(0, 20));
-  }, []);
+  }, [headers]);
 
   const doSearch = useCallback(async (q) => {
     const searchQ = q || query;
@@ -41,7 +41,7 @@ export default function NLPQueryPage() {
       localStorage.setItem("nlp_query_history", JSON.stringify(newHistory));
     } catch { toast.error("Search failed"); }
     finally { setLoading(false); }
-  }, [query, queryHistory, token]);
+  }, [headers, query, queryHistory]);
 
   const clearHistory = () => {
     setQueryHistory([]);

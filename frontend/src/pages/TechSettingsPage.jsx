@@ -18,9 +18,10 @@ import SignatureManager from "@/components/email/SignatureManager";
 import {
   User, Lock, Mail, Shield, Bell, Clock, Palette, Globe, Award, Trophy,
   Star, Zap, Eye, EyeOff,
-  CheckCircle, ArrowLeft, Loader2, ChevronRight, Settings, Moon,
-  Upload, Image, RefreshCw, ShieldCheck
+  CheckCircle, Loader2, ChevronRight, Settings, Moon,
+  Upload, Image, RefreshCw, ShieldCheck, LogOut
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const BADGES = [
   { id: "first_ticket", label: "First Blood", description: "Resolved first ticket", icon: "ticket", color: "#3b82f6" },
@@ -51,9 +52,10 @@ const SETTINGS_SECTIONS = [
 ];
 
 export default function TechSettingsPage() {
-  const { user, token, refreshUser } = useAuth();
+  const { user, token, refreshUser, logout } = useAuth();
   const { theme, toggleTheme, preset, setPreset, accent, setAccent, font, setFont, motion, setMotion, THEME_PRESETS, ACCENT_COLORS, FONTS } = useTheme();
   const headers = { Authorization: `Bearer ${token}` };
+  const canManageBranding = user?.is_admin === true || user?.is_admin === 1 || String(user?.role || "").toLowerCase() === "admin";
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [profile, setProfile] = useState(null);
@@ -82,6 +84,8 @@ export default function TechSettingsPage() {
   const [verifyCode, setVerifyCode] = useState("");
   const [disablePw, setDisablePw] = useState("");
   const [showDisable2FA, setShowDisable2FA] = useState(false);
+  const [showRevokeSessions, setShowRevokeSessions] = useState(false);
+  const [revokingSessions, setRevokingSessions] = useState(false);
 
   // Notifications
   const [notifPrefs, setNotifPrefs] = useState({});
@@ -223,9 +227,14 @@ export default function TechSettingsPage() {
     if (pwForm.new_password !== pwForm.confirm_password) return toast.error("Passwords don't match");
     if (pwForm.new_password.length < 12) return toast.error("Use at least 12 characters");
     try {
-      await axios.post(`${API}/user-settings/change-password`, { current_password: pwForm.current_password, new_password: pwForm.new_password }, { headers });
-      toast.success("Password changed");
+      const response = await axios.post(`${API}/user-settings/change-password`, { current_password: pwForm.current_password, new_password: pwForm.new_password }, { headers });
       setPwForm({ current_password: "", new_password: "", confirm_password: "" });
+      if (response.data?.sessions_revoked) {
+        toast.success("Password changed. All devices have been signed out.");
+        window.setTimeout(logout, 500);
+      } else {
+        toast.success("Password changed");
+      }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to change password"); }
   };
 
@@ -249,13 +258,32 @@ export default function TechSettingsPage() {
 
   const disable2FA = async () => {
     try {
-      await axios.post(`${API}/user-settings/2fa/disable`, { password: disablePw }, { headers });
-      toast.success("2FA disabled");
+      const response = await axios.post(`${API}/user-settings/2fa/disable`, { password: disablePw }, { headers });
       setShowDisable2FA(false);
       setDisablePw("");
-      const res = await axios.get(`${API}/user-settings/2fa`, { headers });
-      setTwoFA(res.data);
+      if (response.data?.sessions_revoked) {
+        toast.success("2FA disabled. All devices have been signed out.");
+        window.setTimeout(logout, 500);
+      } else {
+        toast.success("2FA disabled");
+        const res = await axios.get(`${API}/user-settings/2fa`, { headers });
+        setTwoFA(res.data);
+      }
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+  };
+
+  const revokeAllSessions = async () => {
+    setRevokingSessions(true);
+    try {
+      const response = await axios.post(`${API}/auth/sessions/revoke-all`, {}, { headers });
+      setShowRevokeSessions(false);
+      toast.success(response.data?.message || "All active sessions have been revoked. Sign in again to continue.");
+      window.setTimeout(logout, 500);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to revoke active sessions");
+    } finally {
+      setRevokingSessions(false);
+    }
   };
 
   const saveNotifications = async () => {
@@ -313,28 +341,11 @@ export default function TechSettingsPage() {
 
   return (
     <div className="mx-auto max-w-[1440px] space-y-4 pb-8" data-testid="tech-settings-page">
-      <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_8%_0%,hsl(var(--primary)/0.22),transparent_38%),linear-gradient(110deg,hsl(var(--card)),hsl(var(--background)))] p-4 shadow-[0_16px_48px_-28px_hsl(var(--primary)/0.55)] md:px-6 md:py-5">
-        <div className="absolute -right-10 -top-16 h-48 w-48 rounded-full bg-primary/20 blur-3xl" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-3">
-            <Button variant="ghost" size="icon" className="mt-0.5 shrink-0" onClick={() => window.history.back()} data-testid="settings-back" title="Go back">
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div>
-              <div className="mb-2 flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight md:text-2xl">My Workspace</h1>
-                {profile?.role === "admin" && <Badge className="border-primary/20 bg-primary/10 text-primary"><ShieldCheck className="mr-1 h-3.5 w-3.5" />Administrator</Badge>}
-              </div>
-              <p className="max-w-xl text-sm text-muted-foreground">Your technician command centre for profile, security, communications, availability, and workspace preferences.</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/70 bg-background/60 p-1.5 backdrop-blur-sm">
+      <OperationalPageHeader eyebrow="Personal workspace · technician controls" title="My Workspace" description="Manage your profile, security, communications, availability and Nexus experience." icon={User} tone="violet" meta={profile?.role === "admin" ? ["Administrator"] : []} actions={<>
             <Button variant="outline" size="sm" onClick={() => selectTab("security")}><ShieldCheck className="mr-1.5 h-4 w-4" />Security</Button>
             <Button variant="outline" size="sm" onClick={() => selectTab("notifications")}><Bell className="mr-1.5 h-4 w-4" />Alerts</Button>
             <Button size="sm" onClick={fetchAll}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
-          </div>
-        </div>
-      </section>
+          </>} />
 
       <div className="space-y-4">
         <Card className="border-primary/15 bg-gradient-to-b from-card to-muted/20 shadow-[0_12px_30px_-24px_hsl(var(--foreground)/0.7)]">
@@ -495,6 +506,19 @@ export default function TechSettingsPage() {
                       <Button variant="outline" className="text-destructive" onClick={() => setShowDisable2FA(true)} data-testid="disable-2fa-btn">Disable 2FA</Button>
                     </div>
                   )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-rose-500/20" data-testid="settings-session-security-panel">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><LogOut className="h-5 w-5 text-rose-400" />Active Sessions</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium">End every current Nexus session</p>
+                    <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">Use this if a device is lost, a browser was left signed in, or you want to force a fresh sign-in everywhere. Nexus records the action and immediately invalidates all existing tokens.</p>
+                  </div>
+                  <Button variant="outline" className="shrink-0 border-rose-500/30 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300" onClick={() => setShowRevokeSessions(true)} data-testid="revoke-all-sessions-btn"><LogOut className="mr-1.5 h-4 w-4" />Sign out all devices</Button>
                 </CardContent>
               </Card>
 
@@ -770,6 +794,7 @@ export default function TechSettingsPage() {
                 <Separator />
 
                 {/* Login Wallpaper */}
+                {canManageBranding ? (
                 <div data-testid="wallpaper-section">
                   <Label className="text-sm font-medium flex items-center gap-2"><Image className="w-4 h-4" />Login Page Wallpaper</Label>
                   <p className="text-xs text-muted-foreground mb-3">Upload a custom 1920x1080 image or choose a template for the login page background</p>
@@ -875,6 +900,12 @@ export default function TechSettingsPage() {
                     </div>
                   )}
                 </div>
+                ) : (
+                  <div data-testid="wallpaper-section" className="rounded-xl border border-border/70 bg-muted/[0.18] p-4">
+                    <Label className="flex items-center gap-2 text-sm font-medium"><Image className="h-4 w-4" />Login page visual</Label>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">This is organisation-wide branding. A Nexus administrator can manage the login experience from Platform Branding; your workspace appearance remains personal.</p>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
                   <div><p className="text-sm font-semibold">Save workspace appearance</p><p className="mt-1 text-xs text-muted-foreground">Keep this theme, motion level, accent and font when you sign in on another browser.</p></div>
@@ -998,6 +1029,15 @@ export default function TechSettingsPage() {
             <p className="text-sm font-medium text-foreground">Confirm your identity</p>
             <p className="text-sm leading-6 text-muted-foreground">Enter your password to continue. Nexus records this security change in the audit trail.</p>
             <Input type="password" value={disablePw} onChange={e => setDisablePw(e.target.value)} placeholder="Enter password" data-testid="disable-2fa-password" autoComplete="current-password" />
+          </section>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={showRevokeSessions} onOpenChange={setShowRevokeSessions}>
+        <NexusWorkflowDialog eyebrow="Account security" title="Sign out all active sessions" description="This immediately invalidates this account's active Nexus sessions, including this browser. You will need to sign in again." icon={LogOut} tone="rose" className="max-w-xl" footer={<><Button variant="outline" onClick={() => setShowRevokeSessions(false)} disabled={revokingSessions}>Cancel</Button><Button variant="destructive" onClick={revokeAllSessions} disabled={revokingSessions} data-testid="confirm-revoke-all-sessions">{revokingSessions ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <LogOut className="mr-1.5 h-4 w-4" />}Sign out everywhere</Button></>}>
+          <section className="space-y-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.04] p-4">
+            <p className="text-sm font-medium text-foreground">You are about to end all active sessions</p>
+            <p className="text-sm leading-6 text-muted-foreground">The current browser is included. Existing API tokens stop working on their next request; no password or customer data is changed.</p>
           </section>
         </NexusWorkflowDialog>
       </Dialog>

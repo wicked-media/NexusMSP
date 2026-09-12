@@ -13,6 +13,10 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { toast } from "sonner";
 import {
   Mail, Settings, CheckCircle, XCircle, RefreshCw, Loader2, Shield, Key, Link, Unlink, TestTube, UserPlus, Zap, Plus, Pencil, Send
@@ -21,6 +25,8 @@ import {
 const OUTBOUND_ROLES = [
   { id: "ticket_comments", label: "Ticket comments" },
   { id: "ticket_replies", label: "Ticket replies" },
+  { id: "service_job_comments", label: "Workshop & cabling comments" },
+  { id: "service_job_replies", label: "Workshop & cabling replies" },
   { id: "billing", label: "Billing & invoices" },
   { id: "lead_responses", label: "Lead responses" },
   { id: "notifications", label: "Platform notices" },
@@ -30,15 +36,22 @@ export default function O365SetupPage() {
   const { token, user } = useAuth();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [outboundTesting, setOutboundTesting] = useState(false);
   const [testRecipient, setTestRecipient] = useState("");
+  const [outboundTestRole, setOutboundTestRole] = useState("notifications");
   const [outboundRouting, setOutboundRouting] = useState({});
   const [deliveries, setDeliveries] = useState([]);
   const [isSetupOpen, setIsSetupOpen] = useState(false);
   const [editingMailbox, setEditingMailbox] = useState(null);
+  const [removingMailbox, setRemovingMailbox] = useState(null);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [removingMailboxBusy, setRemovingMailboxBusy] = useState(false);
   const [form, setForm] = useState({
     tenant_id: "", client_id: "", client_secret: "",
     redirect_uri: "", mailbox_email: "",
@@ -50,8 +63,10 @@ export default function O365SetupPage() {
   const [emailLeads, setEmailLeads] = useState([]);
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchSettings = async () => {
-    setLoading(true);
+  const fetchSettings = async ({ quiet = false } = {}) => {
+    setLoadError(null);
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const [sRes, lRes, auditRes] = await Promise.all([
         axios.get(`${API}/settings/o365-mailbox`, { headers }),
@@ -79,8 +94,13 @@ export default function O365SetupPage() {
           auto_reply_message: sRes.data.auto_reply_message || "",
         });
       }
-    } catch { toast.error("Failed to fetch settings"); }
-    finally { setLoading(false); }
+    } catch {
+      if (quiet) toast.error("Mailbox status could not refresh. Your current configuration view has been kept.");
+      else setLoadError("Nexus could not retrieve Microsoft 365 mailbox status. No mail routing has been changed.");
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   };
 
   useEffect(() => { fetchSettings(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -95,26 +115,32 @@ export default function O365SetupPage() {
       await axios.post(`${API}/o365/connect`, form, { headers });
       toast.success("Mailbox configuration saved. Grant Microsoft Graph application permissions, then run the connection and delivery tests.");
       setIsSetupOpen(false);
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
     finally { setSaving(false); }
   };
 
   const handleDisconnect = async () => {
-    if (!window.confirm("Disconnect Microsoft 365 mailbox?")) return;
+    setDisconnecting(true);
     try {
       await axios.post(`${API}/o365/disconnect`, {}, { headers });
-      toast.success("Disconnected");
-      fetchSettings();
-    } catch { toast.error("Failed to disconnect"); }
+      toast.success("Microsoft 365 mailbox disconnected");
+      setDisconnectOpen(false);
+      fetchSettings({ quiet: true });
+    } catch { toast.error("Failed to disconnect mailbox"); }
+    finally { setDisconnecting(false); }
   };
 
-  const handleRemoveMailbox = async (mailboxId) => {
+  const handleRemoveMailbox = async () => {
+    if (!removingMailbox?.id) return;
+    setRemovingMailboxBusy(true);
     try {
-      await axios.delete(`${API}/o365/mailboxes/${mailboxId}`, { headers });
-      toast.success("Mailbox removed");
-      fetchSettings();
+      const response = await axios.delete(`${API}/o365/mailboxes/${removingMailbox.id}`, { headers });
+      toast.success(response.data?.remaining ? "Mailbox removed and delivery routing updated" : "Mailbox removed and Microsoft 365 delivery disconnected");
+      setRemovingMailbox(null);
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to remove mailbox"); }
+    finally { setRemovingMailboxBusy(false); }
   };
 
   const handleUpdateMailbox = async () => {
@@ -127,7 +153,7 @@ export default function O365SetupPage() {
       }, { headers });
       toast.success("Inbox routing updated");
       setEditingMailbox(null);
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to update inbox"); }
     finally { setSaving(false); }
   };
@@ -154,7 +180,7 @@ export default function O365SetupPage() {
         auto_reply_message: form.auto_reply_message,
       }, { headers });
       toast.success("Settings saved");
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch { toast.error("Failed to save"); }
     finally { setSaving(false); }
   };
@@ -164,10 +190,11 @@ export default function O365SetupPage() {
     if (!recipient) { toast.error("Enter an email address for the delivery test"); return; }
     setOutboundTesting(true);
     try {
-      const result = await axios.post(`${API}/settings/email-delivery/test`, { to_email: recipient }, { headers });
-      if (result.data.status === "sent") toast.success(`Test email sent to ${recipient}`);
+      const result = await axios.post(`${API}/settings/email-delivery/test`, { to_email: recipient, category: outboundTestRole }, { headers });
+      const sender = result.data.sender ? ` from ${result.data.sender}` : "";
+      if (result.data.status === "sent") toast.success(`Test email sent to ${recipient}${sender}`);
       else toast.warning(result.data.message || "The delivery test was not sent");
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Outbound delivery test failed"); }
     finally { setOutboundTesting(false); }
   };
@@ -177,7 +204,7 @@ export default function O365SetupPage() {
     try {
       await axios.put(`${API}/settings/o365-mailbox`, { outbound_mailbox_email: mailboxEmail }, { headers });
       toast.success("Shared outbound mailbox updated");
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to update outbound mailbox"); }
     finally { setSaving(false); }
   };
@@ -187,7 +214,7 @@ export default function O365SetupPage() {
     try {
       await axios.put(`${API}/settings/o365-mailbox`, { outbound_routing: outboundRouting }, { headers });
       toast.success("Outbound mailbox routing saved");
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Failed to save outbound routing"); }
     finally { setSaving(false); }
   };
@@ -198,7 +225,7 @@ export default function O365SetupPage() {
       const res = await axios.post(`${API}/o365/sync-emails`, {}, { headers });
       const summary = res.data;
       toast.success(`${summary.emails_fetched || 0} checked · ${summary.leads_created || 0} leads · ${summary.tickets_created || 0} tickets`);
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch (e) { toast.error(e.response?.data?.detail || "Sync failed"); }
     finally { setSyncing(false); }
   };
@@ -214,11 +241,12 @@ export default function O365SetupPage() {
         to_address: (settings?.mailboxes || [])[0]?.mailbox_email || settings?.mailbox_email || "",
       }, { headers });
       toast.success("Demo email processed — check Lead Studio");
-      fetchSettings();
+      fetchSettings({ quiet: true });
     } catch { toast.error("Failed to process test email"); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading Microsoft 365 mailboxes" />;
+  if (loadError) return <WorkspaceErrorState title="Mailbox & Email is unavailable" description={loadError} onRetry={fetchSettings} retryLabel="Retry mailbox load" />;
 
   const isConnected = settings?.connected;
   const isGraphLive = settings?.live_sync_enabled === true;
@@ -234,26 +262,29 @@ export default function O365SetupPage() {
   ];
 
   return (
-    <div className="space-y-6" data-testid="mailbox-email-workspace">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">Mailbox and email</p>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">Microsoft 365 Mailboxes</h2>
-          <p className="text-sm text-muted-foreground">Microsoft Graph email intake, outbound routing, delivery audit, and automatic sync.</p>
-        </div>
-        <div className="flex gap-2">
+    <div id="mailbox-o365-card" data-testid="mailbox-o365-card">
+      <div className="space-y-6" data-testid="mailbox-email-workspace">
+      <OperationalPageHeader
+        eyebrow="Mailbox and email"
+        title="Microsoft 365 Mailboxes"
+        description="Microsoft Graph email intake, outbound routing, delivery audit, and automatic sync."
+        icon={Mail}
+        tone="sky"
+        signal={isGraphLive ? "healthy" : isConnected ? "attention" : "recommendation"}
+        actions={<>
           {isConnected && (
             <>
-              <Button variant="outline" size="sm" onClick={() => setIsSetupOpen(true)} data-testid="add-o365-mailbox"><Plus className="w-4 h-4 mr-2" />Add Inbox</Button>
               <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing} data-testid="o365-sync-now">{syncing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Sync now</Button>
-              <Button variant="outline" size="sm" onClick={handleTest} disabled={testing}>
-                {testing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <TestTube className="w-4 h-4 mr-2" />}Test Connection
-              </Button>
+              <WorkspaceActionMenu testId="o365-more-actions">
+                <WorkspaceActionMenuItem icon={testing ? Loader2 : TestTube} onSelect={handleTest} disabled={testing}>Test connection</WorkspaceActionMenuItem>
+                <WorkspaceActionMenuItem icon={RefreshCw} onSelect={() => fetchSettings({ quiet: true })} disabled={refreshing} testId="refresh-o365-workspace">Refresh workspace</WorkspaceActionMenuItem>
+              </WorkspaceActionMenu>
+              <Button size="sm" onClick={() => setIsSetupOpen(true)} data-testid="add-o365-mailbox"><Plus className="w-4 h-4 mr-2" />Add inbox</Button>
             </>
           )}
-          {!isConnected && <Button onClick={() => setIsSetupOpen(true)} data-testid="connect-o365-btn"><Zap className="w-4 h-4 mr-2" />One-Click Setup</Button>}
-        </div>
-      </div>
+          {!isConnected && <><Button variant="outline" size="sm" onClick={() => fetchSettings({ quiet: true })} disabled={refreshing} data-testid="refresh-o365-workspace">{refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Refresh</Button><Button onClick={() => setIsSetupOpen(true)} data-testid="connect-o365-btn"><Zap className="w-4 h-4 mr-2" />Connect Microsoft 365</Button></>}
+        </>}
+      />
 
       {/* Connection Status Card */}
       <Card className={isConnected ? "border-emerald-500/30" : "border-amber-500/30"}>
@@ -278,7 +309,7 @@ export default function O365SetupPage() {
               )}
             </div>
             {isConnected && (
-              <Button variant="destructive" size="sm" onClick={handleDisconnect} data-testid="disconnect-o365-btn">
+              <Button variant="destructive" size="sm" onClick={() => setDisconnectOpen(true)} data-testid="disconnect-o365-btn">
                 <Unlink className="w-4 h-4 mr-1" />Disconnect
               </Button>
             )}
@@ -294,14 +325,18 @@ export default function O365SetupPage() {
       </Card>
 
       {mailboxes.length > 0 && (
-        <Card className="border-blue-500/25 bg-blue-500/[0.03]">
-          <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Shared outbound mailbox</CardTitle></CardHeader>
+        <Card id="microsoft365-email-control-plane" data-testid="microsoft365-email-control-plane" className="border-blue-500/25 bg-blue-500/[0.03]">
+          <CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Microsoft 365 email control plane</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <div><p className="text-sm text-muted-foreground">Used to send invoices, payment reminders, ticket mail, invitations, and platform notifications through Microsoft Graph.</p>{settings?.last_outbound_test_status && <p className={`mt-1 text-xs ${settings.last_outbound_test_status === "sent" ? "text-emerald-400" : settings.last_outbound_test_status === "failed" ? "text-rose-400" : "text-amber-400"}`}>Last delivery test: {settings.last_outbound_test_status} {settings.last_outbound_test_to ? `to ${settings.last_outbound_test_to}` : ""}{settings.last_outbound_test_at ? ` · ${new Date(settings.last_outbound_test_at).toLocaleString()}` : ""}</p>}</div>
+            <div><p className="text-sm text-muted-foreground">Used to send invoices, payment reminders, ticket mail, invitations, and platform notifications through Microsoft Graph.</p><p className="mt-1 text-xs text-muted-foreground">Delivery is organisation-controlled: compose authors do not change the sender. Use the workflow routes below to choose the approved mailbox for each class of mail.</p>{settings?.last_outbound_test_status && <p className={`mt-1 text-xs ${settings.last_outbound_test_status === "sent" ? "text-emerald-400" : settings.last_outbound_test_status === "failed" ? "text-rose-400" : "text-amber-400"}`}>Last delivery test: {settings.last_outbound_test_status}{settings.last_outbound_test_role ? ` · ${settings.last_outbound_test_role.replace(/_/g, " ")}` : ""}{settings.last_outbound_test_sender ? ` from ${settings.last_outbound_test_sender}` : ""}{settings.last_outbound_test_to ? ` to ${settings.last_outbound_test_to}` : ""}{settings.last_outbound_test_at ? ` · ${new Date(settings.last_outbound_test_at).toLocaleString()}` : ""}</p>}</div>
             <div className="flex flex-wrap items-center gap-2">
               <Select value={outboundMailbox} onValueChange={handleSetOutboundMailbox} disabled={saving}>
                 <SelectTrigger className="w-[280px]" data-testid="outbound-mailbox-select"><SelectValue placeholder="Choose sender mailbox" /></SelectTrigger>
                 <SelectContent>{mailboxes.map(mailbox => <SelectItem key={mailbox.id} value={mailbox.mailbox_email}>{mailbox.mailbox_email}</SelectItem>)}</SelectContent>
+              </Select>
+              <Select value={outboundTestRole} onValueChange={setOutboundTestRole} disabled={outboundTesting}>
+                <SelectTrigger className="w-[220px]" data-testid="o365-outbound-test-role"><SelectValue placeholder="Choose delivery role" /></SelectTrigger>
+                <SelectContent>{OUTBOUND_ROLES.map(role => <SelectItem key={role.id} value={role.id}>{role.label}</SelectItem>)}</SelectContent>
               </Select>
               <Input value={testRecipient} onChange={event => setTestRecipient(event.target.value)} placeholder={user?.email || "test@example.com"} className="w-[250px]" data-testid="o365-outbound-test-recipient" />
               <Button variant="outline" onClick={handleOutboundTest} disabled={outboundTesting} data-testid="o365-outbound-test-send">{outboundTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Send test email</Button>
@@ -332,7 +367,7 @@ export default function O365SetupPage() {
               <div><p className="text-sm font-medium">{mailbox.mailbox_email}</p><p className="text-xs text-muted-foreground">{mailbox.email_to_lead_enabled !== false ? "Email-to-lead enabled" : "Email-to-lead paused"} · Last sync: {mailbox.last_sync ? new Date(mailbox.last_sync).toLocaleString() : "Never"}</p></div>
               <div className="flex items-center gap-1">
                 <Button variant="ghost" size="sm" onClick={() => setEditingMailbox({ ...mailbox })} data-testid={`edit-o365-mailbox-${mailbox.id}`}><Pencil className="w-4 h-4 mr-1" />Routing</Button>
-                <Button variant="ghost" size="sm" className="text-red-400" onClick={() => handleRemoveMailbox(mailbox.id)}><Unlink className="w-4 h-4 mr-1" />Remove</Button>
+                <Button variant="ghost" size="sm" className="text-red-400" onClick={() => setRemovingMailbox(mailbox)} data-testid={`remove-o365-mailbox-${mailbox.id}`}><Unlink className="w-4 h-4 mr-1" />Remove</Button>
               </div>
             </div>)}
           </CardContent>
@@ -340,7 +375,7 @@ export default function O365SetupPage() {
       )}
 
       {mailboxes.length > 0 && (
-        <Card className="border-violet-500/25">
+        <Card id="microsoft365-outbound-role-routing" data-testid="microsoft365-outbound-role-routing" className="border-violet-500/25">
           <CardHeader><CardTitle className="text-base flex items-center gap-2"><Settings className="w-5 h-5 text-violet-400" />Outbound email roles</CardTitle><p className="text-xs text-muted-foreground">Tick one mailbox per role. This determines which address customers see for that class of outgoing email.</p></CardHeader>
           <CardContent className="space-y-3">
             <div className="overflow-x-auto rounded-lg border">
@@ -382,6 +417,29 @@ export default function O365SetupPage() {
                   <p className="text-xs text-muted-foreground">Poll verified Microsoft 365 inboxes every {form.mail_sync_interval_minutes || 5} minutes. Manual sync remains available.</p>
                 </div>
                 <Switch checked={form.mail_sync_enabled} onCheckedChange={v => setForm({ ...form, mail_sync_enabled: v })} data-testid="automatic-mail-sync-toggle" />
+              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <Label htmlFor="mail-sync-interval" className="text-sm font-medium">Sync interval</Label>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Choose how frequently Nexus checks connected inboxes while automatic sync is enabled.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="mail-sync-interval"
+                      type="number"
+                      min="1"
+                      max="30"
+                      value={form.mail_sync_interval_minutes}
+                      onChange={event => setForm({ ...form, mail_sync_interval_minutes: event.target.value })}
+                      disabled={!form.mail_sync_enabled}
+                      className="w-20 text-right"
+                      data-testid="mail-sync-interval-input"
+                    />
+                    <span className="text-sm text-muted-foreground">minutes</span>
+                  </div>
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">Allowed range: 1–30 minutes. Shorter intervals increase Microsoft Graph activity.</p>
               </div>
               <Separator />
               <div className="flex items-center justify-between">
@@ -492,23 +550,67 @@ export default function O365SetupPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(removingMailbox)} onOpenChange={(open) => !open && !removingMailboxBusy && setRemovingMailbox(null)}>
+        <NexusWorkflowDialog
+          eyebrow="Mailbox routing"
+          title={`Remove ${removingMailbox?.mailbox_email || "this mailbox"}?`}
+          description="Stop intake and outgoing delivery through this mailbox. Nexus will move any affected sender roles to a remaining mailbox; if this is the last mailbox, shared Microsoft 365 delivery is disconnected."
+          icon={Unlink}
+          tone="rose"
+          className="max-w-lg"
+          data-testid="remove-o365-mailbox-workflow"
+          footer={<>
+            <Button variant="outline" onClick={() => setRemovingMailbox(null)} disabled={removingMailboxBusy}>Keep mailbox</Button>
+            <Button variant="destructive" onClick={handleRemoveMailbox} disabled={removingMailboxBusy} data-testid="confirm-remove-o365-mailbox">
+              {removingMailboxBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlink className="mr-2 h-4 w-4" />}Remove mailbox
+            </Button>
+          </>}
+        >
+          <p className="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] p-3 text-sm text-muted-foreground">Existing tickets, leads, and delivery audit evidence remain in Nexus. Confirm the revised sender routing after removal.</p>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Mailbox connection"
+          title="Disconnect Microsoft 365 mailbox?"
+          description="Stop inbox sync, email intake, and outbound delivery from this Microsoft 365 connection. Existing tickets, leads, and delivery evidence stay in Nexus."
+          icon={Unlink}
+          tone="amber"
+          className="max-w-lg"
+          data-testid="disconnect-o365-workflow"
+          footer={<>
+            <Button variant="outline" onClick={() => setDisconnectOpen(false)} disabled={disconnecting}>Keep connected</Button>
+            <Button variant="destructive" onClick={handleDisconnect} disabled={disconnecting}>
+              {disconnecting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Unlink className="mr-2 h-4 w-4" />}Disconnect mailbox
+            </Button>
+          </>}
+        >
+          <p className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground">Reconnect only after confirming the sender mailbox, Microsoft Graph permissions, and routing policy.</p>
+        </NexusWorkflowDialog>
+      </Dialog>
+
       {/* Setup Dialog */}
       <Dialog open={isSetupOpen} onOpenChange={setIsSetupOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{isConnected ? "Add Microsoft 365 Mailbox" : "Connect Microsoft 365 Mailbox"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <SetupGuideCallout title="Azure app registration required" source="In Microsoft Entra admin centre, create an App registration, record its Directory (tenant) ID and Application (client) ID, create a Client Secret, then grant the required Microsoft Graph application permissions and administrator consent." steps={["Create the app registration in Microsoft Entra ID.", "Grant Mail.Read and Mail.Send application permissions; include Mail.ReadWrite only when the intended workflow requires it.", "Record the Client Secret in Keeper, then grant tenant-wide administrator consent and use Test Connection after saving."]} securityNote="The Client Secret is a password for the Azure app. Keep its source record in Keeper, enter it directly into this integration setting only when required, and replace it before it expires." helpSlug="email-intake-and-leads" />
+            {isConnected && <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-sm text-muted-foreground" data-testid="same-tenant-mailbox-guidance">
+              <p className="font-medium text-foreground">Use the existing Microsoft Graph connection</p>
+              <p className="mt-1">Additional inboxes must belong to the same Microsoft 365 tenant and use the same approved Entra application as the shared delivery connection. This screen does not manage separate tenant connections.</p>
+            </div>}
             <div className="space-y-2">
-              <Label>Tenant ID *</Label>
-              <Input value={form.tenant_id} onChange={e => setForm({ ...form, tenant_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="o365-tenant-id" />
+              <Label>{isConnected ? "Tenant ID (must match the existing connection) *" : "Tenant ID *"}</Label>
+              <Input value={form.tenant_id} onChange={e => setForm({ ...form, tenant_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" readOnly={isConnected} data-testid="o365-tenant-id" />
             </div>
             <div className="space-y-2">
-              <Label>Client ID (Application ID) *</Label>
-              <Input value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="o365-client-id" />
+              <Label>{isConnected ? "Client ID (must match the existing connection) *" : "Client ID (Application ID) *"}</Label>
+              <Input value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" readOnly={isConnected} data-testid="o365-client-id" />
             </div>
             <div className="space-y-2">
-              <Label>Client Secret *</Label>
-              <Input type="password" value={form.client_secret} onChange={e => setForm({ ...form, client_secret: e.target.value })} placeholder="Enter client secret" data-testid="o365-client-secret" />
+              <Label>{isConnected ? "Client Secret (existing app secret) *" : "Client Secret *"}</Label>
+              <Input type="password" value={form.client_secret} onChange={e => setForm({ ...form, client_secret: e.target.value })} placeholder="Enter client secret" readOnly={isConnected} data-testid="o365-client-secret" />
             </div>
             <div className="space-y-2">
               <Label>Mailbox Email *</Label>
@@ -522,11 +624,12 @@ export default function O365SetupPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSetupOpen(false)}>Cancel</Button>
             <Button onClick={handleConnect} disabled={saving} data-testid="connect-o365-submit">
-              {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Zap className="w-4 h-4 mr-1" />}Connect Mailbox
+              {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Zap className="w-4 h-4 mr-1" />}{isConnected ? "Add inbox" : "Connect mailbox"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import { API, useAuth } from "@/App";
@@ -28,11 +28,11 @@ function useApi(token) {
 function useFetch(api, path) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const reload = () => {
+  const reload = useCallback(() => {
     setLoading(true);
     api.get(path).then(setData).catch((e) => toast.error(e.response?.data?.detail || e.message)).finally(() => setLoading(false));
-  };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [path]);
+  }, [api, path]);
+  useEffect(() => { reload(); }, [reload]);
   return { data, loading, reload };
 }
 
@@ -151,15 +151,15 @@ function AutomationView({ api }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
       const [s, l] = await Promise.all([api.get("/ops/settings"), api.get("/ops/tick-log")]);
       setSettings(s); setLog(l.ticks || []);
     } catch (e) { toast.error(e.response?.data?.detail || e.message); }
     finally { setLoading(false); }
-  };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  }, [api]);
+  useEffect(() => { reload(); }, [reload]);
 
   const toggle = async (enabled) => {
     try { const s = await api.put("/ops/settings", { ...settings, enabled }); setSettings(s); toast.success(`Scheduler ${enabled ? "enabled" : "paused"}`); }

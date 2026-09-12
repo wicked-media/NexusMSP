@@ -257,6 +257,7 @@ export default function BackupCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const requestedStatusFilter = searchParams.get("status");
+  const requestedJobId = searchParams.get("job");
   const [tab, setTab] = useState(() => BACKUP_TABS.has(requestedTab) ? requestedTab : "dashboard");
   const [dashData, setDashData] = useState(null);
   const [compData, setCompData] = useState(null);
@@ -305,6 +306,19 @@ export default function BackupCenterPage() {
     if (BACKUP_STATUS_FILTERS.has(requestedStatusFilter)) setStatusFilter(requestedStatusFilter);
     else setStatusFilter("all");
   }, [requestedStatusFilter]);
+
+  useEffect(() => {
+    if (!requestedJobId || !(dashData?.backups || []).length) return;
+    const matchedJob = dashData.backups.find((backup) => String(backup.id) === requestedJobId);
+    if (!matchedJob) return;
+    // A result from Nexus Command should land on its actual operational row,
+    // rather than merely opening the backup workspace and making the next
+    // action ambiguous.  The row stays highlighted while its deep link is in
+    // the URL, so it is safe to refresh or share internally.
+    setTab("dashboard");
+    setStatusFilter("all");
+    setSearch(String(matchedJob.id));
+  }, [dashData?.backups, requestedJobId]);
 
   useEffect(() => {
     setDashboardPage(1);
@@ -706,6 +720,7 @@ export default function BackupCenterPage() {
     if (!matchesStatus) return false;
     if (!normalizedBackupSearch) return true;
     return [
+      backup.id,
       backup.client_name,
       backup.device_name,
       backup.plan_names,
@@ -815,7 +830,7 @@ export default function BackupCenterPage() {
                     {dashboardPageBackups.map((b, i) => {
                       const Ico = STATUS_ICON[b.status] || Clock;
                       return (
-                        <TableRow key={`k-${b.id || dashboardStartIndex + i}`} data-testid={`backup-row-${b.id || dashboardStartIndex + i}`}>
+                        <TableRow key={`k-${b.id || dashboardStartIndex + i}`} className={requestedJobId === String(b.id) ? "bg-cyan-500/[0.08] ring-1 ring-inset ring-cyan-400/30" : undefined} data-testid={`backup-row-${b.id || dashboardStartIndex + i}`}>
                           <TableCell className="text-sm">{b.client_name || "—"}</TableCell>
                           <TableCell className="font-medium">{b.device_name}</TableCell>
                           <TableCell className="text-xs text-muted-foreground truncate max-w-[260px]" title={b.plan_names || ""}>{b.plan_names || "—"}</TableCell>
@@ -1507,13 +1522,13 @@ export default function BackupCenterPage() {
       </Tabs>
 
       <Dialog open={!!simulationRequest} onOpenChange={(open) => { if (!open && !simulationSaving) setSimulationRequest(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-violet-400/20 bg-background p-0" data-testid="recovery-simulation-dialog">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-violet-400/20 bg-background p-0 sm:rounded-2xl" data-testid="recovery-simulation-dialog">
           <DialogHeader className="border-b border-violet-400/15 bg-[linear-gradient(135deg,rgba(139,92,246,0.13),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Recovery assurance</p>
             <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-400/10"><Route className="h-4 w-4 text-violet-300" /></span>Simulate customer recovery</DialogTitle>
             <DialogDescription>Preview whether current evidence supports the required RTO and RPO. This records a plan only—no provider call, restore, failover or production change occurs.</DialogDescription>
           </DialogHeader>
-          {simulationRequest && <div className="space-y-4 px-6 py-5">
+          {simulationRequest && <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.05] p-3 text-xs text-amber-100"><AlertTriangle className="mr-2 inline h-4 w-4" />Simulation results are evidence-dependent estimates, not a recovery guarantee. Validate them with a measured restore test.</div>
             <div><label className="text-sm font-medium">Customer</label><Select value={simulationRequest.client_id} onValueChange={(client_id) => setSimulationRequest(current => ({ ...current, client_id }))}><SelectTrigger className="mt-1"><SelectValue placeholder="Choose customer" /></SelectTrigger><SelectContent>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.name || client.company_name || client.id}</SelectItem>)}</SelectContent></Select></div>
             <div><label className="text-sm font-medium">Workload or service</label><Input className="mt-1" value={simulationRequest.workload} onChange={event => setSimulationRequest(current => ({ ...current, workload: event.target.value }))} placeholder="e.g. Finance SQL and application server" /></div>
@@ -1521,18 +1536,18 @@ export default function BackupCenterPage() {
             <div><label className="text-sm font-medium">Dependencies in restore order</label><Input className="mt-1" value={simulationRequest.dependencies} onChange={event => setSimulationRequest(current => ({ ...current, dependencies: event.target.value }))} placeholder="Domain Controller, DNS, Application Server" /><p className="mt-1 text-[11px] text-muted-foreground">Separate dependencies with commas. The workload is restored after these services.</p></div>
             <div><label className="text-sm font-medium">Assumptions and recovery constraints</label><Textarea className="mt-1 min-h-20" value={simulationRequest.assumptions} onChange={event => setSimulationRequest(current => ({ ...current, assumptions: event.target.value }))} placeholder="Available bandwidth, alternate site, credentials, licensing, maintenance window…" /></div>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setSimulationRequest(null)} disabled={simulationSaving}>Cancel</Button><Button onClick={submitRecoverySimulation} disabled={simulationSaving || !simulationRequest?.client_id || !simulationRequest?.workload.trim()}>{simulationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Record simulation</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setSimulationRequest(null)} disabled={simulationSaving}>Cancel</Button><Button onClick={submitRecoverySimulation} disabled={simulationSaving || !simulationRequest?.client_id || !simulationRequest?.workload.trim()}>{simulationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Record simulation</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!simulationResult} onOpenChange={(open) => { if (!open) setSimulationResult(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-cyan-400/20 bg-background p-0" data-testid="recovery-simulation-result-dialog">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-cyan-400/20 bg-background p-0 sm:rounded-2xl" data-testid="recovery-simulation-result-dialog">
           <DialogHeader className="border-b border-cyan-400/15 bg-[linear-gradient(135deg,rgba(6,182,212,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Recorded recovery preview</p>
             <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><Gauge className="h-5 w-5 text-cyan-300" />{simulationResult?.client_name} · {simulationResult?.workload}</DialogTitle>
             <DialogDescription>Explainable recovery readiness based on the evidence Nexus could observe when this simulation was created.</DialogDescription>
           </DialogHeader>
-          {simulationResult && <div className="space-y-4 px-6 py-5">
+          {simulationResult && <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Readiness</p><p className="mt-1 text-sm font-semibold capitalize">{String(simulationResult.readiness).replaceAll("_", " ")}</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">RTO</p><p className="mt-1 text-sm font-semibold capitalize">{simulationResult.rto_status?.replaceAll("_", " ")}</p><p className="text-[10px] text-muted-foreground">Target {simulationResult.target_rto_hours}h</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">RPO</p><p className="mt-1 text-sm font-semibold capitalize">{simulationResult.rpo_status?.replaceAll("_", " ")}</p><p className="text-[10px] text-muted-foreground">Target {simulationResult.target_rpo_hours}h</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Immutability</p><p className="mt-1 text-sm font-semibold capitalize">{simulationResult.immutability?.replaceAll("_", " ")}</p></div></div>
             <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] p-4"><p className="text-xs font-semibold text-cyan-100">Recovery estimate</p><p className="mt-2 text-2xl font-semibold">{simulationResult.estimated_restore_range_minutes ? `${simulationResult.estimated_restore_range_minutes[0]}–${simulationResult.estimated_restore_range_minutes[1]} min` : "Not enough evidence"}</p><p className="mt-1 text-[11px] text-muted-foreground">Based on {simulationResult.evidence?.successful_restore_tests || 0} successful measured restore test{simulationResult.evidence?.successful_restore_tests === 1 ? "" : "s"}.</p></div><div className="rounded-xl border border-violet-400/15 bg-violet-500/[0.035] p-4"><p className="text-xs font-semibold text-violet-100">Recovery staging</p><p className="mt-2 text-2xl font-semibold">{simulationResult.required_staging_storage_gb == null ? "Not supplied" : `${simulationResult.required_staging_storage_gb} GB`}</p><p className="mt-1 text-[11px] text-muted-foreground">Includes a 20% planning allowance; validate against the recovery platform.</p></div></div>
             <div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-4"><p className="text-xs font-semibold">Recommended restore order</p><div className="mt-3 flex flex-wrap items-center gap-2">{(simulationResult.restore_order || []).map((step, index) => <div key={`${step}-${index}`} className="flex items-center gap-2"><span className="rounded-lg border border-cyan-400/20 bg-cyan-500/[0.05] px-2.5 py-1.5 text-xs">{index + 1}. {step}</span>{index < simulationResult.restore_order.length - 1 && <ArrowUpRight className="h-3.5 w-3.5 rotate-45 text-muted-foreground" />}</div>)}</div></div>
@@ -1540,40 +1555,45 @@ export default function BackupCenterPage() {
             {simulationResult.assumptions && <div><p className="text-xs font-semibold">Recorded assumptions</p><p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{simulationResult.assumptions}</p></div>}
             <p className="rounded-lg border border-white/[0.07] bg-muted/10 p-3 text-[11px] text-muted-foreground">{simulationResult.notice}</p>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button onClick={() => setSimulationResult(null)}>Done</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t bg-muted/20 px-6 py-4"><Button onClick={() => setSimulationResult(null)}>Done</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!verificationRequest} onOpenChange={(open) => { if (!open) setVerificationRequest(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto border-sky-400/20 bg-background p-0" data-testid="backup-verification-request-dialog">
-          <DialogHeader className="border-b border-sky-400/15 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Recovery assurance</p>
-            <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-400/25 bg-sky-400/10"><Play className="h-4 w-4 text-sky-300" /></span>Schedule a recovery test</DialogTitle>
-            <DialogDescription>Choose the customer and recovery scope before creating the request. NexusMSP will log the request and the eventual outcome as audit evidence.</DialogDescription>
-          </DialogHeader>
-          {verificationRequest && <div className="space-y-4 px-6 py-5">
+        <NexusWorkflowDialog
+          eyebrow="Recovery assurance"
+          title="Schedule a recovery test"
+          description="Choose the customer and recovery scope before creating the request. NexusMSP will log the request and the eventual outcome as audit evidence."
+          icon={Play}
+          tone="cyan"
+          className="max-w-xl"
+          data-testid="backup-verification-request-dialog"
+          footer={<><Button variant="outline" onClick={() => setVerificationRequest(null)} disabled={verificationRequestSaving}>Cancel</Button><Button onClick={submitVerificationRequest} disabled={verificationRequestSaving || !verificationRequest?.client_id}>{verificationRequestSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Schedule test</Button></>}
+        >
+          {verificationRequest && <div className="space-y-4">
             <div><label className="text-sm font-medium">Customer</label><Select value={verificationRequest.client_id} onValueChange={(client_id) => setVerificationRequest((current) => ({ ...current, client_id }))}><SelectTrigger className="mt-1"><SelectValue placeholder="Choose customer" /></SelectTrigger><SelectContent>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name || client.company_name || client.id}</SelectItem>)}</SelectContent></Select></div>
             <div className="grid gap-3 sm:grid-cols-2"><div><label className="text-sm font-medium">Recovery scope</label><Select value={verificationRequest.backup_type} onValueChange={(backup_type) => setVerificationRequest((current) => ({ ...current, backup_type }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Recovery test">Recovery test</SelectItem><SelectItem value="File restore">File restore</SelectItem><SelectItem value="System recovery">System recovery</SelectItem><SelectItem value="Application recovery">Application recovery</SelectItem></SelectContent></Select></div><div><label className="text-sm font-medium">Backup solution</label><Select value={verificationRequest.backup_solution} onValueChange={(backup_solution) => setVerificationRequest((current) => ({ ...current, backup_solution }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Acronis">Acronis</SelectItem><SelectItem value="Veeam">Veeam</SelectItem><SelectItem value="Microsoft 365">Microsoft 365</SelectItem><SelectItem value="Other">Other</SelectItem></SelectContent></Select></div></div>
             <div><label className="text-sm font-medium">Technician brief</label><Input className="mt-1" value={verificationRequest.notes} onChange={(event) => setVerificationRequest((current) => ({ ...current, notes: event.target.value }))} placeholder="What should be restored and what must be validated?" /></div>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setVerificationRequest(null)} disabled={verificationRequestSaving}>Cancel</Button><Button onClick={submitVerificationRequest} disabled={verificationRequestSaving || !verificationRequest?.client_id}>{verificationRequestSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Schedule test</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={!!verificationCompletion} onOpenChange={(open) => { if (!open) setVerificationCompletion(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto border-emerald-400/20 bg-background p-0">
-          <DialogHeader className="border-b border-emerald-400/15 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Recovery evidence</p>
-            <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><CheckCircle className="h-4 w-4 text-emerald-300" /></span>Record restore verification</DialogTitle>
-            <DialogDescription>Document the measured restore result. This becomes audit evidence for the selected backup verification request.</DialogDescription>
-          </DialogHeader>
-          {verificationCompletion && <div className="space-y-4 px-6 py-5">
+        <NexusWorkflowDialog
+          eyebrow="Recovery evidence"
+          title="Record restore verification"
+          description="Document the measured restore result. This becomes audit evidence for the selected backup verification request."
+          icon={CheckCircle}
+          tone="emerald"
+          className="max-w-lg"
+          footer={<><Button variant="outline" onClick={() => setVerificationCompletion(null)}>Cancel</Button><Button onClick={completeVerification} disabled={verificationSaving || !verificationCompletion?.restore_time_minutes}>{verificationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save verification</Button></>}
+        >
+          {verificationCompletion && <div className="space-y-4">
             <div className="rounded-lg border border-border/70 bg-muted/20 p-3 text-sm"><p className="font-medium">{verificationCompletion.test.client_name}</p><p className="mt-1 text-xs text-muted-foreground">{verificationCompletion.test.backup_solution} · {verificationCompletion.test.backup_type}</p></div>
             <div className="grid gap-3 sm:grid-cols-2"><div><label className="text-sm font-medium">Outcome</label><Select value={verificationCompletion.result} onValueChange={(result) => setVerificationCompletion((current) => ({ ...current, result }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pass">Pass</SelectItem><SelectItem value="fail">Fail</SelectItem></SelectContent></Select></div><div><label className="text-sm font-medium">Restore time (minutes)</label><Input className="mt-1" type="number" min="0" value={verificationCompletion.restore_time_minutes} onChange={(event) => setVerificationCompletion((current) => ({ ...current, restore_time_minutes: event.target.value }))} placeholder="e.g. 18" /></div></div>
             <div><label className="text-sm font-medium">Integrity check</label><Select value={verificationCompletion.data_integrity_check} onValueChange={(data_integrity_check) => setVerificationCompletion((current) => ({ ...current, data_integrity_check }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="passed">Passed</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="not_applicable">Not applicable</SelectItem></SelectContent></Select></div>
             <div><label className="text-sm font-medium">Technician notes</label><Input className="mt-1" value={verificationCompletion.notes} onChange={(event) => setVerificationCompletion((current) => ({ ...current, notes: event.target.value }))} placeholder="What was restored and what was validated?" /></div>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setVerificationCompletion(null)}>Cancel</Button><Button onClick={completeVerification} disabled={verificationSaving || !verificationCompletion?.restore_time_minutes}>{verificationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save verification</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={!!dismissAlertTarget} onOpenChange={(open) => { if (!open && !dismissingAlert) setDismissAlertTarget(null); }}>
         <NexusWorkflowDialog

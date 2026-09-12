@@ -27,7 +27,6 @@ export default function TechUtilizationPage() {
   if (!data) return null;
 
   const { summary: s, technicians: techs } = data;
-  const topPerformer = techs[0];
   const underUtilized = techs.filter(t => t.utilization_pct < 50);
   const overUtilized = techs.filter(t => t.utilization_pct > 90);
 

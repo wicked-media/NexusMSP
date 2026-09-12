@@ -123,7 +123,7 @@ export default function AssetLifecyclePage() {
           description={`${selectedAsset.asset_tag} · ${selectedAsset.client_name || "No client assigned"} · ${selectedAsset.manufacturer || "Unknown manufacturer"} ${selectedAsset.model || ""}`}
           icon={Package}
           tone="sky"
-          actions={<><Button variant="outline" size="sm" onClick={() => setSelectedAsset(null)}>All assets</Button><Badge className={`${sc.bg} ${sc.text} border ${sc.color.replace("bg-", "border-")}/30`}><StageIcon className="w-3 h-3 mr-1" />{sc.label}</Badge><Button size="sm" onClick={() => { setTransitionForm({ new_stage: "", notes: "" }); setIsTransitionOpen(true); }} data-testid="transition-btn"><ArrowRight className="w-4 h-4 mr-1" />Transition Stage</Button></>}
+          actions={<><Button variant="outline" size="sm" onClick={() => setSelectedAsset(null)}>All assets</Button><Badge className={`${sc.bg} ${sc.text} border ${sc.color.replace("bg-", "border-")}/30`}><StageIcon className="w-3 h-3 mr-1" />{sc.label}</Badge><Button size="sm" onClick={() => { setTransitionForm({ new_stage: "", notes: "" }); setIsTransitionOpen(true); }} data-testid="transition-btn"><ArrowRight className="w-4 h-4 mr-1" />Transition stage</Button></>}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -202,9 +202,9 @@ export default function AssetLifecyclePage() {
 
         {/* Transition Dialog */}
         <Dialog open={isTransitionOpen} onOpenChange={setIsTransitionOpen}>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Transition Asset Stage</DialogTitle></DialogHeader>
-            <div className="space-y-4">
+          <DialogContent className="flex h-[min(640px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+            <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>Transition Asset Stage</DialogTitle></DialogHeader>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
               <div className="space-y-2">
                 <Label>New Stage</Label>
                 <Select value={transitionForm.new_stage} onValueChange={v => setTransitionForm({ ...transitionForm, new_stage: v })}>
@@ -219,7 +219,7 @@ export default function AssetLifecyclePage() {
                 <Textarea value={transitionForm.notes} onChange={e => setTransitionForm({ ...transitionForm, notes: e.target.value })} placeholder="Reason for transition..." />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4">
               <Button variant="outline" onClick={() => setIsTransitionOpen(false)}>Cancel</Button>
               <Button onClick={handleTransition} disabled={!transitionForm.new_stage} data-testid="confirm-transition-btn">Confirm Transition</Button>
             </DialogFooter>
@@ -237,7 +237,7 @@ export default function AssetLifecyclePage() {
         description="One lifecycle view over the canonical inventory register, from procurement through verified disposal."
         icon={Package}
         tone="sky"
-        actions={<><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button><Button onClick={() => setIsCreateOpen(true)} data-testid="create-asset-btn"><Plus className="w-4 h-4 mr-2" />Add Asset</Button></>}
+        actions={<><Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button><Button onClick={() => setIsCreateOpen(true)} data-testid="create-asset-btn"><Plus className="w-4 h-4 mr-2" />Add asset</Button></>}
       />
 
       {/* Dashboard Stats */}
@@ -304,9 +304,9 @@ export default function AssetLifecyclePage() {
 
       {/* Create Dialog */}
       <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>Add Asset to Lifecycle</DialogTitle></DialogHeader>
-          <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-sky-400/15 via-sky-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle>Add Asset to Lifecycle</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Dell OptiPlex 7090" data-testid="asset-name" /></div>
               <div className="space-y-2"><Label>Asset Type</Label>
@@ -342,7 +342,7 @@ export default function AssetLifecyclePage() {
             </div>
             <div className="space-y-2"><Label>Notes</Label><Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Additional notes..." /></div>
           </div>
-          <DialogFooter><Button onClick={handleCreate} data-testid="create-asset-submit"><Plus className="w-4 h-4 mr-1" />Create Asset</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-5 py-4"><Button variant="outline" onClick={() => setIsCreateOpen(false)}>Cancel</Button><Button onClick={handleCreate} data-testid="create-asset-submit"><Plus className="w-4 h-4 mr-1" />Create Asset</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

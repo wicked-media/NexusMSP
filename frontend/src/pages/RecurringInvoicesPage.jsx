@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,10 +25,38 @@ import ReconcileDialog from "@/components/billing/ReconcileDialog";
 import RecurringSmartActions, { ConsolidateButton } from "@/components/billing/RecurringSmartActions";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
 const STATUS_STYLES = { active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", paused: "bg-amber-500/10 text-amber-400 border-amber-500/20", cancelled: "bg-red-500/10 text-red-400 border-red-500/20" };
+
+const buildRecurringForm = (client = {}) => ({
+  client_id: client.id || "",
+  client_name: client.name || "",
+  description: "",
+  frequency: "monthly",
+  payment_terms: "net_30",
+  tax_rate: "10",
+  currency: "AUD",
+  notes: "",
+  auto_send: false,
+  auto_send_email: client.billing_email || client.email || "",
+  include_acronis_usage: false,
+  include_pax8_usage: false,
+  start_date: new Date().toISOString().split("T")[0],
+  line_items: [{ description: "", quantity: "1", rate: "", amount: "" }],
+});
+
+const monthlyEquivalent = (amount, frequency) => {
+  const value = Number(amount || 0);
+  if (frequency === "weekly") return value * 52 / 12;
+  if (frequency === "fortnightly") return value * 26 / 12;
+  if (frequency === "quarterly") return value / 3;
+  if (["annually", "annual", "yearly"].includes(frequency)) return value / 12;
+  return value;
+};
 
 const WORKFLOW_TONES = {
   emerald: { border: "border-emerald-400/25", background: "bg-[radial-gradient(circle_at_top_right,rgba(52,211,153,0.17),transparent_45%),linear-gradient(135deg,rgba(16,185,129,0.10),transparent)]", icon: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300", eyebrow: "text-emerald-300", badge: "border-emerald-500/30 bg-emerald-500/5 text-emerald-300" },
@@ -99,12 +127,14 @@ function ClientAutocomplete({ clients, value, onValueChange, testId, placeholder
 export default function RecurringInvoicesPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const headers = { Authorization: `Bearer ${token}` };
+  const [searchParams, setSearchParams] = useSearchParams();
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [invoices, setInvoices] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [stats, setStats] = useState(null);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState("recurring");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -124,17 +154,18 @@ export default function RecurringInvoicesPage() {
   const [saving, setSaving] = useState(false);
 
   // Form
-  const emptyForm = { client_id: "", client_name: "", description: "", frequency: "monthly", payment_terms: "net_30", tax_rate: "10", currency: "AUD", notes: "", auto_send: false, auto_send_email: "", include_acronis_usage: false, include_pax8_usage: false, start_date: new Date().toISOString().split("T")[0], line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] };
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => buildRecurringForm());
   const [templateForm, setTemplateForm] = useState({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] });
   const [applyForm, setApplyForm] = useState({ client_id: "", client_name: "", frequency: "monthly", start_date: new Date().toISOString().split("T")[0], auto_send: false, auto_send_email: "" });
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const results = await Promise.allSettled([
         axios.get(`${API}/recurring-invoices/list`, { headers }),
         axios.get(`${API}/recurring-invoices/stats`, { headers }),
-        axios.get(`${API}/invoice-templates`, { headers }),
+        axios.get(`${API}/recurring-invoice-templates`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/recurring-invoices/scheduler/status`, { headers }),
       ]);
@@ -144,12 +175,51 @@ export default function RecurringInvoicesPage() {
       setTemplates(data(2, []));
       setClients(data(3, []));
       setSchedulerStatus(data(4, null));
-      if (results.every(result => result.status === "rejected")) toast.error("Failed to load recurring billing data");
-    } catch { toast.error("Failed to load recurring billing data"); }
-    finally { setLoading(false); }
-  }, [token]);
+      if (results.every(result => result.status === "rejected")) {
+        if (quiet) toast.error("Recurring billing could not refresh. The current view has been kept.");
+        else toast.error("Failed to load recurring billing data");
+      }
+    } catch { toast.error(quiet ? "Recurring billing could not refresh. The current view has been kept." : "Failed to load recurring billing data"); }
+    finally { if (quiet) setRefreshing(false); else setLoading(false); }
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const scopedClientId = searchParams.get("clientId") || "";
+  const createRequested = searchParams.get("create") === "1";
+  const scopedClient = useMemo(
+    () => clients.find((client) => client.id === scopedClientId) || null,
+    [clients, scopedClientId],
+  );
+  const scopedInvoices = useMemo(
+    () => scopedClientId ? invoices.filter((invoice) => invoice.client_id === scopedClientId) : invoices,
+    [invoices, scopedClientId],
+  );
+  const scopedStats = useMemo(() => {
+    if (!scopedClientId) return stats;
+    const active = scopedInvoices.filter((invoice) => invoice.status === "active");
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const inSevenDays = new Date(today);
+    inSevenDays.setDate(inSevenDays.getDate() + 7);
+    const dueThisWeek = active.filter((invoice) => {
+      const next = new Date(invoice.next_generation);
+      return !Number.isNaN(next.getTime()) && next >= today && next <= inSevenDays;
+    }).length;
+    const mrr = active.reduce((total, invoice) => total + monthlyEquivalent(invoice.amount, invoice.frequency), 0);
+    return { mrr, arr: mrr * 12, active: active.length, due_this_week: dueThisWeek };
+  }, [scopedClientId, scopedInvoices, stats]);
+
+  useEffect(() => {
+    if (!createRequested || !scopedClient) return;
+    setTab("recurring");
+    setFilterStatus("all");
+    setForm(buildRecurringForm(scopedClient));
+    setShowCreate(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete("create");
+    setSearchParams(next, { replace: true });
+  }, [createRequested, scopedClient, searchParams, setSearchParams]);
 
   const updateLineItem = (setter, items, idx, field, value) => {
     const updated = [...items];
@@ -178,7 +248,7 @@ export default function RecurringInvoicesPage() {
       await axios.post(`${API}/recurring-invoices/create`, data, { headers });
       toast.success("Recurring invoice created");
       setShowCreate(false);
-      setForm(emptyForm);
+      setForm(buildRecurringForm(scopedClient || {}));
       fetchData();
     } catch { toast.error("Failed to create"); }
     finally { setSaving(false); }
@@ -251,7 +321,7 @@ export default function RecurringInvoicesPage() {
     setSaving(true);
     try {
       const data = { ...templateForm, tax_rate: parseFloat(templateForm.tax_rate) || 0, line_items: templateForm.line_items.filter(li => li.description).map(li => ({ ...li, quantity: parseFloat(li.quantity) || 1, rate: parseFloat(li.rate) || 0, amount: parseFloat(li.amount) || 0 })) };
-      await axios.post(`${API}/invoice-templates`, data, { headers });
+      await axios.post(`${API}/recurring-invoice-templates`, data, { headers });
       toast.success("Template created");
       setShowTemplateCreate(false);
       fetchData();
@@ -264,7 +334,7 @@ export default function RecurringInvoicesPage() {
     if (applyForm.auto_send && !applyForm.auto_send_email.trim()) { toast.error("Enter the invoice recipient email before enabling auto-send"); return; }
     setSaving(true);
     try {
-      await axios.post(`${API}/invoice-templates/${showApplyTemplate.id}/apply`, applyForm, { headers });
+      await axios.post(`${API}/recurring-invoice-templates/${showApplyTemplate.id}/apply`, applyForm, { headers });
       toast.success("Recurring invoice created from template");
       setShowApplyTemplate(null);
       setTab("recurring");
@@ -276,7 +346,7 @@ export default function RecurringInvoicesPage() {
   const deleteTemplate = async (id) => {
     if (!window.confirm("Delete this template?")) return;
     try {
-      await axios.delete(`${API}/invoice-templates/${id}`, { headers });
+      await axios.delete(`${API}/recurring-invoice-templates/${id}`, { headers });
       toast.success("Template deleted");
       fetchData();
     } catch { toast.error("Failed"); }
@@ -304,13 +374,13 @@ export default function RecurringInvoicesPage() {
     finally { setRunningScheduler(false); }
   };
 
-  const filtered = invoices.filter(i => {
+  const filtered = scopedInvoices.filter(i => {
     if (filterStatus !== "all" && i.status !== filterStatus) return false;
     if (search && !i.client_name?.toLowerCase().includes(search.toLowerCase()) && !i.description?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading recurring billing" />;
 
   // Line Items Editor Component
   const LineItemsEditor = ({ items, setter }) => (
@@ -336,30 +406,34 @@ export default function RecurringInvoicesPage() {
       <OperationalPageHeader
         eyebrow="Billing automation"
         title="Recurring Billing"
-        description="Create auditable billing streams from client commitments, live subscription sources, and reusable templates. Generated invoices retain their source, approval, and delivery history."
+        description={scopedClient ? `Commercial workspace for ${scopedClient.name}. Create and manage auditable billing streams without losing the client context.` : "Create auditable billing streams from client commitments, live subscription sources, and reusable templates. Generated invoices retain their source, approval, and delivery history."}
         icon={RefreshCw}
         tone="emerald"
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => navigate("/billing-dashboard")} data-testid="goto-billing-command"><Sparkles className="w-3.5 h-3.5 mr-1" />Billing Command</Button>
-          <Button variant="outline" onClick={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} data-testid="create-template-btn"><FileText className="w-4 h-4 mr-1" />New Template</Button>
-          <Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New Recurring Invoice</Button>
+          <Button variant="outline" size="sm" onClick={() => fetchData({ quiet: true })} disabled={refreshing} data-testid="refresh-recurring-billing"><RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+          <WorkspaceActionMenu testId="recurring-more-actions">
+            <WorkspaceActionMenuItem icon={Sparkles} onSelect={() => navigate("/billing-dashboard")} testId="goto-billing-command">Billing command</WorkspaceActionMenuItem>
+            {scopedClientId && <WorkspaceActionMenuItem onSelect={() => { const next = new URLSearchParams(searchParams); next.delete("clientId"); next.delete("create"); setSearchParams(next); }} testId="clear-recurring-client-scope">All clients</WorkspaceActionMenuItem>}
+            <WorkspaceActionMenuItem icon={FileText} onSelect={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} testId="create-template-btn">New template</WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
+          <Button onClick={() => { setShowCreate(true); setForm(buildRecurringForm(scopedClient || {})); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New recurring invoice</Button>
         </>}
       />
 
       {/* Stats */}
-      {stats && (
+      {scopedStats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <HeroTile label="Monthly recurring revenue" value={`$${(stats.mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} active={tab === "recurring" && filterStatus === "active"} onClick={() => { setTab("recurring"); setFilterStatus("active"); }} testId="recurring-metric-mrr" />
-          <HeroTile label="Annual recurring revenue" value={`$${(stats.arr || 0).toLocaleString()}`} icon={TrendingUp} glow="cyan" animated={false} onClick={() => { setTab("recurring"); setFilterStatus("all"); }} testId="recurring-metric-arr" />
-          <HeroTile label="Active billing streams" value={stats.active || 0} icon={RefreshCw} glow="violet" active={tab === "recurring" && filterStatus === "active"} onClick={() => { setTab("recurring"); setFilterStatus("active"); }} testId="recurring-metric-active" />
-          <HeroTile label="Due this week" value={stats.due_this_week || 0} icon={Calendar} glow={stats.due_this_week > 0 ? "amber" : "emerald"} active={tab === "scheduler"} onClick={() => setTab("scheduler")} testId="recurring-metric-due" />
+          <HeroTile label="Monthly recurring revenue" value={`$${(scopedStats.mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} active={tab === "recurring" && filterStatus === "active"} onClick={() => { setTab("recurring"); setFilterStatus("active"); }} testId="recurring-metric-mrr" />
+          <HeroTile label="Annual recurring revenue" value={`$${(scopedStats.arr || 0).toLocaleString()}`} icon={TrendingUp} glow="cyan" animated={false} onClick={() => { setTab("recurring"); setFilterStatus("all"); }} testId="recurring-metric-arr" />
+          <HeroTile label="Active billing streams" value={scopedStats.active || 0} icon={RefreshCw} glow="violet" active={tab === "recurring" && filterStatus === "active"} onClick={() => { setTab("recurring"); setFilterStatus("active"); }} testId="recurring-metric-active" />
+          <HeroTile label="Due this week" value={scopedStats.due_this_week || 0} icon={Calendar} glow={scopedStats.due_this_week > 0 ? "amber" : "emerald"} active={tab === "scheduler"} onClick={() => setTab("scheduler")} testId="recurring-metric-due" />
         </div>
       )}
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="grid h-auto w-full grid-cols-1 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-3">
-          <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="recurring" data-testid="tab-recurring"><Receipt className="h-3.5 w-3.5" />Recurring Invoices ({invoices.length})</TabsTrigger>
+          <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="recurring" data-testid="tab-recurring"><Receipt className="h-3.5 w-3.5" />Recurring Invoices ({scopedInvoices.length})</TabsTrigger>
           <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="templates" data-testid="tab-templates"><FileText className="h-3.5 w-3.5" />Invoice Templates ({templates.length})</TabsTrigger>
           <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="scheduler" data-testid="tab-scheduler"><Zap className="h-3.5 w-3.5" />Auto-Scheduler</TabsTrigger>
         </TabsList>
@@ -556,7 +630,7 @@ export default function RecurringInvoicesPage() {
               <div className="mb-3"><Label className="text-base font-semibold">Billing profile</Label><p className="mt-0.5 text-xs text-muted-foreground">Choose the client, name the commitment, and establish the recurring cadence.</p></div>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div><Label>Client *</Label>
-                <ClientAutocomplete clients={clients} value={form.client_id} testId="ri-client-select" onValueChange={client => setForm(p => ({ ...p, client_id: client.id, client_name: client.name || "" }))} />
+                <ClientAutocomplete clients={clients} value={form.client_id} testId="ri-client-select" onValueChange={client => setForm(p => ({ ...p, client_id: client.id, client_name: client.name || "", auto_send_email: client.billing_email || client.email || p.auto_send_email }))} />
                 <p className="mt-1 text-[10px] text-emerald-100/70">Search by client name or recorded billing email.</p>
               </div>
               <div><Label>Frequency</Label>

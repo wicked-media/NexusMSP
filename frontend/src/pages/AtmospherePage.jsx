@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
@@ -23,12 +23,13 @@ function useApi(token) {
 function useFetch(api, path, deps = []) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const reload = () => {
+  const reload = useCallback(() => {
     if (!path) { setLoading(false); return; }
     setLoading(true);
     api.get(path).then(setData).catch((e) => toast.error(e.response?.data?.detail || e.message)).finally(() => setLoading(false));
-  };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [path, ...deps]);
+  }, [api, path]);
+  const dependencyKey = JSON.stringify(deps);
+  useEffect(() => { reload(); }, [dependencyKey, reload]);
   return { data, loading, reload };
 }
 
@@ -158,7 +159,7 @@ function FridayReelView({ api }) {
             <Card key={idx} className="bg-gradient-to-br from-violet-900/20 via-slate-900 to-rose-900/10">
               <CardContent className="p-3">
                 <div className="text-[10px] uppercase tracking-widest text-violet-400">Scene {idx + 1}</div>
-                <p className="text-sm mt-1 leading-relaxed">{s.replace(/^\d+[\.\)]\s*/, "")}</p>
+                <p className="text-sm mt-1 leading-relaxed">{s.replace(/^\d+[.)]\s*/, "")}</p>
               </CardContent>
             </Card>
           ))}

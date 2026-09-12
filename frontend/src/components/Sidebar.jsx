@@ -1,16 +1,24 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth, useTheme } from "@/App";
-import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Sun, Moon, Search, X, AlertTriangle, CheckCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Sun, Moon, Search, X, AlertTriangle, CheckCheck, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import { navGroups, getAllNavItems, taskShortcuts } from "@/config/navigation";
 import { useNavCounts, NavBadge } from "@/hooks/useNavCounts";
 import NexusGlobalPulse from "@/components/NexusGlobalPulse";
+import {
+  getNavigationItemState,
+  getActiveParentNavigationPath,
+  readSidebarPreferences,
+  togglePinnedWorkspace,
+  writeSidebarPreferences,
+} from "@/lib/sidebarNavigation";
 
 // Notification Bell Component
 function NotificationBell({ token, collapsed }) {
@@ -150,86 +158,184 @@ function NotificationBell({ token, collapsed }) {
   );
 }
 
-// NavItem with optional collapsible children
-const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) => {
+// Navigation stays URL-driven. This avoids stale highlighting when a workspace
+// changes tabs or views without changing its pathname.
+const NavItem = ({
+  item,
+  collapsed,
+  expandedMenus,
+  toggleMenu,
+  counts = {},
+  onNavigate,
+  isPinned = false,
+  onTogglePin,
+  showPinControl = false,
+}) => {
   const location = useLocation();
-  const navigate = useNavigate();
-  const hasChildren = item.children && item.children.length > 0;
+  const [flyoutOpen, setFlyoutOpen] = useState(false);
+  const hasChildren = Boolean(item.children?.length);
   const isExpanded = expandedMenus.has(item.path);
-  const currentLocation = `${location.pathname}${location.search}`;
-  const matchesPath = (path) => path.includes("?")
-    ? currentLocation === path || currentLocation.startsWith(`${path}&`)
-    : location.pathname === path;
+  const navigationState = getNavigationItemState(item, location);
+  const { activeChild, isCurrentPage, isHighlighted } = navigationState;
+  const submenuId = `submenu-${item.path.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
-  // Check if this item or any child is active
-  const isActive = matchesPath(item.path);
-  const isChildActive = hasChildren && item.children.some(c => matchesPath(c.path));
-  const isWorkspaceActive = item.workspacePaths?.some(path => location.pathname === path || location.pathname.startsWith(`${path}/`));
-  const isHighlighted = isActive || isChildActive || isWorkspaceActive;
-
-  // Aggregate badge count: own + any child paths
+  // Aggregate badge count: own + any child paths.
   const ownCount = counts[item.path] || 0;
-  const childrenCount = hasChildren ? item.children.reduce((s, c) => s + (counts[c.path] || 0), 0) : 0;
+  const childrenCount = hasChildren ? item.children.reduce((sum, child) => sum + (counts[child.path] || 0), 0) : 0;
   const badgeCount = ownCount + childrenCount;
 
-  const navigateToItem = () => navigate(item.path);
+  const closeAfterNavigate = () => {
+    setFlyoutOpen(false);
+    onNavigate?.();
+  };
+
+  const icon = (
+    item.icon && (
+      <span className={`relative flex-shrink-0 nexus-sidebar-workspace-icon ${isHighlighted ? "is-active" : ""} ${badgeCount > 0 ? "has-attention" : ""}`}>
+        <item.icon className={collapsed ? "h-[18px] w-[18px]" : "h-4 w-4"} />
+        {collapsed && badgeCount > 0 && <NavBadge count={badgeCount} className="absolute -right-1.5 -top-1.5" />}
+      </span>
+    )
+  );
+
+  const baseClassName = collapsed
+    ? `flex w-full items-center justify-center rounded-lg p-2.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${isHighlighted ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`
+    : `flex min-w-0 flex-1 items-center gap-2.5 px-3 py-1.5 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${isHighlighted ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`;
+
+  const pinControl = !collapsed && showPinControl && onTogglePin ? (
+    <button
+      type="button"
+      onClick={() => onTogglePin(item.path)}
+      className={`self-stretch px-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+        isPinned ? "opacity-100 text-primary" : "opacity-0 group-hover:opacity-100"
+      }`}
+      aria-label={`${isPinned ? "Unpin" : "Pin"} ${item.label}`}
+      aria-pressed={isPinned}
+      data-testid={`nav-pin-${item.path.replace(/\//g, "-").replace(/^-/, "")}`}
+    >
+      <Pin className="h-3.5 w-3.5" fill={isPinned ? "currentColor" : "none"} />
+    </button>
+  ) : null;
+
+  // A collapsed parent is a real popover rather than an interactive tooltip.
+  // It is available by click, Enter and Space, and retains a direct link to
+  // the workspace root alongside its children.
+  if (collapsed && hasChildren) {
+    return (
+      <Popover open={flyoutOpen} onOpenChange={setFlyoutOpen}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className={baseClassName}
+                aria-label={`${item.label} navigation`}
+                aria-controls={submenuId}
+                aria-expanded={flyoutOpen}
+                data-testid={`nav-${item.path.replace(/\//g, "-").replace(/^-/, "")}`}
+              >
+                {icon}
+              </button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="right">{item.label}</TooltipContent>
+        </Tooltip>
+        <PopoverContent id={submenuId} side="right" align="start" className="w-64 p-2" aria-label={`${item.label} navigation`}>
+          <div className="border-b border-border/70 px-2.5 pb-2 pt-1">
+            <p className="text-xs font-semibold">{item.label}</p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">Choose a workspace view</p>
+          </div>
+          <div className="mt-1 space-y-0.5">
+            <Link
+              to={item.path}
+              onClick={closeAfterNavigate}
+              aria-current={isCurrentPage ? "page" : undefined}
+              className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                isCurrentPage ? "bg-primary/10 text-primary" : "hover:bg-muted"
+              }`}
+            >
+              {item.icon && <item.icon className="h-4 w-4 shrink-0" />}
+              Open {item.label}
+            </Link>
+            {item.children.map((child) => {
+              const childActive = activeChild?.path === child.path;
+              return (
+                <Link
+                  key={child.path}
+                  to={child.path}
+                  onClick={closeAfterNavigate}
+                  aria-current={childActive ? "page" : undefined}
+                  className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                    childActive ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  <span className="flex-1 truncate">{child.label}</span>
+                  {(counts[child.path] || 0) > 0 && <NavBadge count={counts[child.path]} />}
+                </Link>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
+  const rootLink = (
+    <Link
+      to={item.path}
+      onClick={onNavigate}
+      aria-current={isCurrentPage ? "page" : undefined}
+      className={`${baseClassName} ${!collapsed && (hasChildren || pinControl) ? "rounded-l-lg" : "rounded-lg"}`}
+      data-testid={`nav-${item.path.replace(/\//g, "-").replace(/^-/, "")}`}
+    >
+      {icon}
+      {!collapsed && (
+        <>
+          <span className="flex-1 truncate text-left text-[12px]">{item.label}</span>
+          {!isExpanded && badgeCount > 0 && <NavBadge count={badgeCount} />}
+        </>
+      )}
+    </Link>
+  );
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <div>
-          <div className="flex items-center">
-          <button
-            onClick={navigateToItem}
-            className={`flex items-center ${hasChildren && !collapsed ? "flex-1 rounded-l-lg" : "w-full rounded-lg"} transition-all duration-150 group ${
-              collapsed
-                ? `p-2.5 justify-center ${isHighlighted ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`
-                : `px-3 py-1.5 gap-2.5 ${isHighlighted ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`
-            }`}
-            aria-label={item.label}
-            data-testid={`nav-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
-          >
-            {item.icon && (
-              <span className={`relative flex-shrink-0 nexus-sidebar-workspace-icon ${isHighlighted ? "is-active" : ""} ${badgeCount > 0 ? "has-attention" : ""}`}>
-                <item.icon className={`${collapsed ? 'w-[18px] h-[18px]' : 'w-4 h-4'}`} />
-                {collapsed && badgeCount > 0 && (
-                  <NavBadge count={badgeCount} className="absolute -top-1.5 -right-1.5" />
-                )}
-              </span>
+          <div className="group flex items-center">
+            {rootLink}
+            {pinControl}
+            {hasChildren && !collapsed && (
+              <button
+                type="button"
+                onClick={() => toggleMenu(item.path)}
+                className={`self-stretch rounded-r-lg px-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                  isHighlighted ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+                aria-label={`Toggle ${item.label} submenu`}
+                aria-controls={submenuId}
+                aria-expanded={isExpanded}
+                data-testid={`nav-toggle-${item.path.replace(/\//g, "-").replace(/^-/, "")}`}
+              >
+                <ChevronDown className={`h-3 w-3 transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+              </button>
             )}
-            {!collapsed && (
-              <>
-                <span className="text-[12px] flex-1 text-left truncate">{item.label}</span>
-                {!isExpanded && badgeCount > 0 && <NavBadge count={badgeCount} />}
-              </>
-            )}
-          </button>
-          {hasChildren && !collapsed && (
-            <button
-              onClick={() => toggleMenu(item.path)}
-              className={`self-stretch px-2 rounded-r-lg transition-colors ${isHighlighted ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-              aria-label={`Toggle ${item.label} submenu`}
-              aria-expanded={isExpanded}
-              data-testid={`nav-toggle-${item.path.replace(/\//g, '-').replace(/^-/, '')}`}
-            >
-              <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-            </button>
-          )}
           </div>
-          {/* Children */}
           {!collapsed && hasChildren && isExpanded && (
-            <div className="ml-4 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">
-              {item.children.map(child => {
-                const childActive = matchesPath(child.path);
+            <div id={submenuId} className="ml-4 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">
+              {item.children.map((child) => {
+                const childActive = activeChild?.path === child.path;
                 const childCount = counts[child.path] || 0;
                 return (
                   <Link
                     key={child.path}
                     to={child.path}
-                    className={`flex items-center gap-2 px-2.5 py-1 rounded text-[11px] transition-all ${
-                      childActive ? 'text-primary font-medium bg-primary/5' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    onClick={onNavigate}
+                    aria-current={childActive ? "page" : undefined}
+                    className={`flex items-center gap-2 rounded px-2.5 py-1 text-[11px] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                      childActive ? "bg-primary/5 font-medium text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                     }`}
-                    data-testid={`nav-child-${child.path.replace(/\//g, '-').replace(/^-/, '')}`}
+                    data-testid={`nav-child-${child.path.replace(/\//g, "-").replace(/^-/, "")}`}
                   >
                     <span className="flex-1 truncate">{child.label}</span>
                     {childCount > 0 && <NavBadge count={childCount} />}
@@ -240,27 +346,25 @@ const NavItem = ({ item, collapsed, expandedMenus, toggleMenu, counts = {} }) =>
           )}
         </div>
       </TooltipTrigger>
-      {collapsed && (
-        <TooltipContent side="right" className="font-medium">
-          {item.label}
-          {hasChildren && (
-            <div className="mt-1 pt-1 border-t border-border/50 space-y-0.5">
-              {item.children.map(c => (
-                <Link key={c.path} to={c.path} className="block text-xs text-muted-foreground hover:text-foreground py-0.5">{c.label}</Link>
-              ))}
-            </div>
-          )}
-        </TooltipContent>
-      )}
+      {collapsed && <TooltipContent side="right">{item.label}</TooltipContent>}
     </Tooltip>
   );
 };
 
 // Sidebar Search Component
-function SidebarSearch() {
+//
+// This is deliberately a lightweight entry point into the same server-side
+// operational search that powers Nexus Command.  Workspace filtering remains
+// instant and local; record lookup stays behind the API so the browser never
+// has to download or correlate unrestricted business data.
+function SidebarSearch({ onNavigate, token }) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const [recordSearch, setRecordSearch] = useState({});
+  const [searchingRecords, setSearchingRecords] = useState(false);
   const navigate = useNavigate();
+  const searchTimerRef = useRef(null);
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const allItems = getAllNavItems();
   const normalisedQuery = query.trim().toLowerCase();
@@ -279,10 +383,139 @@ function SidebarSearch() {
     .filter((item, index, items) => items.findIndex(candidate => candidate.path === item.path) === index)
     .slice(0, 8);
 
+  useEffect(() => {
+    const value = query.trim();
+    clearTimeout(searchTimerRef.current);
+    if (!token || value.length < 2) {
+      setRecordSearch({});
+      setSearchingRecords(false);
+      return undefined;
+    }
+    searchTimerRef.current = setTimeout(async () => {
+      setSearchingRecords(true);
+      try {
+        const response = await axios.get(`${API}/command-palette/search`, { headers, params: { q: value } });
+        setRecordSearch(response.data || {});
+      } catch {
+        setRecordSearch({});
+      } finally {
+        setSearchingRecords(false);
+      }
+    }, 180);
+    return () => clearTimeout(searchTimerRef.current);
+  }, [headers, query, token]);
+
+  const recordSections = useMemo(() => [
+    {
+      heading: "Tickets",
+      items: (recordSearch.tickets || []).slice(0, 2).map(item => ({
+        kind: "ticket", id: item.id, label: `${item.ticket_number || "Ticket"} · ${item.title || "Untitled"}`,
+        hint: [item.client_name, item.priority].filter(Boolean).join(" · "),
+      })),
+    },
+    {
+      heading: "Clients & contacts",
+      items: [
+        ...(recordSearch.clients || []).slice(0, 2).map(item => ({
+          kind: "client", id: item.id, label: item.name || "Client", hint: item.phone || item.email || item.contract_status || "Client",
+        })),
+        ...(recordSearch.contacts || []).slice(0, 2).map(item => ({
+          kind: "contact", id: item.id, clientId: item.client_id, label: item.name || "Client contact",
+          hint: [item.client_name, item.phone || item.email || item.role].filter(Boolean).join(" · "),
+        })),
+      ],
+    },
+    {
+      heading: "Products & assets",
+      items: [
+        ...(recordSearch.products || []).slice(0, 2).map(item => ({
+          kind: "product", id: item.id, label: item.name || "Product", hint: [item.sku || item.barcode, item.vendor || item.category].filter(Boolean).join(" · "),
+        })),
+        ...(recordSearch.devices || []).slice(0, 2).map(item => ({
+          kind: "device", id: item.id, label: item.hostname || item.name || "Managed asset", hint: [item.client_name, item.device_type].filter(Boolean).join(" · "),
+        })),
+      ],
+    },
+    {
+      heading: "Commercial records",
+      items: [
+        ...(recordSearch.invoices || []).slice(0, 1).map(item => ({
+          kind: "invoice", id: item.id, label: item.invoice_name || item.invoice_number || "Invoice", hint: item.client_name || item.status || "Invoice",
+        })),
+        ...(recordSearch.purchase_orders || []).slice(0, 1).map(item => ({
+          kind: "purchase_order", id: item.id, label: item.po_number || "Purchase order", hint: item.vendor || item.client_name || item.status || "Purchase order",
+        })),
+        ...(recordSearch.projects || []).slice(0, 1).map(item => ({
+          kind: "project", id: item.id, label: item.name || item.project_number || "Project", hint: item.client_name || item.status || "Project",
+        })),
+        ...(recordSearch.contracts || []).slice(0, 1).map(item => ({
+          kind: "contract", id: item.id, label: item.name || item.contract_number || "Contract", hint: item.client_name || item.status || "Contract",
+        })),
+      ],
+    },
+    {
+      heading: "Service operations",
+      items: [
+        ...(recordSearch.pbxs || []).slice(0, 1).map(item => ({
+          kind: "pbx", id: item.id, label: item.pbx_name || item.name || "PBX", hint: [item.client_name, item.status || "Voice"].filter(Boolean).join(" · "),
+        })),
+        ...(recordSearch.backups || []).slice(0, 1).map(item => ({
+          kind: "backup", id: item.id, label: item.name || "Backup job", hint: [item.client_name, item.provider || item.status || "Backup"].filter(Boolean).join(" · "),
+        })),
+        ...(recordSearch.csat_surveys || []).slice(0, 1).map(item => ({
+          kind: "csat_survey", id: item.id, label: `${item.ticket_number || "Ticket feedback"} · ${item.client_name || "Customer"}`,
+          hint: [item.score ? `${item.score}/5` : item.status || "Sent", item.tech_name].filter(Boolean).join(" · "),
+        })),
+      ],
+    },
+    {
+      heading: "Collaboration & growth",
+      items: [
+        ...(recordSearch.conversations || []).slice(0, 1).map(item => ({
+          kind: "conversation", id: item.id, label: item.display_name || item.name || "Conversation",
+          hint: item.description || (item.is_private ? "Private conversation" : "Team channel"),
+        })),
+        ...(recordSearch.leads || []).slice(0, 1).map(item => ({
+          kind: "lead", id: item.id, label: item.company_name || item.contact_name || "Lead",
+          hint: [item.contact_name, item.phone || item.email || item.status || "Lead"].filter(Boolean).join(" · "),
+        })),
+      ],
+    },
+  ].filter(section => section.items.length), [recordSearch]);
+
+  const firstRecord = recordSections[0]?.items[0];
+
   const openEverythingSearch = () => {
     setFocused(false);
     setQuery("");
     window.dispatchEvent(new CustomEvent("nexus:open-command-palette"));
+  };
+
+  const navigateToResult = (path) => {
+    navigate(path);
+    setQuery("");
+    onNavigate?.();
+  };
+
+  const navigateToRecord = (record) => {
+    if (!record) return;
+    const routes = {
+      ticket: `/tickets?ticket=${encodeURIComponent(record.id)}`,
+      client: `/clients?client=${encodeURIComponent(record.id)}`,
+      contact: `/clients?client=${encodeURIComponent(record.clientId || record.id)}`,
+      product: `/products?product=${encodeURIComponent(record.id)}`,
+      device: `/devices/${encodeURIComponent(record.id)}`,
+      invoice: `/invoices?invoice=${encodeURIComponent(record.id)}`,
+      purchase_order: `/purchase-orders?po=${encodeURIComponent(record.id)}`,
+      project: `/projects?project=${encodeURIComponent(record.id)}`,
+      contract: `/contracts?contract=${encodeURIComponent(record.id)}`,
+      lead: `/leads?lead=${encodeURIComponent(record.id)}`,
+      conversation: `/team-chat?channel=${encodeURIComponent(record.id)}`,
+      pbx: `/voice?tab=pbxs&pbxId=${encodeURIComponent(record.id)}`,
+      backup: `/backup-center?job=${encodeURIComponent(record.id)}`,
+      csat_survey: `/csat-surveys?survey=${encodeURIComponent(record.id)}`,
+    };
+    if (routes[record.kind]) navigateToResult(routes[record.kind]);
   };
 
   return (
@@ -293,56 +526,143 @@ function SidebarSearch() {
           value={query}
           onChange={e => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+              event.preventDefault();
+              openEverythingSearch();
+            } else if (event.key === "Enter" && firstRecord) {
+              event.preventDefault();
+              navigateToRecord(firstRecord);
+            }
+          }}
           onBlur={() => setTimeout(() => setFocused(false), 200)}
-          placeholder="What do you need to do?"
+          placeholder="Search Nexus — records, people, workspaces"
           className="bg-transparent text-[12px] w-full outline-none placeholder:text-muted-foreground/50"
           data-testid="sidebar-search-input"
         />
         {query ? (
           <button onClick={() => setQuery("")} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
         ) : (
-          <button type="button" onMouseDown={openEverythingSearch} className="hidden rounded px-1 text-[9px] uppercase tracking-wider text-muted-foreground/60 transition hover:bg-background hover:text-primary sm:inline" title="Search everything (Ctrl + K)">Ctrl K</button>
+          <button type="button" onMouseDown={openEverythingSearch} className="hidden rounded px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground/70 transition hover:bg-background hover:text-primary sm:inline" title="Search all Nexus (Ctrl + K)" data-testid="sidebar-open-command">
+            All <span className="ml-1 text-[8px] uppercase tracking-wider">Ctrl K</span>
+          </button>
         )}
       </div>
       {focused && (
-        <div className="absolute left-3 right-3 top-full mt-1 bg-card border rounded-lg shadow-xl z-50 overflow-hidden" data-testid="sidebar-search-results">
-          {filtered.length > 0 ? filtered.map((item, i) => (
-            <button
-              key={`${item.path}-${i}`}
-              onMouseDown={() => { navigate(item.path); setQuery(""); }}
-              className="flex items-center gap-2.5 w-full px-3 py-2 text-left hover:bg-muted/70 transition-colors border-b border-border/30 last:border-0"
-              data-testid={`search-result-${i}`}
-            >
-              {item.icon && <item.icon className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />}
-              <div className="min-w-0">
-                <p className="text-[12px] font-medium truncate">{item.label}</p>
-                <p className="text-[10px] text-muted-foreground/60 truncate">{item.isTask ? item.description : `${item.parentLabel ? `${item.parentLabel} > ` : ''}${item.group}`}</p>
-              </div>
-            </button>
-          )) : normalisedQuery ? (
-            <div className="p-3">
-              <p className="text-[11px] font-medium">No workspace matched that phrase</p>
-              <button type="button" onMouseDown={openEverythingSearch} className="mt-2 flex w-full items-center justify-between rounded-md bg-primary/10 px-2.5 py-2 text-left text-[11px] font-medium text-primary hover:bg-primary/15">
-                Search records, people and actions <span>Ctrl K</span>
-              </button>
+        <div className="absolute left-3 right-3 top-full z-50 mt-1 max-h-[min(32rem,calc(100vh-7rem))] overflow-y-auto rounded-lg border bg-card shadow-xl" data-testid="sidebar-search-results">
+          {searchingRecords && <p className="px-3 py-2 text-[10px] font-medium text-primary/80">Searching operational records…</p>}
+          {recordSections.map((section) => (
+            <div key={section.heading} className="border-b border-border/30 last:border-0">
+              <p className="px-3 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{section.heading}</p>
+              {section.items.map((item) => (
+                <button
+                  key={`${item.kind}-${item.id}`}
+                  type="button"
+                  onMouseDown={() => navigateToRecord(item)}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted/70"
+                  data-testid={`sidebar-record-${item.kind}-${item.id}`}
+                >
+                  <Search className="h-3.5 w-3.5 shrink-0 text-primary/70" />
+                  <div className="min-w-0"><p className="truncate text-[12px] font-medium">{item.label}</p><p className="truncate text-[10px] text-muted-foreground/60">{item.hint}</p></div>
+                </button>
+              ))}
             </div>
-          ) : (
-            <div className="p-3 text-[10px] leading-relaxed text-muted-foreground">Try “remote into a device”, “invoice a client” or “investigate a threat”.</div>
+          ))}
+          {filtered.length > 0 && (
+            <div className="border-b border-border/30 last:border-0">
+              <p className="px-3 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Workspaces & guided actions</p>
+              {filtered.map((item, i) => (
+                <button
+                  key={`${item.path}-${i}`}
+                  onMouseDown={() => navigateToResult(item.path)}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted/70"
+                  data-testid={`search-result-${i}`}
+                >
+                  {item.icon && <item.icon className="h-3.5 w-3.5 shrink-0 text-primary/70" />}
+                  <div className="min-w-0"><p className="truncate text-[12px] font-medium">{item.label}</p><p className="truncate text-[10px] text-muted-foreground/60">{item.isTask ? item.description : `${item.parentLabel ? `${item.parentLabel} > ` : ""}${item.group}`}</p></div>
+                </button>
+              ))}
+            </div>
           )}
+          {!recordSections.length && !filtered.length && !searchingRecords ? (
+            <div className="p-3"><p className="text-[11px] font-medium">No matching workspace or record yet</p><p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">Try a ticket reference, client, phone fragment, product SKU, voice service, backup, lead or feedback record.</p></div>
+          ) : null}
+          <button type="button" onMouseDown={openEverythingSearch} className="flex w-full items-center justify-between bg-primary/5 px-3 py-2.5 text-left text-[11px] font-medium text-primary transition-colors hover:bg-primary/10" data-testid="sidebar-open-command-full">
+            Open full Nexus Command <span className="text-[9px] text-primary/70">Ctrl K</span>
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle, onCopilotToggle }) => {
+export const Sidebar = ({
+  collapsed,
+  mobileOpen = false,
+  onMobileClose,
+  onToggle,
+  onCopilotToggle,
+  onCollapsedPreferenceRestore,
+}) => {
   const { user, logout, token } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { counts: navCounts } = useNavCounts();
   const navigate = useNavigate();
   const location = useLocation();
+  const { pathname, search } = location;
   const [expandedMenus, setExpandedMenus] = useState(new Set());
+  const [pinnedPaths, setPinnedPaths] = useState([]);
   const [sidebarBrand, setSidebarBrand] = useState(null);
+  const skipNextPreferencesPersist = useRef(null);
+
+  // Sidebar preferences contain only presentation choices. They are scoped to
+  // the signed-in user and validated against current navigation paths before
+  // being restored, so a stale browser value cannot create an invalid route.
+  const preferenceUserId = user?.id || user?.email || "anonymous";
+  const navigationItems = useMemo(() => navGroups.flatMap((group) => group.items), []);
+  const navigationPaths = useMemo(() => navigationItems.map((item) => item.path), [navigationItems]);
+
+  // Get user's enabled modules (default: all enabled)
+  const enabledModules = useMemo(
+    () => user?.enabled_modules || navGroups.map((group) => group.id),
+    [user?.enabled_modules],
+  );
+  // Help remains available during module migrations so technicians always have
+  // access to documentation, even for accounts saved before this group existed.
+  const visibleGroups = useMemo(
+    () => navGroups.filter((group) => enabledModules.includes(group.id) || group.id === "help"),
+    [enabledModules],
+  );
+  const visibleNavigationItems = useMemo(
+    () => visibleGroups.flatMap((group) => group.items),
+    [visibleGroups],
+  );
+  const pinnedItems = useMemo(
+    () => pinnedPaths.map((path) => visibleNavigationItems.find((item) => item.path === path)).filter(Boolean),
+    [pinnedPaths, visibleNavigationItems],
+  );
+
+  useEffect(() => {
+    const preferences = readSidebarPreferences(preferenceUserId, navigationPaths);
+    // Prevent the default render from replacing existing preferences before
+    // their state update is applied.
+    skipNextPreferencesPersist.current = preferenceUserId;
+    setExpandedMenus(new Set(preferences.expandedPaths));
+    setPinnedPaths(preferences.pinnedPaths);
+    onCollapsedPreferenceRestore?.(preferences.collapsed);
+  }, [navigationPaths, onCollapsedPreferenceRestore, preferenceUserId]);
+
+  useEffect(() => {
+    if (skipNextPreferencesPersist.current === preferenceUserId) {
+      skipNextPreferencesPersist.current = null;
+      return;
+    }
+    writeSidebarPreferences(preferenceUserId, {
+      collapsed,
+      expandedPaths: [...expandedMenus],
+      pinnedPaths,
+    }, navigationPaths);
+  }, [collapsed, expandedMenus, navigationPaths, pinnedPaths, preferenceUserId]);
 
   useEffect(() => {
     axios.get(`${API}/settings/branding/public`).then(r => {
@@ -359,9 +679,6 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
     }).catch(() => {});
   }, []);
 
-  // Get user's enabled modules (default: all enabled)
-  const enabledModules = user?.enabled_modules || navGroups.map(g => g.id);
-
   const handleLogout = () => {
     logout();
     navigate("/login");
@@ -369,34 +686,38 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
 
   const toggleMenu = (path) => {
     setExpandedMenus(prev => {
-      const n = new Set(prev);
-      if (n.has(path)) n.delete(path); else n.add(path);
-      return n;
+      // One open workspace at a time keeps the long Nexus navigation scannable.
+      return prev.has(path) ? new Set() : new Set([path]);
     });
   };
 
-  // Auto-expand the group containing the current route
-  useEffect(() => {
-    for (const group of navGroups) {
-      for (const item of group.items) {
-        if (item.children) {
-          const isChildActive = item.children.some(c => location.pathname === c.path);
-          if (isChildActive || location.pathname === item.path) {
-            setExpandedMenus(prev => {
-              const n = new Set(prev);
-              n.add(item.path);
-              return n;
-            });
-          }
-        }
-      }
-    }
-  }, [location.pathname]);
+  const togglePinnedPath = (path) => {
+    setPinnedPaths((previous) => togglePinnedWorkspace(previous, path, navigationPaths));
+  };
 
-  // Filter nav groups by enabled modules
-  // Help remains available during module migrations so technicians always have
-  // access to documentation, even for accounts saved before this group existed.
-  const visibleGroups = navGroups.filter(g => enabledModules.includes(g.id) || g.id === "help");
+  const handleNavigation = useCallback(() => {
+    onMobileClose?.();
+  }, [onMobileClose]);
+
+  // Auto-expand the parent that owns the active URL. Query changes are
+  // included, so switching a workspace tab does not leave the wrong submenu
+  // open or highlighted.
+  useEffect(() => {
+    // Record workspaces use the full canvas for the object being worked on.
+    // Keep the owning submenu collapsed on entry (matching the Device Cockpit
+    // layout), while still allowing a technician to expand it manually.
+    if (/^\/devices\/[^/]+$/.test(pathname)) {
+      setExpandedMenus((previous) => (previous.size === 0 ? previous : new Set()));
+      return;
+    }
+    const activeParentPath = getActiveParentNavigationPath(visibleGroups, { pathname, search });
+    if (!activeParentPath) return;
+    setExpandedMenus((previous) => (
+      previous.size === 1 && previous.has(activeParentPath)
+        ? previous
+        : new Set([activeParentPath])
+    ));
+  }, [pathname, search, visibleGroups]);
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -454,12 +775,12 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
 
         {/* Global Module Search */}
         {!collapsed ? (
-          <SidebarSearch />
+          <SidebarSearch token={token} onNavigate={handleNavigation} />
         ) : (
           <div className="px-3 py-1">
             <Tooltip>
               <TooltipTrigger asChild>
-                <button onClick={() => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"))} className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all" data-testid="sidebar-search-collapsed" aria-label="Open Nexus Command">
+                <button onClick={() => { window.dispatchEvent(new CustomEvent("nexus:open-command-palette")); handleNavigation(); }} className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted transition-all" data-testid="sidebar-search-collapsed" aria-label="Open Nexus Command">
                   <Search className="w-[18px] h-[18px]" />
                 </button>
               </TooltipTrigger>
@@ -471,8 +792,45 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
         {/* Navigation */}
         <ScrollArea className="flex-1">
           <nav className="py-3 px-3">
+            {!collapsed && pinnedItems.length > 0 && (
+              <section className="mb-4" aria-label="Pinned workspaces">
+                <div className="mb-1.5 flex items-center gap-1.5 px-3">
+                  <Pin className="h-3 w-3 text-primary/70" />
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">Pinned</span>
+                </div>
+                <div className="space-y-0.5">
+                  {pinnedItems.map((item) => {
+                    const itemState = getNavigationItemState(item, location);
+                    return (
+                      <div key={`pinned-${item.path}`} className="group flex items-center">
+                        <Link
+                          to={item.path}
+                          onClick={handleNavigation}
+                          aria-current={itemState.isCurrentPage ? "page" : undefined}
+                          className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-l-lg px-3 py-1.5 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${
+                            itemState.isHighlighted ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          }`}
+                        >
+                          {item.icon && <item.icon className="h-4 w-4 shrink-0" />}
+                          <span className="flex-1 truncate">{item.label}</span>
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => togglePinnedPath(item.path)}
+                          className="self-stretch rounded-r-lg px-2 text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                          aria-label={`Unpin ${item.label}`}
+                          data-testid={`pinned-remove-${item.path.replace(/\//g, "-").replace(/^-/, "")}`}
+                        >
+                          <Pin className="h-3.5 w-3.5" fill="currentColor" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
             {visibleGroups.map((group, groupIndex) => (
-              <div key={group.id} className={groupIndex > 0 ? 'mt-4' : ''}>
+              <div key={group.id} className={groupIndex > 0 || (!collapsed && pinnedItems.length > 0) ? 'mt-4' : ''}>
                 {!collapsed && (
                   <div className="px-3 mb-1.5">
                     <span className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">
@@ -485,7 +843,18 @@ export const Sidebar = ({ collapsed, mobileOpen = false, onMobileClose, onToggle
                 )}
                 <div className="space-y-0.5">
                   {group.items.map((item) => (
-                    <NavItem key={item.path} item={item} collapsed={collapsed} expandedMenus={expandedMenus} toggleMenu={toggleMenu} counts={navCounts} />
+                    <NavItem
+                      key={item.path}
+                      item={item}
+                      collapsed={collapsed}
+                      expandedMenus={expandedMenus}
+                      toggleMenu={toggleMenu}
+                      counts={navCounts}
+                      onNavigate={handleNavigation}
+                      isPinned={pinnedPaths.includes(item.path)}
+                      onTogglePin={togglePinnedPath}
+                      showPinControl
+                    />
                   ))}
                 </div>
               </div>

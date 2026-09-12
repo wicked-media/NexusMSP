@@ -82,6 +82,8 @@ export function TicketRow({
   const isClosed = ["closed", "resolved"].includes(ticket.status);
   const isBlocked = !!ticket.blocked_by_ticket_number;
   const hasLinkedDevice = Boolean(ticket.device_id || ticket.asset_id || ticket.device_ids?.length);
+  const serviceKit = ticket.service_kit || (ticket.service_kit_id ? { id: ticket.service_kit_id } : null);
+  const serviceKitLabel = serviceKit?.id === "workshop_repair" ? "Workshop kit" : serviceKit?.id === "cabling_field" ? "Field kit" : null;
   const quickActions = [
     !isClosed && !ticket.assigned_to && { id: "claim", label: "Claim", icon: UserPlus, tone: "text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-100" },
     !isClosed && ticket.status !== "in_progress" && { id: "start", label: "Start", icon: Play, tone: "text-amber-300 hover:bg-amber-500/10 hover:text-amber-100" },
@@ -152,6 +154,11 @@ export function TicketRow({
         {isBlocked && (
           <Badge className="bg-rose-950/60 text-rose-300 border-rose-800/50 px-1 py-0 text-[9px] font-mono uppercase tracking-wider gap-1">
             <Lock className="w-2 h-2" />blocked
+          </Badge>
+        )}
+        {serviceKitLabel && (
+          <Badge className={`${serviceKit?.id === "workshop_repair" ? "border-cyan-400/25 bg-cyan-400/[0.08] text-cyan-200" : "border-violet-400/25 bg-violet-400/[0.08] text-violet-200"} px-1.5 py-0 text-[9px] font-mono uppercase tracking-wider`} title="Specialist delivery workflow linked to this parent ticket">
+            {serviceKitLabel}
           </Badge>
         )}
         {ticket.csat_sent && <Bookmark className="w-3 h-3 text-amber-400/70 shrink-0" title="CSAT sent" />}

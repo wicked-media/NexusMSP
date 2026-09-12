@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import {
+  loadVoiceWorkspaceSupplementalData,
+  VOICE_WORKSPACE_CORE_TIMEOUT_MS,
+} from "@/lib/voiceWorkspaceLoad";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
 import { MetricStrip, MetricTile } from "@/components/design-system";
@@ -85,18 +90,21 @@ export default function VoiceWorkspacePage() {
   const load = useCallback(async () => {
     setBusy("load");
     setLoadError(false);
-    try {
-      const [{ data: voice }, { data: clientRows }, { data: productRows }, { data: ycmOverview }] = await Promise.all([
-        axios.get(`${API}/yeastar/voice-workspace`, { headers, timeout: 8000 }),
-        axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/products`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/yeastar/ycm/overview`, { headers }).catch(() => ({ data: { connection: {}, discoveries: [] } })),
-      ]);
-      setWorkspace(voice);
-      setClients(clientRows || []);
-      setProducts(productRows || []);
-      setYcm(ycmOverview || { connection: {}, discoveries: [] });
+    // Start optional catalogue/YCM reads in parallel, but never await them
+    // before rendering the customer-scoped Voice workspace. A provider/admin
+    // 403 or a stalled supplemental request must not leave this page spinning.
+    void loadVoiceWorkspaceSupplementalData({ api: API, headers }).then(({ clients: clientRows, products: productRows, ycm: ycmOverview }) => {
+      setClients(clientRows);
+      setProducts(productRows);
+      setYcm(ycmOverview);
       setYcmForm(current => ({ ...current, base_url: ycmOverview?.connection?.base_url || current.base_url, client_id: ycmOverview?.connection?.client_id || current.client_id, user_agent: ycmOverview?.connection?.user_agent || current.user_agent }));
+    });
+    try {
+      const { data: voice } = await axios.get(`${API}/yeastar/voice-workspace`, {
+        headers,
+        timeout: VOICE_WORKSPACE_CORE_TIMEOUT_MS,
+      });
+      setWorkspace(voice);
     } catch {
       setLoadError(true);
       toast.error("Could not load Voice services");
@@ -375,9 +383,11 @@ export default function VoiceWorkspacePage() {
       icon={Phone}
       tone="sky"
       actions={<>
-        <Button variant="outline" size="sm" onClick={() => navigate("/help/voice-yeastar-pbx-onboarding")} disabled={!!busy} data-testid="voice-open-setup-guide"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Setup guide</Button>
-        <Button variant="outline" size="sm" onClick={() => setYcmOpen(true)} disabled={!!busy} data-testid="voice-open-ycm"><Cloud className="mr-1.5 h-3.5 w-3.5" />YCM fleet</Button>
-        <Button variant="outline" size="sm" onClick={() => testScopedPbxs(pbxs)} disabled={!!busy} data-testid="voice-test-connection"><Wifi className="mr-1.5 h-3.5 w-3.5" />Test PBXs</Button>
+        <WorkspaceActionMenu disabled={!!busy} testId="voice-more-actions">
+          <WorkspaceActionMenuItem icon={ExternalLink} onSelect={() => navigate("/help/voice-yeastar-pbx-onboarding")} testId="voice-open-setup-guide">Setup guide</WorkspaceActionMenuItem>
+          <WorkspaceActionMenuItem icon={Cloud} onSelect={() => setYcmOpen(true)} testId="voice-open-ycm">YCM fleet</WorkspaceActionMenuItem>
+          <WorkspaceActionMenuItem icon={Wifi} onSelect={() => testScopedPbxs(pbxs)} testId="voice-test-connection">Test PBXs</WorkspaceActionMenuItem>
+        </WorkspaceActionMenu>
         <Button variant="outline" size="sm" onClick={() => runSync()} disabled={!!busy} data-testid="voice-sync"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy === "sync" ? "animate-spin" : ""}`} />Sync now</Button>
         <Button size="sm" onClick={openAddPbx} disabled={!!busy} data-testid="voice-add-pbx"><Plus className="mr-1.5 h-3.5 w-3.5" />Add PBX</Button>
       </>}

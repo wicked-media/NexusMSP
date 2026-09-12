@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { TICKET_PRIORITY_STYLES } from "@/lib/ticketWorkspaceHelpers";
 import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } from "@/lib/ticketPreviewData";
 import { toast } from "sonner";
@@ -36,27 +37,41 @@ const useApi = () => {
 };
 
 const PageHeader = ({ title, subtitle, icon: Icon = Sparkles, children }) => (
-  <div className="flex items-start justify-between mb-5">
-    <div>
-      <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-        <Icon className="w-6 h-6 text-violet-400" />{title}
-      </h1>
-      {subtitle && <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>}
-    </div>
-    {children && <div className="flex gap-2">{children}</div>}
-  </div>
+  <OperationalPageHeader
+    eyebrow="Nexus workspace"
+    title={title}
+    description={subtitle}
+    icon={Icon}
+    tone="violet"
+    actions={children}
+  />
 );
 
 /* ============== TRIAGE QUEUE ============== */
 export function TriageQueuePage({ embedded = false }) {
   const { headers } = useApi();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(false);
+  const [claimingTicketId, setClaimingTicketId] = useState("");
   const load = () => axios.get(`${API}/pro-pack/triage-queue`, { headers })
     .then(r => { setData(normaliseTriageQueue(r.data, isLocalTicketPreview() ? LOCAL_PREVIEW_TICKETS : [])); setLoadError(false); })
     .catch(() => { setData(normaliseTriageQueue(null, isLocalTicketPreview() ? LOCAL_PREVIEW_TICKETS : [])); setLoadError(true); });
   useEffect(() => { load(); const i = setInterval(load, 30000); return () => clearInterval(i); }, []); // eslint-disable-line
+  const claimTicket = async (ticket) => {
+    if (!user?.id) { toast.error("Your technician identity is unavailable. Refresh and try again."); return; }
+    setClaimingTicketId(ticket.id);
+    try {
+      const response = await axios.post(`${API}/dispatch/assign`, { ticket_id: ticket.id, tech_id: user.id }, { headers });
+      toast.success(response.data?.message || "Ticket assigned to you");
+      load();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not claim this ticket");
+    } finally {
+      setClaimingTicketId("");
+    }
+  };
   if (!data) return <div className="p-6 space-y-4"><TicketModuleHeader title="Triage queue" subtitle="Loading unassigned tickets…" /><Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" /></div>;
   return (
     <div className="space-y-4" data-testid="triage-queue-page">
@@ -91,7 +106,22 @@ export function TriageQueuePage({ embedded = false }) {
             <TableCell><Badge className={`text-[10px] capitalize ${TICKET_PRIORITY_STYLES[t.priority]?.badge || TICKET_PRIORITY_STYLES.medium.badge}`}>{t.priority}</Badge></TableCell>
             <TableCell><Badge variant="outline" className="text-[10px]">{t.source || "manual"}</Badge></TableCell>
             <TableCell className="font-mono text-xs text-muted-foreground">{t.created_at?.slice(0, 16).replace("T", " ")}</TableCell>
-            <TableCell className="text-right"><Button type="button" size="sm" variant="outline" className="h-8 border-cyan-500/20 text-xs text-cyan-200 opacity-70 transition-opacity group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); navigate(`/tickets?ticket=${encodeURIComponent(t.id)}`); }} data-testid={`triage-review-${t.id}`}>Review & assign<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button></TableCell>
+            <TableCell className="text-right">
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 bg-emerald-500 text-xs text-emerald-950 hover:bg-emerald-400"
+                  disabled={claimingTicketId === t.id}
+                  onClick={(event) => { event.stopPropagation(); claimTicket(t); }}
+                  data-testid={`triage-claim-${t.id}`}
+                >
+                  {claimingTicketId === t.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="mr-1 h-3.5 w-3.5" />}
+                  Claim
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="h-8 border-cyan-500/20 text-xs text-cyan-200 opacity-70 transition-opacity group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); navigate(`/tickets?ticket=${encodeURIComponent(t.id)}`); }} data-testid={`triage-review-${t.id}`}>Review<ChevronRight className="ml-1 h-3.5 w-3.5" /></Button>
+              </div>
+            </TableCell>
           </TableRow>
         ))}</TableBody>
       </Table>{(data.items || []).length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No unassigned tickets need triage.</p>}</CardContent></Card>
@@ -232,9 +262,30 @@ export function CustomerHealthPage({ embedded = false }) {
 /* ============== QUOTE TO CASH ============== */
 export function QuoteToCashPage() {
   const { headers } = useApi();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
-  useEffect(() => { axios.get(`${API}/pro-pack/quote-to-cash`, { headers }).then(r => setData(r.data)); }, []); // eslint-disable-line
-  if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const load = async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const response = await axios.get(`${API}/pro-pack/quote-to-cash`, { headers });
+      setData(response.data);
+      setLoadError("");
+    } catch {
+      const message = "Commercial pipeline data could not be loaded.";
+      setLoadError(message);
+      if (quiet) toast.error(`${message} Current results remain visible.`);
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  if (loading) return <WorkspaceLoadingState label="Loading quote-to-cash health" />;
+  if (!data) return <WorkspaceErrorState title="Commercial pipeline is unavailable" description={loadError || "The quote-to-cash overview could not be loaded."} onRetry={load} retryLabel="Retry commercial overview" />;
   const fmt = (n) => `$${(n || 0).toLocaleString()}`;
   const stageIcons = { leads: Users, estimates: FileSpreadsheet, contracts: Briefcase, invoices: Receipt, recurring: RefreshCw };
   const stageGlows = { leads: "cyan", estimates: "sky", contracts: "violet", invoices: "amber", recurring: "emerald" };
@@ -246,14 +297,22 @@ export function QuoteToCashPage() {
     { key: "recurring", label: "Recurring", icon: "🔁", color: "text-emerald-400", value: data.recurring.mrr_aud, count: data.recurring.count, link: "/recurring-invoices", suffix: " MRR" },
   ];
   return (
-    <div className="p-6 space-y-4" data-testid="qtc-page">
-      <PageHeader title="Quote → Cash Pipeline" subtitle="End-to-end revenue funnel: lead → invoice → MRR" icon={Workflow} />
+    <div className="space-y-5" data-testid="qtc-page">
+      <OperationalPageHeader
+        eyebrow="Commercial intelligence"
+        title="Quote-to-Cash Health"
+        description="Track how commercial work moves from an opportunity through a proposal, contract, invoice and recurring service. Create and manage proposals in the dedicated Proposals & Quotes workspace."
+        icon={Workflow}
+        tone="violet"
+        signal="commercial-pipeline"
+        actions={<><Button variant="outline" size="sm" onClick={() => load({ quiet: true })} disabled={refreshing} data-testid="refresh-quote-to-cash"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><Button size="sm" onClick={() => navigate("/proposals")}><FileSpreadsheet className="mr-1.5 h-4 w-4" />Open proposals</Button></>}
+      />
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {stages.map(s => (
-          <HeroTile key={s.key} label={s.label} value={fmt(s.value)} icon={stageIcons[s.key]} glow={stageGlows[s.key]} animated={false} subtitle={`${s.count} item${s.count !== 1 ? "s" : ""}${s.suffix || ""}`} onClick={() => window.location.href = s.link} testId={`qtc-stage-${s.key}`} />
+          <HeroTile key={s.key} label={s.label} value={fmt(s.value)} icon={stageIcons[s.key]} glow={stageGlows[s.key]} animated={false} subtitle={`${s.count} item${s.count !== 1 ? "s" : ""}${s.suffix || ""}`} onClick={() => navigate(s.link)} testId={`qtc-stage-${s.key}`} />
         ))}
       </div>
-      <Card><CardHeader><CardTitle className="text-sm">Estimate Conversion</CardTitle></CardHeader><CardContent>
+      <Card className="border-border/80 bg-card/70"><CardHeader className="border-b border-border/70 bg-muted/[0.14]"><CardTitle className="flex items-center gap-2 text-sm"><BarChart3 className="h-4 w-4 text-violet-300" />Proposal conversion</CardTitle></CardHeader><CardContent className="pt-5">
         <div className="grid grid-cols-3 gap-3 text-sm">
           <div className="border rounded-md p-3"><p className="text-[10px] uppercase text-muted-foreground">Drafts</p><p className="text-2xl font-bold mt-1">{data.estimates.draft}</p></div>
           <div className="border rounded-md p-3"><p className="text-[10px] uppercase text-muted-foreground">Sent</p><p className="text-2xl font-bold mt-1 text-cyan-400">{data.estimates.sent}</p></div>
@@ -267,43 +326,86 @@ export function QuoteToCashPage() {
 /* ============== NOTIFY CHANNELS ============== */
 export function NotifyChannelsPage() {
   const { headers } = useApi();
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ name: "", kind: "slack", webhook_url: "", events: ["ticket_created", "sla_breach", "invoice_paid"] });
-  const fetch = () => axios.get(`${API}/pro-pack/notify-channels`, { headers }).then(r => setItems(r.data));
-  useEffect(() => { fetch(); }, []); // eslint-disable-line
-  const save = async () => { try { await axios.post(`${API}/pro-pack/notify-channels`, form, { headers }); toast.success("Channel saved"); setShow(false); setForm({ name: "", kind: "slack", webhook_url: "", events: ["ticket_created"] }); fetch(); } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); } };
+  const [removeCandidate, setRemoveCandidate] = useState(null);
+  const [form, setForm] = useState({ name: "", kind: "slack", webhook_url: "", events: ["ticket_created"] });
+  const isAdmin = user?.role === "admin" || user?.is_admin === true;
+  const fetch = async ({ quiet = false } = {}) => {
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const response = await axios.get(`${API}/pro-pack/notify-channels`, { headers });
+      setItems(response.data);
+      setLoadError("");
+    } catch {
+      const message = "Could not load notification channels.";
+      setLoadError(message);
+      if (quiet) toast.error(`${message} Current channels remain visible.`);
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
+  useEffect(() => { fetch(); }, [isAdmin]); // eslint-disable-line
+  const save = async () => { try { await axios.post(`${API}/pro-pack/notify-channels`, form, { headers }); toast.success("Channel saved"); setShow(false); setForm({ name: "", kind: "slack", webhook_url: "", events: ["ticket_created"] }); fetch({ quiet: true }); } catch (e) { toast.error(e.response?.data?.detail || "Save failed"); } };
   const test = async (id) => { try { const r = await axios.post(`${API}/pro-pack/notify-channels/${id}/test`, {}, { headers }); toast.success(`Test sent — HTTP ${r.data.status_code}`); } catch (e) { toast.error(e.response?.data?.detail || "Test failed"); } };
-  const del = async (id) => { await axios.delete(`${API}/pro-pack/notify-channels/${id}`, { headers }); fetch(); };
+  const del = async (id) => { try { await axios.delete(`${API}/pro-pack/notify-channels/${id}`, { headers }); toast.success("Channel removed"); setRemoveCandidate(null); fetch({ quiet: true }); } catch (error) { toast.error(error.response?.data?.detail || "Channel could not be removed"); } };
+  if (!isAdmin) return <WorkspaceErrorState title="Administrator access required" description="External notification destinations are protected because their webhook URLs are reusable delivery credentials. Ask a Nexus administrator to manage them." />;
+  if (loading) return <WorkspaceLoadingState label="Loading notification channels" />;
+  if (loadError && items.length === 0) return <WorkspaceErrorState title="Notification channels are unavailable" description={loadError} onRetry={fetch} retryLabel="Retry channels" />;
   return (
     <div className="p-6 space-y-4" data-testid="notify-channels-page">
-      <PageHeader title="Slack / Teams / Discord Webhooks" subtitle="Push real-time NexusOps events to your team channels" icon={Webhook}>
+      <PageHeader title="Slack / Teams / Discord Webhooks" subtitle="Route live ticket-created events to an approved team channel. Destinations are encrypted at rest and never displayed in full." icon={Webhook}>
+        <Button variant="outline" size="sm" onClick={() => fetch({ quiet: true })} disabled={refreshing} data-testid="refresh-notify-channels"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
         <Button size="sm" onClick={() => setShow(true)} data-testid="new-channel-btn"><Plus className="w-3.5 h-3.5 mr-1" />New Channel</Button>
       </PageHeader>
+      <Card className="border-violet-500/15 bg-violet-500/[0.025]"><CardContent className="flex gap-3 p-4 text-sm text-muted-foreground"><BellRing className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" /><p><span className="font-medium text-foreground">Live today:</span> ticket-created notifications. Additional event types appear here only when Nexus has a verified delivery producer for them.</p></CardContent></Card>
       <Card><CardContent className="p-0"><Table>
-        <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Kind</TableHead><TableHead>Webhook</TableHead><TableHead>Events</TableHead><TableHead></TableHead></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Platform</TableHead><TableHead>Destination</TableHead><TableHead>Live event</TableHead><TableHead></TableHead></TableRow></TableHeader>
         <TableBody>{items.map(c => (
           <TableRow key={c.id}>
             <TableCell className="font-medium">{c.name}</TableCell>
             <TableCell><Badge variant="outline" className="text-[10px] capitalize">{c.kind}</Badge></TableCell>
-            <TableCell className="text-xs text-muted-foreground font-mono truncate max-w-[260px]">{c.webhook_url}</TableCell>
-            <TableCell className="text-xs">{(c.events || []).join(", ")}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{c.webhook_configured ? "Configured securely" : "Needs secure destination"}</TableCell>
+            <TableCell className="text-xs">{c.events?.length ? <Badge variant="outline" className="border-violet-500/25 text-[10px] text-violet-200">{c.events.join(", ")}</Badge> : <Badge variant="outline" className="border-amber-500/25 text-[10px] text-amber-200">Review required</Badge>}</TableCell>
             <TableCell className="text-right">
               <Button size="sm" variant="ghost" onClick={() => test(c.id)} data-testid={`test-${c.id}`}><Send className="w-3 h-3 mr-1" />Test</Button>
-              <Button size="sm" variant="ghost" onClick={() => del(c.id)}><Trash2 className="w-3 h-3 text-rose-400" /></Button>
+              <Button size="sm" variant="ghost" onClick={() => setRemoveCandidate(c)} aria-label={`Remove ${c.name}`}><Trash2 className="w-3 h-3 text-rose-400" /></Button>
             </TableCell>
           </TableRow>
         ))}</TableBody>
-      </Table></CardContent></Card>
-      <Dialog open={show} onOpenChange={setShow}><DialogContent>
-        <DialogHeader><DialogTitle>New Webhook Channel</DialogTitle><DialogDescription>Pick destination, paste the incoming-webhook URL, and you're live.</DialogDescription></DialogHeader>
+      </Table>{items.length === 0 && <p className="py-12 text-center text-sm text-muted-foreground">No notification channels are configured. Add one when your team needs a ticket-created alert.</p>}</CardContent></Card>
+      <Dialog open={show} onOpenChange={setShow}><NexusWorkflowDialog eyebrow="Notification delivery" title="New webhook channel" description="Connect an approved destination for operational events. Test the channel after saving to confirm its delivery path." icon={Webhook} tone="violet" footer={<><Button variant="outline" onClick={() => setShow(false)}>Cancel</Button><Button onClick={save} data-testid="save-channel">Add channel</Button></>}>
         <div className="space-y-3">
           <div><Label>Channel Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. #ops-alerts" data-testid="ch-name" /></div>
           <div><Label>Platform</Label><Select value={form.kind} onValueChange={v => setForm({ ...form, kind: v })}><SelectTrigger data-testid="ch-kind"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="slack">Slack</SelectItem><SelectItem value="teams">Microsoft Teams</SelectItem><SelectItem value="discord">Discord</SelectItem></SelectContent></Select></div>
-          <div><Label>Incoming Webhook URL</Label><Input value={form.webhook_url} onChange={e => setForm({ ...form, webhook_url: e.target.value })} placeholder="https://hooks.slack.com/services/..." data-testid="ch-url" /></div>
+          <div className="space-y-1.5"><Label>Incoming Webhook URL</Label><Input type="url" value={form.webhook_url} onChange={e => setForm({ ...form, webhook_url: e.target.value })} placeholder="https://hooks.slack.com/services/..." data-testid="ch-url" /><p className="text-xs text-muted-foreground">Use a dedicated HTTPS inbound webhook. Nexus encrypts this destination server-side and never displays it in full after this workflow.</p></div>
+          <div className="rounded-xl border border-violet-500/15 bg-violet-500/[0.04] p-3 text-xs text-muted-foreground"><span className="font-medium text-violet-200">Event:</span> Ticket created. This is the verified event Nexus can deliver today.</div>
         </div>
-        <DialogFooter><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button onClick={save} data-testid="save-channel">Add Channel</Button></DialogFooter>
-      </DialogContent></Dialog>
+      </NexusWorkflowDialog></Dialog>
+      <AlertDialog open={Boolean(removeCandidate)} onOpenChange={(open) => !open && setRemoveCandidate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove notification channel?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removeCandidate?.name || "This channel"} will stop receiving Nexus alerts immediately. Its encrypted delivery destination will be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep channel</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => del(removeCandidate.id)}>Remove channel</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -313,23 +415,42 @@ export function PatchTuesdayPage() {
   const { headers } = useApi();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
-  const load = () => axios.get(`${API}/pro-pack/patch-tuesday?months=12`, { headers })
-    .then(r => setData(r.data))
-    .catch(() => toast.error("Could not load the Patch Tuesday calendar"));
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const load = async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const response = await axios.get(`${API}/pro-pack/patch-tuesday?months=12`, { headers });
+      setData(response.data);
+      setLoadError("");
+    } catch {
+      const message = "Could not load the Patch Tuesday calendar.";
+      setLoadError(message);
+      if (quiet) toast.error(`${message} Current schedule remains visible.`);
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
   useEffect(() => { load(); }, []); // eslint-disable-line
-  if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
+  if (loading) return <WorkspaceLoadingState label="Loading Patch Tuesday calendar" />;
+  if (!data) return <WorkspaceErrorState title="Patch calendar is unavailable" description={loadError || "The Patch Tuesday calendar could not be loaded."} onRetry={load} retryLabel="Retry calendar" />;
   const events = data.events || [];
   const upcoming = events.filter(event => !event.is_past);
   const nextPatch = upcoming[0];
   const thisWeek = upcoming.filter(event => event.days_until <= 7).length;
   return (
     <div className="space-y-5" data-testid="patch-tuesday-page">
-      <section className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/[0.10] via-background to-background p-5 md:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div><p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-300">Patch operations</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight"><Calendar className="h-6 w-6 text-sky-300" />Patch Tuesday</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Plan around Microsoft release dates, then schedule approved Windows updates through an auditable Nexus Agent maintenance window.</p></div>
-          <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={load} data-testid="refresh-patch-calendar"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button><Button size="sm" onClick={() => navigate("/maintenance-scheduler")} data-testid="open-patch-manager"><Shield className="mr-1.5 h-3.5 w-3.5" />Schedule maintenance</Button></div>
-        </div>
-      </section>
+      <OperationalPageHeader
+        eyebrow="Patch operations"
+        title="Patch Tuesday"
+        description="Plan around Microsoft release dates, then schedule approved Windows updates through an auditable Nexus Agent maintenance window."
+        icon={Calendar}
+        tone="sky"
+        actions={<><Button variant="outline" size="sm" onClick={() => load({ quiet: true })} disabled={refreshing} data-testid="refresh-patch-calendar"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><Button size="sm" onClick={() => navigate("/maintenance-scheduler")} data-testid="open-patch-manager"><Shield className="mr-1.5 h-3.5 w-3.5" />Schedule maintenance</Button></>}
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <HeroTile label="Next release" value={nextPatch ? new Date(`${nextPatch.date}T00:00:00`).getDate() : "-"} subtitle={nextPatch ? nextPatch.month : "No release scheduled"} icon={Calendar} glow="sky" animated={false} testId="patch-tuesday-next-release" />
@@ -355,17 +476,44 @@ export function PatchTuesdayPage() {
 export function ApiTokensPage() {
   const { headers } = useApi();
   const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [show, setShow] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", scopes: ["read"] });
   const [created, setCreated] = useState(null);
   const [revokeCandidate, setRevokeCandidate] = useState(null);
-  const fetch = () => axios.get(`${API}/pro-pack/api-tokens`, { headers }).then(r => setItems(r.data));
+  const fetch = async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const response = await axios.get(`${API}/pro-pack/api-tokens`, { headers });
+      setItems(response.data);
+      setLoadError("");
+    } catch {
+      const message = "Could not load API tokens.";
+      setLoadError(message);
+      if (quiet) toast.error(`${message} Current token list remains visible.`);
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
   useEffect(() => { fetch(); }, []); // eslint-disable-line
-  const save = async () => { try { const r = await axios.post(`${API}/pro-pack/api-tokens`, form, { headers }); setCreated(r.data); fetch(); setShow(false); } catch { toast.error("Create failed"); } };
-  const revoke = async (id) => { try { await axios.delete(`${API}/pro-pack/api-tokens/${id}`, { headers }); toast.success("API token revoked"); setRevokeCandidate(null); fetch(); } catch (error) { toast.error(error.response?.data?.detail || "Token could not be revoked"); } };
+  const save = async () => {
+    if (!form.name.trim()) { toast.error("Give this token a clear integration purpose"); return; }
+    if (!form.scopes.length) { toast.error("Select at least one scope"); return; }
+    setCreating(true);
+    try { const r = await axios.post(`${API}/pro-pack/api-tokens`, form, { headers }); setCreated(r.data); fetch({ quiet: true }); setShow(false); } catch { toast.error("Token could not be created"); } finally { setCreating(false); }
+  };
+  const revoke = async (id) => { try { await axios.delete(`${API}/pro-pack/api-tokens/${id}`, { headers }); toast.success("API token revoked"); setRevokeCandidate(null); fetch({ quiet: true }); } catch (error) { toast.error(error.response?.data?.detail || "Token could not be revoked"); } };
+  if (loading) return <WorkspaceLoadingState label="Loading API tokens" />;
+  if (loadError && items.length === 0) return <WorkspaceErrorState title="API tokens are unavailable" description={loadError} onRetry={fetch} retryLabel="Retry tokens" />;
   return (
     <div className="p-6 space-y-4" data-testid="api-tokens-page">
       <PageHeader title="API Tokens" subtitle="Programmatic access — sha256-hashed at rest" icon={KeySquare}>
+        <Button variant="outline" size="sm" onClick={() => fetch({ quiet: true })} disabled={refreshing} data-testid="refresh-api-tokens"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
         <Button size="sm" onClick={() => setShow(true)} data-testid="new-token-btn"><Plus className="w-3.5 h-3.5 mr-1" />New Token</Button>
       </PageHeader>
       {created && (
@@ -387,18 +535,16 @@ export function ApiTokensPage() {
           </TableRow>
         ))}</TableBody>
       </Table></CardContent></Card>
-      <Dialog open={show} onOpenChange={setShow}><DialogContent>
-        <DialogHeader><DialogTitle>New API Token</DialogTitle></DialogHeader>
+      <Dialog open={show} onOpenChange={setShow}><NexusWorkflowDialog eyebrow="Integration access" title="Create API token" description="Grant only the scopes required by this integration. The token value is shown once after creation and cannot be retrieved later." icon={KeySquare} tone="violet" footer={<><Button variant="outline" onClick={() => setShow(false)} disabled={creating}>Cancel</Button><Button onClick={save} disabled={creating} data-testid="confirm-create-token">{creating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{creating ? "Creating…" : "Create token"}</Button></>}>
         <div className="space-y-3">
           <div><Label>Name / Purpose</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Zapier integration" /></div>
           <div><Label>Scopes</Label>
-            <div className="flex gap-2 flex-wrap">{["read", "write", "admin", "billing", "tickets", "devices"].map(s => (
+            <div className="mt-2 flex gap-2 flex-wrap">{["read", "write", "admin", "billing", "tickets", "devices"].map(s => (
               <Badge key={s} variant={form.scopes.includes(s) ? "default" : "outline"} className="cursor-pointer" onClick={() => setForm({ ...form, scopes: form.scopes.includes(s) ? form.scopes.filter(x => x !== s) : [...form.scopes, s] })}>{s}</Badge>
             ))}</div>
           </div>
         </div>
-        <DialogFooter><Button variant="ghost" onClick={() => setShow(false)}>Cancel</Button><Button onClick={save} data-testid="confirm-create-token">Create</Button></DialogFooter>
-      </DialogContent></Dialog>
+      </NexusWorkflowDialog></Dialog>
       <AlertDialog open={Boolean(revokeCandidate)} onOpenChange={(open) => !open && setRevokeCandidate(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -490,11 +636,33 @@ export function SaasSpendPage() {
 export function DefenderHealthPage() {
   const { headers } = useApi();
   const [data, setData] = useState(null);
-  useEffect(() => { axios.get(`${API}/pro-pack/defender-health`, { headers }).then(r => setData(r.data)); }, []); // eslint-disable-line
-  if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const load = async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const response = await axios.get(`${API}/pro-pack/defender-health`, { headers });
+      setData(response.data);
+      setLoadError("");
+    } catch {
+      const message = "Could not load endpoint protection posture.";
+      setLoadError(message);
+      if (quiet) toast.error(`${message} Current results remain visible.`);
+    } finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  if (loading) return <WorkspaceLoadingState label="Loading Defender health" />;
+  if (!data) return <WorkspaceErrorState title="Endpoint protection posture is unavailable" description={loadError || "Defender health could not be loaded."} onRetry={load} retryLabel="Retry health check" />;
   return (
     <div className="p-6 space-y-4" data-testid="defender-health-page">
-      <PageHeader title="Defender / AV Health" subtitle="Endpoint anti-virus posture across all managed devices" icon={Activity} />
+      <PageHeader title="Defender / AV Health" subtitle="Endpoint anti-virus posture across all managed devices" icon={Activity}>
+        <Button variant="outline" size="sm" onClick={() => load({ quiet: true })} disabled={refreshing} data-testid="refresh-defender-health"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+      </PageHeader>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card><CardContent className="pt-4"><p className="text-[10px] uppercase">Total Devices</p><p className="text-3xl font-bold font-mono mt-1">{data.summary.total_devices}</p></CardContent></Card>
         <Card className="border-emerald-500/30"><CardContent className="pt-4"><p className="text-[10px] uppercase text-emerald-300">Healthy</p><p className="text-3xl font-bold text-emerald-400 font-mono mt-1">{data.summary.healthy}</p></CardContent></Card>
@@ -524,15 +692,42 @@ export function StocktakeMobilePage() {
   const [sku, setSku] = useState("");
   const [qty, setQty] = useState(1);
   const [data, setData] = useState({ scans: [], total_diff: 0 });
-  const refresh = () => axios.get(`${API}/pro-pack/stocktake/session/${sessionId}`, { headers }).then(r => setData(r.data));
+  const [refreshing, setRefreshing] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const refresh = async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    try {
+      const response = await axios.get(`${API}/pro-pack/stocktake/session/${sessionId}`, { headers });
+      setData(response.data);
+    } catch {
+      toast.error(quiet ? "Could not refresh this session. Current counts remain visible." : "Could not load this stocktake session.");
+    } finally {
+      if (quiet) setRefreshing(false);
+    }
+  };
   useEffect(() => { refresh(); }, [sessionId]); // eslint-disable-line
   const scan = async () => {
-    try { await axios.post(`${API}/pro-pack/stocktake/scan`, { sku_or_barcode: sku, qty_counted: qty, session_id: sessionId }, { headers }); toast.success(`Counted ${sku}: ${qty}`); setSku(""); setQty(1); refresh(); } catch (e) { toast.error(e.response?.data?.detail || "Scan failed"); }
+    try { await axios.post(`${API}/pro-pack/stocktake/scan`, { sku_or_barcode: sku, qty_counted: qty, session_id: sessionId }, { headers }); toast.success(`Counted ${sku}: ${qty}`); setSku(""); setQty(1); refresh({ quiet: true }); } catch (e) { toast.error(e.response?.data?.detail || "Scan failed"); }
   };
-  const commit = async () => { if (!window.confirm(`Apply ${data.scans.length} stock adjustments?`)) return; await axios.post(`${API}/pro-pack/stocktake/session/${sessionId}/commit`, {}, { headers }); toast.success("Committed"); refresh(); };
+  const commit = async () => {
+    setCommitting(true);
+    try {
+      await axios.post(`${API}/pro-pack/stocktake/session/${sessionId}/commit`, {}, { headers });
+      toast.success("Stock adjustments committed");
+      setCommitOpen(false);
+      refresh({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not commit stock adjustments");
+    } finally {
+      setCommitting(false);
+    }
+  };
   return (
     <div className="p-6 space-y-4 max-w-2xl mx-auto" data-testid="stocktake-mobile-page">
-      <PageHeader title="Stocktake (Mobile)" subtitle="Scan barcode → enter count → commit at end" icon={ScanLine} />
+      <PageHeader title="Stocktake (Mobile)" subtitle="Scan barcode → enter count → commit at end" icon={ScanLine}>
+        <Button variant="outline" size="sm" onClick={() => refresh({ quiet: true })} disabled={refreshing} data-testid="refresh-stocktake-mobile"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
+      </PageHeader>
       <Card><CardContent className="pt-4 space-y-3">
         <div><Label className="text-xs">Session</Label><Input value={sessionId} onChange={e => setSessionId(e.target.value)} className="font-mono text-xs" /></div>
         <div className="grid grid-cols-3 gap-2">
@@ -548,7 +743,22 @@ export function StocktakeMobilePage() {
             <TableRow key={s.id}><TableCell>{s.product_name}</TableCell><TableCell className="font-mono">{s.expected}</TableCell><TableCell className="font-mono">{s.counted}</TableCell><TableCell className={`font-mono ${s.diff < 0 ? "text-rose-400" : s.diff > 0 ? "text-emerald-400" : ""}`}>{s.diff > 0 ? "+" : ""}{s.diff}</TableCell></TableRow>
           ))}</TableBody>
         </Table></CardContent></Card>
-      <Button onClick={commit} disabled={!data.scans?.length} className="w-full" data-testid="commit-stocktake"><CheckCircle className="w-4 h-4 mr-1" />Commit & Adjust Stock</Button>
+      <Button onClick={() => setCommitOpen(true)} disabled={!data.scans?.length} className="w-full" data-testid="commit-stocktake"><CheckCircle className="w-4 h-4 mr-1" />Review & Commit Adjustments</Button>
+      <Dialog open={commitOpen} onOpenChange={setCommitOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Inventory control"
+          title="Commit stock adjustments"
+          description="This will apply the counted differences to the current stock record. Review the impact before completing the adjustment."
+          icon={CheckCircle}
+          tone="amber"
+          footer={<><Button variant="outline" onClick={() => setCommitOpen(false)} disabled={committing}>Cancel</Button><Button onClick={commit} disabled={committing} data-testid="confirm-commit-stocktake">{committing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{committing ? "Committing…" : "Commit adjustments"}</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 text-sm leading-6 text-muted-foreground">
+            <p className="font-semibold text-foreground">{data.scans?.length || 0} counted item{data.scans?.length === 1 ? "" : "s"}</p>
+            <p className="mt-1">Net quantity difference: <span className="font-medium text-foreground">{data.total_diff > 0 ? "+" : ""}{data.total_diff || 0}</span>. This action is recorded against session <span className="font-mono text-foreground">{sessionId}</span>.</p>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
     </div>
   );
 }
@@ -649,7 +859,7 @@ export function AutomationHubPage() {
   const refresh = async () => {
     setRefreshing(true);
     try {
-      const [runbooks, scripts, workflows, workflowStats, alertStats] = await Promise.all([
+      const [knowledgeRunbooks, scripts, workflows, workflowStats, alertStats] = await Promise.all([
         axios.get(`${API}/runbooks`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/scripts`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/workflows`, { headers }).catch(() => ({ data: [] })),
@@ -657,7 +867,7 @@ export function AutomationHubPage() {
         axios.get(`${API}/alert-rules/stats`, { headers }).catch(() => ({ data: {} })),
       ]);
       setSnapshot({
-        runbooks: (runbooks.data || []).filter(item => item.enabled !== false).length,
+        knowledgeRunbooks: (knowledgeRunbooks.data || []).length,
         scripts: (scripts.data || []).length,
         workflows: (workflows.data || []).filter(item => item.enabled !== false).length,
         simulations: workflowStats.data?.simulations || 0,
@@ -672,7 +882,7 @@ export function AutomationHubPage() {
   };
   useEffect(() => { refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const tiles = [
-    { path: "/runbooks", label: "Runbooks", icon: Workflow, desc: "Step-by-step automated playbooks", count: snapshot?.runbooks, countLabel: "enabled" },
+    { path: "/documentation-hub?tab=library", label: "Knowledge procedures", icon: Workflow, desc: "Proven fixes promoted from resolved work", count: snapshot?.knowledgeRunbooks, countLabel: "published" },
     { path: "/scripting", label: "Scripts Library", icon: Zap, desc: "PowerShell / Bash script repo", count: snapshot?.scripts, countLabel: "available" },
     { path: "/git-scripts", label: "Git Scripts Sync", icon: Workflow, desc: "Pull scripts from Git repos" },
     { path: "/workflow-automation", label: "Automation Studio", icon: Workflow, desc: "No-code and JSON orchestration with safe simulation", count: snapshot?.workflows, countLabel: "active" },
@@ -686,15 +896,15 @@ export function AutomationHubPage() {
       <OperationalPageHeader
         eyebrow="Automation workspace · orchestration and governance"
         title="Automation"
-        description="Build governed workflows, install verified packs, run scripts and runbooks, and preview every material change before approval."
+        description="Build governed workflows, install verified packs, run scripts, and preview every material change before approval."
         icon={Workflow}
         tone="violet"
-        actions={<><Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} data-testid="automation-hub-refresh"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh status</Button><Button size="sm" onClick={() => navigate("/workflow-automation")}><Sparkles className="mr-1.5 h-4 w-4" />Open Studio</Button></>}
+        actions={<><Button variant="outline" size="sm" onClick={refresh} disabled={refreshing} data-testid="automation-hub-refresh"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh status</Button><Button size="sm" onClick={() => navigate("/workflow-automation")}><Sparkles className="mr-1.5 h-4 w-4" />Open studio</Button></>}
       />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <HeroTile label="Enabled runbooks" value={snapshot?.runbooks ?? "—"} icon={Workflow} glow="violet" animated={false} onClick={() => navigate("/runbooks")} testId="automation-hub-runbooks" />
+        <HeroTile label="Active workflows" value={snapshot?.workflows ?? "—"} icon={Workflow} glow="violet" animated={false} onClick={() => navigate("/workflow-automation")} testId="automation-hub-workflows" />
         <HeroTile label="Scripts" value={snapshot?.scripts ?? "—"} icon={Zap} glow="amber" animated={false} onClick={() => navigate("/scripting")} testId="automation-hub-scripts" />
-        <HeroTile label="Simulations" value={snapshot?.simulations ?? "—"} icon={Sparkles} glow="sky" animated={false} subtitle="Zero-change previews" onClick={() => navigate("/workflow-automation?tab=simulations")} testId="automation-hub-workflows" />
+        <HeroTile label="Simulations" value={snapshot?.simulations ?? "—"} icon={Sparkles} glow="sky" animated={false} subtitle="Zero-change previews" onClick={() => navigate("/workflow-automation?tab=simulations")} testId="automation-hub-simulations" />
         <HeroTile label="Awaiting approval" value={snapshot?.approvals ?? "—"} icon={GitMerge} glow={(snapshot?.approvals || 0) ? "rose" : "emerald"} animated={false} subtitle="Change review queue" onClick={() => navigate("/change-management")} testId="automation-hub-alert-rules" />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">{tiles.map(t => (

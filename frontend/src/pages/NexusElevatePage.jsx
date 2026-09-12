@@ -17,6 +17,7 @@ import {
   Loader2, MonitorCog, RefreshCw, Search, ShieldCheck, ShieldX, TimerReset,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import HeroTile from "@/components/HeroTile";
 import ElevatePolicyWorkspace from "@/components/nexus-elevate/ElevatePolicyWorkspace";
 
@@ -207,9 +208,11 @@ export default function NexusElevatePage() {
         icon={ShieldCheck}
         tone="emerald"
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => navigate("/help/nexus-elevate-setup")}><HelpCircle className="mr-1 h-4 w-4" />Setup guide</Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}><FileKey2 className="mr-1 h-4 w-4" />Settings</Button>
-          <Button variant="outline" size="sm" onClick={jumpToPolicies}><ShieldCheck className="mr-1 h-4 w-4" />Policies</Button>
+          <WorkspaceActionMenu testId="elevate-more-actions">
+            <WorkspaceActionMenuItem icon={HelpCircle} onSelect={() => navigate("/help/nexus-elevate-setup")}>Setup guide</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={FileKey2} onSelect={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}>Settings</WorkspaceActionMenuItem>
+            <WorkspaceActionMenuItem icon={ShieldCheck} onSelect={jumpToPolicies}>Policies</WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
           <Button variant="outline" size="sm" onClick={openCompanionRollout}><MonitorCog className="mr-1 h-4 w-4" />Companion repair</Button>
           <Button size="sm" onClick={() => load()} disabled={loading}><RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh queue</Button>
         </>}
@@ -253,9 +256,9 @@ export default function NexusElevatePage() {
       </Dialog>
 
       <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto" data-testid="nexus-elevate-review-dialog">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-300" />Nexus Elevate request review</DialogTitle></DialogHeader>
-          {!selected ? null : <div className="space-y-5">
+        <DialogContent className="flex h-[min(900px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="nexus-elevate-review-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/80 bg-gradient-to-r from-emerald-400/15 via-emerald-400/[0.04] to-transparent px-5 py-5 pr-12"><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-300" />Nexus Elevate request review</DialogTitle></DialogHeader>
+          {!selected ? null : <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
             <div className="grid gap-3 rounded-xl border border-border bg-muted/25 p-4 sm:grid-cols-2"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Approved program</p><p className="mt-1 break-all text-sm font-medium">{selected.program_name}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{selected.program_path}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Endpoint context</p><p className="mt-1 text-sm font-medium">{selected.asset_name || selected.hostname}</p><p className="mt-1 text-xs text-muted-foreground">{selected.client_name || "Unassigned client"} · {selected.requested_by_name || "Endpoint user"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Fingerprint (verified on endpoint)</p><p className="mt-1 break-all font-mono text-[10px] text-emerald-300">{selected.sha256}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Publisher and arguments</p><p className="mt-1 text-xs">{selected.publisher || "Unknown publisher"}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{(selected.arguments || []).join(" ") || "No arguments"}</p></div></div>
             <div className="rounded-lg border border-border bg-background/40 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Requester justification</p><p className="mt-1 whitespace-pre-wrap text-sm">{selected.justification || "No justification supplied"}</p>{selected.parent_process && <p className="mt-2 font-mono text-[10px] text-muted-foreground">Parent process: {selected.parent_process}</p>}</div>
             {detail?.audit?.length > 0 && <div><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Audit timeline</p><div className="space-y-2">{detail.audit.map((event) => <div key={event.id} className="flex gap-3 rounded-lg border border-border/70 px-3 py-2 text-xs"><Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /><div><span className="font-medium capitalize">{String(event.kind || "event").replace(/_/g, " ")}</span><span className="ml-2 text-muted-foreground">{displayTime(event.at)}</span></div></div>)}</div></div>}

@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { AlertTriangle, BookOpenCheck, CalendarClock, CheckCircle2, CircleAlert, ClipboardCheck, Download, FileCheck2, History, Layers3, Library, ListChecks, Loader2, Paperclip, Pencil, Plus, RefreshCw, ShieldAlert, ShieldCheck, Target, UserCheck, WandSparkles } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import HeroTile from "@/components/HeroTile";
 
 const TABS = ["overview", "programs", "issues", "policies", "controls", "evidence", "reports", "insurance"];
@@ -104,7 +105,6 @@ export default function ComplianceHubPage() {
   const [scans, setScans] = useState([]);
   const [reports, setReports] = useState([]);
   const [selectedScan, setSelectedScan] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanClientId, setScanClientId] = useState("");
   const [scanFramework, setScanFramework] = useState("cis");
@@ -138,8 +138,7 @@ export default function ComplianceHubPage() {
   const [approvalPolicy, setApprovalPolicy] = useState(null);
   const [approvalNote, setApprovalNote] = useState("");
 
-  const load = useCallback(async ({ quiet = false } = {}) => {
-    if (!quiet) setLoading(true);
+  const load = useCallback(async () => {
     try {
       const [overviewResult, clientsResult, frameworksResult, scansResult, reportsResult, programsResult, customResult, checksResult, issuesResult, policiesResult, policyTemplatesResult] = await Promise.all([
         axios.get(`${API}/compliance-frameworks/overview`, { headers }),
@@ -167,7 +166,7 @@ export default function ComplianceHubPage() {
       setPolicyTemplates(policyTemplatesResult.data || []);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Compliance Hub could not be loaded");
-    } finally { setLoading(false); }
+    } finally { /* individual sections retain their own loading state */ }
   }, [headers]);
 
   const loadInsuranceEvidence = useCallback(async (clientId = insuranceClientId) => {
@@ -403,7 +402,7 @@ export default function ComplianceHubPage() {
         : "recommendation";
 
   return <div className="nx-page-stage space-y-5" data-testid="compliance-hub">
-    <OperationalPageHeader eyebrow="Security workspace - continuous assurance" title="Compliance" description="Build each customer’s compliance path, continuously collect evidence, reuse controls across frameworks, and preserve an audit-ready history without overstating certification." icon={ShieldCheck} tone="emerald" signal={complianceSignal} actions={<><Button variant="outline" size="sm" onClick={() => navigate("/audit-trail")}><History className="mr-1 h-4 w-4" />Audit trail</Button><Button variant="outline" size="sm" onClick={() => setBuilderOpen(true)}><WandSparkles className="mr-1 h-4 w-4" />Framework builder</Button><Button variant="outline" size="sm" onClick={() => setIssueOpen(true)}><CircleAlert className="mr-1 h-4 w-4" />New issue</Button><Button variant="outline" size="sm" onClick={() => setProgramOpen(true)}><Target className="mr-1 h-4 w-4" />New programme</Button><Button size="sm" onClick={openScan}><ClipboardCheck className="mr-1 h-4 w-4" />Run evidence scan</Button></>} />
+    <OperationalPageHeader eyebrow="Security workspace - continuous assurance" title="Compliance" description="Build each customer’s compliance path, continuously collect evidence, reuse controls across frameworks, and preserve an audit-ready history without overstating certification." icon={ShieldCheck} tone="emerald" signal={complianceSignal} actions={<><WorkspaceActionMenu testId="compliance-more-actions"><WorkspaceActionMenuItem icon={History} onSelect={() => navigate("/audit-trail")}>Audit trail</WorkspaceActionMenuItem><WorkspaceActionMenuItem icon={WandSparkles} onSelect={() => setBuilderOpen(true)}>Framework builder</WorkspaceActionMenuItem><WorkspaceActionMenuItem icon={CircleAlert} onSelect={() => setIssueOpen(true)}>New issue</WorkspaceActionMenuItem></WorkspaceActionMenu><Button variant="outline" size="sm" onClick={() => setProgramOpen(true)}><Target className="mr-1 h-4 w-4" />New programme</Button><Button size="sm" onClick={openScan}><ClipboardCheck className="mr-1 h-4 w-4" />Run evidence scan</Button></>} />
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><HeroTile label="Frameworks" value={summary.total_frameworks || frameworks.length || 0} icon={ShieldCheck} glow="sky" subtitle={`${customFrameworks.length} custom · reusable controls`} onClick={() => selectTab("controls")} active={tab === "controls"} /><HeroTile label="Client programmes" value={programs.length} icon={Target} glow={programs.length ? "violet" : "zinc"} subtitle="Owned compliance paths" onClick={() => selectTab("programs")} active={tab === "programs"} /><HeroTile label="Open assurance issues" value={activeIssues.length} icon={CircleAlert} glow={activeIssues.length ? "amber" : "emerald"} subtitle={activeIssues.length ? "Remediation required" : "No active gaps"} onClick={() => selectTab("issues")} active={tab === "issues"} /><HeroTile label="Evidence scans" value={summary.evidence_scans || 0} icon={ClipboardCheck} glow={summary.evidence_scans ? "emerald" : "zinc"} subtitle={`${summary.clients_assessed || 0} customers assessed`} onClick={() => selectTab("evidence")} active={tab === "evidence"} /></div>
     <Tabs value={tab} onValueChange={selectTab}><TabsList className="grid h-auto w-full grid-cols-4 gap-1 p-1 lg:grid-cols-8"><TabsTrigger value="overview">Readiness</TabsTrigger><TabsTrigger value="programs">Programmes</TabsTrigger><TabsTrigger value="issues">Issues</TabsTrigger><TabsTrigger value="policies">Policies</TabsTrigger><TabsTrigger value="controls">Control library</TabsTrigger><TabsTrigger value="evidence">Evidence</TabsTrigger><TabsTrigger value="reports">Reports</TabsTrigger><TabsTrigger value="insurance">Insurance</TabsTrigger></TabsList>
       <TabsContent value="overview" className="mt-5"><div className="grid gap-3 xl:grid-cols-2">{frameworkCards.map((framework) => <Card key={framework.id} className="border-border/80"><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{framework.name}</p><p className="mt-1 text-sm text-muted-foreground">{framework.clients_assessed || 0} customer{framework.clients_assessed === 1 ? "" : "s"} with current evidence</p></div><Badge variant="outline" className={framework.evidence_state === "evidence_available" ? "border-emerald-500/30 text-emerald-200" : "border-slate-500/30 text-slate-200"}>{framework.evidence_state === "evidence_available" ? "Evidence available" : "Not assessed"}</Badge></div><div className="mt-4 grid grid-cols-3 gap-2 text-xs"><MetricCard label="Pass rate" value={scoreLabel(framework.compliance_pct)} detail="Observed controls" tone={scoreText(framework.compliance_pct)} /><MetricCard label="Coverage" value={`${framework.evidence_coverage_pct ?? 0}%`} detail="Available evidence" /><MetricCard label="Controls" value={framework.total_controls || 0} detail="Framework controls" /></div>{isScore(framework.compliance_pct) ? <Progress value={framework.compliance_pct} className="mt-3 h-2" /> : <div className="mt-3 h-2 rounded-full bg-muted/40" />}<div className="mt-3 flex items-center justify-between text-xs text-muted-foreground"><span>Last evidence: {readableDate(framework.latest_assessed_at)}</span><Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={openScan}>Run check</Button></div></CardContent></Card>)}</div></TabsContent>

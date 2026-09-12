@@ -6,7 +6,7 @@ import { Heart, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 /** Inline sentiment scorer — shows a badge on the ticket detail header. */
-export function SentimentBadge({ ticketId, auto = false }) {
+export function SentimentBadge({ ticketId }) {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,13 +16,16 @@ import { Progress } from "@/components/ui/progress";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
-  Plus, Search, Loader2, ClipboardCheck, ArrowLeft,
+  Plus, Search, ClipboardCheck, ArrowLeft,
   CheckCircle, AlertTriangle, Scan, RefreshCw,
   TrendingDown, TrendingUp, DollarSign, ChevronRight,
   History, Trash2
 } from "lucide-react";
 import { format } from "date-fns";
-import HeroTile from "@/components/HeroTile";
+import { MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 
 const STATUS_COLORS = {
   in_progress: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
@@ -30,9 +34,11 @@ const STATUS_COLORS = {
 
 export default function StocktakePage() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState("sessions");
   const [newDialog, setNewDialog] = useState(false);
   const [newForm, setNewForm] = useState({ name: "", description: "", location: "All Locations", category_filter: "" });
@@ -44,10 +50,11 @@ export default function StocktakePage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const scanRef = useRef(null);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const [sesRes, repRes] = await Promise.all([
         axios.get(`${API}/stocktake/sessions`, { headers }),
@@ -55,9 +62,9 @@ export default function StocktakePage() {
       ]);
       setSessions(sesRes.data);
       setReport(repRes.data);
-    } catch { toast.error("Failed to load stocktake data"); }
-    finally { setLoading(false); }
-  }, [token]);
+    } catch { toast.error(quiet ? "Stocktake could not refresh. The current view has been kept." : "Failed to load stocktake data"); }
+    finally { if (quiet) setRefreshing(false); else setLoading(false); }
+  }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -133,7 +140,7 @@ export default function StocktakePage() {
     } catch { toast.error("Failed to delete"); }
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading) return <WorkspaceLoadingState label="Loading stocktake" />;
 
   const finalizeConfirmation = (
     <AlertDialog open={finalizeDialog} onOpenChange={setFinalizeDialog}>
@@ -182,36 +189,46 @@ export default function StocktakePage() {
 
     return (
       <div className="space-y-6" data-testid="stocktake-detail">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setViewSession(null)} data-testid="back-to-stocktake">
-            <ArrowLeft className="w-4 h-4 mr-1" />Back to Stocktakes
-          </Button>
-          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-          <span className="font-semibold">{s.session_number}</span>
-          <Badge className={STATUS_COLORS[s.status]}>{s.status === "in_progress" ? "In Progress" : "Completed"}</Badge>
-        </div>
+        <OperationalPageHeader
+          eyebrow="Inventory assurance · count session"
+          title={s.name || s.session_number}
+          description={`${s.session_number} · ${s.location || "All locations"}. Count each included product, review variances, then apply a traceable stock adjustment.`}
+          icon={ClipboardCheck}
+          tone="amber"
+          showBack={false}
+          actions={<>
+            <Badge className={STATUS_COLORS[s.status]}>{s.status === "in_progress" ? "In Progress" : "Completed"}</Badge>
+            <Button variant="outline" size="sm" onClick={() => setViewSession(null)} data-testid="back-to-stocktake">
+              <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />All stocktakes
+            </Button>
+            {s.status === "in_progress" && (
+              <Button onClick={() => setFinalizeDialog(true)} data-testid="finalize-stocktake">
+                <CheckCircle className="mr-1.5 h-4 w-4" />Review & finalize
+              </Button>
+            )}
+          </>}
+        />
 
-        {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <HeroTile label="Count progress" value={`${progressPct}%`} icon={ClipboardCheck} glow="cyan" animated={false} />
-          <HeroTile label="Counted items" value={`${s.counted_items} / ${s.total_items}`} icon={CheckCircle} glow="emerald" animated={false} />
-          <HeroTile label="Variances" value={s.variance_count || 0} icon={AlertTriangle} glow={s.variance_count > 0 ? "amber" : "emerald"} animated={false} />
-          <HeroTile label="Stock loss" value={`$${(s.stock_loss_value || 0).toFixed(2)}`} icon={TrendingDown} glow="rose" animated={false} />
-          <HeroTile label="Stock gain" value={`$${(s.stock_gain_value || 0).toFixed(2)}`} icon={TrendingUp} glow="emerald" animated={false} />
-        </div>
+        <MetricStrip columns={5}>
+          <MetricTile label="Count progress" value={`${progressPct}%`} icon={<ClipboardCheck className="h-3.5 w-3.5" />} accent="cyan" />
+          <MetricTile label="Counted items" value={`${s.counted_items} / ${s.total_items}`} icon={<CheckCircle className="h-3.5 w-3.5" />} accent="emerald" />
+          <MetricTile label="Variances" value={s.variance_count || 0} icon={<AlertTriangle className="h-3.5 w-3.5" />} accent={s.variance_count > 0 ? "amber" : "emerald"} />
+          <MetricTile label="Stock loss" value={`$${(s.stock_loss_value || 0).toFixed(2)}`} icon={<TrendingDown className="h-3.5 w-3.5" />} accent="rose" />
+          <MetricTile label="Stock gain" value={`$${(s.stock_gain_value || 0).toFixed(2)}`} icon={<TrendingUp className="h-3.5 w-3.5" />} accent="emerald" />
+        </MetricStrip>
 
         {/* Barcode Scanner Strip */}
         {s.status === "in_progress" && (
-          <Card className="border-cyan-500/30 bg-cyan-500/5">
-            <CardContent className="py-3 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
+          <Card className="overflow-hidden rounded-2xl border-cyan-400/25 bg-cyan-400/[0.045] shadow-[0_18px_45px_-36px_rgba(34,211,238,0.45)]">
+            <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/[0.10]">
                 <Scan className="w-5 h-5 text-cyan-400 animate-pulse" />
               </div>
-              <form onSubmit={handleScannerSubmit} className="flex-1 flex gap-2">
+              <form onSubmit={handleScannerSubmit} className="flex flex-1 gap-2">
                 <Input ref={scanRef} value={scannerInput} onChange={e => setScannerInput(e.target.value)}
-                  placeholder="Scan barcode or type SKU... (auto-increments count)" className="font-mono"
+                  placeholder="Scan barcode or type SKU... (auto-increments count)" className="border-cyan-400/20 bg-background/65 font-mono"
                   data-testid="stocktake-scanner-input" autoFocus />
-                <Button type="submit" data-testid="stocktake-scan-btn">Scan</Button>
+                <Button type="submit" className="shrink-0 rounded-xl" data-testid="stocktake-scan-btn">Scan</Button>
               </form>
               <p className="text-xs text-muted-foreground flex-shrink-0">Bluetooth / USB scanner ready</p>
             </CardContent>
@@ -219,27 +236,21 @@ export default function StocktakePage() {
         )}
 
         {/* Search + Actions */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1 max-w-sm">
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/70 bg-card/55 p-3 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)]">
+          <div className="relative min-w-[min(100%,18rem)] flex-1 max-w-xl">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input className="pl-9" placeholder="Search items..." value={countSearch} onChange={e => setCountSearch(e.target.value)} />
+            <Input className="border-border/70 bg-background/65 pl-9" placeholder="Search products, SKU, or barcode…" value={countSearch} onChange={e => setCountSearch(e.target.value)} />
           </div>
-          <Badge variant="outline">{pendingItems.length} pending</Badge>
-          <Badge variant="outline" className="text-green-400">{countedItems.length} counted</Badge>
-          {varianceItems.length > 0 && <Badge variant="outline" className="text-amber-400">{varianceItems.length} variances</Badge>}
-          <div className="flex-1" />
-          {s.status === "in_progress" && (
-            <Button onClick={() => setFinalizeDialog(true)} className="bg-green-600 hover:bg-green-700" data-testid="finalize-stocktake">
-              <CheckCircle className="w-4 h-4 mr-1" />Finalize & Adjust Stock
-            </Button>
-          )}
+          <Badge variant="outline" className="rounded-full border-border/70">{pendingItems.length} pending</Badge>
+          <Badge variant="outline" className="rounded-full border-emerald-400/25 bg-emerald-400/[0.05] text-emerald-300">{countedItems.length} counted</Badge>
+          {varianceItems.length > 0 && <Badge variant="outline" className="rounded-full border-amber-400/25 bg-amber-400/[0.05] text-amber-300">{varianceItems.length} variances</Badge>}
         </div>
 
         {/* Items Table */}
-        <Card>
+        <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.95)]">
           <CardContent className="p-0">
-            <Table>
-              <TableHeader>
+            <div className="overflow-x-auto"><Table>
+              <TableHeader className="bg-muted/45">
                 <TableRow>
                   <TableHead>Product</TableHead>
                   <TableHead className="text-right">Expected</TableHead>
@@ -308,14 +319,14 @@ export default function StocktakePage() {
                   <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No items match your search</TableCell></TableRow>
                 )}
               </TableBody>
-            </Table>
+            </Table></div>
           </CardContent>
         </Card>
 
         {/* Audit Log */}
         {auditLog.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><History className="w-4 h-4" />Audit Trail ({auditLog.length})</CardTitle></CardHeader>
+          <Card className="overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.95)]">
+            <CardHeader className="border-b border-border/60 bg-gradient-to-r from-muted/50 to-transparent pb-3"><CardTitle className="text-sm flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-400/[0.08]"><History className="h-4 w-4 text-violet-300" /></span>Audit trail ({auditLog.length})</CardTitle></CardHeader>
             <CardContent className="p-0 max-h-48 overflow-y-auto">
               <Table>
                 <TableBody>
@@ -341,16 +352,32 @@ export default function StocktakePage() {
   // ========== MAIN VIEW ==========
   return (
     <div className="space-y-6" data-testid="stocktake-page">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Stocktake</h1>
-          <p className="text-muted-foreground">Inventory counting, variance tracking & reporting</p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={() => setNewDialog(true)} data-testid="new-stocktake-btn"><Plus className="w-4 h-4 mr-1" />New Stocktake</Button>
-        </div>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Products & stock · inventory assurance"
+        title="Stocktake"
+        description="Count stock against the shared product catalogue, review variance before it changes on-hand quantity, and keep the complete count trail with the session."
+        icon={ClipboardCheck}
+        tone="amber"
+        actions={<>
+          <Button variant="outline" size="sm" onClick={() => navigate("/products")}>
+            <ChevronRight className="mr-1.5 h-3.5 w-3.5" />Product catalogue
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => fetchData({ quiet: true })} disabled={refreshing}>
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh
+          </Button>
+          <Button onClick={() => setNewDialog(true)} data-testid="new-stocktake-btn"><Plus className="mr-1.5 h-4 w-4" />New stocktake</Button>
+        </>}
+      />
+
+      {report && (
+        <MetricStrip columns={5}>
+          <MetricTile label="Sessions" value={report.total_sessions || 0} icon={<ClipboardCheck className="h-3.5 w-3.5" />} accent="cyan" />
+          <MetricTile label="Stock at cost" value={`$${(report.stock_in_hand_cost || 0).toLocaleString()}`} icon={<DollarSign className="h-3.5 w-3.5" />} accent="emerald" />
+          <MetricTile label="Stock at retail" value={`$${(report.stock_in_hand_retail || 0).toLocaleString()}`} icon={<DollarSign className="h-3.5 w-3.5" />} accent="sky" />
+          <MetricTile label="Recorded loss" value={`$${(report.total_stock_loss || 0).toLocaleString()}`} icon={<TrendingDown className="h-3.5 w-3.5" />} accent="rose" />
+          <MetricTile label="Recorded gain" value={`$${(report.total_stock_gain || 0).toLocaleString()}`} icon={<TrendingUp className="h-3.5 w-3.5" />} accent="emerald" />
+        </MetricStrip>
+      )}
 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
@@ -359,29 +386,18 @@ export default function StocktakePage() {
         </TabsList>
 
         <TabsContent value="sessions">
-          {/* Shared inventory overview */}
-          {report && (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
-              <HeroTile label="Stocktake sessions" value={report.total_sessions || 0} icon={ClipboardCheck} glow="cyan" animated={false} />
-              <HeroTile label="Stock at cost" value={`$${(report.stock_in_hand_cost || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} />
-              <HeroTile label="Stock at retail" value={`$${(report.stock_in_hand_retail || 0).toLocaleString()}`} icon={DollarSign} glow="cyan" animated={false} />
-              <HeroTile label="Stock loss" value={`$${(report.total_stock_loss || 0).toLocaleString()}`} icon={TrendingDown} glow="rose" animated={false} />
-              <HeroTile label="Stock gain" value={`$${(report.total_stock_gain || 0).toLocaleString()}`} icon={TrendingUp} glow="emerald" animated={false} />
-            </div>
-          )}
-
           {/* Sessions List */}
           <div className="space-y-3 mt-4">
             {sessions.length === 0 ? (
               <Card className="border-dashed"><CardContent className="py-12 text-center">
                 <ClipboardCheck className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
                 <p className="text-muted-foreground mb-3">No stocktake sessions yet</p>
-                <Button onClick={() => setNewDialog(true)}><Plus className="w-4 h-4 mr-1" />Start First Stocktake</Button>
+                <Button onClick={() => setNewDialog(true)}><Plus className="w-4 h-4 mr-1" />Start first stocktake</Button>
               </CardContent></Card>
             ) : sessions.map(s => {
               const pct = s.total_items > 0 ? Math.round((s.counted_items / s.total_items) * 100) : 0;
               return (
-                <Card key={s.id} className="hover:border-primary/40 transition-colors cursor-pointer" onClick={() => fetchSession(s.id)} data-testid={`stocktake-session-${s.id}`}>
+                <Card key={s.id} role="button" tabIndex={0} className="cursor-pointer overflow-hidden rounded-2xl border-border/70 bg-card/90 shadow-[0_16px_36px_-34px_rgba(0,0,0,0.9)] transition-all hover:-translate-y-0.5 hover:border-amber-400/35 hover:shadow-[0_22px_42px_-34px_rgba(245,158,11,0.42)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60" onClick={() => fetchSession(s.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fetchSession(s.id); } }} data-testid={`stocktake-session-${s.id}`}>
                   <CardContent className="py-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-4">
@@ -472,26 +488,46 @@ export default function StocktakePage() {
 
       {/* New Session Dialog */}
       <Dialog open={newDialog} onOpenChange={setNewDialog}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Start New Stocktake</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div><Label>Session Name</Label><Input value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} placeholder="e.g. Monthly Warehouse Count" data-testid="stocktake-name-input" /></div>
-            <div><Label>Description</Label><Textarea value={newForm.description} onChange={e => setNewForm({ ...newForm, description: e.target.value })} placeholder="Notes about this stocktake..." rows={2} /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Location</Label><Input value={newForm.location} onChange={e => setNewForm({ ...newForm, location: e.target.value })} placeholder="All Locations" /></div>
-              <div><Label>Category Filter (optional)</Label>
-                <Select value={newForm.category_filter || "all"} onValueChange={v => setNewForm({ ...newForm, category_filter: v === "all" ? "" : v })}>
-                  <SelectTrigger><SelectValue placeholder="All categories" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {["Hardware", "Software", "Licensing", "Services", "Accessories", "Networking", "Security", "Cloud"].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+        <NexusWorkflowDialog
+          eyebrow="Inventory assurance"
+          title="Start a stocktake"
+          description="Choose the scope before counting. Nexus snapshots the included catalogue items, then preserves every count and variance as reviewable inventory evidence."
+          icon={ClipboardCheck}
+          tone="amber"
+          className="max-w-2xl"
+          footer={<>
+            <Button variant="outline" onClick={() => setNewDialog(false)}>Cancel</Button>
+            <Button onClick={handleCreateSession} data-testid="start-stocktake-btn"><ClipboardCheck className="mr-1.5 h-4 w-4" />Start stocktake</Button>
+          </>}
+        >
+          <div className="space-y-5">
+            <section className="rounded-2xl border border-border/65 bg-card/45 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">01 · Count scope</p>
+              <p className="mt-1 text-sm font-semibold">Name the evidence set</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">The name and location make the resulting audit trail clear to the technician who reviews it later.</p>
+              <div className="mt-4 space-y-4">
+                <div><Label>Session name</Label><Input value={newForm.name} onChange={e => setNewForm({ ...newForm, name: e.target.value })} placeholder="e.g. Monthly Warehouse Count" data-testid="stocktake-name-input" /></div>
+                <div><Label>Purpose or handover note <span className="text-muted-foreground">(optional)</span></Label><Textarea value={newForm.description} onChange={e => setNewForm({ ...newForm, description: e.target.value })} placeholder="What is being counted, and why?" rows={3} /></div>
               </div>
-            </div>
+            </section>
+            <section className="rounded-2xl border border-border/65 bg-card/45 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-300">02 · Inventory boundary</p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div><Label>Location</Label><Input value={newForm.location} onChange={e => setNewForm({ ...newForm, location: e.target.value })} placeholder="All Locations" /></div>
+                <div><Label>Category <span className="text-muted-foreground">(optional)</span></Label>
+                  <Select value={newForm.category_filter || "all"} onValueChange={v => setNewForm({ ...newForm, category_filter: v === "all" ? "" : v })}>
+                    <SelectTrigger><SelectValue placeholder="All categories" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {["Hardware", "Software", "Licensing", "Services", "Accessories", "Networking", "Security", "Cloud"].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl border border-amber-400/15 bg-amber-400/[0.05] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">No stock changes yet.</strong> Starting this session only establishes its count list. Stock changes require an explicit review and finalisation step.</div>
+            </section>
           </div>
-          <DialogFooter><Button onClick={handleCreateSession} data-testid="start-stocktake-btn"><ClipboardCheck className="w-4 h-4 mr-1" />Start Stocktake</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       {deleteConfirmation}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Loader2, Package, Boxes, DollarSign, Percent, AlertTriangle, TrendingDown, Plus } from "lucide-react";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 function useApi(token) {
   return useMemo(() => ({
@@ -23,12 +24,13 @@ function useApi(token) {
 function useFetch(api, path, deps = []) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const reload = () => {
+  const reload = useCallback(() => {
     if (!path) { setLoading(false); return; }
     setLoading(true);
     api.get(path).then(setData).catch((e) => toast.error(e.response?.data?.detail || e.message)).finally(() => setLoading(false));
-  };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [path, ...deps]);
+  }, [api, path]);
+  const dependencyKey = JSON.stringify(deps);
+  useEffect(() => { reload(); }, [dependencyKey, reload]);
   return { data, loading, reload };
 }
 const fmt$ = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -44,13 +46,7 @@ export default function FinanceIntelPage() {
   return (
     <PageShell>
       <div className="space-y-4" data-testid="finance-intel-page">
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-emerald-400 mb-1 flex items-center gap-2">
-            <DollarSign className="w-3 h-3" />Finance Intelligence
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Products, invoices & revenue intelligence</h1>
-          <p className="text-sm text-muted-foreground">Margin · Kits · Client price book · Cash flow · Late-risk · Drift · Dispute scan.</p>
-        </div>
+        <OperationalPageHeader eyebrow="Finance intelligence · commercial evidence" title="Products, invoices & revenue intelligence" description="Review margin, kits, client pricing, cash flow, late-payment risk, drift and disputes from one governed workspace." icon={DollarSign} tone="emerald" />
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="margin" data-testid="tab-margin"><Percent className="w-3 h-3 mr-1" />Product margin</TabsTrigger>
@@ -223,7 +219,7 @@ function KitEditor({ open, draft, products, onClose, onSave }) {
 /* ─── 3 Client Price Book ─── */
 function PriceBookView({ api }) {
   const { data: clients } = useFetch(api, "/clients");
-  const list = Array.isArray(clients) ? clients : (clients?.clients || []);
+  const list = useMemo(() => (Array.isArray(clients) ? clients : (clients?.clients || [])), [clients]);
   const [cid, setCid] = useState("");
   useEffect(() => { if (!cid && list[0]) setCid(list[0].id); }, [list, cid]);
   const { data, loading, reload } = useFetch(api, cid ? `/clients/${cid}/price-book` : null, [cid]);

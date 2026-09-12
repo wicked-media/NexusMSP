@@ -11,6 +11,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Plus, Brain, Loader2, Wrench, Radio, UserRound, Monitor, ClipboardList, AlertTriangle, MapPin, CalendarClock, FileText, Building2, ShieldCheck, Sparkles, Check, ChevronsUpDown, CircleCheck, CircleDashed } from "lucide-react";
 import { priorityConfig } from "@/config/ticketConfig";
+import ServiceKitSelector from "@/components/tickets/ServiceKitSelector";
+import { serviceKitCreateLabel } from "@/lib/serviceKits";
 
 function TicketSearchPicker({
   items = [],
@@ -64,7 +66,7 @@ function TicketSearchPicker({
 
 export function CreateTicketDialog({
   open, onOpenChange, formData, setFormData, clients, clientContacts = [], devices, users, tickets,
-  handleAiTriage, triaging, triageResult, applyTriage, handleCreateTicket, services,
+  handleAiTriage, triaging, triageResult, applyTriage, handleCreateTicket, services, creating = false,
 }) {
   const selectedClient = clients.find(client => client.id === formData.client_id);
   const availableContacts = clientContacts.length ? clientContacts : (selectedClient?.contacts || []);
@@ -100,7 +102,7 @@ export function CreateTicketDialog({
                 </div>
               ))}
             </div>}
-        footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p><div className="flex gap-2"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateTicket} disabled={!canCreate} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit"><Plus className="mr-1.5 w-4 h-4" />Create and open ticket</Button></div></>}
+        footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p><div className="flex gap-2"><Button variant="outline" disabled={creating} onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateTicket} disabled={!canCreate || creating} aria-busy={creating} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit">{creating ? <Loader2 className="mr-1.5 w-4 h-4 animate-spin" /> : <Plus className="mr-1.5 w-4 h-4" />}{creating ? "Creating ticket…" : serviceKitCreateLabel(formData.service_kit_id)}</Button></div></>}
       >
           <section className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/[0.14] p-3 md:grid-cols-4" data-testid="ticket-intake-summary">
             <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Client</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedClient?.name || "Not selected"}</p><p className="truncate text-[10px] text-zinc-600">{selectedContact?.name || "No requester selected"}</p></div>
@@ -144,6 +146,13 @@ export function CreateTicketDialog({
               </Select>
             </section>
           )}
+
+          <ServiceKitSelector
+            value={formData.service_kit_id}
+            context={formData.service_kit_context}
+            clientAddress={selectedClient?.address || ""}
+            onChange={(service_kit_id, service_kit_context) => setFormData({ ...formData, service_kit_id, service_kit_context })}
+          />
 
           <section className="rounded-xl border border-border/70 bg-muted/[0.10] p-3.5">
           <div className="flex flex-wrap items-center gap-2">

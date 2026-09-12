@@ -52,7 +52,7 @@ function remoteErrorMessage(error, fallback) {
  * this device. When multiple providers are available, opens a dropdown so the
  * tech can choose. Falls back to a "Configure" CTA when nothing is set up.
  */
-export default function RemoteAccessButton({ device, status, ticketId = null, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
+export default function RemoteAccessButton({ device, status, ticketId = null, workSessionId = null, busy = false, testid = "remote-access-btn", compact = false, providersOverride = null }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -62,6 +62,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
   const [consentConfirmed, setConsentConfirmed] = useState(false);
   const [session, setSession] = useState(null);
   const [starting, setStarting] = useState(false);
+  const [confirmingConnection, setConfirmingConnection] = useState(false);
   const [purpose, setPurpose] = useState("");
   const [sessionType, setSessionType] = useState("remote_desktop");
   const [consentMethod, setConsentMethod] = useState("attended_prompt");
@@ -70,6 +71,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
   const [remoteHealth, setRemoteHealth] = useState(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [repairing, setRepairing] = useState(false);
+  const workSessionOwnsTime = Boolean(workSessionId);
 
   useEffect(() => {
     if (providersOverride !== null) {
@@ -105,7 +107,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
     setPurpose("");
     setSessionType("remote_desktop");
     setConsentMethod("attended_prompt");
-    setCreateTimeEntry(true);
+    setCreateTimeEntry(!workSessionOwnsTime);
     setEndNotes("");
     setRemoteHealth(null);
     setPendingProvider(provider);
@@ -159,16 +161,15 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         consent_method: consentMethod,
         purpose: purpose.trim() || "Technician support session",
         session_type: sessionType,
-        create_time_entry: createTimeEntry,
+        create_time_entry: workSessionOwnsTime ? false : createTimeEntry,
         ticket_id: ticketId,
+        work_session_id: workSessionId,
         idempotency_key: idempotencyKey,
       }, { headers });
       let nextSession = res.data;
       if (res.data.connection_url) {
         launchNative(res.data.connection_url);
-        const opened = await axios.post(`${API}/remote/sessions/${res.data.session.id}/opened`, {}, { headers });
-        nextSession = { ...res.data, session: opened.data };
-        toast.success(`Launching ${PROVIDER_LABEL[pendingProvider] || pendingProvider} for ${device?.name}`);
+        toast.info(`Launch requested for ${PROVIDER_LABEL[pendingProvider] || pendingProvider}. Confirm once the remote desktop opens.`);
       } else {
         toast.info(typeof res.data.message === "string" ? res.data.message : "Remote provider handoff is ready");
       }
@@ -185,13 +186,35 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
       const { data } = await axios.put(`${API}/remote/sessions/${session.session.id}/end`, {
         lock_action_on_disconnect: "no_change",
         notes: endNotes.trim(),
-        create_time_entry: createTimeEntry,
+        create_time_entry: workSessionOwnsTime ? false : createTimeEntry,
         billable: true,
       }, { headers });
-      toast.success(data.time_entry_id ? "Session ended, ticket updated and time recorded" : "Remote session ended and logged");
+      if (data.time_entry_id) {
+        toast.success("Session ended, ticket updated and time recorded");
+      } else if (data.time_entry_suppressed_by === "nexus_work_session") {
+        toast.success("Session ended; time remains in Nexus Work Session");
+      } else if (data.time_entry_suppressed_by === "launch_not_confirmed") {
+        toast.info("Remote authorisation cancelled; no time was recorded");
+      } else {
+        toast.success("Remote session ended and logged");
+      }
       setSession(null);
       setEndNotes("");
     } catch { toast.error("Unable to close the remote session record"); }
+  };
+
+  const confirmConnectionOpened = async () => {
+    if (!session?.session?.id || confirmingConnection) return;
+    setConfirmingConnection(true);
+    try {
+      const { data } = await axios.post(`${API}/remote/sessions/${session.session.id}/opened`, {}, { headers });
+      setSession(previous => ({ ...previous, session: data }));
+      toast.success("Remote connection confirmed. Session time and audit evidence are now active.");
+    } catch (error) {
+      toast.error(remoteErrorMessage(error, "Unable to confirm the remote connection"));
+    } finally {
+      setConfirmingConnection(false);
+    }
   };
 
   // Use only configured, supported remote providers. The old TRMM path was
@@ -389,21 +412,46 @@ export default function RemoteAccessButton({ device, status, ticketId = null, bu
         </div>
         <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">Purpose</label><Input value={purpose} onChange={event => setPurpose(event.target.value)} placeholder="For example: investigate Outlook sign-in failure" maxLength={500} /></div>
         <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm"><Checkbox checked={consentConfirmed} onCheckedChange={v => setConsentConfirmed(v === true)} /><span>I confirm the client is aware of and has approved this remote session using the method selected above.</span></label>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={createTimeEntry} onCheckedChange={v => setCreateTimeEntry(v === true)} /><span>Create a billable time entry when this session closes if it is linked to a ticket.</span></label>
+        {workSessionOwnsTime ? (
+          <div className="rounded-lg border border-violet-400/20 bg-violet-400/[0.05] p-3 text-xs leading-5 text-violet-100" data-testid={`${testid}-work-session-time-owner`}>
+            This session is linked to an active Nexus Work Session. Remote evidence is retained here; time is reviewed and recorded once in the Work Session completion pack.
+          </div>
+        ) : (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={createTimeEntry} onCheckedChange={v => setCreateTimeEntry(v === true)} /><span>Create a billable time entry when this session closes if it is linked to a ticket.</span></label>
+        )}
       </NexusWorkflowDialog>
     </Dialog>
-    <Dialog open={!!session} onOpenChange={v => !v && setSession(null)}>
+    <Dialog open={!!session} onOpenChange={v => {
+      // Keep the pending confirmation in view. Closing a connection request
+      // should be an explicit cancel action so it cannot leave an untracked,
+      // time-eligible authorisation behind.
+      if (!v && session?.session?.status === "active") setSession(null);
+    }}>
       <NexusWorkflowDialog
         eyebrow="Nexus Remote"
-        title={session?.provider === "splashtop" ? "Provider handoff ready" : "Remote session active"}
-        description={session?.message}
+        title={session?.session?.status === "active" ? "Remote session active" : "Confirm remote connection"}
+        description={session?.session?.status === "active"
+          ? "Connection confirmation, technician identity and linked work evidence are retained."
+          : "The launch request is authorised and audited, but no service time begins until you confirm the remote desktop or provider session actually opened."}
         icon={MonitorSmartphone}
         tone="emerald"
         className="max-w-lg"
-        footer={<><Button variant="outline" onClick={() => setSession(null)}>Keep running</Button><Button variant="destructive" onClick={endSession}>End & save evidence</Button></>}
+        footer={session?.session?.status === "active"
+          ? <><Button variant="outline" onClick={() => setSession(null)}>Keep running</Button><Button variant="destructive" onClick={endSession}>End & save evidence</Button></>
+          : <><Button variant="outline" onClick={endSession} data-testid={`${testid}-cancel-authorisation`}>Cancel authorisation</Button><Button onClick={confirmConnectionOpened} disabled={confirmingConnection} data-testid={`${testid}-confirm-opened`}>{confirmingConnection ? "Confirming…" : "I’m connected"}</Button></>}
       >
-        <div className="rounded-xl border border-emerald-400/15 bg-emerald-400/[0.04] p-3"><p className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Evidence live</p><p className="mt-1 text-sm text-foreground/90">{device?.name} · {session?.session?.session_type?.replaceAll("_", " ")}</p><p className="mt-1 font-mono text-[10px] text-muted-foreground">{session?.session?.id}</p></div>
-        <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">Outcome for the ticket and time entry</label><Textarea value={endNotes} onChange={event => setEndNotes(event.target.value)} placeholder="Record what was checked, changed and verified…" rows={4} /></div>
+        <div className={`rounded-xl border p-3 ${session?.session?.status === "active" ? "border-emerald-400/15 bg-emerald-400/[0.04]" : "border-amber-400/20 bg-amber-400/[0.05]"}`}>
+          <p className={`text-xs font-semibold uppercase tracking-wider ${session?.session?.status === "active" ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-200"}`}>{session?.session?.status === "active" ? "Evidence live" : "Launch request recorded"}</p>
+          <p className="mt-1 text-sm text-foreground/90">{device?.name} · {session?.session?.session_type?.replaceAll("_", " ")}</p>
+          <p className="mt-1 font-mono text-[10px] text-muted-foreground">{session?.session?.id}</p>
+        </div>
+        {session?.session?.status !== "active" && (
+          <div className="rounded-lg border border-amber-400/20 bg-amber-400/[0.04] p-3 text-xs leading-5 text-amber-900 dark:text-amber-100">
+            Confirm only after you can see the remote desktop or have connected through the provider console. Cancelling this request preserves the authorisation audit without adding time to the ticket.
+            {session?.connection_url && <Button type="button" variant="link" className="ml-1 h-auto p-0 text-amber-800 dark:text-amber-200" onClick={() => launchNative(session.connection_url)}>Launch again</Button>}
+          </div>
+        )}
+        <div className="space-y-1.5"><label className="text-xs font-medium text-foreground">{workSessionOwnsTime ? "Outcome for the linked Work Session" : "Outcome for the ticket and time entry"}</label><Textarea value={endNotes} onChange={event => setEndNotes(event.target.value)} placeholder="Record what was checked, changed and verified…" rows={4} /></div>
       </NexusWorkflowDialog>
     </Dialog>
     </>
