@@ -1,3 +1,85 @@
+# On-call roster design QA
+
+## Evidence
+
+- Source visual truth path: authenticated baseline capture of `http://localhost:3000/team-hub?view=roster` before this redesign, compared with the established `http://localhost:3000/workspace` and `http://localhost:3000/clients` workspace patterns.
+- Implementation screenshot path: Codex in-app browser full-page capture of `http://localhost:3000/team-hub?view=roster` in the current task. The browser API returned the capture as inline image evidence and did not expose a filesystem export path.
+- Browser: Codex in-app browser, authenticated NexusMSP session.
+- Viewport and capture pixels: 1132 x 900 CSS viewport for baseline and final desktop checks; the implementation was also checked at 480 x 900 CSS pixels.
+- CSS size and density normalization: same browser surface, zoom and authenticated state for the source and implementation; no cross-density scaling was applied.
+- State: all permitted clients, dark theme, no scheduled shifts, one ready roster contact, technician role without organisation configuration permission.
+- Browser-rendered evidence: desktop full-page capture, narrow responsive capture, live tier gap state, empty timeline, coverage health, rotation load, responder directory, More menu, Schedule shift dialog and Add roster contact dialog.
+- Console errors checked: final warning and error log query returned an empty array.
+
+## Full-view comparison evidence
+
+The baseline was a contact directory with manual on-call badges and three equal tier cards, but no schedule truth, live escalation chain, handoff timeline, overrides, coverage diagnostics or load signal. The final route uses the Team Hub shell and Nexus workspace hierarchy while promoting live coverage, T1/T2/T3 escalation responsibility and the next operational action above the directory.
+
+## Focused region comparison evidence
+
+- **Header and permissions:** verified that status is prominent, common actions remain grouped, and mutation controls are visibly disabled with an explanatory tooltip for a technician without configuration permission.
+- **Tier model:** verified distinct T1 Primary responder, T2 Backup responder and T3 Incident lead cards, including immediate, 10-minute and 20-minute triggers.
+- **Schedule timeline:** verified the 7/30/56-day horizon and category filters, no-shifts state, future handoff copy and action hierarchy.
+- **Readiness and fairness:** verified live gaps, overlaps, missing paging paths, future shift count and an eight-week weighted load view whose copy clearly says it is not payroll.
+- **Dialogs and menus:** opened More, Schedule shift and Add roster contact without submitting changes; labels, tier choices, contact paths, cancel/close paths and disabled permission states were inspected.
+- **Responsive state:** at 480 x 900, actions and metrics wrapped without clipping, the primary content stayed readable, and the existing Team Hub tab strip remained horizontally scrollable.
+
+## Required fidelity surfaces
+
+- **Fonts and typography:** preserved the Nexus font stack and hierarchy; headings, operational values, tier labels and supporting text remain readable without identity truncation.
+- **Spacing and layout rhythm:** reused Nexus workspace gutters, section cards, metric rhythm, borders and radii; desktop and narrow captures showed no clipped core controls.
+- **Colors and visual tokens:** reused Nexus background, border, muted, amber, cyan, violet, emerald and destructive tokens with text labels accompanying every semantic colour.
+- **Image quality and asset fidelity:** the roster is an operational data surface and needs no decorative imagery; existing Lucide icons are used consistently, with no placeholder, emoji, CSS-art or handcrafted SVG assets.
+- **Copy and content:** tier purpose, escalation timing, coverage authority, readiness, overrides, fairness weighting and permission requirements are explicit and use MSP operational language.
+
+## Comparison history
+
+### Iteration 1 - baseline
+
+- [P1] Manual contact `on_call` flags could disagree with actual scheduled coverage.
+- [P1] T1/T2/T3 appeared as generic contact tiers rather than an actionable escalation chain.
+- [P1] No schedule timeline, handoff, override or cancellation workflow was available on this route.
+- [P2] No gap, overlap, contact-path or workload visibility existed before a page fired.
+- [P2] Roster mutations were not presented as permission-aware controls.
+
+### Fixes made
+
+- Made scheduled shifts the authority for live coverage and retained the roster as the responder directory/default tier pool.
+- Added the explicit T1 now, T2 at 10 minutes and T3 at 20 minutes policy surface.
+- Added schedule creation, override and history-preserving cancellation flows plus timeline filters.
+- Added coverage health, next handoff, responder readiness and weighted eight-week rotation load.
+- Added frontend permission states and server-side tenant scope, target validation, action permission checks and audit events.
+
+### Post-fix evidence
+
+- The final 1132 x 900 capture shows a coherent Nexus workspace with the live escalation chain and status-led action hierarchy above schedule and roster management.
+- The final accessibility tree exposes named tiers, filters, headings, a semantic directory table and explanatory disabled states.
+- The 480 x 900 capture showed no hidden persistent actions or clipped primary content.
+- The final browser log query returned no warnings or errors.
+
+## Findings
+
+No actionable P0, P1 or P2 visual differences remain in the audited desktop or narrow states.
+
+## Validation
+
+- Production build passed.
+- Full frontend lint passed with zero errors and zero warnings.
+- All 31 frontend Jest suites passed: 113 tests.
+- Focused backend tests passed: 5 tests.
+- Python compilation passed for both changed routers.
+- Workspace consistency audit passed with zero legacy headers, header contract issues or crowded action headers.
+
+## Follow-up polish
+
+- [P3] Add automated screenshot fixtures for populated, override and overlap states when deterministic schedule fixtures are available.
+
+## Final result
+
+passed
+
+---
+
 # Team Hub design QA
 
 ## Evidence
