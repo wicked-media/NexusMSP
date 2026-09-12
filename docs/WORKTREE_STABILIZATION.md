@@ -6,25 +6,24 @@ Purpose: preserve the current broad development effort while making review and r
 
 ## Safety decision
 
-The worktree contains hundreds of pre-existing source, test, documentation and evidence changes. No unrelated file was reset, deleted, staged or committed during the production-readiness pass. Local browser captures and temporary QA scripts are now ignored, and malformed generated cache entries were removed from `.gitignore`.
+The worktree contained hundreds of pre-existing source, test, documentation and evidence changes. No file was reset or discarded during stabilisation. Local browser captures and temporary QA scripts are now ignored, and malformed generated cache entries were removed from `.gitignore`.
 
-The snapshot immediately before this manifest contained 917 individual status records: 541 modified, 374 untracked and 2 deleted. The largest groups were backend (420), frontend (270), artifacts (92), test reports (78), docs (23) and Agent (20). This manifest adds one further untracked documentation record, bringing the current total to 918.
+The snapshot immediately before this manifest contained 917 individual status records: 541 modified, 374 untracked and 2 deleted. The largest groups were backend (420), frontend (270), artifacts (92), test reports (78), docs (23) and Agent (20). This manifest added one further documentation record, bringing the reviewed total to 918. Stabilisation completed on `codex/worktree-stabilization` with a clean worktree.
 
 ## Review checkpoints
 
 Review and commit these groups independently. A checkpoint advances only when its own focused tests and ownership review pass.
 
-| Checkpoint | Scope | Required review before commit |
+| Checkpoint | Scope | Result |
 |---|---|---|
-| A — platform and security | `backend/app`, `backend/server.py`, backend runtime configuration | Tenant/client scope, permission, audit, failure and data-ownership review; deterministic backend gate |
-| B — backend contracts | `backend/tests`, acceptance runner and acceptance Compose file | Match each changed boundary to positive and negative coverage; disposable acceptance run |
-| C — frontend product and design system | `frontend/src`, frontend configuration and dependency manifests | Unit, lint, build, dependency, workspace consistency, responsive and permission-aware UX checks |
-| D — endpoint Agent | `agent` and Agent repair/release scripts | Go tests/vet/build, trust and replay checks, Windows signing/pilot evidence when applicable |
-| E — deployment and recovery | production Docker/Compose files, CI and recovery scripts | Secret boundary, durable-volume ownership, clean-host build, restore and rollback rehearsal |
-| F — architecture and operator docs | `docs`, root README and design QA record | Statements match current evidence; external gates remain explicitly open |
-| G — generated evidence | `artifacts` and `test_reports` | Retain only intentional, non-secret evidence; remove or regenerate stale reports in a separately reviewed change |
+| A/B — backend platform, security and contracts | `backend` | `8f2f7bf`; deterministic backend gate and disposable two-client acceptance passed |
+| C — frontend product and design system | `frontend` | `0b277b6`; unit, lint, build, dependency and workspace-consistency gates passed; both tracked deletions verified unused |
+| D — endpoint Agent | `agent` | `92c3c12`; Go tests passed and staged whitespace check passed after amendment |
+| E/F — deployment, recovery and operator docs | CI, Compose, scripts, `docs`, root guidance | `3210576`; configuration and documentation checkpointed with external gates still open |
+| G — generated evidence | `artifacts` and `test_reports` | `149f720`; 170 files, 20.75 MB, no file over 5 MB and no high-confidence credential candidate |
+| Credential cleanup | tracked project notes | `2033d83` and `de2ff84`; plaintext test password removed from the current tree |
 
-## Immediate release slice from this pass
+## Completed release slice from this pass
 
 The smallest independently reviewable slice is:
 
@@ -34,11 +33,10 @@ The smallest independently reviewable slice is:
 - readiness, acceptance, design-QA and worktree documentation;
 - `.gitignore` cleanup for local captures and generated frontend cache files.
 
-Do not combine this slice with the full historical working set until the other checkpoint owners confirm which untracked files and two tracked deletions are intentional.
+The full historical working set is now preserved in the independent checkpoints above. No checkpoint has been merged or pushed by this local stabilisation pass.
 
-## Known worktree blockers
+## Remaining repository follow-up
 
-- The two tracked deletions (`frontend/src/components/ui/calendar.jsx` and `frontend/src/lib/supabase.js`) require explicit owner confirmation.
-- Hundreds of untracked backend, frontend, script and documentation files appear to be substantive product work, not disposable output. They must be reviewed and committed by checkpoint or deliberately removed by their owner.
-- `artifacts` and `test_reports` contain a large evidence set. Release owners must decide which files are authoritative and which are stale before packaging.
+- Review the seven commits as a branch and merge or push them only after owner approval.
+- The removed test password existed in repository history. Rotate it if it was ever active; the current tree no longer contains the former value.
 - Line-ending conversion warnings are widespread. Apply an agreed `.gitattributes` policy in a separate mechanical change; do not mix mass line-ending churn into a security or product checkpoint.
