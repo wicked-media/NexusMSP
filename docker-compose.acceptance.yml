@@ -1,0 +1,43 @@
+# Disposable API acceptance environment.  It is intentionally separate from
+# docker-compose.production.yml: no production-like volumes, worker, uploads or
+# external provider credentials are attached to this stack.
+services:
+  mongo:
+    image: mongo:7.0
+    restart: "no"
+    command: ["mongod", "--bind_ip_all"]
+    tmpfs:
+      - /data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [acceptance]
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: "no"
+    ports:
+      - "127.0.0.1:${NEXUS_ACCEPTANCE_PORT:-18000}:8000"
+    environment:
+      APP_ENV: test
+      NEXUS_TEST_ENVIRONMENT: "1"
+      NEXUS_SEED_DEMO_DATA: "false"
+      NEXUS_RUN_BACKGROUND_WORKERS: "false"
+      NEXUS_UPLOADS_DIR: /app/uploads/acceptance
+      MONGO_URL: mongodb://mongo:27017
+      DB_NAME: ${NEXUS_ACCEPTANCE_DB_NAME:?Set an isolated nexus_acceptance_ database name}
+      JWT_SECRET: ${NEXUS_ACCEPTANCE_JWT_SECRET:?Set a generated test-only JWT secret}
+      NEXUS_SECRET_ENCRYPTION_KEY: ${NEXUS_ACCEPTANCE_ENCRYPTION_KEY:?Set a generated test-only encryption secret}
+      CORS_ORIGINS: http://127.0.0.1:${NEXUS_ACCEPTANCE_PORT:-18000}
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [acceptance]
+
+networks:
+  acceptance:
+    internal: true

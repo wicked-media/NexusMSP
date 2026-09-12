@@ -19,6 +19,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.production
+      args:
+        NEXUS_AGENT_VERSION: ${NEXUS_AGENT_VERSION:-0.1.11-endpoint-readiness}
     restart: unless-stopped
     environment: &backend-env
       APP_ENV: production
@@ -31,6 +33,7 @@ services:
       NEXUS_MAIL_SHIELD_CLIENT_SECRET: ${NEXUS_MAIL_SHIELD_CLIENT_SECRET:-}
       CORS_ORIGINS: ${CORS_ORIGINS:?Set the public NexusMSP origin}
       NEXUS_RUN_BACKGROUND_WORKERS: "false"
+      NEXUS_AGENT_VERSION: ${NEXUS_AGENT_VERSION:-0.1.11-endpoint-readiness}
       NEXUS_TRUST_PROXY_HEADERS: ${NEXUS_TRUST_PROXY_HEADERS:-false}
       NEXUS_LOGIN_WINDOW_SECONDS: ${NEXUS_LOGIN_WINDOW_SECONDS:-300}
       NEXUS_LOGIN_IDENTITY_ATTEMPTS: ${NEXUS_LOGIN_IDENTITY_ATTEMPTS:-8}
@@ -41,6 +44,7 @@ services:
         condition: service_healthy
     volumes:
       - nexus-uploads:/app/uploads
+      - nexus-private-uploads:/app/private_uploads
       - nexus-installers:/app/data/agent-installers
     networks: [backend]
 
@@ -48,6 +52,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.production
+      args:
+        NEXUS_AGENT_VERSION: ${NEXUS_AGENT_VERSION:-0.1.11-endpoint-readiness}
     restart: unless-stopped
     command: ["python", "worker.py"]
     environment:
@@ -58,6 +64,7 @@ services:
         condition: service_healthy
     volumes:
       - nexus-uploads:/app/uploads
+      - nexus-private-uploads:/app/private_uploads
       - nexus-installers:/app/data/agent-installers
     networks: [backend]
 
@@ -78,4 +85,5 @@ networks:
 volumes:
   nexus-mongo:
   nexus-uploads:
+  nexus-private-uploads:
   nexus-installers:

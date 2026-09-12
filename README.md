@@ -60,8 +60,30 @@ Run the backend safety tests:
 $env:JWT_SECRET = "test-only-local-secret"
 $env:MONGO_URL = "mongodb://127.0.0.1:27017"
 $env:DB_NAME = "nexusops-tests"
-python -m pytest backend\tests\test_nexus_agent_safety.py
+python backend\scripts\run_unit_tests.py
 ```
+
+### Live API integration probes
+
+The historical `backend/tests/test_iteration*.py` API probes can create and
+modify records. They are excluded from a normal `pytest` run so a developer or
+CI job cannot accidentally exercise a local, shared, or production-like Nexus
+environment. They must only run against a disposable, non-production stack.
+
+To opt in deliberately, set all of the following in the shell that launches
+pytest (never commit their values):
+
+```powershell
+$env:NEXUS_RUN_LIVE_INTEGRATION_TESTS = "1"
+$env:NEXUS_TEST_ENVIRONMENT = "1"
+$env:REACT_APP_BACKEND_URL = "http://127.0.0.1:8001"
+$env:NEXUS_TEST_ADMIN_PASSWORD = "<isolated-test-account-password>"
+python -m pytest backend\tests\test_iteration20_new_features.py
+```
+
+`NEXUS_TEST_ENVIRONMENT=1` is an explicit operator acknowledgement, not a
+substitute for an isolated database and test account. The live probes are not
+part of the deterministic CI unit gate.
 
 Run frontend tests and a production build:
 

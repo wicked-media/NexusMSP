@@ -1,6 +1,6 @@
 # Nexus switching and value strategy
 
-Last reviewed: 2026-08-07
+Last reviewed: 2026-09-02
 
 ## The reason to switch
 
@@ -59,6 +59,20 @@ Every connector must produce:
 - rollback or safe compensating action;
 - final signed migration report.
 
+### Current Switchboard boundary
+
+Nexus Switchboard now retains the migration programme, source boundary,
+object scope, stable-ID mapping decisions, exception ownership,
+reconciliation checklist, cutover checklist and plan review evidence. It is
+**not** a provider importer yet. Opening or updating a plan does not call a
+source provider, read an export or write a canonical Nexus record.
+
+This is intentional: a provider adapter may only be introduced after it has a
+fixture/sandbox contract, deterministic import batch identity, retry and
+compensation design, source-versus-Nexus reconciliation, attachment policy and
+repeat-import idempotency tests. The legacy direct Syncro importer is not the
+Switchboard runtime and must not be used as that implementation.
+
 ### Provider order
 
 1. Syncro and Halo PSA: clients, contacts, tickets, assets, products, invoices and time.
@@ -83,8 +97,8 @@ The first-hour report should prioritise outdated/offline devices, missing protec
 ## Release order
 
 1. Finish the canonical model, client scope and Value Proof contract.
-2. Add migration batches, mappings, dry runs, exception queues and reconciliation as shared infrastructure.
-3. Ship one end-to-end Syncro/Halo pilot connector using real export fixtures.
+2. Add migration batches, mappings, dry runs, exception queues and reconciliation as shared infrastructure. **Switchboard planning/evidence is now available; provider reads and imports remain deliberately unavailable.**
+3. Ship one end-to-end Syncro/Halo pilot connector using real export fixtures, deterministic batch checksums and reconciliation.
 4. Build the first-hour findings report on coverage-aware evidence.
 5. Add further providers through the same migration framework.
 6. Publish customer-facing ROI and executive reporting only after the measurement methodology is approved.

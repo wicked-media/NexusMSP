@@ -27,7 +27,7 @@ Objective: safely operate a controlled internal and single-client pilot.
 | Reliability and observability | Worker leases/recovery, correlation IDs, structured logs, health/readiness, metrics/traces/alerts and owners. | Queue/provider outage drills alert the named owner and recover without false success. |
 | Delivery and recovery | Reproducible containers/agent build, CI gates, immutable releases, migrations, backups and rollback. | Timed Mongo/uploads restore and application rollback rehearsals meet recorded RPO/RTO. |
 
-Release 1 exit: no open critical/high security risks; all six golden workflows in `PRODUCTION_READINESS.md` have current evidence; one controlled pilot has completed rollback and recovery drills.
+Release 1 exit: no open critical/high security risks; all eight golden workflows in `PRODUCTION_READINESS.md` have current evidence; one controlled pilot has completed rollback and recovery drills.
 
 ## Release 2 — MSP Core
 
@@ -111,7 +111,7 @@ Gate: product-specific security/recovery reviews, signed artifacts, staged updat
 ## Immediate work queue
 
 1. [Completed 2026-08-07] Add and verify public authentication abuse protection with privacy-safe counters and proxy trust controls.
-2. Run authenticated two-client DAST over the six golden workflows and close boundary gaps.
+2. Run authenticated two-client DAST over the eight golden workflows and close boundary gaps.
 3. Add upload quarantine/malware-scanner interface before broad portal uploads.
 4. Connect structured metrics/traces/alerts to a production observability backend and assign owners.
 5. Rehearse Mongo/uploads restore and immutable application rollback.
