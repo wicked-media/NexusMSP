@@ -28,6 +28,10 @@ def _matches(row: dict[str, Any], query: dict[str, Any] | None) -> bool:
             if not all(_matches(row, clause) for clause in expected):
                 return False
             continue
+        if key == "$or":
+            if not any(_matches(row, clause) for clause in expected):
+                return False
+            continue
 
         actual = row.get(key)
         if isinstance(expected, dict):

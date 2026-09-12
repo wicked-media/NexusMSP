@@ -58,6 +58,7 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [allowedActions, setAllowedActions] = useState(new Set());
   const [drawerLeadId, setDrawerLeadId] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingLead, setEditingLead] = useState(null);
@@ -71,12 +72,21 @@ export default function LeadsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const canManageLeads = allowedActions.has("crm.lead.manage");
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     setLoadError(null);
     if (quiet) setRefreshing(true);
     else setLoading(true);
     try {
+      const permissionResponse = await axios.get(`${API}/permissions/me`, { headers });
+      const nextAllowedActions = new Set(permissionResponse.data?.allowed || []);
+      setAllowedActions(nextAllowedActions);
+      if (!nextAllowedActions.has("crm.lead.view")) {
+        const permissionError = new Error("Lead access required");
+        permissionError.permissionDenied = true;
+        throw permissionError;
+      }
       const [l, u, s] = await Promise.all([
         axios.get(`${API}/leads`, { headers }),
         axios.get(`${API}/users`, { headers }).catch(() => ({ data: [] })),
@@ -87,9 +97,16 @@ export default function LeadsPage() {
       const m = {};
       (s.data?.scores || []).forEach(x => { m[x.id] = x; });
       setScores(m);
-    } catch {
+    } catch (error) {
+      const permissionDenied = Boolean(error?.permissionDenied || error?.response?.status === 403);
       if (quiet) toast.error("Lead Studio could not refresh. Your current view has been kept.");
-      else setLoadError("Nexus could not load the lead pipeline. No opportunity records have been changed.");
+      else setLoadError(permissionDenied ? {
+        permissionDenied: true,
+        message: "This account does not have crm.lead.view. Ask a Nexus administrator to grant lead access from Team Hub permissions.",
+      } : {
+        permissionDenied: false,
+        message: "Nexus could not load the lead pipeline. No opportunity records have been changed.",
+      });
     } finally {
       if (quiet) setRefreshing(false);
       else setLoading(false);
@@ -201,7 +218,7 @@ export default function LeadsPage() {
   };
 
   if (loading) return <WorkspaceLoadingState label="Loading Lead Studio" />;
-  if (loadError) return <WorkspaceErrorState title="Lead Studio is unavailable" description={loadError} onRetry={load} retryLabel="Retry Lead Studio" />;
+  if (loadError) return <WorkspaceErrorState title={loadError.permissionDenied ? "Lead access required" : "Lead Studio is unavailable"} description={loadError.message} onRetry={loadError.permissionDenied ? undefined : load} retryLabel="Retry Lead Studio" onSecondaryAction={loadError.permissionDenied ? () => navigate("/team-hub?view=matrix") : undefined} secondaryLabel="Open Team Hub permissions" />;
 
   return (
     <div className="p-6 space-y-4" data-testid="leads-page">
@@ -217,11 +234,11 @@ export default function LeadsPage() {
           </Button>
           <WorkspaceActionMenu testId="leads-more-actions">
             <WorkspaceActionMenuItem icon={Funnel} onSelect={() => navigate("/settings?tab=mailbox")} testId="leads-email-intake">Email intake</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={Sparkles} onSelect={() => setPasteOpen(true)} testId="leads-quick-add">Quick add by paste</WorkspaceActionMenuItem>
+            {canManageLeads && <WorkspaceActionMenuItem icon={Sparkles} onSelect={() => setPasteOpen(true)} testId="leads-quick-add">Quick add by paste</WorkspaceActionMenuItem>}
           </WorkspaceActionMenu>
-          <Button size="sm" onClick={() => { setEditingLead(null); setForm(EMPTY_FORM); setShowCreate(true); }} data-testid="leads-new-btn">
+          {canManageLeads && <Button size="sm" onClick={() => { setEditingLead(null); setForm(EMPTY_FORM); setShowCreate(true); }} data-testid="leads-new-btn">
             <Plus className="w-3.5 h-3.5 mr-1" />New lead
-          </Button>
+          </Button>}
         </>}
       />
 
@@ -264,6 +281,7 @@ export default function LeadsPage() {
           <LeadsKanban
             leads={filteredLeads}
             scores={scores}
+            readOnly={!canManageLeads}
             onOpen={setDrawerLeadId}
             onMoved={(id, from, to) => {
               setLeads(prev => prev.map(l => l.id === id ? { ...l, status: to } : l));
@@ -304,7 +322,7 @@ export default function LeadsPage() {
                 <FilterIcon className="w-3 h-3 mr-1" />Clear filters
               </Button>
             )}
-            {selected.length > 0 && (
+            {canManageLeads && selected.length > 0 && (
               <div className="ml-auto flex items-center gap-1.5" data-testid="leads-bulk-bar">
                 <span className="text-[11px] text-violet-200">{selected.length} selected</span>
                 <Select onValueChange={(v) => bulkAction("change_stage", { stage: v })}>
@@ -323,7 +341,7 @@ export default function LeadsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-8"><input type="checkbox" checked={selected.length > 0 && selected.length === filteredLeads.length} onChange={e => setSelected(e.target.checked ? filteredLeads.map(l => l.id) : [])} /></TableHead>
+                  <TableHead className="w-8">{canManageLeads && <input type="checkbox" checked={selected.length > 0 && selected.length === filteredLeads.length} onChange={e => setSelected(e.target.checked ? filteredLeads.map(l => l.id) : [])} />}</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Contact</TableHead>
                   <TableHead>Source</TableHead>
@@ -351,7 +369,7 @@ export default function LeadsPage() {
                       className="cursor-pointer hover:bg-violet-500/[0.06] hover:shadow-[inset_2px_0_0_rgb(139,92,246)] transition-all"
                     >
                       <TableCell onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" checked={selected.includes(l.id)} onChange={() => toggleSel(l.id)} data-testid={`lead-select-${l.id}`} />
+                        {canManageLeads && <input type="checkbox" checked={selected.includes(l.id)} onChange={() => toggleSel(l.id)} data-testid={`lead-select-${l.id}`} />}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -376,9 +394,9 @@ export default function LeadsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => setDrawerLeadId(l.id)}>Open</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setCreateTicketFor(l)} data-testid={`row-create-ticket-${l.id}`}><Ticket className="w-3 h-3 mr-1" />Create ticket</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => setMergeFor(l)} data-testid={`row-merge-ticket-${l.id}`}><GitMerge className="w-3 h-3 mr-1" />Merge into ticket…</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => { setEditingLead(l); setForm({ ...EMPTY_FORM, ...l }); setShowCreate(true); }}>Edit</DropdownMenuItem>
+                            {canManageLeads && <DropdownMenuItem onClick={() => setCreateTicketFor(l)} data-testid={`row-create-ticket-${l.id}`}><Ticket className="w-3 h-3 mr-1" />Create ticket</DropdownMenuItem>}
+                            {canManageLeads && <DropdownMenuItem onClick={() => setMergeFor(l)} data-testid={`row-merge-ticket-${l.id}`}><GitMerge className="w-3 h-3 mr-1" />Merge into ticket…</DropdownMenuItem>}
+                            {canManageLeads && <DropdownMenuItem onClick={() => { setEditingLead(l); setForm({ ...EMPTY_FORM, ...l }); setShowCreate(true); }}>Edit</DropdownMenuItem>}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -393,7 +411,7 @@ export default function LeadsPage() {
 
       {/* Drawer */}
       {drawerLeadId && (
-        <LeadDrawer leadId={drawerLeadId} onClose={() => setDrawerLeadId(null)} onUpdated={load} />
+        <LeadDrawer leadId={drawerLeadId} canManage={canManageLeads} onClose={() => setDrawerLeadId(null)} onUpdated={load} />
       )}
 
       {/* Create/Edit Dialog */}

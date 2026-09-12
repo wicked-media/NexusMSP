@@ -16,7 +16,7 @@ import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
-import { WorkspaceLoadingState } from "@/components/WorkspaceState";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import WorkspaceToolsMenu from "@/components/WorkspaceToolsMenu";
 
 const STREAK_CONFIG = {
@@ -127,7 +127,7 @@ export default function BillingDashboardPage() {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState(null);
   const [chasingId, setChasingId] = useState(null);
   const navigate = useNavigate();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
@@ -135,16 +135,19 @@ export default function BillingDashboardPage() {
   const fetchMetrics = useCallback(async ({ quiet = false } = {}) => {
     if (quiet) setRefreshing(true);
     else setLoading(true);
-    setLoadError("");
+    setLoadError(null);
     try {
       const res = await axios.get(`${API}/billing-dashboard/metrics`, { headers });
       setMetrics(normalizeBillingMetrics(res.data));
     } catch (error) {
-      const message = error.response?.data?.detail || "Failed to load billing metrics";
+      const permissionDenied = error.response?.status === 403;
+      const message = permissionDenied
+        ? "This account does not have billing.analytics.view. Ask a Nexus administrator to grant Billing analytics access from Team Hub permissions."
+        : (error.response?.data?.detail || "Failed to load billing metrics");
       if (quiet) toast.error("Billing could not refresh. The last verified figures are still shown.");
       else {
         setMetrics(null);
-        setLoadError(message);
+        setLoadError({ message, permissionDenied });
         toast.error(message);
       }
     }
@@ -171,6 +174,7 @@ export default function BillingDashboardPage() {
   }
 
   if (loadError || !metrics) {
+    const permissionDenied = Boolean(loadError?.permissionDenied);
     return (
       <div className="space-y-6" data-testid="billing-dashboard-error">
         <OperationalPageHeader
@@ -179,16 +183,16 @@ export default function BillingDashboardPage() {
           description="Revenue, collections, cash flow, and financial follow-through across NexusMSP."
           icon={Banknote}
           tone="emerald"
-          actions={<Button variant="outline" size="sm" onClick={fetchMetrics}><RefreshCw className="mr-1.5 h-4 w-4" />Retry</Button>}
+          actions={!permissionDenied && <Button variant="outline" size="sm" onClick={fetchMetrics}><RefreshCw className="mr-1.5 h-4 w-4" />Retry</Button>}
         />
-        <Card className="border-rose-500/20 bg-rose-500/[0.04]">
-          <CardContent className="flex min-h-56 flex-col items-center justify-center p-8 text-center">
-            <AlertTriangle className="h-8 w-8 text-rose-300" />
-            <h2 className="mt-3 text-base font-semibold">Billing metrics are temporarily unavailable</h2>
-            <p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError || "The metrics response was empty."}</p>
-            <Button className="mt-4" onClick={fetchMetrics}><RefreshCw className="mr-2 h-4 w-4" />Try again</Button>
-          </CardContent>
-        </Card>
+        <WorkspaceErrorState
+          title={permissionDenied ? "Billing access required" : "Billing metrics are temporarily unavailable"}
+          description={loadError?.message || "The metrics response was empty."}
+          onRetry={permissionDenied ? undefined : fetchMetrics}
+          retryLabel="Try again"
+          onSecondaryAction={permissionDenied ? () => navigate("/team-hub?view=matrix") : undefined}
+          secondaryLabel="Open Team Hub permissions"
+        />
       </div>
     );
   }

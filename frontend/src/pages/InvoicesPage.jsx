@@ -20,7 +20,7 @@ import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
-import { WorkspaceLoadingState } from "@/components/WorkspaceState";
+import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -252,6 +252,7 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [allowedActions, setAllowedActions] = useState(new Set());
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterPayment, setFilterPayment] = useState("all");
@@ -314,12 +315,24 @@ export default function InvoicesPage() {
   const processedStripeSession = useRef(null);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const canCreateInvoice = allowedActions.has("billing.invoice.create");
+  const canModifyInvoice = allowedActions.has("billing.invoice.modify");
+  const canRecordPayment = allowedActions.has("billing.payment.record");
+  const canVoidInvoice = allowedActions.has("billing.invoice.void");
 
   const fetchAll = useCallback(async ({ quiet = false } = {}) => {
     if (quiet) setRefreshing(true);
     else setLoading(true);
     setLoadError(null);
     try {
+      const permissionResponse = await axios.get(`${API}/permissions/me`, { headers });
+      const nextAllowedActions = new Set(permissionResponse.data?.allowed || []);
+      setAllowedActions(nextAllowedActions);
+      if (!nextAllowedActions.has("billing.portal.view")) {
+        const permissionError = new Error("Invoice access required");
+        permissionError.permissionDenied = true;
+        throw permissionError;
+      }
       const [invResult, clientResult, productResult, ticketResult, statsResult, xeroResult, reconciliationResult, templateResult] = await Promise.allSettled([
         axios.get(`${API}/invoices`, { headers }),
         axios.get(`${API}/clients`, { headers }),
@@ -342,11 +355,18 @@ export default function InvoicesPage() {
       if ([clientResult, productResult, ticketResult].some(result => result.status === "rejected")) {
         toast.warning("Invoices loaded, but one optional client, product, or ticket lookup is temporarily unavailable");
       }
-    } catch {
+    } catch (error) {
+      const permissionDenied = Boolean(error?.permissionDenied || error?.response?.status === 403);
       if (quiet) toast.error("Invoices could not refresh. The current billing view has been kept.");
       else {
-        setLoadError("NexusMSP could not load invoices and the required billing records. No invoice changes have been made.");
-        toast.error("Failed to load invoices");
+        setLoadError(permissionDenied ? {
+          permissionDenied: true,
+          message: "This account does not have billing.portal.view. Ask a Nexus administrator to grant invoice access from Team Hub permissions.",
+        } : {
+          permissionDenied: false,
+          message: "NexusMSP could not load invoices and the required billing records. No invoice changes have been made.",
+        });
+        if (!permissionDenied) toast.error("Failed to load invoices");
       }
     }
     finally {
@@ -570,6 +590,7 @@ export default function InvoicesPage() {
 
   const handleManualPayment = async () => {
     if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) { toast.error("Enter valid amount"); return; }
+    if (["eftpos", "xero_reconciled"].includes(paymentForm.method) && !paymentForm.reference.trim()) { toast.error(paymentForm.method === "eftpos" ? "Enter the EFTPOS terminal receipt or settlement ID" : "Enter the Xero payment or bank-feed reference"); return; }
     const remaining = (payingInvoice?.total || 0) - (payingInvoice?.amount_paid || 0);
     if (parseFloat(paymentForm.amount) > remaining + 0.001) { toast.error(`Payment cannot exceed the remaining balance of $${remaining.toFixed(2)}`); return; }
     try {
@@ -782,7 +803,10 @@ export default function InvoicesPage() {
       if (res.data?.type && !res.data.type.includes("pdf")) throw new Error("Invoice PDF was not returned");
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       setPdfPreviewUrl(url);
-    } catch { toast.error("Failed to generate invoice PDF"); }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || error.message || "Failed to generate invoice PDF");
+      setPdfPreviewInvoice(null);
+    }
     finally { setPdfLoading(false); }
   };
 
@@ -794,12 +818,18 @@ export default function InvoicesPage() {
       const url = window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
       const a = document.createElement("a"); a.href = url; a.download = `${inv.invoice_number || "invoice"}.pdf`; a.click();
       window.URL.revokeObjectURL(url); toast.success("PDF downloaded");
-    } catch { toast.error("Failed to download invoice PDF"); }
+    } catch (error) { toast.error(error.response?.data?.detail || error.message || "Failed to download invoice PDF"); }
   };
 
   const closePdfPreview = () => {
     if (pdfPreviewUrl) window.URL.revokeObjectURL(pdfPreviewUrl);
     setPdfPreviewUrl(null); setPdfPreviewInvoice(null);
+  };
+
+  const continueFromPdfPreview = (action) => {
+    const invoice = pdfPreviewInvoice;
+    closePdfPreview();
+    if (invoice) action(invoice);
   };
 
   // --- Revenue Analytics ---
@@ -827,13 +857,14 @@ export default function InvoicesPage() {
   if (loadError) {
     return (
       <PageShell data-testid="invoices-load-error">
-        <Card className="mx-auto mt-10 max-w-2xl border-rose-500/30 bg-rose-500/[0.045]">
-          <CardContent className="flex flex-col items-center gap-4 px-6 py-10 text-center">
-            <AlertTriangle className="h-10 w-10 text-rose-300" />
-            <div><h1 className="text-lg font-semibold">Invoice workspace is unavailable</h1><p className="mt-1 max-w-lg text-sm text-muted-foreground">{loadError}</p></div>
-            <Button onClick={fetchAll} data-testid="retry-invoices-load"><RefreshCw className="mr-2 h-4 w-4" />Retry invoices</Button>
-          </CardContent>
-        </Card>
+        <WorkspaceErrorState
+          title={loadError.permissionDenied ? "Invoice access required" : "Invoice workspace is unavailable"}
+          description={loadError.message}
+          onRetry={loadError.permissionDenied ? undefined : fetchAll}
+          retryLabel="Retry invoices"
+          onSecondaryAction={loadError.permissionDenied ? () => navigate("/team-hub?view=matrix") : undefined}
+          secondaryLabel="Open Team Hub permissions"
+        />
       </PageShell>
     );
   }
@@ -1046,10 +1077,10 @@ export default function InvoicesPage() {
               </Select>
             </div>
             <p className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">{paymentForm.method === "eftpos" ? "Record the EFTPOS terminal receipt or settlement reference so the payment can be matched in Xero." : paymentForm.method === "cash" ? "Record the receipt number or till reference. Cash payments should be reconciled with the daily cash-up." : paymentForm.method === "xero_reconciled" ? "Use this only after the payment is matched in Xero; include the Xero payment or bank-feed reference." : "Include the banking or remittance reference so finance can reconcile the payment in Xero."}</p>
-            <div><Label>Reference</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
+            <div><Label>Reference{["eftpos", "xero_reconciled"].includes(paymentForm.method) ? " *" : ""}</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
             <div><Label>Internal notes</Label><Textarea className="mt-1" value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional reconciliation, remittance, or customer notes" rows={3} /></div>
           </div>
-          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} disabled={["eftpos", "xero_reconciled"].includes(paymentForm.method) && !paymentForm.reference.trim()} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1149,19 +1180,30 @@ export default function InvoicesPage() {
 
       {/* PDF PREVIEW */}
       <Dialog open={!!pdfPreviewUrl} onOpenChange={v => { if (!v) closePdfPreview(); }}>
-        <DialogContent className="max-w-4xl h-[85vh] flex flex-col">
+        <DialogContent className="flex h-[88vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
           <DialogHeader>
-            <div className="flex items-center justify-between">
+            <div className="border-b border-white/[0.08] px-6 py-4 pr-12">
               <DialogTitle className="flex items-center gap-2"><FileText className="w-5 h-5" />Preview: {pdfPreviewInvoice?.invoice_number}</DialogTitle>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={() => { if (pdfPreviewUrl) { const w = window.open(pdfPreviewUrl, "_blank"); if (w) w.addEventListener("load", () => w.print()); } }} data-testid="print-pdf-btn"><Printer className="w-4 h-4 mr-1" />Print</Button>
-                <Button size="sm" variant="outline" onClick={() => pdfPreviewInvoice && handlePdfDownload(pdfPreviewInvoice)} data-testid="download-invoice-pdf-btn"><Download className="w-4 h-4 mr-1" />Download</Button>
-              </div>
+              <DialogDescription className="mt-1">Review the client copy, then complete the next billing action without leaving the invoice.</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="flex-1 min-h-0">
-            {pdfLoading ? <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 animate-spin" /></div> : <iframe src={pdfPreviewUrl} className="w-full h-full rounded-lg border" title="Invoice PDF" />}
+          <div className="min-h-0 flex-1 bg-zinc-950/60 p-3">
+            {pdfLoading ? <div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div> : <iframe src={pdfPreviewUrl} className="h-full w-full rounded-lg border border-white/[0.08] bg-white" title="Invoice PDF" />}
           </div>
+          <DialogFooter className="shrink-0 items-center gap-2 border-t border-white/[0.08] bg-black/30 px-5 py-4 sm:justify-between sm:space-x-0" data-testid="invoice-preview-actions">
+            <div className="mr-auto text-left text-xs text-muted-foreground">
+              <p className="font-medium text-zinc-200">{pdfPreviewInvoice?.client_name || "Customer invoice"}</p>
+              <p>Balance ${Math.max(0, Number(pdfPreviewInvoice?.total || 0) - Number(pdfPreviewInvoice?.amount_paid || 0)).toFixed(2)}</p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" variant="outline" onClick={closePdfPreview}>Close</Button>
+              {canModifyInvoice && !pdfPreviewInvoice?.is_split_parent && <Button size="sm" variant="outline" onClick={() => continueFromPdfPreview(openInvoiceEmail)} data-testid="preview-email-invoice-btn"><Mail className="mr-1.5 h-4 w-4" />Email</Button>}
+              {canModifyInvoice && !pdfPreviewInvoice?.is_split_parent && !pdfPreviewInvoice?.is_split_child && (pdfPreviewInvoice?.payment_status || "unpaid") === "unpaid" && ["draft", "pending_approval"].includes(pdfPreviewInvoice?.status) && <Button size="sm" variant="outline" className="border-violet-400/30 text-violet-100" onClick={() => continueFromPdfPreview(openSplitBilling)} data-testid="preview-split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing</Button>}
+              {canRecordPayment && !pdfPreviewInvoice?.is_split_parent && Math.max(0, Number(pdfPreviewInvoice?.total || 0) - Number(pdfPreviewInvoice?.amount_paid || 0)) > 0 && <Button size="sm" variant="success" onClick={() => continueFromPdfPreview(invoice => openPaymentDialog(invoice, "eftpos"))} data-testid="preview-record-eftpos-btn"><Banknote className="mr-1.5 h-4 w-4" />Record EFTPOS</Button>}
+              <Button size="sm" variant="outline" onClick={() => { if (pdfPreviewUrl) { const w = window.open(pdfPreviewUrl, "_blank"); if (w) w.addEventListener("load", () => w.print()); } }} data-testid="print-pdf-btn"><Printer className="mr-1.5 h-4 w-4" />Print</Button>
+              <Button size="sm" variant="outline" onClick={() => pdfPreviewInvoice && handlePdfDownload(pdfPreviewInvoice)} data-testid="download-invoice-pdf-btn"><Download className="mr-1.5 h-4 w-4" />Download</Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1317,9 +1359,9 @@ export default function InvoicesPage() {
     const inv = viewInvoice;
     const isSplitParent = Boolean(inv.is_split_parent);
     const pStatus = isSplitParent ? "split" : (inv.payment_status || "unpaid");
-    const canDelete = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
-    const canEditFinancialRecord = pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && !isSplitParent;
-    const canVoid = pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
+    const canDelete = canVoidInvoice && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status);
+    const canEditFinancialRecord = canModifyInvoice && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && !isSplitParent;
+    const canVoid = canVoidInvoice && pStatus === "unpaid" && !["cancelled", "voided"].includes(inv.status);
     const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
     const balance = isSplitParent ? 0 : (inv.total || 0) - (inv.amount_paid || 0);
     const isOverdue = !isSplitParent && inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
@@ -1340,8 +1382,8 @@ export default function InvoicesPage() {
                 <p className="truncate text-xl font-semibold tracking-tight text-white">{inv.invoice_name || inv.client_name || "Client invoice"}</p>
                 <p className="mt-1 text-xs text-zinc-400">{isSplitParent ? <><span>Source record retained for audit</span><span className="px-1.5 text-zinc-600">/</span><span className="text-violet-200">{(inv.split_billing?.allocations || []).length} payer invoice{(inv.split_billing?.allocations || []).length === 1 ? "" : "s"} issued</span></> : <>{inv.invoice_name && <><span>{inv.client_name || "Client invoice"}</span><span className="px-1.5 text-zinc-600">/</span></>}Due {inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "date not set"} <span className="px-1.5 text-zinc-600">/</span> Balance <span className={balance > 0 ? "font-mono text-amber-200" : "font-mono text-emerald-200"}>${Math.max(0, balance).toFixed(2)}</span></>}</p>
               </div>
-              {balance > 0 && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
-              {!isSplitParent && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
+              {canRecordPayment && balance > 0 && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
+              {canModifyInvoice && !isSplitParent && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
               <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="header-preview-invoice-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3">
@@ -1584,8 +1626,8 @@ export default function InvoicesPage() {
             <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(135deg,rgba(255,255,255,0.035),rgba(255,255,255,0.012))]">
               <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Invoice controls</CardTitle></CardHeader>
               <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
-                {!isSplitParent && pStatus !== "paid" && <Button variant="success" className="w-full" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
-                {!isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
+                {canRecordPayment && !isSplitParent && pStatus !== "paid" && <Button variant="success" className="w-full" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
+                {canModifyInvoice && !isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
                 {isSplitParent && <div className="rounded-lg border border-violet-400/25 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-100"><span className="font-medium">Payer invoices issued.</span> Open the Payer invoices tab to email each customer or record their payment.</div>}
                 <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground"><span className="font-medium text-sky-300">Xero</span> {xeroStatus.connected ? `Connected to ${xeroStatus.org_name || "your organisation"}. Reconcile payments after they are recorded.` : xeroStatus.configured ? "Setup is incomplete. Finish Xero OAuth before relying on sync or reconciliation." : "Not connected. Configure Xero before relying on sync or reconciliation."}</div>
                 <Button variant="info" className="w-full" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} data-testid="open-xero-btn"><Building2 className="mr-1.5 h-4 w-4" />{xeroStatus.connected ? "Open Xero hub" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</Button>
@@ -1626,7 +1668,7 @@ export default function InvoicesPage() {
                 >
                   <Zap className="w-4 h-4 mr-1" />Pre-scan Risks (AI)
                 </Button>
-                {!isSplitParent && <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => openInvoiceEmail(inv)} data-testid="email-invoice-btn">
+                {canModifyInvoice && !isSplitParent && <Button variant="outline" className="w-full text-sky-400 border-sky-500/30 hover:bg-sky-500/10" onClick={() => openInvoiceEmail(inv)} data-testid="email-invoice-btn">
                   <Mail className="w-4 h-4 mr-1" />Email Invoice
                 </Button>}
                 {pStatus !== "paid" && (
@@ -1636,16 +1678,16 @@ export default function InvoicesPage() {
                   </Button>
                 )}
                 <Separator />
-                <Button variant="outline" className="w-full" onClick={() => handleCloneInvoice(inv)} data-testid="clone-invoice-btn">
+                {canCreateInvoice && <Button variant="outline" className="w-full" onClick={() => handleCloneInvoice(inv)} data-testid="clone-invoice-btn">
                   <Copy className="w-4 h-4 mr-1" />Clone Invoice
-                </Button>
+                </Button>}
                 <Button variant="outline" className="w-full text-amber-400 border-amber-500/30 hover:bg-amber-500/10" onClick={() => {
                   setCreditNoteForm({ reason: "", total: 0, subtotal: 0, tax: 0, line_items: [] });
                   setCreditNoteDialog(true);
                 }} data-testid="credit-note-btn">
                   <Receipt className="w-4 h-4 mr-1" />Issue Credit Note
                 </Button>
-                {inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
+                {canModifyInvoice && inv.status === "draft" && <Button variant="outline" className="w-full" onClick={() => handleStatusChange(inv, "sent")}><Send className="w-4 h-4 mr-1" />Mark as Sent</Button>}
                 {canEditFinancialRecord && <Button variant="outline" className="w-full" onClick={() => { setMovingInvoice(inv); setMoveTarget(""); setMoveDialog(true); }} data-testid="move-invoice-btn">
                   <ArrowRightLeft className="w-4 h-4 mr-1" />Move to Client
                 </Button>}
@@ -1766,7 +1808,7 @@ export default function InvoicesPage() {
             <WorkspaceActionMenuItem icon={Timer} onSelect={() => navigate("/reports?tab=commercial")} testId="aging-report-btn">Receivables report</WorkspaceActionMenuItem>
             <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => { setTopView("revenue"); setRevenueAnalytics(null); }} testId="revenue-analytics-btn">Revenue analytics</WorkspaceActionMenuItem>
           </WorkspaceActionMenu>
-          <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New invoice</Button>
+          {canCreateInvoice && <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New invoice</Button>}
         </>}
       />
 
@@ -1886,11 +1928,11 @@ export default function InvoicesPage() {
                     <TableCell><Badge className={STATUS_CONFIG[effectiveStatus]?.class + " text-[10px]"}>{STATUS_CONFIG[effectiveStatus]?.label}</Badge></TableCell>
                     <TableCell>
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                        {!isSplitParent && pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-emerald-400 hover:text-emerald-300 text-xs px-2" onClick={() => openPaymentDialog(inv)} data-testid={`pay-btn-${inv.id}`}><Banknote className="w-3 h-3 mr-1" />Record</Button>}
+                        {canRecordPayment && !isSplitParent && pStatus !== "paid" && <Button variant="ghost" size="sm" className="h-7 text-emerald-400 hover:text-emerald-300 text-xs px-2" onClick={() => openPaymentDialog(inv)} data-testid={`pay-btn-${inv.id}`}><Banknote className="w-3 h-3 mr-1" />Record</Button>}
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-400" title="Preview PDF" onClick={() => handlePdfPreview(inv)} data-testid={`print-btn-${inv.id}`}><Printer className="w-3 h-3" /></Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-emerald-400" title="Download" onClick={() => handlePdfDownload(inv)} data-testid={`download-btn-${inv.id}`}><Download className="w-3 h-3" /></Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Clone" onClick={() => handleCloneInvoice(inv)}><Copy className="w-3 h-3" /></Button>
-                        {pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete draft" onClick={() => setDeleteTarget(inv)}><Trash2 className="w-3 h-3" /></Button>}
+                        {canCreateInvoice && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Clone" onClick={() => handleCloneInvoice(inv)}><Copy className="w-3 h-3" /></Button>}
+                        {canVoidInvoice && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive" title="Delete draft" onClick={() => setDeleteTarget(inv)}><Trash2 className="w-3 h-3" /></Button>}
                       </div>
                     </TableCell>
                   </TableRow>

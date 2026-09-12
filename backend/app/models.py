@@ -706,6 +706,7 @@ class Lead(BaseModel):
     notes: Optional[str] = None
     assigned_to: Optional[str] = None
     assigned_name: Optional[str] = None
+    assigned_to_name: Optional[str] = None
     converted_to_client: Optional[str] = None  # client_id if converted
     last_contact: Optional[datetime] = None
     next_follow_up: Optional[datetime] = None

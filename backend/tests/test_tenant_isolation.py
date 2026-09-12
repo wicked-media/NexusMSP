@@ -859,12 +859,18 @@ def test_invoice_list_is_limited_to_the_technicians_clients(monkeypatch):
     user = {
         "id": "tech-1",
         "role": "technician",
+        "tenant_id": "tenant-a",
         "client_scope_mode": "restricted",
         "client_scope_ids": ["client-a"],
     }
 
     assert asyncio.run(invoices.get_invoices(current_user=user)) == []
-    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+    assert captured["query"] == {
+        "$and": [
+            {"client_id": {"$in": ["client-a"]}},
+            {"tenant_id": "tenant-a"},
+        ]
+    }
 
 
 def test_smart_invoice_action_is_denied_for_a_foreign_client(monkeypatch):

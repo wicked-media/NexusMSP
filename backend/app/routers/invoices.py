@@ -10,7 +10,13 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.services.integration_security import redact_connection_settings
 from app.services.public_url import configured_public_base_url
 from app.services.finance_integrity import (
@@ -71,7 +77,7 @@ async def _sync_split_billing_parent_payment(child_invoice: dict, amount_paid: f
     if not parent_id or not allocation_id:
         return
 
-    parent = await db.invoices.find_one({"id": parent_id}, {"_id": 0, "id": 1, "invoice_number": 1, "split_billing": 1})
+    parent = await db.invoices.find_one(tenant_scoped_query(current_user, {"id": parent_id}), {"_id": 0, "id": 1, "invoice_number": 1, "split_billing": 1})
     if not parent:
         return
     split_billing = dict(parent.get("split_billing") or {})
@@ -90,7 +96,7 @@ async def _sync_split_billing_parent_payment(child_invoice: dict, amount_paid: f
     split_billing["allocations"] = allocations
     split_billing["amount_paid"] = round(sum(float(item.get("amount_paid", 0) or 0) for item in allocations), 2)
     split_billing["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.invoices.update_one({"id": parent_id}, {"$set": {"split_billing": split_billing}})
+    await db.invoices.update_one(tenant_scoped_query(current_user, {"id": parent_id}), {"$set": {"split_billing": split_billing}})
     await log_activity(
         current_user,
         "split_payment_updated",
@@ -104,7 +110,7 @@ async def _sync_split_billing_parent_payment(child_invoice: dict, amount_paid: f
 
 # ============== INVOICES ENDPOINTS ==============
 
-@router.get("/invoices", response_model=List[Invoice])
+@router.get("/invoices", response_model=List[Invoice], dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_invoices(
     client_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -116,7 +122,8 @@ async def get_invoices(
     if status:
         query["status"] = status
     
-    invoices = await db.invoices.find(scoped_query(current_user, query, site_field=None), {"_id": 0}).sort("created_at", -1).to_list(1000)
+    invoice_query = tenant_scoped_query(current_user, scoped_query(current_user, query, site_field=None))
+    invoices = await db.invoices.find(invoice_query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     for index, invoice in enumerate(invoices):
         i = normalise_invoice_document(invoice)
         if isinstance(i.get('created_at'), str):
@@ -124,10 +131,10 @@ async def get_invoices(
         invoices[index] = i
     return invoices
 
-@router.get("/invoices/stats/summary")
+@router.get("/invoices/stats/summary", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
     all_inv = await db.invoices.find(
-        scoped_query(current_user, {"is_split_parent": {"$ne": True}}, site_field=None),
+        tenant_scoped_query(current_user, scoped_query(current_user, {"is_split_parent": {"$ne": True}}, site_field=None)),
         {"_id": 0},
     ).to_list(10000)
     total = len(all_inv)
@@ -151,25 +158,25 @@ async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
         "total_outstanding": round(total_outstanding, 2)
     }
 
-@router.get("/invoices/{invoice_id}")
+@router.get("/invoices/{invoice_id}", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_invoice(invoice_id: str, current_user: dict = Depends(get_current_user)):
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    invoice = await db.invoices.find_one(tenant_scoped_query(current_user, {"id": invoice_id}), {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     await assert_client_scope(current_user, invoice.get("client_id"), operation="billing.invoice.read", mask_not_found=True)
     return normalise_invoice_document(invoice)
 
-@router.get("/invoices/{invoice_id}/activity-log")
+@router.get("/invoices/{invoice_id}/activity-log", dependencies=[Depends(require_action("billing.portal.view"))])
 async def get_invoice_activity_log(invoice_id: str, current_user: dict = Depends(get_current_user)):
     """Get activity log for a specific invoice (admin only)"""
     caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required")
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0, "client_id": 1})
+    invoice = await db.invoices.find_one(tenant_scoped_query(current_user, {"id": invoice_id}), {"_id": 0, "client_id": 1})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     await assert_client_scope(current_user, invoice.get("client_id"), operation="billing.invoice.audit.read", mask_not_found=True)
-    logs = await db.activity_logs.find({"entity_type": "invoice", "entity_id": invoice_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    logs = await db.activity_logs.find(tenant_scoped_query(current_user, {"entity_type": "invoice", "entity_id": invoice_id}), {"_id": 0}).sort("created_at", -1).to_list(200)
     return logs
 
 @router.post("/invoices", response_model=Invoice, dependencies=[Depends(require_action("billing.invoice.create"))])
@@ -319,6 +326,7 @@ async def create_invoice(invoice_data: InvoiceCreate, request: Request, current_
     invoice = Invoice(**invoice_kwargs)
     doc = invoice.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc['tenant_id'] = platform_tenant_id(current_user)
     # Persist enrichment fields not in the base model
     doc["discount_pct"] = inv_discount_pct
     doc["discount_amount"] = inv_discount_amt
@@ -515,7 +523,8 @@ async def create_split_billing_invoices(
     available as a locked audit record, while generated payer invoices are the
     only documents included in receivables and revenue reporting.
     """
-    source = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    source_query = tenant_scoped_query(current_user, {"id": invoice_id})
+    source = await db.invoices.find_one(source_query, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail="Invoice not found")
     await assert_client_scope(
@@ -559,7 +568,7 @@ async def create_split_billing_invoices(
             request=request,
             mask_not_found=True,
         )
-        client = await db.clients.find_one({"id": payer_client_id}, {"_id": 0, "id": 1, "name": 1, "email": 1})
+        client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": payer_client_id}), {"_id": 0, "id": 1, "name": 1, "email": 1})
         if not client:
             raise HTTPException(status_code=422, detail=f"The customer selected for allocation {index} could not be found")
         payer_ids.add(payer_client_id)
@@ -644,6 +653,7 @@ async def create_split_billing_invoices(
         )
         child_doc = payer_invoice.model_dump()
         child_doc["created_at"] = now.isoformat()
+        child_doc["tenant_id"] = platform_tenant_id(current_user)
         await db.invoices.insert_one(child_doc)
         payer_invoices.append(child_doc)
         await log_activity(
@@ -666,10 +676,10 @@ async def create_split_billing_invoices(
         "allocations": normalized,
         "child_invoice_ids": [item["id"] for item in payer_invoices],
     }
-    parent_update = await db.invoices.update_one({
+    parent_update = await db.invoices.update_one(tenant_scoped_query(current_user, {
         "id": source["id"],
         "client_id": source.get("client_id"),
-    }, {"$set": {
+    }), {"$set": {
         "status": "split_billed",
         "payment_status": "split",
         "is_split_parent": True,
@@ -678,7 +688,7 @@ async def create_split_billing_invoices(
     }})
     if parent_update.matched_count == 0:
         raise HTTPException(status_code=409, detail="Invoice ownership changed while split billing was being created; refresh and retry")
-    parent = await db.invoices.find_one({"id": source["id"]}, {"_id": 0})
+    parent = await db.invoices.find_one(tenant_scoped_query(current_user, {"id": source["id"]}), {"_id": 0})
     await log_activity(
         current_user,
         "split_billing_created",
@@ -915,7 +925,7 @@ async def check_payment_status(
 
 @router.post("/invoices/{invoice_id}/record-payment", dependencies=[Depends(require_action("billing.payment.record"))])
 async def record_manual_payment(invoice_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    invoice = await db.invoices.find_one(tenant_scoped_query(current_user, {"id": invoice_id}), {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     await assert_client_scope(
@@ -982,7 +992,7 @@ async def record_manual_payment(invoice_id: str, data: dict, request: Request, c
         return {**replay, "replayed": True}
     version = invoice.get("version")
     version_filter = {"version": version} if version is not None else {"version": {"$exists": False}}
-    result = await db.invoices.update_one({"id": invoice_id, "client_id": invoice.get("client_id"), **version_filter}, {
+    result = await db.invoices.update_one(tenant_scoped_query(current_user, {"id": invoice_id, "client_id": invoice.get("client_id"), **version_filter}), {
         "$set": {"payment_status": new_status, "amount_paid": new_paid,
                  "status": "paid" if new_status == "paid" else invoice.get("status"),
                  "paid_date": payment_date if new_status == "paid" else invoice.get("paid_date")},

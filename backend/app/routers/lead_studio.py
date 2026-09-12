@@ -24,12 +24,14 @@ Endpoints (all prefixed /api):
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import hashlib
 import uuid
 
-router = APIRouter(tags=["Lead Studio"])
+router = APIRouter(tags=["Lead Studio"], dependencies=[Depends(require_action("crm.lead.view"))])
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -99,7 +101,7 @@ def _score_lead(lead: dict) -> dict:
 
 @router.get("/lead-studio/score")
 async def score_all(current_user: dict = Depends(get_current_user)):
-    leads = await db.leads.find({"status": {"$nin": ["won", "lost"]}}, {"_id": 0}).to_list(1000)
+    leads = await db.leads.find(tenant_scoped_query(current_user, {"status": {"$nin": ["won", "lost"]}}), {"_id": 0}).to_list(1000)
     out = []
     for ld in leads:
         s = _score_lead(ld)
@@ -113,7 +115,7 @@ async def score_all(current_user: dict = Depends(get_current_user)):
 # ──────────────────────────────────────────────────────────────────────────────
 @router.get("/lead-studio/hot")
 async def hot_leads(current_user: dict = Depends(get_current_user)):
-    leads = await db.leads.find({"status": {"$nin": ["won", "lost"]}}, {"_id": 0}).to_list(500)
+    leads = await db.leads.find(tenant_scoped_query(current_user, {"status": {"$nin": ["won", "lost"]}}), {"_id": 0}).to_list(500)
     scored = []
     for ld in leads:
         s = _score_lead(ld)
@@ -137,7 +139,7 @@ async def stale_leads(days: int = 14, current_user: dict = Depends(get_current_u
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_str = cutoff.isoformat()
     leads = await db.leads.find(
-        {"status": {"$nin": ["won", "lost"]}, "$or": [{"last_activity_at": {"$lt": cutoff_str}}, {"last_activity_at": {"$exists": False}}]},
+        tenant_scoped_query(current_user, {"status": {"$nin": ["won", "lost"]}, "$or": [{"last_activity_at": {"$lt": cutoff_str}}, {"last_activity_at": {"$exists": False}}]}),
         {"_id": 0},
     ).to_list(500)
     out = []
@@ -164,7 +166,7 @@ async def stale_leads(days: int = 14, current_user: dict = Depends(get_current_u
 async def lead_activity_ticker(current_user: dict = Depends(get_current_user)):
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
     events = []
-    cursor = db.lead_activities.find({"created_at": {"$gte": cutoff}}, {"_id": 0}).sort("created_at", -1).limit(30)
+    cursor = db.lead_activities.find(tenant_scoped_query(current_user, {"created_at": {"$gte": cutoff}}), {"_id": 0}).sort("created_at", -1).limit(30)
     async for a in cursor:
         kind_map = {"call": "📞", "email": "✉️", "note": "📝", "meeting": "📅", "stage_change": "🔀", "proposal_sent": "📄"}
         events.append({
@@ -199,7 +201,7 @@ STAGE_PROB = {
 
 @router.get("/lead-studio/forecast")
 async def forecast(current_user: dict = Depends(get_current_user)):
-    leads = await db.leads.find({"status": {"$nin": ["won", "lost"]}}, {"_id": 0}).to_list(1000)
+    leads = await db.leads.find(tenant_scoped_query(current_user, {"status": {"$nin": ["won", "lost"]}}), {"_id": 0}).to_list(1000)
     now = datetime.now(timezone.utc)
     buckets = {"this_month": 0.0, "next_30d": 0.0, "next_90d": 0.0, "later": 0.0}
     raw_buckets = {"this_month": 0.0, "next_30d": 0.0, "next_90d": 0.0, "later": 0.0}
@@ -232,7 +234,7 @@ async def velocity(current_user: dict = Depends(get_current_user)):
     """Average days a lead spends in each stage (last 90 days of stage transitions)."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
     transitions = await db.lead_activities.find(
-        {"type": "stage_change", "created_at": {"$gte": cutoff}}, {"_id": 0}
+        tenant_scoped_query(current_user, {"type": "stage_change", "created_at": {"$gte": cutoff}}), {"_id": 0}
     ).to_list(2000)
     per_stage = {}
     # Pair consecutive transitions per lead
@@ -257,7 +259,7 @@ async def velocity(current_user: dict = Depends(get_current_user)):
 
 @router.get("/lead-studio/source-attribution")
 async def source_attribution(current_user: dict = Depends(get_current_user)):
-    leads = await db.leads.find({}, {"_id": 0}).to_list(2000)
+    leads = await db.leads.find(tenant_scoped_query(current_user, {}), {"_id": 0}).to_list(2000)
     sources = {}
     for ld in leads:
         src = ld.get("source", "other") or "other"
@@ -286,7 +288,7 @@ async def source_attribution(current_user: dict = Depends(get_current_user)):
 
 @router.get("/lead-studio/conversion-funnel")
 async def conversion_funnel(current_user: dict = Depends(get_current_user)):
-    leads = await db.leads.find({}, {"_id": 0}).to_list(2000)
+    leads = await db.leads.find(tenant_scoped_query(current_user, {}), {"_id": 0}).to_list(2000)
     stages = ["new", "contacted", "qualified", "proposal", "negotiation", "won"]
     counts = {s: 0 for s in stages}
     counts["lost"] = 0
@@ -317,7 +319,7 @@ async def conversion_funnel(current_user: dict = Depends(get_current_user)):
 # ──────────────────────────────────────────────────────────────────────────────
 @router.get("/leads/{lead_id}/next-best-action")
 async def next_best_action(lead_id: str, current_user: dict = Depends(get_current_user)):
-    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    lead = await db.leads.find_one(tenant_scoped_query(current_user, {"id": lead_id}), {"_id": 0})
     if not lead:
         raise HTTPException(404, "Lead not found")
     last = _safe_dt(lead.get("last_activity_at") or lead.get("updated_at"))
@@ -353,7 +355,7 @@ async def next_best_action(lead_id: str, current_user: dict = Depends(get_curren
 
 @router.post("/leads/{lead_id}/ai-draft-email")
 async def ai_draft_email(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    lead = await db.leads.find_one(tenant_scoped_query(current_user, {"id": lead_id}), {"_id": 0})
     if not lead:
         raise HTTPException(404, "Lead not found")
     intent = (data or {}).get("intent", "follow_up")
@@ -403,10 +405,11 @@ Best,
     return {"subject": subject, "body": body, "intent": intent}
 
 
-@router.post("/leads/{lead_id}/send-email")
+@router.post("/leads/{lead_id}/send-email", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def send_lead_email(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Send a lead response through the Microsoft 365 mailbox selected for lead responses."""
-    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    lead_query = tenant_scoped_query(current_user, {"id": lead_id})
+    lead = await db.leads.find_one(lead_query, {"_id": 0})
     if not lead:
         raise HTTPException(404, "Lead not found")
 
@@ -456,8 +459,9 @@ async def send_lead_email(lead_id: str, data: dict, current_user: dict = Depends
         "created_at": now,
         "created_by_name": current_user.get("name") or current_user.get("email"),
     }
+    activity["tenant_id"] = platform_tenant_id(current_user)
     await db.lead_activities.insert_one(activity)
-    await db.leads.update_one({"id": lead_id}, {"$set": {"last_contact": now, "last_activity_at": now}})
+    await db.leads.update_one(lead_query, {"$set": {"last_contact": now, "last_activity_at": now}})
     activity.pop("_id", None)
     return {"delivery": delivery, "activity": activity}
 
@@ -532,18 +536,19 @@ async def win_loss_catalog(current_user: dict = Depends(get_current_user)):
     return {"won": WIN_REASONS, "lost": LOSS_REASONS}
 
 
-@router.post("/leads/{lead_id}/win-loss")
+@router.post("/leads/{lead_id}/win-loss", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def record_win_loss(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     outcome = (data or {}).get("outcome")
     reason = (data or {}).get("reason")
     note = (data or {}).get("note", "")
     if outcome not in ("won", "lost"):
         raise HTTPException(400, "outcome must be 'won' or 'lost'")
-    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    lead_query = tenant_scoped_query(current_user, {"id": lead_id})
+    lead = await db.leads.find_one(lead_query, {"_id": 0})
     if not lead:
         raise HTTPException(404, "Lead not found")
     await db.leads.update_one(
-        {"id": lead_id},
+        lead_query,
         {"$set": {
             "status": outcome,
             "win_loss_reason": reason,
@@ -564,6 +569,7 @@ async def record_win_loss(lead_id: str, data: dict, current_user: dict = Depends
         "to_stage": outcome,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by_name": current_user.get("name") or current_user.get("email"),
+        "tenant_id": platform_tenant_id(current_user),
     })
     return {"id": lead_id, "outcome": outcome, "reason": reason}
 
@@ -574,10 +580,10 @@ async def record_win_loss(lead_id: str, data: dict, current_user: dict = Depends
 @router.get("/lead-studio/recently-viewed")
 async def recently_viewed(current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("id") or current_user.get("email")
-    rows = await db.lead_recent_views.find({"user_id": user_id}, {"_id": 0}).sort("viewed_at", -1).limit(8).to_list(8)
+    rows = await db.lead_recent_views.find(tenant_scoped_query(current_user, {"user_id": user_id}), {"_id": 0}).sort("viewed_at", -1).limit(8).to_list(8)
     enriched = []
     for r in rows:
-        ld = await db.leads.find_one({"id": r.get("lead_id")}, {"_id": 0})
+        ld = await db.leads.find_one(tenant_scoped_query(current_user, {"id": r.get("lead_id")}), {"_id": 0})
         if ld:
             enriched.append({
                 "id": ld.get("id"),
@@ -592,9 +598,11 @@ async def recently_viewed(current_user: dict = Depends(get_current_user)):
 @router.post("/leads/{lead_id}/touch")
 async def touch_lead(lead_id: str, current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("id") or current_user.get("email")
+    if not await db.leads.find_one(tenant_scoped_query(current_user, {"id": lead_id}), {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Lead not found")
     await db.lead_recent_views.update_one(
-        {"user_id": user_id, "lead_id": lead_id},
-        {"$set": {"user_id": user_id, "lead_id": lead_id, "viewed_at": datetime.now(timezone.utc).isoformat()}},
+        tenant_scoped_query(current_user, {"user_id": user_id, "lead_id": lead_id}),
+        {"$set": {"user_id": user_id, "lead_id": lead_id, "tenant_id": platform_tenant_id(current_user), "viewed_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
     return {"ok": True}
@@ -603,19 +611,20 @@ async def touch_lead(lead_id: str, current_user: dict = Depends(get_current_user
 # ──────────────────────────────────────────────────────────────────────────────
 # Merge lead into existing ticket
 # ──────────────────────────────────────────────────────────────────────────────
-@router.post("/leads/{lead_id}/merge-into-ticket")
+@router.post("/leads/{lead_id}/merge-into-ticket", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def merge_into_ticket(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     ticket_id = (data or {}).get("ticket_id")
     if not ticket_id:
         raise HTTPException(400, "ticket_id required")
-    lead = await db.leads.find_one({"id": lead_id}, {"_id": 0})
+    lead_query = tenant_scoped_query(current_user, {"id": lead_id})
+    lead = await db.leads.find_one(lead_query, {"_id": 0})
     if not lead:
         raise HTTPException(404, "Lead not found")
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    ticket = await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
     if not ticket:
         raise HTTPException(404, "Ticket not found")
 
-    activities = await db.lead_activities.find({"lead_id": lead_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    activities = await db.lead_activities.find(tenant_scoped_query(current_user, {"lead_id": lead_id}), {"_id": 0}).sort("created_at", 1).to_list(200)
 
     # Compose a rich merge comment
     lines = [
@@ -650,16 +659,17 @@ async def merge_into_ticket(lead_id: str, data: dict, current_user: dict = Depen
         "is_lead_merge": True,
         "source_lead_id": lead_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": platform_tenant_id(current_user),
     }
     await db.ticket_comments.insert_one(comment)
 
     # Back-references
     await db.tickets.update_one(
-        {"id": ticket_id},
+        tenant_scoped_query(current_user, {"id": ticket_id}),
         {"$addToSet": {"linked_leads": lead_id}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
     )
     await db.leads.update_one(
-        {"id": lead_id},
+        lead_query,
         {"$set": {
             "merged_into_ticket": ticket_id,
             "status": "won",
@@ -678,6 +688,7 @@ async def merge_into_ticket(lead_id: str, data: dict, current_user: dict = Depen
         "ticket_id": ticket_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by_name": current_user.get("name") or current_user.get("email"),
+        "tenant_id": platform_tenant_id(current_user),
     })
 
     return {
@@ -694,7 +705,7 @@ async def merge_into_ticket(lead_id: str, data: dict, current_user: dict = Depen
 @router.get("/lead-studio/saved-views")
 async def list_views(current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("id") or current_user.get("email")
-    rows = await db.lead_saved_views.find({"user_id": user_id}, {"_id": 0}).sort("created_at", 1).to_list(50)
+    rows = await db.lead_saved_views.find(tenant_scoped_query(current_user, {"user_id": user_id}), {"_id": 0}).sort("created_at", 1).to_list(50)
     return rows
 
 
@@ -709,6 +720,7 @@ async def create_view(data: dict, current_user: dict = Depends(get_current_user)
         "name": data["name"],
         "filters": data.get("filters", {}),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": platform_tenant_id(current_user),
     }
     await db.lead_saved_views.insert_one(view)
     view.pop("_id", None)
@@ -718,7 +730,7 @@ async def create_view(data: dict, current_user: dict = Depends(get_current_user)
 @router.delete("/lead-studio/saved-views/{view_id}")
 async def delete_view(view_id: str, current_user: dict = Depends(get_current_user)):
     user_id = current_user.get("id") or current_user.get("email")
-    res = await db.lead_saved_views.delete_one({"id": view_id, "user_id": user_id})
+    res = await db.lead_saved_views.delete_one(tenant_scoped_query(current_user, {"id": view_id, "user_id": user_id}))
     if res.deleted_count == 0:
         raise HTTPException(404, "View not found")
     return {"deleted": True}
@@ -729,12 +741,16 @@ async def delete_view(view_id: str, current_user: dict = Depends(get_current_use
 # ──────────────────────────────────────────────────────────────────────────────
 @router.get("/leads/{lead_id}/tasks")
 async def list_tasks(lead_id: str, current_user: dict = Depends(get_current_user)):
-    rows = await db.lead_tasks.find({"lead_id": lead_id}, {"_id": 0}).sort("due_at", 1).to_list(200)
+    if not await db.leads.find_one(tenant_scoped_query(current_user, {"id": lead_id}), {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Lead not found")
+    rows = await db.lead_tasks.find(tenant_scoped_query(current_user, {"lead_id": lead_id}), {"_id": 0}).sort("due_at", 1).to_list(200)
     return rows
 
 
-@router.post("/leads/{lead_id}/tasks")
+@router.post("/leads/{lead_id}/tasks", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def create_task(lead_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    if not await db.leads.find_one(tenant_scoped_query(current_user, {"id": lead_id}), {"_id": 0, "id": 1}):
+        raise HTTPException(404, "Lead not found")
     if not (data or {}).get("title"):
         raise HTTPException(400, "title required")
     task = {
@@ -745,26 +761,27 @@ async def create_task(lead_id: str, data: dict, current_user: dict = Depends(get
         "completed": False,
         "created_by_name": current_user.get("name") or current_user.get("email"),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": platform_tenant_id(current_user),
     }
     await db.lead_tasks.insert_one(task)
     task.pop("_id", None)
     return task
 
 
-@router.put("/lead-studio/tasks/{task_id}")
+@router.put("/lead-studio/tasks/{task_id}", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def update_task(task_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     update = {k: v for k, v in (data or {}).items() if k in ("title", "due_at", "completed")}
     if "completed" in update and update["completed"]:
         update["completed_at"] = datetime.now(timezone.utc).isoformat()
-    res = await db.lead_tasks.update_one({"id": task_id}, {"$set": update})
+    res = await db.lead_tasks.update_one(tenant_scoped_query(current_user, {"id": task_id}), {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Task not found")
     return {"updated": True}
 
 
-@router.delete("/lead-studio/tasks/{task_id}")
+@router.delete("/lead-studio/tasks/{task_id}", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def delete_task(task_id: str, current_user: dict = Depends(get_current_user)):
-    res = await db.lead_tasks.delete_one({"id": task_id})
+    res = await db.lead_tasks.delete_one(tenant_scoped_query(current_user, {"id": task_id}))
     if res.deleted_count == 0:
         raise HTTPException(404, "Task not found")
     return {"deleted": True}
@@ -773,7 +790,7 @@ async def delete_task(task_id: str, current_user: dict = Depends(get_current_use
 # ──────────────────────────────────────────────────────────────────────────────
 # Bulk actions
 # ──────────────────────────────────────────────────────────────────────────────
-@router.post("/lead-studio/bulk-action")
+@router.post("/lead-studio/bulk-action", dependencies=[Depends(require_action("crm.lead.manage"))])
 async def bulk_action(data: dict, current_user: dict = Depends(get_current_user)):
     lead_ids = (data or {}).get("lead_ids") or []
     action = (data or {}).get("action")
@@ -784,18 +801,18 @@ async def bulk_action(data: dict, current_user: dict = Depends(get_current_user)
         stage = (data or {}).get("stage")
         if not stage:
             raise HTTPException(400, "stage required")
-        await db.leads.update_many({"id": {"$in": lead_ids}}, {"$set": {"status": stage, "last_activity_at": now}})
+        await db.leads.update_many(tenant_scoped_query(current_user, {"id": {"$in": lead_ids}}), {"$set": {"status": stage, "last_activity_at": now}})
         return {"updated": len(lead_ids), "action": "change_stage", "stage": stage}
     if action == "assign":
         owner_id = (data or {}).get("owner_id")
         owner_name = (data or {}).get("owner_name")
-        await db.leads.update_many({"id": {"$in": lead_ids}}, {"$set": {"assigned_to": owner_id, "assigned_to_name": owner_name, "last_activity_at": now}})
+        await db.leads.update_many(tenant_scoped_query(current_user, {"id": {"$in": lead_ids}}), {"$set": {"assigned_to": owner_id, "assigned_to_name": owner_name, "last_activity_at": now}})
         return {"updated": len(lead_ids), "action": "assign", "owner": owner_name}
     if action == "delete":
-        await db.leads.delete_many({"id": {"$in": lead_ids}})
+        await db.leads.delete_many(tenant_scoped_query(current_user, {"id": {"$in": lead_ids}}))
         return {"deleted": len(lead_ids)}
     if action == "tag":
         tags = (data or {}).get("tags") or []
-        await db.leads.update_many({"id": {"$in": lead_ids}}, {"$addToSet": {"tags": {"$each": tags}}, "$set": {"last_activity_at": now}})
+        await db.leads.update_many(tenant_scoped_query(current_user, {"id": {"$in": lead_ids}}), {"$addToSet": {"tags": {"$each": tags}}, "$set": {"last_activity_at": now}})
         return {"updated": len(lead_ids), "tags": tags}
     raise HTTPException(400, f"Unknown action {action}")
