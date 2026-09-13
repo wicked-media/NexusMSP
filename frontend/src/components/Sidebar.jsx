@@ -1,8 +1,7 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useAuth, useTheme } from "@/App";
-import { ChevronLeft, ChevronRight, ChevronDown, Bell, Bot, LogOut, Sun, Moon, Search, X, AlertTriangle, CheckCheck, Pin } from "lucide-react";
+import { useAuth } from "@/App";
+import { ChevronLeft, ChevronRight, ChevronDown, Bell, Search, X, AlertTriangle, CheckCheck, Pin } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -21,7 +20,7 @@ import {
 } from "@/lib/sidebarNavigation";
 
 // Notification Bell Component
-function NotificationBell({ token, collapsed }) {
+export function NotificationBell({ token, collapsed = true, placement = "sidebar" }) {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -98,27 +97,28 @@ function NotificationBell({ token, collapsed }) {
     : notifications;
 
   return (
-    <div className={`relative px-3 py-1.5 ${collapsed ? 'flex justify-center' : ''}`} ref={ref}>
+    <TooltipProvider delayDuration={0}>
+    <div className={placement === "topbar" ? "relative" : `relative px-3 py-1.5 ${collapsed ? 'flex justify-center' : ''}`} ref={ref}>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             onClick={() => setIsOpen(!isOpen)}
             className={`relative flex items-center gap-2 rounded-lg transition-all duration-150 hover:bg-muted ${
-              collapsed ? 'p-2 justify-center' : 'w-full px-3 py-2'
+              placement === "topbar" ? 'h-9 w-9 justify-center' : collapsed ? 'p-2 justify-center' : 'w-full px-3 py-2'
             }`}
             data-testid="notification-bell"
           >
             <Bell className="w-[18px] h-[18px] text-muted-foreground" />
-            {!collapsed && <span className="text-[12px] text-muted-foreground">Notifications</span>}
+            {!collapsed && placement !== "topbar" && <span className="text-[12px] text-muted-foreground">Notifications</span>}
             {unreadCount > 0 && (
               <span className="absolute top-1 left-5 w-4 h-4 bg-red-500 rounded-full text-[9px] text-white font-bold flex items-center justify-center">{unreadCount > 9 ? '9+' : unreadCount}</span>
             )}
           </button>
         </TooltipTrigger>
-        {collapsed && <TooltipContent side="right">Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}</TooltipContent>}
+        {(collapsed || placement === "topbar") && <TooltipContent side={placement === "topbar" ? "bottom" : "right"}>Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}</TooltipContent>}
       </Tooltip>
       {isOpen && (
-        <div className="absolute left-full top-0 z-50 ml-3 w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-violet-500/20 bg-card shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)]" data-testid="notification-panel">
+        <div className={`absolute z-50 w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-violet-500/20 bg-card shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)] ${placement === "topbar" ? "right-0 top-full mt-2" : "left-full top-0 ml-3"}`} data-testid="notification-panel">
           <div className="border-b border-border bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.18),transparent_45%)] px-4 py-3">
             <div className="flex items-center justify-between">
             <div><span className="text-sm font-semibold">Notification inbox</span><p className="mt-0.5 text-[11px] text-muted-foreground">{attentionCount > 0 ? `${attentionCount} needs attention` : unreadCount > 0 ? `${unreadCount} unread updates` : "You’re up to date"}</p></div>
@@ -155,6 +155,7 @@ function NotificationBell({ token, collapsed }) {
         </div>
       )}
     </div>
+    </TooltipProvider>
   );
 }
 
@@ -601,13 +602,10 @@ export const Sidebar = ({
   mobileOpen = false,
   onMobileClose,
   onToggle,
-  onCopilotToggle,
   onCollapsedPreferenceRestore,
 }) => {
-  const { user, logout, token } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { user, token } = useAuth();
   const { counts: navCounts } = useNavCounts();
-  const navigate = useNavigate();
   const location = useLocation();
   const { pathname, search } = location;
   const [expandedMenus, setExpandedMenus] = useState(new Set());
@@ -679,11 +677,6 @@ export const Sidebar = ({
     }).catch(() => {});
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
-  };
-
   const toggleMenu = (path) => {
     setExpandedMenus(prev => {
       // One open workspace at a time keeps the long Nexus navigation scannable.
@@ -725,13 +718,13 @@ export const Sidebar = ({
         className={`fixed left-0 top-0 z-40 flex h-dvh w-[min(86vw,320px)] flex-col border-r border-border bg-card transition-all duration-300 md:translate-x-0 ${
           mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
         } ${
-          collapsed ? 'md:w-[72px]' : 'md:w-[260px]'
+          collapsed ? 'md:w-[64px]' : 'md:w-[240px]'
         }`}
         style={{ backgroundColor: "var(--theme-sidebar, hsl(var(--card)))" }}
         data-testid="sidebar"
       >
         {/* Logo */}
-        <div className={`h-16 flex items-center border-b border-border px-4 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+        <div className={`h-14 flex items-center border-b border-border px-3 ${collapsed ? 'justify-center' : 'justify-between'}`}>
           {!collapsed && (
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/70 bg-background/40 p-0.5 shadow-sm">
@@ -766,9 +759,6 @@ export const Sidebar = ({
           </Button>
         </div>
 
-        {/* Notification Bell */}
-        <NotificationBell token={token} collapsed={collapsed} />
-
         <div className="px-3 pb-1">
           <NexusGlobalPulse counts={navCounts} collapsed={collapsed} />
         </div>
@@ -791,7 +781,7 @@ export const Sidebar = ({
 
         {/* Navigation */}
         <ScrollArea className="flex-1">
-          <nav className="py-3 px-3">
+          <nav className="px-2 py-2">
             {!collapsed && pinnedItems.length > 0 && (
               <section className="mb-4" aria-label="Pinned workspaces">
                 <div className="mb-1.5 flex items-center gap-1.5 px-3">
@@ -830,9 +820,9 @@ export const Sidebar = ({
               </section>
             )}
             {visibleGroups.map((group, groupIndex) => (
-              <div key={group.id} className={groupIndex > 0 || (!collapsed && pinnedItems.length > 0) ? 'mt-4' : ''}>
+              <div key={group.id} className={groupIndex > 0 || (!collapsed && pinnedItems.length > 0) ? 'mt-3' : ''}>
                 {!collapsed && (
-                  <div className="px-3 mb-1.5">
+                  <div className="mb-1 px-2">
                     <span className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">
                       {group.title}
                     </span>
@@ -864,12 +854,12 @@ export const Sidebar = ({
 
         {/* Expand button when collapsed */}
         {collapsed && (
-          <div className="px-3 pb-2">
+          <div className="px-2 pb-2">
             <Button
               variant="ghost"
               size="icon"
               onClick={onToggle}
-              className="w-full h-10"
+              className="h-9 w-full"
               data-testid="sidebar-expand"
             >
               <ChevronRight className="h-4 w-4" />
@@ -877,99 +867,6 @@ export const Sidebar = ({
           </div>
         )}
 
-        {/* User Section */}
-        <div className={`border-t border-border p-3 ${collapsed ? 'flex flex-col items-center gap-2' : ''}`}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Link
-                to="/my-settings"
-                className={`flex items-center gap-3 p-2 rounded-lg hover:bg-muted transition-all duration-150 cursor-pointer ${
-                  collapsed ? 'justify-center' : ''
-                }`}
-                data-testid="user-settings-link"
-              >
-                <Avatar className="h-9 w-9">
-                  <AvatarImage src={user?.avatar} alt={user?.name} />
-                  <AvatarFallback className="bg-primary/20 text-primary text-sm font-semibold">
-                    {user?.name?.split(' ').map(n => n[0]).join('') || 'U'}
-                  </AvatarFallback>
-                </Avatar>
-                {!collapsed && (
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{user?.name}</p>
-                    <p className="text-xs text-muted-foreground truncate capitalize">{user?.role}</p>
-                  </div>
-                )}
-              </Link>
-            </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right">
-                <p className="font-medium">{user?.name}</p>
-                <p className="text-xs text-muted-foreground capitalize">{user?.role} - My Settings</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-          
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={collapsed ? "icon" : "sm"}
-                onClick={toggleTheme}
-                className={`text-muted-foreground hover:text-amber-400 hover:bg-amber-400/10 ${
-                  collapsed ? 'w-10 h-10' : 'w-full justify-start gap-2'
-                }`}
-                data-testid="theme-toggle"
-              >
-                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                {!collapsed && <span>{theme === "dark" ? "Light Mode" : "Dark Mode"}</span>}
-              </Button>
-            </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right">{theme === "dark" ? "Light Mode" : "Dark Mode"}</TooltipContent>
-            )}
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={collapsed ? "icon" : "sm"}
-                onClick={onCopilotToggle}
-                className={`text-muted-foreground hover:text-primary hover:bg-primary/10 ${
-                  collapsed ? 'w-10 h-10' : 'w-full justify-start gap-2'
-                }`}
-                data-testid="copilot-toggle"
-              >
-                <Bot className="h-4 w-4" />
-                {!collapsed && <span>AI Copilot</span>}
-              </Button>
-            </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right">AI Copilot</TooltipContent>
-            )}
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={collapsed ? "icon" : "sm"}
-                onClick={handleLogout}
-                className={`text-muted-foreground hover:text-destructive hover:bg-destructive/10 ${
-                  collapsed ? 'w-10 h-10' : 'w-full justify-start gap-2'
-                }`}
-                data-testid="logout-button"
-              >
-                <LogOut className="h-4 w-4" />
-                {!collapsed && <span>Logout</span>}
-              </Button>
-            </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right">Logout</TooltipContent>
-            )}
-          </Tooltip>
-        </div>
       </aside>
     </TooltipProvider>
   );

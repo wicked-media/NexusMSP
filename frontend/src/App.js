@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, createContext, useContext, Suspense } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import LoginPage from "@/pages/LoginPage";
-import { Sidebar } from "@/components/Sidebar";
+import { NotificationBell, Sidebar } from "@/components/Sidebar";
+import TechnicianAccountMenu from "@/components/TechnicianAccountMenu";
 import { AICopilotPanel } from "@/components/AICopilotPanel";
 import { routeConfig } from "@/config/routes";
 import { secureStorage } from "@/lib/secureStorage";
@@ -22,7 +23,7 @@ import UniversalInspector from "@/components/UniversalInspector";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
 import { ClientContextProvider } from "@/contexts/ClientContext";
 import ClientContextBar from "@/components/ClientContextBar";
-import { Menu } from "lucide-react";
+import { Bot, Menu, Search } from "lucide-react";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || (
@@ -336,11 +337,14 @@ const ProtectedRoute = ({ children }) => {
 
 // Main Layout with Sidebar
 const MainLayout = ({ children }) => {
+  const { user, logout, token } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const collaborationWorkspace = location.pathname === "/team-chat";
   const deviceRecordWorkspace = /^\/devices\/[^/]+$/.test(location.pathname);
   const restoreSidebarCollapsed = useCallback((value) => {
@@ -381,13 +385,18 @@ const MainLayout = ({ children }) => {
     };
   }, [focusMode]);
 
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
   return (
     <div className={`${collaborationWorkspace ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex`} style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
       {!focusMode && mobileNavigationOpen && (
         <button
           type="button"
           aria-label="Close navigation"
-          className="fixed inset-0 z-30 bg-black/65 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-[35] bg-black/65 backdrop-blur-sm md:hidden"
           onClick={() => setMobileNavigationOpen(false)}
         />
       )}
@@ -396,31 +405,54 @@ const MainLayout = ({ children }) => {
         mobileOpen={mobileNavigationOpen}
         onMobileClose={() => setMobileNavigationOpen(false)}
         onToggle={() => setSidebarCollapsed((current) => !current)}
-        onCopilotToggle={() => setCopilotOpen(o => !o)}
         onCollapsedPreferenceRestore={restoreSidebarCollapsed}
       />}
       {!focusMode && (
-        <div className="fixed inset-x-0 top-0 z-20 flex h-14 items-center gap-3 border-b border-border/80 bg-background/90 px-3 backdrop-blur-xl md:hidden">
+        <header className={`fixed right-0 top-0 z-30 flex h-14 items-center gap-2 border-b border-border/70 bg-background/90 px-3 shadow-[0_10px_30px_-26px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[left] duration-300 ${sidebarCollapsed ? "left-0 md:left-[64px]" : "left-0 md:left-[240px]"}`} data-testid="global-technician-bar">
           <button
             type="button"
             aria-label="Open navigation"
             onClick={() => { setSidebarCollapsed(false); setMobileNavigationOpen(true); }}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="text-sm font-semibold tracking-tight">NexusMSP</span>
+          <span className="text-sm font-semibold tracking-tight md:hidden">NexusMSP</span>
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"))}
-            className="ml-auto rounded-lg border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground"
+            className="hidden h-9 min-w-[220px] items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 text-left text-xs text-muted-foreground transition hover:border-primary/25 hover:bg-card hover:text-foreground md:flex"
+            data-testid="topbar-search"
           >
-            Search
+            <Search className="h-3.5 w-3.5" />
+            <span>Search Nexus</span>
+            <span className="ml-auto rounded border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]">Ctrl K</span>
           </button>
-        </div>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setCopilotOpen((open) => !open)}
+              className={`hidden h-9 items-center gap-2 rounded-lg px-2.5 text-xs transition sm:flex ${copilotOpen ? "bg-primary/[0.12] text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              aria-pressed={copilotOpen}
+              data-testid="topbar-copilot-toggle"
+            >
+              <Bot className="h-4 w-4" />
+              <span className="hidden xl:inline">Copilot</span>
+            </button>
+            <NotificationBell token={token} placement="topbar" />
+            <TechnicianAccountMenu
+              user={user}
+              theme={theme}
+              onSettings={() => navigate("/my-settings")}
+              onThemeToggle={toggleTheme}
+              onCopilot={() => setCopilotOpen(true)}
+              onLogout={handleLogout}
+            />
+          </div>
+        </header>
       )}
-      <main className={`min-w-0 flex-1 transition-all duration-300 ${collaborationWorkspace ? "flex min-h-0 flex-col overflow-hidden" : ""} ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
-        <div className={collaborationWorkspace ? 'flex min-h-0 flex-1 flex-col px-3 pb-3 pt-[68px] md:p-4' : focusMode ? 'p-4 md:p-8' : deviceRecordWorkspace ? 'px-4 pb-24 pt-20 md:px-7 md:pb-7 md:pt-0' : 'px-4 pb-24 pt-20 md:p-8'}>
+      <main className={`min-w-0 flex-1 transition-all duration-300 ${collaborationWorkspace ? "flex min-h-0 flex-col overflow-hidden" : ""} ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[64px]' : 'md:ml-[240px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
+        <div className={collaborationWorkspace ? 'flex min-h-0 flex-1 flex-col px-3 pb-3 pt-[68px] md:px-4 md:pb-4 md:pt-[72px]' : focusMode ? 'p-4 md:p-8' : deviceRecordWorkspace ? 'px-4 pb-24 pt-20 md:px-7 md:pb-7 md:pt-[72px]' : 'px-4 pb-24 pt-20 md:px-8 md:pb-8 md:pt-[80px]'}>
           {!focusMode && !deviceRecordWorkspace && <ClientContextBar compact={collaborationWorkspace} />}
           <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""} ${collaborationWorkspace ? "flex min-h-0 flex-1 flex-col" : ""}`}>
             {children}
