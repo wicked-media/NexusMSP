@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { DollarSign, AlertTriangle, Clock, Send, Loader2, Mail, History, TrendingDown } from "lucide-react";
 import { buildLatePaymentReminderPayload } from "@/lib/latePaymentPayloads";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 export default function LatePaymentPage() {
   const { token } = useAuth();
@@ -68,8 +69,10 @@ export default function LatePaymentPage() {
     <div className="space-y-5" data-testid="late-payment-page">
       <OperationalPageHeader eyebrow="Revenue operations · payment follow-up" title="Late Payment Manager" description="Prioritise overdue invoices, explain late-payment risk and send auditable reminders." icon={Clock} tone="amber" signal={(ps.high_risk || os.count) > 0 ? "attention" : "ready"} />
 
+      <BillingWorkspaceNav />
+
       {/* Summary Cards */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Card className="border-red-500/20"><CardContent className="pt-4 pb-3"><AlertTriangle className="w-5 h-5 text-red-400 mb-1" /><p className="text-2xl font-bold text-red-400">{ps.high_risk || 0}</p><p className="text-[11px] text-muted-foreground">High Risk Clients</p></CardContent></Card>
         <Card className="border-orange-500/20"><CardContent className="pt-4 pb-3"><Clock className="w-5 h-5 text-orange-400 mb-1" /><p className="text-2xl font-bold text-orange-400">{ps.medium_risk || 0}</p><p className="text-[11px] text-muted-foreground">Medium Risk</p></CardContent></Card>
         <Card><CardContent className="pt-4 pb-3"><DollarSign className="w-5 h-5 text-amber-400 mb-1" /><p className="text-2xl font-bold">${(ps.total_at_risk || 0).toLocaleString()}</p><p className="text-[11px] text-muted-foreground">At Risk Amount</p></CardContent></Card>

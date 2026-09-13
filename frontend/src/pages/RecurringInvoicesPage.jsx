@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import {
   RefreshCw, Plus, Trash2, Play, Pause, Edit, DollarSign, Calendar,
   Receipt, TrendingUp, Loader2, Copy, Clock, FileText,
-  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, Search, Cloud, Sparkles
+  CheckCircle, AlertTriangle, Zap, ChevronRight, Eye, Search, Cloud
 } from "lucide-react";
 import ReconcileDialog from "@/components/billing/ReconcileDialog";
 import RecurringSmartActions, { ConsolidateButton } from "@/components/billing/RecurringSmartActions";
@@ -27,6 +27,7 @@ import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import { WorkspaceLoadingState } from "@/components/WorkspaceState";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 const FREQ_LABELS = { weekly: "Weekly", fortnightly: "Fortnightly", monthly: "Monthly", quarterly: "Quarterly", annually: "Annually" };
 const TERMS_LABELS = { due_on_receipt: "Due on Receipt", net_7: "Net 7", net_14: "Net 14", net_30: "Net 30", net_45: "Net 45", net_60: "Net 60", net_90: "Net 90" };
@@ -411,14 +412,12 @@ export default function RecurringInvoicesPage() {
         tone="emerald"
         actions={<>
           <Button variant="outline" size="sm" onClick={() => fetchData({ quiet: true })} disabled={refreshing} data-testid="refresh-recurring-billing"><RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
-          <WorkspaceActionMenu testId="recurring-more-actions">
-            <WorkspaceActionMenuItem icon={Sparkles} onSelect={() => navigate("/billing-dashboard")} testId="goto-billing-command">Billing command</WorkspaceActionMenuItem>
-            {scopedClientId && <WorkspaceActionMenuItem onSelect={() => { const next = new URLSearchParams(searchParams); next.delete("clientId"); next.delete("create"); setSearchParams(next); }} testId="clear-recurring-client-scope">All clients</WorkspaceActionMenuItem>}
-            <WorkspaceActionMenuItem icon={FileText} onSelect={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} testId="create-template-btn">New template</WorkspaceActionMenuItem>
-          </WorkspaceActionMenu>
+          {scopedClientId && <Button variant="ghost" size="sm" onClick={() => { const next = new URLSearchParams(searchParams); next.delete("clientId"); next.delete("create"); setSearchParams(next); }} data-testid="clear-recurring-client-scope">All clients</Button>}
           <Button onClick={() => { setShowCreate(true); setForm(buildRecurringForm(scopedClient || {})); }} data-testid="create-recurring-btn"><Plus className="w-4 h-4 mr-1" />New recurring invoice</Button>
         </>}
       />
+
+      <BillingWorkspaceNav />
 
       {/* Stats */}
       {scopedStats && (
@@ -493,16 +492,16 @@ export default function RecurringInvoicesPage() {
                         <Badge className={`${STATUS_STYLES[ri.status]} text-[9px] border`}>{ri.status}</Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-1 justify-end">
-                          <Button size="sm" variant="ghost" title="Generate invoice now" onClick={() => setGenerateTarget(ri)} disabled={ri.status !== "active"} data-testid={`gen-${ri.id}`}><Zap className="w-3 h-3 text-amber-400" /></Button>
-                          <Button size="sm" variant="ghost" title="Reconcile (bill-shock check)" onClick={() => setShowReconcile(ri)} data-testid={`reconcile-${ri.id}`}>
-                            <DollarSign className="w-3 h-3 text-emerald-400" />
-                          </Button>
-                          <Button size="sm" variant="ghost" title={ri.status === "active" ? "Pause" : "Activate"} onClick={() => toggleRI(ri.id)}>{ri.status === "active" ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}</Button>
-                          <Button size="sm" variant="ghost" title="Edit" onClick={() => setShowEdit({ ...ri, tax_rate: String(ri.tax_rate || 10) })}><Edit className="w-3 h-3" /></Button>
-                          <Button size="sm" variant="ghost" title="History" onClick={() => setShowHistory(ri)}><Eye className="w-3 h-3" /></Button>
-                          <Button size="sm" variant="ghost" title="Duplicate" onClick={() => duplicateRI(ri.id)}><Copy className="w-3 h-3" /></Button>
-                          <Button size="sm" variant="ghost" title={ri.invoices_generated > 0 ? "Streams with invoice history are retained" : "Delete"} className="text-red-400" onClick={() => setDeleteTarget(ri)} disabled={ri.invoices_generated > 0}><Trash2 className="w-3 h-3" /></Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" className="h-8 gap-1.5 px-2 text-[10px]" title="Generate invoice now" onClick={() => setGenerateTarget(ri)} disabled={ri.status !== "active"} data-testid={`gen-${ri.id}`}><Zap className="h-3.5 w-3.5 text-amber-400" />Generate</Button>
+                          <WorkspaceActionMenu compact label={`Actions for ${ri.client_name}`} testId={`ri-actions-${ri.id}`}>
+                            <WorkspaceActionMenuItem icon={DollarSign} onSelect={() => setShowReconcile(ri)} testId={`reconcile-${ri.id}`}>Review bill shock</WorkspaceActionMenuItem>
+                            <WorkspaceActionMenuItem icon={ri.status === "active" ? Pause : Play} onSelect={() => toggleRI(ri.id)}>{ri.status === "active" ? "Pause stream" : "Activate stream"}</WorkspaceActionMenuItem>
+                            <WorkspaceActionMenuItem icon={Edit} onSelect={() => setShowEdit({ ...ri, tax_rate: String(ri.tax_rate || 10) })}>Edit billing stream</WorkspaceActionMenuItem>
+                            <WorkspaceActionMenuItem icon={Eye} onSelect={() => setShowHistory(ri)}>Generation history</WorkspaceActionMenuItem>
+                            <WorkspaceActionMenuItem icon={Copy} onSelect={() => duplicateRI(ri.id)}>Duplicate stream</WorkspaceActionMenuItem>
+                            <WorkspaceActionMenuItem icon={Trash2} onSelect={() => setDeleteTarget(ri)} disabled={ri.invoices_generated > 0}>{ri.invoices_generated > 0 ? "History retained" : "Delete stream"}</WorkspaceActionMenuItem>
+                          </WorkspaceActionMenu>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -525,6 +524,10 @@ export default function RecurringInvoicesPage() {
 
         {/* TEMPLATES TAB */}
         <TabsContent value="templates" className="mt-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div><p className="text-sm font-semibold">Reusable billing templates</p><p className="mt-0.5 text-xs text-muted-foreground">Start a consistent client billing stream without repeating line-item setup.</p></div>
+            <Button size="sm" variant="outline" onClick={() => { setShowTemplateCreate(true); setTemplateForm({ name: "", description: "", category: "managed_services", tax_rate: "10", payment_terms: "net_30", notes: "", line_items: [{ description: "", quantity: "1", rate: "", amount: "" }] }); }} data-testid="create-template-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />New template</Button>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {templates.map(tpl => (
               <Card key={tpl.id} className="hover:border-primary/30 transition-colors" data-testid={`tpl-${tpl.id}`}>

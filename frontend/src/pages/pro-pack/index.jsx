@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { TICKET_PRIORITY_STYLES } from "@/lib/ticketWorkspaceHelpers";
 import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } from "@/lib/ticketPreviewData";
@@ -307,6 +308,7 @@ export function QuoteToCashPage() {
         signal="commercial-pipeline"
         actions={<><Button variant="outline" size="sm" onClick={() => load({ quiet: true })} disabled={refreshing} data-testid="refresh-quote-to-cash"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><Button size="sm" onClick={() => navigate("/proposals")}><FileSpreadsheet className="mr-1.5 h-4 w-4" />Open proposals</Button></>}
       />
+      <BillingWorkspaceNav />
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         {stages.map(s => (
           <HeroTile key={s.key} label={s.label} value={fmt(s.value)} icon={stageIcons[s.key]} glow={stageGlows[s.key]} animated={false} subtitle={`${s.count} item${s.count !== 1 ? "s" : ""}${s.suffix || ""}`} onClick={() => navigate(s.link)} testId={`qtc-stage-${s.key}`} />

@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Loader2, Package, Boxes, DollarSign, Percent, AlertTriangle, TrendingDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 function useApi(token) {
   return useMemo(() => ({
@@ -47,6 +48,7 @@ export default function FinanceIntelPage() {
     <PageShell>
       <div className="space-y-4" data-testid="finance-intel-page">
         <OperationalPageHeader eyebrow="Finance intelligence · commercial evidence" title="Products, invoices & revenue intelligence" description="Review margin, kits, client pricing, cash flow, late-payment risk, drift and disputes from one governed workspace." icon={DollarSign} tone="emerald" />
+        <BillingWorkspaceNav />
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="margin" data-testid="tab-margin"><Percent className="w-3 h-3 mr-1" />Product margin</TabsTrigger>

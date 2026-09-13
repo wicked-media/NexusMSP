@@ -19,7 +19,7 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
-import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -29,7 +29,7 @@ import {
   Plus, Search, FileText, Loader2, Send, Check, ArrowLeft,
   AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
-  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Timer, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown
+  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown, ChevronRight
 } from "lucide-react";
 import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
@@ -1802,15 +1802,12 @@ export default function InvoicesPage() {
         signal={(stats.unpaid || 0) > 0 || (stats.total_outstanding || 0) > 0 ? "attention" : "healthy"}
         actions={<>
           <Button variant="outline" size="sm" onClick={() => fetchAll({ quiet: true })} disabled={refreshing} data-testid="refresh-invoices"><RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
-          <WorkspaceActionMenu testId="invoice-more-actions">
-            <WorkspaceActionMenuItem icon={Zap} onSelect={() => navigate("/billing-dashboard")} testId="goto-billing-command">Billing command</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={Building2} onSelect={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} testId="invoice-xero-button">{xeroStatus.connected ? "Xero connected" : xeroStatus.configured ? "Finish Xero setup" : "Configure Xero"}</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={Timer} onSelect={() => navigate("/reports?tab=commercial")} testId="aging-report-btn">Receivables report</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => { setTopView("revenue"); setRevenueAnalytics(null); }} testId="revenue-analytics-btn">Revenue analytics</WorkspaceActionMenuItem>
-          </WorkspaceActionMenu>
+          <Button variant="outline" size="sm" onClick={() => { setTopView("revenue"); setRevenueAnalytics(null); }} data-testid="revenue-analytics-btn"><BarChart3 className="mr-1.5 h-4 w-4" />Revenue</Button>
           {canCreateInvoice && <Button variant="success" className="h-9 rounded-lg px-3" onClick={openCreate} data-testid="create-invoice-btn"><Plus className="w-4 h-4 mr-1.5" />New invoice</Button>}
         </>}
       />
+
+      <BillingWorkspaceNav />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <HeroTile label="All invoices" value={stats.total || 0} icon={FileText} glow="cyan" testId="stat-total" />
@@ -1820,10 +1817,10 @@ export default function InvoicesPage() {
         <HeroTile label="Outstanding" value={`$${(stats.total_outstanding || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={AlertTriangle} glow={stats.total_outstanding > 0 ? "amber" : "emerald"} animated={false} testId="stat-outstanding" />
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <HeroTile label="Xero finance link" value={xeroStatus.connected ? "Connected" : xeroStatus.configured ? "Finish setup" : "Not connected"} subtitle={xeroStatus.connected ? (xeroStatus.org_name || "Open reconciliation hub") : "Configure OAuth before sync"} icon={Building2} glow="sky" animated={false} onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} testId="xero-finance-tile" />
-        <HeroTile label="Reconciliation queue" value={`$${Number(reconciliation.pending_total || 0).toFixed(2)}`} subtitle={`${reconciliation.pending_count} payment${reconciliation.pending_count === 1 ? "" : "s"} awaiting Xero match`} icon={Wallet} glow="amber" animated={false} onClick={() => reconciliation.pending_count ? setSettlementOpen(true) : toast.info("No payments are ready to settle")} testId="reconciliation-tile" />
-        <HeroTile label="Client billing controls" value={clients.length} subtitle="Terms, PO and billing contact defaults" icon={Users} glow="emerald" onClick={() => openBillingProfile()} testId="billing-profile-tile" />
+      <div className="grid gap-2 md:grid-cols-3" data-testid="invoice-control-strip">
+        <button type="button" onClick={() => navigate(xeroStatus.connected ? "/xero" : "/settings?tab=integrations")} className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/[0.55] p-3 text-left transition hover:border-sky-400/30 hover:bg-sky-500/[0.04]" data-testid="xero-finance-tile"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-300"><Building2 className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Xero</span><span className="block truncate text-sm font-semibold">{xeroStatus.connected ? (xeroStatus.org_name || "Connected") : xeroStatus.configured ? "Finish setup" : "Not connected"}</span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>
+        <button type="button" onClick={() => reconciliation.pending_count ? setSettlementOpen(true) : toast.info("No payments are ready to settle")} className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/[0.55] p-3 text-left transition hover:border-amber-400/30 hover:bg-amber-500/[0.04]" data-testid="reconciliation-tile"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-300"><Wallet className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Awaiting reconciliation</span><span className="block font-mono text-sm font-semibold">${Number(reconciliation.pending_total || 0).toFixed(2)} <span className="font-sans text-[10px] font-normal text-muted-foreground">· {reconciliation.pending_count} payments</span></span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>
+        <button type="button" onClick={() => openBillingProfile()} className="flex min-w-0 items-center gap-3 rounded-xl border border-border/70 bg-card/[0.55] p-3 text-left transition hover:border-emerald-400/30 hover:bg-emerald-500/[0.04]" data-testid="billing-profile-tile"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-300"><Users className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Billing profiles</span><span className="block text-sm font-semibold">{clients.length} clients</span></span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>
       </div>
 
       {/* Filters */}

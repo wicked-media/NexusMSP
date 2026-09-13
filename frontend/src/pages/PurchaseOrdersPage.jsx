@@ -29,6 +29,7 @@ import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { WorkspaceLoadingState } from "@/components/WorkspaceState";
@@ -1541,6 +1542,7 @@ export default function PurchaseOrdersPage() {
           tone="emerald"
           actions={<Button variant="outline" size="sm" onClick={() => setAnalyticsTab("list")} data-testid="back-to-po-list"><ArrowLeft className="w-4 h-4 mr-1" />Back to POs</Button>}
         />
+        <BillingWorkspaceNav />
         {!spendAnalytics ? (
           <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin" /></div>
         ) : (
@@ -1635,6 +1637,8 @@ export default function PurchaseOrdersPage() {
           <Button size="sm" onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1.5" />New purchase order</Button>
         </>}
       />
+
+      <BillingWorkspaceNav />
 
       {/* Shared ticket-style metric strip */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">

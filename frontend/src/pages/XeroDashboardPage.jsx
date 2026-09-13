@@ -27,6 +27,7 @@ import {
   Pie, Cell, Legend, AreaChart, Area
 } from "recharts";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { PdfViewerDialog } from "@/components/PdfViewerDialog";
 import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
 
@@ -409,8 +410,10 @@ export default function XeroDashboardPage() {
           </Button>
         } />
 
+      <BillingWorkspaceNav />
+
       {/* Summary Stats */}
-      <div className="grid grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {[
           { label: "Total Revenue", value: d.total_revenue, color: "text-emerald-400", bg: "bg-emerald-500/10", icon: TrendingUp },
           { label: "Collected", value: d.total_paid, color: "text-blue-400", bg: "bg-blue-500/10", icon: CheckCircle },

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -232,15 +233,14 @@ export default function LicenseManagementPage() {
             <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} data-testid="refresh-services">
               <RefreshCw className={`mr-1.5 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")}>
-              <Receipt className="mr-1.5 h-4 w-4" />Recurring billing
-            </Button>
             <Button size="sm" onClick={openCreate} data-testid="add-confirmed-licence">
               <Plus className="mr-1.5 h-4 w-4" />Add confirmed licence
             </Button>
           </>
         )}
       />
+
+      <BillingWorkspaceNav />
 
       <MetricStrip columns={6}>
         <MetricTile label="Active records" value={summary.active_services ?? 0} accent="cyan" icon={<PackageCheck />} testid="services-active-tile" />

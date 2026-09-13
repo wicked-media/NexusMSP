@@ -18,6 +18,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 const MERGE_TAGS = [
   "{{invoice_number}}", "{{client_name}}", "{{due_date}}", "{{issue_date}}",
@@ -297,6 +298,8 @@ function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplic
     <div className="space-y-6">
       <OperationalPageHeader eyebrow="Commercial documents · governed design" title="Document design studio" description="Tailor Nexus document systems, brand language and payment guidance without changing financial or audit evidence." icon={FileEdit} tone="emerald" meta={[`${gallery.length} presets`, `${list.length} saved designs`, `${new Set(gallery.map(template => template.doc_type)).size} document types`]} actions={<><Button variant="outline" size="sm" onClick={onToggleView} data-testid="invoice-studio-toggle-view"><Wrench className="mr-1.5 h-3.5 w-3.5" />My templates</Button><Button size="sm" onClick={onCreateBlank} data-testid="invoice-tpl-new-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />New template</Button></>} />
 
+      <BillingWorkspaceNav />
+
       <div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3"><div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /><h2 className="text-base font-medium">Designer Gallery</h2><Badge variant="outline" className="text-[10px]">{filteredGallery.length} shown</Badge></div><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search designs" className="h-9 sm:w-56" /></div>
         <div className="mb-4 flex flex-wrap gap-2">{[["all", "All designs"], ["invoice", "Invoices"], ["purchase_order", "Purchase orders"], ["estimate", "Quotes"], ["statement", "Statements"], ["qbr", "QBRs"]].map(([value, label]) => <Button key={value} size="sm" variant={typeFilter === value ? "default" : "outline"} onClick={() => setTypeFilter(value)}>{label}</Button>)}</div>
@@ -362,7 +365,9 @@ function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplic
 function BuilderView({ selected, setSelected, list, catalog, loading, saving, open, save, remove, duplicate, setDefault, previewUrl, refreshPreview, editorTab, setEditorTab, toggleBlock, updateBlock, updateBlockStyle, reorderBlock, updatePage, dragKey }) {
   if (loading) return <div className="p-12 text-center"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
   return (
-    <div className="grid grid-cols-12 gap-4">
+    <div className="space-y-4">
+      <BillingWorkspaceNav />
+      <div className="grid grid-cols-12 gap-4">
       {/* Left: Template list */}
       <Card className="col-span-3 h-[82vh] overflow-y-auto">
         <CardContent className="p-2">
@@ -487,6 +492,7 @@ function BuilderView({ selected, setSelected, list, catalog, loading, saving, op
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Calculator } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 export default function PricingCalcPage() {
   const { token } = useAuth();
@@ -24,7 +25,8 @@ export default function PricingCalcPage() {
   return (
     <div className="space-y-6" data-testid="pricing-calc-page">
       <OperationalPageHeader eyebrow="Commercial modelling · transparent assumptions" title="Dynamic Pricing Calculator" description="Model service pricing from delivery cost, labour and margin targets before committing a client proposal." icon={Calculator} tone="emerald" />
-      <div className="grid grid-cols-2 gap-6">
+      <BillingWorkspaceNav />
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <Card><CardHeader><CardTitle className="text-base">Calculate Pricing</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-3">

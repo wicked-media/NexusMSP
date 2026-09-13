@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
@@ -260,6 +261,8 @@ export default function ProposalBuilderPage() {
         signal="proposal-pipeline"
         actions={<><Button variant="outline" size="sm" onClick={() => fetchData({ quiet: true })} disabled={refreshing}><RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><Button onClick={() => { setShowCreate(true); setForm(emptyForm); }} data-testid="create-proposal-btn"><Plus className="mr-1.5 h-4 w-4" />New proposal</Button></>}
       />
+
+      <BillingWorkspaceNav />
 
       {/* Stats */}
       {stats && (

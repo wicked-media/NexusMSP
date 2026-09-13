@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import {
   Loader2, DollarSign, TrendingUp, AlertTriangle, CheckCircle,
   Clock, Flame, Zap, Send, ArrowUpRight, ArrowDownRight,
-  BarChart3, Users, FileText, Receipt, ShoppingCart, Target, Banknote,
+  BarChart3, Users, FileText, ShoppingCart, Target, Banknote,
   Trophy, ChevronRight, Activity, RefreshCw
 } from "lucide-react";
 import { format } from "date-fns";
@@ -17,7 +17,7 @@ import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
-import WorkspaceToolsMenu from "@/components/WorkspaceToolsMenu";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 const STREAK_CONFIG = {
   starter: { label: "Getting Started", color: "text-gray-400", bg: "bg-gray-500/10", ring: "" },
@@ -219,12 +219,10 @@ export default function BillingDashboardPage() {
           <Button variant="outline" size="sm" onClick={() => fetchMetrics({ quiet: true })} disabled={refreshing} data-testid="refresh-billing-dashboard">
             <RefreshCw className={`mr-1.5 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />Refresh
           </Button>
-          <WorkspaceToolsMenu workspace="billing" testId="billing-workspace-tools" />
-          <Button size="sm" onClick={() => navigate("/invoices")} data-testid="go-to-invoices">
-            <Receipt className="w-4 h-4 mr-1" />Invoices
-          </Button>
         </>}
       />
+
+      <BillingWorkspaceNav />
 
       {/* Row 1: MRR/ARR + Health + Streak */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">

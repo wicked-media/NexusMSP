@@ -18,6 +18,7 @@ import {
 import { API, useAuth } from "@/App";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -229,15 +230,14 @@ export default function BillingReconPage() {
         signal={reconciliationSignal}
         actions={(
           <>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => navigate("/invoices")}>
-              <FileText className="h-3.5 w-3.5" />Invoices
-            </Button>
             <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fetchData(false)} disabled={refreshing} data-testid="billing-recon-refresh">
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh
             </Button>
           </>
         )}
       />
+
+      <BillingWorkspaceNav />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <HeroTile label="Recoverable revenue" value={compactMoney(d.total_recoverable)} icon={DollarSign} glow="emerald" animated={false} subtitle={`${actionCount} findings`} onClick={() => setFocus("all")} active={focus === "all"} testId="recon-metric-recoverable" />
