@@ -14,6 +14,7 @@ import NexusGlobalPulse from "@/components/NexusGlobalPulse";
 import {
   getNavigationItemState,
   getActiveParentNavigationPath,
+  getActiveNavigationGroupId,
   readSidebarPreferences,
   togglePinnedWorkspace,
   writeSidebarPreferences,
@@ -609,6 +610,7 @@ export const Sidebar = ({
   const location = useLocation();
   const { pathname, search } = location;
   const [expandedMenus, setExpandedMenus] = useState(new Set());
+  const [expandedGroupIds, setExpandedGroupIds] = useState(new Set());
   const [pinnedPaths, setPinnedPaths] = useState([]);
   const [sidebarBrand, setSidebarBrand] = useState(null);
   const skipNextPreferencesPersist = useRef(null);
@@ -635,20 +637,24 @@ export const Sidebar = ({
     () => visibleGroups.flatMap((group) => group.items),
     [visibleGroups],
   );
+  const visibleGroupIds = useMemo(() => visibleGroups.map((group) => group.id), [visibleGroups]);
   const pinnedItems = useMemo(
     () => pinnedPaths.map((path) => visibleNavigationItems.find((item) => item.path === path)).filter(Boolean),
     [pinnedPaths, visibleNavigationItems],
   );
 
   useEffect(() => {
-    const preferences = readSidebarPreferences(preferenceUserId, navigationPaths);
+    const preferences = readSidebarPreferences(preferenceUserId, navigationPaths, visibleGroupIds);
     // Prevent the default render from replacing existing preferences before
     // their state update is applied.
     skipNextPreferencesPersist.current = preferenceUserId;
     setExpandedMenus(new Set(preferences.expandedPaths));
+    setExpandedGroupIds(new Set(preferences.expandedGroupIds.length
+      ? preferences.expandedGroupIds
+      : [getActiveNavigationGroupId(visibleGroups, location) || visibleGroupIds[0]].filter(Boolean)));
     setPinnedPaths(preferences.pinnedPaths);
     onCollapsedPreferenceRestore?.(preferences.collapsed);
-  }, [navigationPaths, onCollapsedPreferenceRestore, preferenceUserId]);
+  }, [location, navigationPaths, onCollapsedPreferenceRestore, preferenceUserId, visibleGroupIds, visibleGroups]);
 
   useEffect(() => {
     if (skipNextPreferencesPersist.current === preferenceUserId) {
@@ -658,9 +664,10 @@ export const Sidebar = ({
     writeSidebarPreferences(preferenceUserId, {
       collapsed,
       expandedPaths: [...expandedMenus],
+      expandedGroupIds: [...expandedGroupIds],
       pinnedPaths,
-    }, navigationPaths);
-  }, [collapsed, expandedMenus, navigationPaths, pinnedPaths, preferenceUserId]);
+    }, navigationPaths, visibleGroupIds);
+  }, [collapsed, expandedGroupIds, expandedMenus, navigationPaths, pinnedPaths, preferenceUserId, visibleGroupIds]);
 
   useEffect(() => {
     axios.get(`${API}/settings/branding/public`).then(r => {
@@ -684,6 +691,10 @@ export const Sidebar = ({
     });
   };
 
+  const toggleGroup = (groupId) => {
+    setExpandedGroupIds((previous) => previous.has(groupId) ? new Set() : new Set([groupId]));
+  };
+
   const togglePinnedPath = (path) => {
     setPinnedPaths((previous) => togglePinnedWorkspace(previous, path, navigationPaths));
   };
@@ -695,6 +706,12 @@ export const Sidebar = ({
   // Auto-expand the parent that owns the active URL. Query changes are
   // included, so switching a workspace tab does not leave the wrong submenu
   // open or highlighted.
+  useEffect(() => {
+    const activeGroupId = getActiveNavigationGroupId(visibleGroups, { pathname, search });
+    if (!activeGroupId) return;
+    setExpandedGroupIds((previous) => previous.has(activeGroupId) ? previous : new Set([activeGroupId]));
+  }, [pathname, search, visibleGroups]);
+
   useEffect(() => {
     // Record workspaces use the full canvas for the object being worked on.
     // Keep the owning submenu collapsed on entry (matching the Device Cockpit
@@ -819,19 +836,32 @@ export const Sidebar = ({
                 </div>
               </section>
             )}
-            {visibleGroups.map((group, groupIndex) => (
-              <div key={group.id} className={groupIndex > 0 || (!collapsed && pinnedItems.length > 0) ? 'mt-3' : ''}>
+            {visibleGroups.map((group, groupIndex) => {
+              const groupExpanded = collapsed || expandedGroupIds.has(group.id);
+              const groupAttentionCount = group.items.reduce((total, item) => (
+                total + Number(navCounts[item.path] || 0) + (item.children || []).reduce((childTotal, child) => childTotal + Number(navCounts[child.path] || 0), 0)
+              ), 0);
+              const groupRegionId = `sidebar-group-${group.id}`;
+              return <div key={group.id} className={groupIndex > 0 || (!collapsed && pinnedItems.length > 0) ? 'mt-1.5' : ''}>
                 {!collapsed && (
-                  <div className="mb-1 px-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">
-                      {group.title}
-                    </span>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${groupExpanded ? "bg-primary/[0.045] text-primary" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+                    aria-expanded={groupExpanded}
+                    aria-controls={groupRegionId}
+                    data-testid={`sidebar-group-toggle-${group.id}`}
+                  >
+                    <span className={`h-1 w-1 rounded-full ${groupExpanded ? "bg-primary" : "bg-muted-foreground/40"}`} aria-hidden="true" />
+                    <span className="flex-1">{group.title}</span>
+                    {groupAttentionCount > 0 && <NavBadge count={groupAttentionCount} />}
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${groupExpanded ? "rotate-180" : ""}`} aria-hidden="true" />
+                  </button>
                 )}
                 {collapsed && groupIndex > 0 && (
                   <div className="mx-3 mb-2 border-t border-border/50" />
                 )}
-                <div className="space-y-0.5">
+                <div id={groupRegionId} className={`${groupExpanded ? "space-y-0.5" : "hidden"}`}>
                   {group.items.map((item) => (
                     <NavItem
                       key={item.path}
@@ -847,8 +877,8 @@ export const Sidebar = ({
                     />
                   ))}
                 </div>
-              </div>
-            ))}
+              </div>;
+            })}
           </nav>
         </ScrollArea>
 

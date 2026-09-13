@@ -79,41 +79,52 @@ export function sidebarPreferencesKey(userId) {
   return `nexus.sidebar.navigation.v${SIDEBAR_PREFERENCES_VERSION}:${safeUserId}`;
 }
 
-export function normaliseSidebarPreferences(value, validPaths = []) {
+export function normaliseSidebarPreferences(value, validPaths = [], validGroupIds = []) {
   const allowedPaths = new Set(validPaths);
+  const allowedGroupIds = new Set(validGroupIds);
   const uniqueValid = (paths, limit) => [...new Set(Array.isArray(paths) ? paths : [])]
     .filter((path) => typeof path === "string" && allowedPaths.has(path))
     .slice(0, limit);
+  const expandedGroupIds = [...new Set(Array.isArray(value?.expandedGroupIds) ? value.expandedGroupIds : [])]
+    .filter((groupId) => typeof groupId === "string" && allowedGroupIds.has(groupId))
+    .slice(0, 1);
 
   return {
     version: SIDEBAR_PREFERENCES_VERSION,
     collapsed: value?.collapsed === true,
     expandedPaths: uniqueValid(value?.expandedPaths, 1),
+    expandedGroupIds,
     pinnedPaths: uniqueValid(value?.pinnedPaths, MAX_PINNED_WORKSPACES),
   };
 }
 
-export function readSidebarPreferences(userId, validPaths = []) {
-  if (typeof window === "undefined") return normaliseSidebarPreferences({}, validPaths);
+export function readSidebarPreferences(userId, validPaths = [], validGroupIds = []) {
+  if (typeof window === "undefined") return normaliseSidebarPreferences({}, validPaths, validGroupIds);
   try {
     const stored = window.localStorage.getItem(sidebarPreferencesKey(userId));
-    return normaliseSidebarPreferences(stored ? JSON.parse(stored) : {}, validPaths);
+    return normaliseSidebarPreferences(stored ? JSON.parse(stored) : {}, validPaths, validGroupIds);
   } catch {
-    return normaliseSidebarPreferences({}, validPaths);
+    return normaliseSidebarPreferences({}, validPaths, validGroupIds);
   }
 }
 
-export function writeSidebarPreferences(userId, preferences, validPaths = []) {
+export function writeSidebarPreferences(userId, preferences, validPaths = [], validGroupIds = []) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(
       sidebarPreferencesKey(userId),
-      JSON.stringify(normaliseSidebarPreferences(preferences, validPaths)),
+      JSON.stringify(normaliseSidebarPreferences(preferences, validPaths, validGroupIds)),
     );
   } catch {
     // Local navigation preferences are optional. Storage restrictions must not
     // prevent a technician using the rest of Nexus.
   }
+}
+
+export function getActiveNavigationGroupId(groups, location) {
+  return (groups || []).find((group) => (
+    (group.items || []).some((item) => getNavigationItemState(item, location).isHighlighted)
+  ))?.id || null;
 }
 
 export function togglePinnedWorkspace(pinnedPaths, path, validPaths = []) {

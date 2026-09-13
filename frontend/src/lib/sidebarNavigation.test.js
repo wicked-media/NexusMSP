@@ -1,4 +1,5 @@
 import {
+  getActiveNavigationGroupId,
   getActiveParentNavigationPath,
   getNavigationItemState,
   matchesNavigationTarget,
@@ -48,6 +49,13 @@ describe("sidebar navigation URL matching", () => {
       search: "?module=microsoft365&view=connections",
     })).toBe("/control-plane");
   });
+
+  test("finds the navigation group that owns the active workspace", () => {
+    expect(getActiveNavigationGroupId(groups, {
+      pathname: "/control-plane",
+      search: "?module=microsoft365",
+    })).toBe("platform");
+  });
 });
 
 describe("sidebar navigation preferences", () => {
@@ -58,12 +66,19 @@ describe("sidebar navigation preferences", () => {
       collapsed: true,
       expandedPaths: ["/tickets", "/devices", "/unknown"],
       pinnedPaths: ["/tickets", "/tickets", "/unknown", "/devices"],
-    }, validPaths)).toEqual({
+    }, validPaths, ["service_desk", "infrastructure"])).toEqual({
       version: 1,
       collapsed: true,
       expandedPaths: ["/tickets"],
+      expandedGroupIds: [],
       pinnedPaths: ["/tickets", "/devices"],
     });
+  });
+
+  test("retains only one known expanded navigation group", () => {
+    expect(normaliseSidebarPreferences({
+      expandedGroupIds: ["infrastructure", "service_desk", "unknown"],
+    }, validPaths, ["service_desk", "infrastructure"]).expandedGroupIds).toEqual(["infrastructure"]);
   });
 
   test("adds and removes a pinned workspace without persisting invalid paths", () => {

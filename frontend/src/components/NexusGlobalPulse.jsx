@@ -18,7 +18,7 @@ export default function NexusGlobalPulse({ counts = {}, collapsed = false }) {
     data-testid="nexus-global-pulse"
   >
     <span className="nexus-global-pulse__orb" aria-hidden="true">{nominal ? <ShieldCheck /> : <CircleAlert />}</span>
-    {!collapsed && <span className="min-w-0 text-left"><span className="nexus-global-pulse__eyebrow"><Activity />Nexus Global Pulse</span><strong>{label}</strong><small>{nominal ? "The estate is calm on current evidence" : "Open Mission Control to investigate"}</small></span>}
+    {!collapsed && <span className="min-w-0 text-left"><span className="nexus-global-pulse__eyebrow"><Activity />Nexus Global Pulse</span><strong>{label}</strong></span>}
     {!collapsed && <ArrowRight className="nexus-global-pulse__arrow" aria-hidden="true" />}
   </button>;
 }
