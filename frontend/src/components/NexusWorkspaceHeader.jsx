@@ -118,10 +118,10 @@ export default function NexusWorkspaceHeader({
           )}
           {actions && (
             <div className="nx-workspace-header__command-rail">
-              <div className="nx-workspace-header__action-copy">
-                <p>{actionsLabel}</p>
-                <small>{actionsDescription}</small>
-              </div>
+              {(actionsLabel || actionsDescription) && <div className="nx-workspace-header__action-copy">
+                {actionsLabel && <p>{actionsLabel}</p>}
+                {actionsDescription && <small>{actionsDescription}</small>}
+              </div>}
               <div className="nx-workspace-header__actions">{actions}</div>
             </div>
           )}

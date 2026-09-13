@@ -37,7 +37,6 @@ import { ThreatRadarTicker } from "@/components/ai/ThreatRadarTicker";
 import { ChurnRiskTile } from "@/components/ai/ChurnRiskTile";
 import { SLARadarTile } from "@/components/ai/SLARadarTile";
 import { HuntressSummaryCard } from "@/components/security/HuntressSummaryCard";
-import WeatherStrip from "@/components/ambient/WeatherStrip";
 import MissionControlOverview from "@/components/dashboard/MissionControlOverview";
 import NexusBrainBriefing from "@/components/dashboard/NexusBrainBriefing";
 import NexusDaily from "@/components/dashboard/NexusDaily";
@@ -273,15 +272,13 @@ export default function DashboardPage() {
 
   return (
     <PageShell>
-    <WeatherStrip />
-    <div className="flex-1 overflow-y-auto p-6 space-y-5" data-testid="dashboard-page">
+    <div className="flex-1 overflow-y-auto space-y-4 pt-1" data-testid="dashboard-page">
 
       <NexusDaily
         missionControl={missionControl}
         nexusBrain={nexusBrain}
         user={user}
         navigate={navigate}
-        onOpenCommand={openCommandPalette}
         onOpenDailyReview={() => setDailyReviewOpen(true)}
         onRefresh={fetchDashboardData}
       />

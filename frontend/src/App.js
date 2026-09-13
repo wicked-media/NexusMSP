@@ -23,6 +23,7 @@ import UniversalInspector from "@/components/UniversalInspector";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
 import { ClientContextProvider } from "@/contexts/ClientContext";
 import ClientContextBar from "@/components/ClientContextBar";
+import WeatherStrip from "@/components/ambient/WeatherStrip";
 import { Bot, Menu, Search } from "lucide-react";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
@@ -429,6 +430,7 @@ const MainLayout = ({ children }) => {
             <span className="ml-auto rounded border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]">Ctrl K</span>
           </button>
           <div className="ml-auto flex items-center gap-1">
+            {location.pathname === "/" && <WeatherStrip compact />}
             <button
               type="button"
               onClick={() => setCopilotOpen((open) => !open)}
@@ -453,7 +455,7 @@ const MainLayout = ({ children }) => {
       )}
       <main className={`min-w-0 flex-1 transition-all duration-300 ${collaborationWorkspace ? "flex min-h-0 flex-col overflow-hidden" : ""} ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[64px]' : 'md:ml-[240px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
         <div className={collaborationWorkspace ? 'flex min-h-0 flex-1 flex-col px-3 pb-3 pt-[68px] md:px-4 md:pb-4 md:pt-[72px]' : focusMode ? 'p-4 md:p-8' : deviceRecordWorkspace ? 'px-4 pb-24 pt-20 md:px-7 md:pb-7 md:pt-[72px]' : 'px-4 pb-24 pt-20 md:px-8 md:pb-8 md:pt-[80px]'}>
-          {!focusMode && !deviceRecordWorkspace && <ClientContextBar compact={collaborationWorkspace} />}
+          {!focusMode && !deviceRecordWorkspace && <ClientContextBar compact={collaborationWorkspace || location.pathname === "/"} />}
           <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""} ${collaborationWorkspace ? "flex min-h-0 flex-1 flex-col" : ""}`}>
             {children}
           </div>

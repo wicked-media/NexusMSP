@@ -101,7 +101,7 @@ function WeatherOutlookDialog({ open, onOpenChange, weather, now }) {
   </Dialog>;
 }
 
-export default function WeatherStrip() {
+export default function WeatherStrip({ compact = false }) {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [weather, setWeather] = useState(null);
@@ -127,15 +127,29 @@ export default function WeatherStrip() {
     return () => clearInterval(ticker);
   }, []);
 
-  if (!weather && !error) return <div className="flex min-h-12 items-center rounded-xl border border-border/60 bg-card/45 px-4 text-xs text-muted-foreground" data-testid="weather-strip"><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin text-cyan-300" />Loading local weather...</div>;
-  if (error) return <Link to="/settings?tab=weather&anchor=weather-clock-settings-card" className="flex min-h-12 items-center justify-between rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 text-sm transition-colors hover:bg-amber-400/[0.1]" data-testid="weather-strip"><span className="text-amber-100">Weather is currently unavailable</span><span className="text-xs text-amber-200/80">Retry or check settings</span></Link>;
-  if (!weather?.configured || !weather.current) return <Link to="/settings?tab=weather&anchor=weather-clock-settings-card" className="group flex min-h-12 items-center gap-3 rounded-xl border border-cyan-400/20 bg-gradient-to-r from-cyan-400/[0.09] via-background to-background px-4 transition-colors hover:border-cyan-400/35 hover:bg-cyan-400/[0.1]" data-testid="weather-strip"><span className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-400/10"><MapPin className="h-4 w-4 text-cyan-200" /></span><div><p className="text-xs font-semibold">Set your office weather</p><p className="text-[11px] text-muted-foreground">Choose a location for the dashboard forecast and local clock.</p></div><span className="ml-auto text-xs font-medium text-cyan-200">Configure</span></Link>;
+  if (!weather && !error) return compact ? null : <div className="flex min-h-12 items-center rounded-xl border border-border/60 bg-card/45 px-4 text-xs text-muted-foreground" data-testid="weather-strip"><Loader2 className="mr-2 h-3.5 w-3.5 animate-spin text-cyan-300" />Loading local weather...</div>;
+  if (error) return compact
+    ? <Link to="/settings?tab=weather&anchor=weather-clock-settings-card" className="hidden h-9 items-center gap-2 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex" data-testid="weather-strip"><Cloud className="h-4 w-4 text-amber-400" /><span className="hidden xl:inline">Weather unavailable</span></Link>
+    : <Link to="/settings?tab=weather&anchor=weather-clock-settings-card" className="flex min-h-12 items-center justify-between rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 text-sm transition-colors hover:bg-amber-400/[0.1]" data-testid="weather-strip"><span className="text-amber-100">Weather is currently unavailable</span><span className="text-xs text-amber-200/80">Retry or check settings</span></Link>;
+  if (!weather?.configured || !weather.current) return compact
+    ? <Link to="/settings?tab=weather&anchor=weather-clock-settings-card" className="hidden h-9 items-center gap-2 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex" data-testid="weather-strip"><MapPin className="h-4 w-4 text-cyan-300" /><span className="hidden xl:inline">Set office weather</span></Link>
+    : <Link to="/settings?tab=weather&anchor=weather-clock-settings-card" className="group flex min-h-12 items-center gap-3 rounded-xl border border-cyan-400/20 bg-gradient-to-r from-cyan-400/[0.09] via-background to-background px-4 transition-colors hover:border-cyan-400/35 hover:bg-cyan-400/[0.1]" data-testid="weather-strip"><span className="flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-400/10"><MapPin className="h-4 w-4 text-cyan-200" /></span><div><p className="text-xs font-semibold">Set your office weather</p><p className="text-[11px] text-muted-foreground">Choose a location for the dashboard forecast and local clock.</p></div><span className="ml-auto text-xs font-medium text-cyan-200">Configure</span></Link>;
 
   const { current, location, units } = weather;
   const forecast = Array.isArray(weather.forecast) ? weather.forecast : [];
   const temperatureUnit = units?.temperature || "°C";
   const place = [location.name, location.admin1].filter(Boolean).join(", ");
   const freshness = formatWeatherFreshness(weather.freshness?.retrieved_at || weather.refreshed_at || current.observed_at, now);
+
+  if (compact) return <>
+    <button type="button" onClick={() => setOutlookOpen(true)} className="group hidden h-9 items-center gap-2 rounded-lg border border-transparent px-2.5 text-left text-xs text-muted-foreground transition-colors hover:border-border/70 hover:bg-card hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 lg:flex" aria-label={`Open weather outlook for ${place}`} data-testid="weather-strip">
+      <WeatherGlyph kind={current.icon} isDay={current.is_day} className="h-4 w-4" iconClassName="h-4 w-4 text-cyan-300" />
+      <span className="font-semibold text-foreground">{displayTemperature(current.temperature)}{temperatureUnit}</span>
+      <span className="hidden max-w-28 truncate xl:inline">{place}</span>
+      <span className="hidden font-mono text-[10px] text-muted-foreground 2xl:inline">{formatClock(location.timezone, now)}</span>
+    </button>
+    <WeatherOutlookDialog open={outlookOpen} onOpenChange={setOutlookOpen} weather={weather} now={now} />
+  </>;
 
   return <>
     <button type="button" onClick={() => setOutlookOpen(true)} className="group block w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80 focus-visible:ring-offset-2 focus-visible:ring-offset-background" aria-label={`Open weather outlook for ${place}`} data-testid="weather-strip">

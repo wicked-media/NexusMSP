@@ -203,6 +203,14 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
+    if (!isNexusBrand || isAtelierExperience) return undefined;
+    const interval = window.setInterval(() => {
+      setNexusStatementIndex((index) => (index + 1) % NEXUS_LOGIN_STATEMENTS.length);
+    }, 4600);
+    return () => window.clearInterval(interval);
+  }, [isAtelierExperience, isNexusBrand]);
+
+  useEffect(() => {
     // Apply the product identity immediately so a slow or unavailable branding
     // endpoint never exposes a stale browser title or favicon.
     document.title = "NexusMSP";
@@ -242,14 +250,6 @@ export default function LoginPage() {
     });
   }, [searchParams]);
 
-  useEffect(() => {
-    if (!isNexusBrand) return undefined;
-    const interval = window.setInterval(() => {
-      setNexusStatementIndex((index) => (index + 1) % NEXUS_LOGIN_STATEMENTS.length);
-    }, 4600);
-    return () => window.clearInterval(interval);
-  }, [isNexusBrand]);
-
   if (user && !previewMode) return <Navigate to="/" replace />;
 
   const handleMicrosoftLogin = () => {
@@ -279,7 +279,7 @@ export default function LoginPage() {
   const hour = now.getHours();
   const timeGreeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
   const GreetingIcon = hour < 6 ? Moon : hour < 12 ? Sun : hour < 17 ? CloudSun : hour < 21 ? Sunset : Moon;
-  const nexusStatement = NEXUS_LOGIN_STATEMENTS[nexusStatementIndex];
+  const nexusStatement = NEXUS_LOGIN_STATEMENTS[isAtelierExperience ? 0 : nexusStatementIndex];
 
   if (isAtelierExperience) {
     return (
@@ -299,7 +299,7 @@ export default function LoginPage() {
               <div className="nexus-atelier-kicker"><span className="nexus-atelier-kicker-dot" aria-hidden="true" />Nexus MSP · Operations workspace</div>
               <img src="/login-experiences/nexus-atelier-identity.png" alt="Nexus MSP" className="nexus-atelier-identity" />
               <div className="nexus-atelier-copy">
-                <p key={nexusStatementIndex} className="nexus-atelier-statement" aria-live="polite"><span>{nexusStatement.lead}</span> <strong>{nexusStatement.accent}</strong></p>
+                <p className="nexus-atelier-statement"><span>{nexusStatement.lead}</span> <strong>{nexusStatement.accent}</strong></p>
                 <p className="nexus-atelier-supporting">A secure, deliberate start to every customer, signal and accountable action.</p>
               </div>
               <div className="nexus-atelier-trust-row" aria-label="Nexus platform qualities">
@@ -317,7 +317,7 @@ export default function LoginPage() {
               <div className="nexus-atelier-auth-header border-b border-cyan-200/[0.12] px-7 pb-6 pt-7 sm:px-8 sm:pt-8">
                 <p className="nexus-atelier-auth-kicker">Secure workspace access</p>
                 <h1 className="mt-2 text-[clamp(1.7rem,2.6vw,2.2rem)] font-semibold tracking-[-0.045em] text-white">Welcome back</h1>
-                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-300/70">Sign in with your technician account. Access is governed by your organisation’s security policy.</p>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-300/75">Use your technician account to enter your organisation’s protected workspace.</p>
               </div>
               <form onSubmit={handleLogin} className="px-7 py-7 sm:px-8 sm:py-8" aria-busy={isLoading}>
                 {authError && <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-rose-400/25 bg-rose-500/[0.08] px-3.5 py-3 text-xs leading-relaxed text-rose-100" role="alert"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" /><div><p className="font-semibold">Sign-in unsuccessful</p><p className="mt-0.5 text-rose-200/75">{authError}</p></div></div>}
@@ -331,13 +331,12 @@ export default function LoginPage() {
                   {capsLockOn && <p className="flex items-center gap-1.5 text-[10px] font-medium text-amber-200" role="status"><TriangleAlert className="h-3 w-3" />Caps Lock is on</p>}
                 </div>
                 {twoFactorRequired && <div className="mt-5 space-y-2.5 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.05] p-3.5"><Label htmlFor="nexus-login-2fa" className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-cyan-100"><ShieldCheck className="h-3.5 w-3.5" />Authenticator code</Label><Input id="nexus-login-2fa" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" value={twoFactorCode} onChange={(e) => { setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6)); if (authError) setAuthError(""); }} required maxLength={6} data-testid="login-2fa-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 font-mono tracking-[.35em] text-center text-white" /></div>}
-                <Button type="submit" className="nexus-atelier-submit mt-7 h-[3.25rem] w-full rounded-xl border border-cyan-200/25 bg-gradient-to-r from-[#008dcc] via-[#00b8e7] to-[#4a73ff] text-[15px] font-semibold text-white shadow-[0_16px_35px_-18px_rgba(0,181,255,.96)] transition hover:brightness-110 hover:shadow-[0_18px_42px_-17px_rgba(62,124,255,.9)]" disabled={isLoading} data-testid="login-submit-button">{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying workspace</> : <>{twoFactorRequired ? "Verify & Sign In" : "Sign in"}<ArrowRight className="ml-2 h-4 w-4" /></>}</Button>
+                <Button type="submit" className="nexus-atelier-submit mt-7 h-[3.25rem] w-full rounded-xl border border-cyan-200/25 bg-cyan-500 text-[15px] font-semibold text-slate-950 shadow-[0_16px_34px_-20px_rgba(34,211,238,.75)] transition-colors hover:bg-cyan-400 hover:text-slate-950" disabled={isLoading} data-testid="login-submit-button">{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying workspace</> : <>{twoFactorRequired ? "Verify & Sign In" : "Sign in"}<ArrowRight className="ml-2 h-4 w-4" /></>}</Button>
                 {ssoEnabled && <Button type="button" variant="outline" className="mt-3 h-11 w-full rounded-xl border-cyan-200/[0.14] bg-white/[0.025] text-slate-200 hover:bg-cyan-400/[0.06] hover:text-white" onClick={handleMicrosoftLogin} disabled={ssoLoading} data-testid="microsoft-sso-button">{ssoLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Sign in with Microsoft</Button>}
                 {isLocalPreview && <Button type="button" variant="ghost" className="mt-2 h-8 w-full text-xs text-slate-400 hover:bg-transparent hover:text-cyan-100" onClick={fillDemoCredentials} data-testid="demo-credentials-button">Use local account email</Button>}
                 <p className="mt-6 flex items-start justify-center gap-2 text-center text-[11px] leading-5 text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />Sign-in attempts and security challenges are audited.</p>
               </form>
             </div>
-            <p className="absolute bottom-7 left-1/2 w-[min(28rem,calc(100%-3rem))] -translate-x-1/2 text-center text-[11px] leading-5 text-slate-500">Authorised users only · access is governed by your organisation’s security policy.</p>
           </section>
         </main>
         <style>{`
@@ -357,16 +356,16 @@ export default function LoginPage() {
           .nexus-atelier-stage-rail { padding-bottom:clamp(5rem,11vh,8rem); }
           .nexus-atelier-kicker { display:flex; align-items:center; gap:.58rem; color:rgba(174,229,255,.72); font-size:.64rem; font-weight:700; letter-spacing:.19em; text-transform:uppercase; }
           .nexus-atelier-kicker-dot { width:.42rem; height:.42rem; border-radius:999px; background:#64d9ff; animation:atelierKickerPulse 3.8s ease-in-out infinite; }
-          .nexus-atelier-identity { width:min(100%,25rem); height:auto; margin:clamp(1.6rem,4.5vh,3.5rem) 0 clamp(1.45rem,3.5vh,2.4rem); object-fit:contain; object-position:left center; animation:atelierIdentityFloat 9s ease-in-out infinite; }
+          .nexus-atelier-identity { width:min(100%,25rem); height:auto; margin:clamp(1.6rem,4.5vh,3.5rem) 0 clamp(1.45rem,3.5vh,2.4rem); object-fit:contain; object-position:left center; }
           .nexus-atelier-copy { max-width:29rem; }
           .nexus-atelier-statement { margin:0; color:#f7fbff; font-size:clamp(2rem,3.6vw,4.15rem); font-weight:500; letter-spacing:-.06em; line-height:.97; text-shadow:0 4px 28px rgba(0,0,0,.42); animation:atelierStatementIn .68s cubic-bezier(.2,.78,.2,1) both; }
-          .nexus-atelier-statement strong { background:linear-gradient(100deg,#72e8ff,#d6f7ff,#4a88ff,#72e8ff); background-size:220% 100%; background-clip:text; -webkit-background-clip:text; color:transparent; font-weight:inherit; animation:atelierButtonBreathe 7.2s ease-in-out infinite; }
+          .nexus-atelier-statement strong { color:#7ddcff; font-weight:inherit; }
           .nexus-atelier-supporting { max-width:25rem; margin:1.2rem 0 0; color:rgba(189,213,231,.7); font-size:.92rem; line-height:1.65; }
           .nexus-atelier-trust-row { display:flex; flex-wrap:wrap; gap:.65rem 1.05rem; margin-top:2rem; color:rgba(193,228,247,.7); font-size:.68rem; font-weight:600; letter-spacing:.04em; }
           .nexus-atelier-trust-row span { display:inline-flex; align-items:center; gap:.42rem; }
           .nexus-atelier-trust-row svg { color:#60dfff; }
-          .nexus-atelier-horizon { position:absolute; inset:auto 0 0; width:100%; height:min(29vh,17rem); min-height:10rem; object-fit:cover; object-position:center bottom; opacity:.82; pointer-events:none; mask-image:linear-gradient(180deg,transparent 0%,#000 35%); animation:atelierHorizonDrift 25s ease-in-out infinite; }
-          .nexus-atelier-horizon-glare { position:absolute; inset:auto 0 0; width:100%; height:min(29vh,17rem); min-height:10rem; object-fit:cover; object-position:center bottom; mix-blend-mode:screen; opacity:.35; pointer-events:none; mask-image:linear-gradient(180deg,transparent 5%,#000 60%); animation:atelierHorizonGlare 18s ease-in-out infinite; }
+          .nexus-atelier-horizon { position:absolute; inset:auto 0 0; width:100%; height:min(29vh,17rem); min-height:10rem; object-fit:cover; object-position:center bottom; opacity:.72; pointer-events:none; mask-image:linear-gradient(180deg,transparent 0%,#000 35%); }
+          .nexus-atelier-horizon-glare { position:absolute; inset:auto 0 0; width:100%; height:min(29vh,17rem); min-height:10rem; object-fit:cover; object-position:center bottom; mix-blend-mode:screen; opacity:.2; pointer-events:none; mask-image:linear-gradient(180deg,transparent 5%,#000 60%); }
           .nexus-atelier-auth-stage { background:linear-gradient(165deg,rgba(5,14,30,.38),rgba(1,5,14,.69)); }
           .nexus-atelier-auth-halo { position:absolute; width:27rem; height:27rem; border-radius:999px; background:rgba(12,115,216,.09); filter:blur(70px); pointer-events:none; }
           .nexus-atelier-auth-panel { animation:atelierPanelIn .72s cubic-bezier(.2,.78,.2,1) .12s both; }
@@ -374,7 +373,7 @@ export default function LoginPage() {
           .nexus-atelier-auth-kicker { color:rgba(109,221,255,.92); font-size:.64rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; }
           .nexus-atelier-field { border-radius:.75rem; transition:transform .2s ease; }
           .nexus-atelier-field:focus-within { transform:translateY(-1px); animation:atelierFieldFocus 2.4s ease-in-out infinite; }
-          .nexus-atelier-submit { background-size:220% 100%; animation:atelierButtonBreathe 5.4s ease-in-out infinite; }
+          .nexus-atelier-submit { background-size:100% 100%; }
           .nexus-atelier-auth-panel.is-authenticating { animation:atelierAuthenticating 1.8s ease-in-out infinite !important; }
           @media (max-width:1023px) { .nexus-atelier-stage::after { background:linear-gradient(180deg,transparent 62%,rgba(1,5,15,.9)); } .nexus-atelier-stage-rail { padding-bottom:7rem; } .nexus-atelier-identity { width:min(100%,21rem); } .nexus-atelier-horizon,.nexus-atelier-horizon-glare { height:13rem; } }
           @media (max-width:640px) { .nexus-atelier-preview { justify-content:flex-start; } .nexus-atelier-stage { min-height:31rem; } .nexus-atelier-stage-rail { padding-bottom:5.5rem; } .nexus-atelier-statement { font-size:clamp(2rem,10.5vw,3.1rem); } .nexus-atelier-auth-panel { border-radius:1.15rem; } }
