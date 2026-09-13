@@ -17,13 +17,14 @@ import {
   Shield, Database, Play, Activity, ExternalLink, Zap, Cloud, Wifi, WifiOff,
   Ghost, Skull, AlertCircle, Sparkles, RotateCw, Eye, Settings,
   Server, ArrowUpRight, Trash2, FileQuestion, Bell, StopCircle, Wand2,
-  Users, DollarSign, ChevronLeft, ChevronRight, Gauge, LockKeyhole, Route,
+  Users, ChevronLeft, ChevronRight, Gauge, LockKeyhole, Route,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
 import TenantsTab from "@/components/backups/TenantsTab";
 import BackupStatusTab from "@/components/backups/BackupStatusTab";
 import BillingTab from "@/components/backups/BillingTab";
+import BackupWorkspaceNav from "@/components/backups/BackupWorkspaceNav";
 import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
@@ -33,7 +34,6 @@ import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "@/styles/dashboard-grid.css";
-import "@/styles/dashboard-ticker.css";
 import { useWidgetGrid } from "@/hooks/useWidgetGrid";
 
 const BackupResponsiveGridLayout = WidthProvider(Responsive);
@@ -117,9 +117,9 @@ function RunningBackupCard({ activity, onCancel }) {
 
             {/* CRT-style scrolling stats */}
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono text-muted-foreground/80">
-              {transferred && total && <span>📦 {transferred}/{total} GB</span>}
-              {speedMB && <span>⚡ {speedMB} MB/s</span>}
-              {activity.tenant_name && <span className="truncate max-w-[140px]">🏢 {activity.tenant_name}</span>}
+              {transferred && total && <span className="inline-flex items-center gap-1"><Database className="h-3 w-3" />{transferred}/{total} GB</span>}
+              {speedMB && <span className="inline-flex items-center gap-1"><Zap className="h-3 w-3" />{speedMB} MB/s</span>}
+              {activity.tenant_name && <span className="inline-flex max-w-[160px] items-center gap-1 truncate"><Users className="h-3 w-3 shrink-0" />{activity.tenant_name}</span>}
             </div>
 
             {/* Progress bar with shimmer */}
@@ -158,95 +158,6 @@ function RunningBackupCard({ activity, onCancel }) {
 function HeroMetric(props) { return <HeroTile {...props} />; }
 /* legacy local impl preserved below for reference, no longer used */
 
-function BackupOperationsTicker({ items, onNavigate, statusText = "Select an item to investigate" }) {
-  const repeatedItems = [...items, ...items];
-
-  return (
-    <div className="nx-live-ticker" data-testid="backup-assurance-strip" aria-label="Live backup operations ticker">
-      <div className="nx-live-ticker__label">
-        <Activity className="h-3.5 w-3.5" />
-        <span>Live backup</span>
-        <span className="nx-live-ticker__pulse" />
-      </div>
-      <div className="nx-live-ticker__viewport">
-        <div className="nx-live-ticker__track">
-          {repeatedItems.map((item, index) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={`${item.key}-${index}`}
-                type="button"
-                onClick={() => onNavigate(item.action)}
-                className={`nx-live-ticker__item nx-live-ticker__item--${item.tone}`}
-                data-testid={index < items.length ? `backup-ticker-${item.key}` : undefined}
-                title={item.title}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="font-medium">{item.label}</span>
-                <span className="nx-live-ticker__detail">{item.detail}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <span className="nx-live-ticker__refresh">{statusText}</span>
-    </div>
-  );
-}
-
-function BackupLifecycleNavigator({ activeTab, onSelect, orphanCount = 0 }) {
-  const groups = [
-    {
-      label: "Operate", description: "See protection and live activity", tone: "sky",
-      items: [["dashboard", "Overview", Database], ["live", "Live activity", Activity], ["status", "Coverage", Server]],
-    },
-    {
-      label: "Organise", description: "Keep tenant data clean", tone: "violet",
-      items: [["tenants", "Tenant mapping", Users], ["acronis", "Provider health", Cloud], ["orphans", "Hygiene", Ghost]],
-    },
-    {
-      label: "Assure", description: "Prove recoverability", tone: "emerald",
-      items: [["compliance", "Assurance", Shield], ["verify", "Recovery tests", CheckCircle]],
-    },
-    {
-      label: "Bill", description: "Reconcile protected usage", tone: "amber",
-      items: [["billing", "Usage billing", DollarSign]],
-    },
-  ];
-
-  const toneClasses = {
-    sky: "data-[active=true]:border-sky-400/45 data-[active=true]:bg-sky-500/10 data-[active=true]:text-sky-100",
-    violet: "data-[active=true]:border-violet-400/45 data-[active=true]:bg-violet-500/10 data-[active=true]:text-violet-100",
-    emerald: "data-[active=true]:border-emerald-400/45 data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-100",
-    amber: "data-[active=true]:border-amber-400/45 data-[active=true]:bg-amber-500/10 data-[active=true]:text-amber-100",
-  };
-
-  return (
-    <nav className="grid gap-3 lg:grid-cols-4" aria-label="Backup Centre workflow" data-testid="backup-lifecycle-navigator">
-      {groups.map((group) => (
-        <section key={group.label} className="rounded-2xl border border-border/60 bg-muted/[0.12] p-3">
-          <div className="mb-2"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{group.label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{group.description}</p></div>
-          <div className="flex flex-wrap gap-1.5">
-            {group.items.map(([value, label, Icon]) => (
-              <button
-                key={value}
-                type="button"
-                data-active={activeTab === value}
-                onClick={() => onSelect(value)}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground ${toneClasses[group.tone]}`}
-                data-testid={`tab-${value}`}
-              >
-                <Icon className="h-3.5 w-3.5" />{label}
-                {value === "orphans" && orphanCount > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200">{orphanCount}</span>}
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
-    </nav>
-  );
-}
-
 const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis", "orphans", "compliance", "billing", "verify"]);
 const BACKUP_STATUS_FILTERS = new Set(["all", "success", "failed", "running"]);
 
@@ -265,7 +176,6 @@ export default function BackupCenterPage() {
   const [assuranceData, setAssuranceData] = useState(null);
   const [assuranceClientId, setAssuranceClientId] = useState("");
   const [assuranceLoading, setAssuranceLoading] = useState(false);
-  const [acronisUsage, setAcronisUsage] = useState(null);
   const [agentsHealth, setAgentsHealth] = useState(null);
   const [acronisAlerts, setAcronisAlerts] = useState([]);
   const [orphans, setOrphans] = useState(null);
@@ -365,12 +275,11 @@ export default function BackupCenterPage() {
     setLoading(true);
     setLoadError("");
     try {
-      const [dash, comp, verify, assurance, usage, agents, alerts, clientList, config] = await Promise.allSettled([
+      const [dash, comp, verify, assurance, agents, alerts, clientList, config] = await Promise.allSettled([
         axios.get(`${API}/backup-dashboard/overview`, { headers }),
         axios.get(`${API}/backup-compliance/dashboard`, { headers }),
         axios.get(`${API}/backup-verify/overview`, { headers }),
         axios.get(`${API}/backup-assurance/overview`, { headers }),
-        axios.get(`${API}/acronis/usage-summary`, { headers }),
         axios.get(`${API}/acronis/agents/health`, { headers }),
         axios.get(`${API}/acronis/alerts`, { headers }),
         axios.get(`${API}/clients`, { headers }),
@@ -384,13 +293,12 @@ export default function BackupCenterPage() {
       if (comp.status === "fulfilled") setCompData(comp.value.data);
       if (verify.status === "fulfilled") setVerifyData(verify.value.data);
       if (assurance.status === "fulfilled") setAssuranceData(assurance.value.data);
-      if (usage.status === "fulfilled") setAcronisUsage(usage.value.data);
       if (agents.status === "fulfilled") setAgentsHealth(agents.value.data);
       if (alerts.status === "fulfilled") setAcronisAlerts(alerts.value.data?.items || []);
       if (clientList.status === "fulfilled") setClients(clientList.value.data || []);
       if (config.status === "fulfilled") setAcronisConfig(config.value.data || {});
       else setAcronisConfig({ configured: false, error: "Unable to load Acronis connection status" });
-      if (![dash, comp, verify, assurance, usage, agents, alerts, clientList, config].some(result => result.status === "fulfilled")) {
+      if (![dash, comp, verify, assurance, agents, alerts, clientList, config].some(result => result.status === "fulfilled")) {
         setLoadError("Nexus could not reach the backup evidence services. No recovery or billing actions have been changed.");
       }
     } catch {
@@ -654,66 +562,6 @@ export default function BackupCenterPage() {
     liveActivities?.error ? `Live activity feed: ${liveActivities.error}` : null,
   ].filter(Boolean);
   const backupSourceUnavailable = !loading && sourceIssues.length > 0;
-  const backupTickerItems = [
-    {
-      key: "activity",
-      icon: Activity,
-      label: "Backup activity",
-      detail: backupSourceUnavailable ? "Feed unavailable" : liveCount ? `${liveCount} run${liveCount === 1 ? "" : "s"} in progress` : "Standing by",
-      tone: backupSourceUnavailable ? "critical" : "healthy",
-      action: backupSourceUnavailable ? "settings" : "live",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open live backup activity",
-    },
-    {
-      key: "failures",
-      icon: XCircle,
-      label: "Failed backups",
-      detail: `${ds.failed || 0} need${ds.failed === 1 ? "s" : ""} attention`,
-      tone: ds.failed ? "critical" : "healthy",
-      action: "failed",
-      title: "Review failed backups",
-    },
-    {
-      key: "coverage",
-      icon: Shield,
-      label: "Protection coverage",
-      detail: backupSourceUnavailable
-        ? "Source unavailable"
-        : cs.evidence_available
-        ? `${cs.no_backup || 0} asset${cs.no_backup === 1 ? "" : "s"} without backup`
-        : `${cs.not_assessed || 0} asset${cs.not_assessed === 1 ? "" : "s"} awaiting evidence`,
-      tone: backupSourceUnavailable ? "critical" : cs.evidence_available && !cs.no_backup ? "healthy" : "warning",
-      action: backupSourceUnavailable ? "settings" : "compliance",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open protection coverage",
-    },
-    {
-      key: "recovery",
-      icon: CheckCircle,
-      label: "Recovery verification",
-      detail: `${vs.pending || 0} test${vs.pending === 1 ? "" : "s"} pending`,
-      tone: vs.pending ? "warning" : "healthy",
-      action: "verify",
-      title: "Open recovery evidence",
-    },
-    {
-      key: "agents",
-      icon: Wifi,
-      label: "Backup agents",
-      detail: backupSourceUnavailable ? "Status unavailable" : `${ah.online || 0}/${ah.total || 0} online`,
-      tone: backupSourceUnavailable ? "critical" : ah.total && ah.online < ah.total ? "warning" : "healthy",
-      action: backupSourceUnavailable ? "settings" : "status",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open backup agent status",
-    },
-    {
-      key: "alerts",
-      icon: Bell,
-      label: "Acronis alerts",
-      detail: backupSourceUnavailable ? "Monitoring unavailable" : acronisAlerts.length ? `${acronisAlerts.length} active alert${acronisAlerts.length === 1 ? "" : "s"}` : "No active alerts",
-      tone: backupSourceUnavailable ? "critical" : acronisAlerts.length ? "warning" : "healthy",
-      action: backupSourceUnavailable ? "settings" : "acronis",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open Acronis alerts",
-    },
-  ];
   const normalizedBackupSearch = search.trim().toLowerCase();
   const filteredBackups = (dashData?.backups || []).filter((backup) => {
     const matchesStatus = statusFilter === "all" || backup.status === statusFilter;
@@ -743,21 +591,21 @@ export default function BackupCenterPage() {
         description="Monitor protected assets, investigate backup exceptions, validate recoverability, and retain auditable recovery evidence."
         icon={HardDrive}
         tone="sky"
+        signal={backupSourceUnavailable || ds.failed ? "attention" : "connected"}
+        meta={[backupSourceUnavailable ? "Provider unavailable" : `${ds.success_rate || 0}% successful`, `${vs.pending || 0} recovery test${vs.pending === 1 ? "" : "s"} pending`]}
         actions={<>
-          <Button variant="outline" onClick={openVerificationRequest} data-testid="header-schedule-recovery-test"><Play className="mr-1.5 h-4 w-4" />Recovery test</Button>
-          <Button variant="outline" onClick={() => handleOpenAcronis()} data-testid="open-acronis-console"><ExternalLink className="mr-1.5 h-4 w-4" />Acronis Cloud</Button>
-          <Button variant="outline" onClick={() => { fetchData(); fetchLive(); }}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+          <Button variant="outline" size="sm" onClick={() => { fetchData(); fetchLive(); }}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+          <Button size="sm" onClick={openVerificationRequest} data-testid="header-schedule-recovery-test"><Play className="mr-1.5 h-4 w-4" />Recovery test</Button>
         </>}
       />
 
-      <BackupOperationsTicker
-        items={backupTickerItems}
-        statusText={backupSourceUnavailable ? "Acronis source needs attention" : "Select an item to investigate"}
-        onNavigate={(action) => {
-          if (action === "settings") openAcronisSettings();
-          else if (action === "failed") openDashboardFilter("failed");
-          else selectTab(action);
-        }}
+      <BackupWorkspaceNav
+        activeTab={tab}
+        onSelect={selectTab}
+        orphanCount={orphans?.totals?.total_orphans || 0}
+        alertCount={acronisAlerts.length}
+        onOpenAcronis={() => handleOpenAcronis()}
+        onOpenSettings={openAcronisSettings}
       />
 
       {backupSourceUnavailable && (
@@ -776,18 +624,15 @@ export default function BackupCenterPage() {
       )}
 
       {/* Hero metric strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <HeroMetric label="Total backups" value={ds.total_jobs || 0} icon={Database} glow="cyan" subtitle="All protected workloads" onClick={() => openDashboardFilter("all")} />
-        <HeroMetric label="Successful" value={ds.successful || 0} icon={CheckCircle} glow="emerald" subtitle={`${ds.success_rate || 0}% success rate`} onClick={() => openDashboardFilter("success")} />
-        <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle={ds.failed ? "Needs attention" : "All healthy"} onClick={() => openDashboardFilter("failed")} />
-        <HeroMetric label="Running" value={liveCount} icon={Activity} glow={backupSourceUnavailable ? "rose" : "violet"} subtitle={backupSourceUnavailable ? "Source unavailable" : "Live now"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("live")} />
-        <HeroMetric label="Online agents" value={ah.online || 0} icon={Wifi} glow={backupSourceUnavailable ? "rose" : "emerald"} subtitle={backupSourceUnavailable ? "Source unavailable" : `${ah.online_pct || 0}% of ${ah.total || 0}`} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("status")} />
-        <HeroMetric label="Active alerts" value={acronisAlerts.length} icon={Bell} glow={backupSourceUnavailable ? "rose" : acronisAlerts.length > 0 ? "amber" : "cyan"} subtitle={backupSourceUnavailable ? "Source unavailable" : acronisUsage?.critical_alerts ? `${acronisUsage.critical_alerts} critical` : "Acronis monitoring"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("acronis")} />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <HeroMetric label="Protected workloads" value={backupSourceUnavailable ? "—" : ds.total_jobs || 0} icon={Database} glow={backupSourceUnavailable ? "rose" : "cyan"} subtitle={backupSourceUnavailable ? "Provider unavailable" : "In active backup scope"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : openDashboardFilter("all")} />
+        <HeroMetric label="Success rate" value={backupSourceUnavailable ? "—" : ds.success_rate || 0} suffix={backupSourceUnavailable ? undefined : "%"} icon={CheckCircle} glow={backupSourceUnavailable ? "rose" : "emerald"} subtitle={backupSourceUnavailable ? "Awaiting source" : `${ds.successful || 0} successful`} onClick={() => backupSourceUnavailable ? openAcronisSettings() : openDashboardFilter("success")} />
+        <HeroMetric label="Failed" value={backupSourceUnavailable ? "—" : ds.failed || 0} icon={XCircle} glow="rose" subtitle={backupSourceUnavailable ? "Awaiting source" : ds.failed ? "Needs attention" : "All healthy"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : openDashboardFilter("failed")} />
+        <HeroMetric label="Running now" value={backupSourceUnavailable ? "—" : liveCount} icon={Activity} glow={backupSourceUnavailable ? "rose" : "violet"} subtitle={backupSourceUnavailable ? "Feed unavailable" : "Live operations"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("live")} />
+        <HeroMetric label="Recovery pending" value={vs.pending || 0} icon={Shield} glow={vs.pending ? "amber" : "sky"} subtitle={vs.pending ? "Tests need completion" : "Recovery evidence current"} onClick={() => selectTab("verify")} />
       </div>
 
       <Tabs value={tab} onValueChange={selectTab}>
-        <BackupLifecycleNavigator activeTab={tab} onSelect={selectTab} orphanCount={orphans?.totals?.total_orphans || 0} />
-
         {/* DASHBOARD */}
         <TabsContent value="dashboard" className="mt-4 space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row">
