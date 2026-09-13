@@ -1264,16 +1264,46 @@ html[data-motion="minimal"] .nx-device-quick-actions__remote button { transition
 
 .nx-toast {
     position: relative;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .nx-toast::before {
     content: "";
     position: absolute;
     inset: 0 auto 0 0;
-    width: 2px;
+    width: 3px;
+    border-radius: 999px;
     background: hsl(var(--primary));
-    opacity: 0.82;
+    opacity: 0.9;
+}
+
+.nx-toast[data-type="success"]::before { background: rgb(16 185 129); }
+.nx-toast[data-type="warning"]::before { background: rgb(245 158 11); }
+.nx-toast[data-type="error"]::before { background: rgb(244 63 94); }
+.nx-toast[data-type="info"]::before { background: rgb(56 189 248); }
+
+.nx-toast[data-type="success"] .nx-toast__icon { color: rgb(52 211 153); }
+.nx-toast[data-type="warning"] .nx-toast__icon { color: rgb(251 191 36); }
+.nx-toast[data-type="error"] .nx-toast__icon { color: rgb(251 113 133); }
+.nx-toast[data-type="info"] .nx-toast__icon { color: rgb(56 189 248); }
+
+.nx-toast__close {
+    opacity: 0;
+    transition: opacity var(--nx-motion-fast) var(--nx-ease-out), background-color var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+.nx-toast:hover .nx-toast__close,
+.nx-toast:focus-within .nx-toast__close {
+    opacity: 1;
+}
+
+@media (max-width: 640px) {
+    .nx-toast__close { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nx-toast,
+    .nx-toast__close { transition: none !important; }
 }
 
 /* Native Nexus controls: one predictable focus and hover language across forms. */

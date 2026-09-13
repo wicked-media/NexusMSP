@@ -1,16 +1,22 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/App";
-import { ChevronLeft, ChevronRight, ChevronDown, Bell, Search, X, AlertTriangle, CheckCheck, Pin } from "lucide-react";
+import {
+  ChevronLeft, ChevronRight, ChevronDown, Bell, Search, X, AlertTriangle,
+  CheckCheck, Pin, Clock3, Monitor, Ticket, FileText, UserPlus,
+  MessageCircle, ReceiptText, ShieldAlert,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import axios from "axios";
+import { formatDistanceToNow } from "date-fns";
 import { API } from "@/App";
 import { navGroups, getAllNavItems, taskShortcuts } from "@/config/navigation";
 import { useNavCounts, NavBadge } from "@/hooks/useNavCounts";
 import NexusGlobalPulse from "@/components/NexusGlobalPulse";
+import { coalesceStateNotifications, notificationRecordIds } from "@/lib/notificationPresentation";
 import {
   getNavigationItemState,
   getActiveParentNavigationPath,
@@ -20,7 +26,35 @@ import {
   writeSidebarPreferences,
 } from "@/lib/sidebarNavigation";
 
-// Notification Bell Component
+const notificationTypeVisuals = {
+  sla_breach: { icon: ShieldAlert, label: "SLA breach", tone: "critical" },
+  sla_warning: { icon: Clock3, label: "SLA warning", tone: "warning" },
+  contract_renewal: { icon: FileText, label: "Contract", tone: "warning" },
+  device_offline: { icon: Monitor, label: "Device", tone: "warning" },
+  ticket_assigned: { icon: Ticket, label: "Ticket", tone: "info" },
+  ticket_updated: { icon: Ticket, label: "Ticket", tone: "info" },
+  new_lead: { icon: UserPlus, label: "Lead", tone: "success" },
+  supplier_invoice_follow_up: { icon: ReceiptText, label: "Invoice", tone: "warning" },
+  chat_mention: { icon: MessageCircle, label: "Mention", tone: "info" },
+  chat_broadcast: { icon: MessageCircle, label: "Message", tone: "info" },
+  thread_reply: { icon: MessageCircle, label: "Reply", tone: "info" },
+};
+
+const notificationToneClasses = {
+  critical: "border-rose-500/25 bg-rose-500/[0.07] text-rose-400",
+  warning: "border-amber-500/25 bg-amber-500/[0.07] text-amber-400",
+  success: "border-emerald-500/25 bg-emerald-500/[0.07] text-emerald-400",
+  info: "border-sky-500/25 bg-sky-500/[0.07] text-sky-400",
+};
+
+const notificationTime = (value) => {
+  if (!value) return "Just now";
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return "Just now";
+  return formatDistanceToNow(when, { addSuffix: true });
+};
+
+// Compact operational notification centre shared by the global shell.
 export function NotificationBell({ token, collapsed = true, placement = "sidebar" }) {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
@@ -28,6 +62,7 @@ export function NotificationBell({ token, collapsed = true, placement = "sidebar
   const [isOpen, setIsOpen] = useState(false);
   const [panelView, setPanelView] = useState("attention");
   const ref = useRef(null);
+  const triggerRef = useRef(null);
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const getNotificationLink = (n) => {
@@ -49,7 +84,7 @@ export function NotificationBell({ token, collapsed = true, placement = "sidebar
   const handleNotificationClick = (n) => {
     const link = getNotificationLink(n);
     if (!n.read) {
-      axios.post(`${API}/notifications/mark-read`, { ids: [n.id] }, { headers }).catch(() => {});
+      axios.post(`${API}/notifications/mark-read`, { ids: notificationRecordIds(n) }, { headers }).catch(() => {});
       setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
       setUnreadCount(prev => Math.max(0, prev - 1));
     }
@@ -61,12 +96,10 @@ export function NotificationBell({ token, collapsed = true, placement = "sidebar
 
   const fetchNotifications = useCallback(async () => {
     try {
-      const [nRes, cRes] = await Promise.all([
-        axios.get(`${API}/notifications`, { headers }),
-        axios.get(`${API}/notifications/unread-count`, { headers }),
-      ]);
-      setNotifications(nRes.data.slice(0, 15));
-      setUnreadCount(cRes.data.count);
+      const nRes = await axios.get(`${API}/notifications`, { headers });
+      const current = coalesceStateNotifications(nRes.data);
+      setNotifications(current.slice(0, 15));
+      setUnreadCount(current.filter(notification => !notification.read).length);
     } catch {}
   }, [headers]);
 
@@ -83,6 +116,17 @@ export function NotificationBell({ token, collapsed = true, placement = "sidebar
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isOpen]);
+
   const markAllRead = async () => {
     try {
       await axios.post(`${API}/notifications/mark-read`, {}, { headers });
@@ -91,7 +135,6 @@ export function NotificationBell({ token, collapsed = true, placement = "sidebar
     } catch {}
   };
 
-  const typeIcon = { sla_breach: "SLA", sla_warning: "SLA", contract_renewal: "CTR", device_offline: "DEV", ticket_assigned: "TKT", ticket_updated: "TKT", new_lead: "LEAD", supplier_invoice_follow_up: "PO", chat_mention: "CHAT", chat_broadcast: "CHAT", thread_reply: "CHAT" };
   const attentionCount = notifications.filter(n => !n.read && ["critical", "warning"].includes(n.severity)).length;
   const visibleNotifications = panelView === "attention"
     ? notifications.filter(n => !n.read && ["critical", "warning"].includes(n.severity))
@@ -103,55 +146,80 @@ export function NotificationBell({ token, collapsed = true, placement = "sidebar
       <Tooltip>
         <TooltipTrigger asChild>
           <button
+            ref={triggerRef}
             onClick={() => setIsOpen(!isOpen)}
-            className={`relative flex items-center gap-2 rounded-lg transition-all duration-150 hover:bg-muted ${
-              placement === "topbar" ? 'h-9 w-9 justify-center' : collapsed ? 'p-2 justify-center' : 'w-full px-3 py-2'
+            className={`relative flex items-center gap-2 rounded-lg border border-transparent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 ${
+              placement === "topbar"
+                ? `h-8 w-8 justify-center ${isOpen ? "border-border/70 bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`
+                : collapsed ? 'justify-center p-2 hover:bg-muted' : 'w-full px-3 py-2 hover:bg-muted'
             }`}
             data-testid="notification-bell"
+            aria-label={unreadCount > 0 ? `Open notifications, ${unreadCount} unread` : "Open notifications"}
+            aria-expanded={isOpen}
+            aria-controls="nexus-notification-panel"
+            aria-haspopup="dialog"
           >
-            <Bell className="w-[18px] h-[18px] text-muted-foreground" />
+            <Bell className={`h-[17px] w-[17px] ${isOpen ? "text-foreground" : "text-muted-foreground"}`} />
             {!collapsed && placement !== "topbar" && <span className="text-[12px] text-muted-foreground">Notifications</span>}
             {unreadCount > 0 && (
-              <span className="absolute top-1 left-5 w-4 h-4 bg-red-500 rounded-full text-[9px] text-white font-bold flex items-center justify-center">{unreadCount > 9 ? '9+' : unreadCount}</span>
+              <span className={`absolute flex h-4 min-w-4 items-center justify-center rounded-full border-2 border-background bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ${placement === "topbar" ? "-right-1.5 -top-1" : "right-0 top-0"}`} aria-hidden="true">{unreadCount > 99 ? '99+' : unreadCount}</span>
             )}
           </button>
         </TooltipTrigger>
         {(collapsed || placement === "topbar") && <TooltipContent side={placement === "topbar" ? "bottom" : "right"}>Notifications {unreadCount > 0 ? `(${unreadCount})` : ''}</TooltipContent>}
       </Tooltip>
       {isOpen && (
-        <div className={`absolute z-50 w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-violet-500/20 bg-card shadow-[0_24px_70px_-30px_rgba(0,0,0,0.9)] ${placement === "topbar" ? "right-0 top-full mt-2" : "left-full top-0 ml-3"}`} data-testid="notification-panel">
-          <div className="border-b border-border bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.18),transparent_45%)] px-4 py-3">
-            <div className="flex items-center justify-between">
-            <div><span className="text-sm font-semibold">Notification inbox</span><p className="mt-0.5 text-[11px] text-muted-foreground">{attentionCount > 0 ? `${attentionCount} needs attention` : unreadCount > 0 ? `${unreadCount} unread updates` : "You’re up to date"}</p></div>
-            <div className="flex items-center gap-2">
-              {unreadCount > 0 && <button onClick={markAllRead} className="rounded-md px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/10"><CheckCheck className="mr-1 inline h-3 w-3" />Read all</button>}
+        <div
+          id="nexus-notification-panel"
+          role="dialog"
+          aria-label="Notifications"
+          className={`absolute z-50 w-[360px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-card shadow-[0_24px_64px_-28px_rgba(0,0,0,0.92)] ${placement === "topbar" ? "right-0 top-full mt-2" : "left-full top-0 ml-3"}`}
+          data-testid="notification-panel"
+        >
+          <div className="border-b border-border/70 px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2"><span className="text-sm font-semibold">Notifications</span>{unreadCount > 0 && <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{unreadCount} unread</span>}</div>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{attentionCount > 0 ? `${attentionCount} operational ${attentionCount === 1 ? "item needs" : "items need"} attention` : "No urgent updates"}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {unreadCount > 0 && <button onClick={markAllRead} className="rounded-md px-2 py-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><CheckCheck className="mr-1 inline h-3 w-3" />Read all</button>}
+                <button type="button" onClick={() => setIsOpen(false)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" aria-label="Close notifications"><X className="h-3.5 w-3.5" /></button>
+              </div>
             </div>
+            <div className="mt-2.5 grid grid-cols-2 gap-1 rounded-lg bg-muted/45 p-1" role="tablist" aria-label="Notification views">
+              <button role="tab" aria-selected={panelView === "attention"} onClick={() => setPanelView("attention")} className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${panelView === "attention" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}><AlertTriangle className="h-3 w-3" />Attention {attentionCount > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 text-[9px] text-rose-400">{attentionCount}</span>}</button>
+              <button role="tab" aria-selected={panelView === "all"} onClick={() => setPanelView("all")} className={`flex items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${panelView === "all" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>All updates <span className="ml-1 text-[9px] text-muted-foreground">{notifications.length}</span></button>
             </div>
-            <div className="mt-3 flex items-center gap-1 rounded-lg bg-muted/50 p-1"><button onClick={() => setPanelView("attention")} className={`flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${panelView === "attention" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}><AlertTriangle className="h-3 w-3" />Attention {attentionCount > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 text-[9px] text-rose-400">{attentionCount}</span>}</button><button onClick={() => setPanelView("all")} className={`flex flex-1 items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors ${panelView === "all" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>All updates <span className="ml-1 text-[9px] text-muted-foreground">{notifications.length}</span></button></div>
           </div>
-          <div className="max-h-[390px] overflow-y-auto p-1.5">
+          <div className="max-h-[340px] overflow-y-auto p-1.5" role="tabpanel">
             {visibleNotifications.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-10">No notifications</p>
-            ) : visibleNotifications.map(n => (
-              <div key={n.id} onClick={() => handleNotificationClick(n)}
-                className={`group rounded-xl border border-transparent px-3 py-3 cursor-pointer transition-colors ${!n.read ? 'bg-primary/[0.045]' : ''} ${n.severity === "critical" ? "hover:border-rose-500/30 hover:bg-rose-500/[0.04]" : n.severity === "warning" ? "hover:border-amber-500/30 hover:bg-amber-500/[0.04]" : "hover:border-border hover:bg-muted/60"}`}>
-                <div className="flex items-start gap-3">
-                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${n.severity === "critical" ? "bg-rose-500/10 text-rose-400" : n.severity === "warning" ? "bg-amber-500/10 text-amber-400" : "bg-sky-500/10 text-sky-400"}`}><span className="text-[9px] font-bold">{typeIcon[n.type] || 'SYS'}</span></div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+              <div className="px-4 py-9 text-center"><Bell className="mx-auto h-6 w-6 text-muted-foreground/40" /><p className="mt-2 text-sm font-medium">You’re caught up</p><p className="mt-1 text-[11px] text-muted-foreground">No notifications in this view.</p></div>
+            ) : visibleNotifications.map(n => {
+              const visual = notificationTypeVisuals[n.type] || { icon: Bell, label: "System", tone: "info" };
+              const NotificationIcon = visual.icon;
+              const tone = n.severity === "critical" ? "critical" : n.severity === "warning" ? "warning" : visual.tone;
+              const link = getNotificationLink(n);
+              return (
+              <button key={n.id} type="button" onClick={() => handleNotificationClick(n)}
+                className={`group block w-full rounded-lg border border-transparent px-2.5 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${!n.read ? 'bg-primary/[0.035]' : ''} ${n.severity === "critical" ? "hover:border-rose-500/25 hover:bg-rose-500/[0.035]" : n.severity === "warning" ? "hover:border-amber-500/25 hover:bg-amber-500/[0.035]" : "hover:border-border hover:bg-muted/45"}`}>
+                <div className="flex w-full min-w-0 items-start gap-2.5">
+                  <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${notificationToneClasses[tone] || notificationToneClasses.info}`}><NotificationIcon className="h-3.5 w-3.5" /></div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
                       {!n.read && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                      <p className="text-xs font-semibold truncate">{n.title || n.message}</p>
+                      <p className="truncate text-xs font-semibold">{n.title || n.message}</p>
                     </div>
-                    {n.title && n.message && <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground line-clamp-2">{n.message}</p>}
-                    <p className="text-[10px] text-muted-foreground mt-1">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</p>
+                    {n.title && n.message && <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{n.message}</p>}
+                    <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground"><span>{visual.label}</span>{n.occurrence_count > 1 && <><span aria-hidden="true">·</span><span>{n.occurrence_count} combined</span></>}<span aria-hidden="true">·</span><time dateTime={n.created_at || undefined} title={n.created_at ? new Date(n.created_at).toLocaleString() : undefined}>{notificationTime(n.created_at)}</time>{link && <><span aria-hidden="true">·</span><span className="text-primary/80">Open item</span></>}</p>
                   </div>
                 </div>
-              </div>
-            ))}
+              </button>
+            );})}
           </div>
           <button onClick={() => { setIsOpen(false); navigate('/notifications'); }}
-            className="w-full px-4 py-3 text-xs text-primary font-medium hover:bg-primary/5 border-t transition-colors" data-testid="view-all-notifications">
-            Open notification centre →
+            className="flex w-full items-center justify-center gap-1.5 border-t border-border/70 px-4 py-2.5 text-xs font-medium text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50" data-testid="view-all-notifications">
+            Open notification centre <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
