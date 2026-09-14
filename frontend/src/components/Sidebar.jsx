@@ -15,7 +15,7 @@ import { formatDistanceToNow } from "date-fns";
 import { API } from "@/App";
 import { navGroups, getAllNavItems, taskShortcuts } from "@/config/navigation";
 import { useNavCounts, NavBadge } from "@/hooks/useNavCounts";
-import NexusGlobalPulse from "@/components/NexusGlobalPulse";
+import EstateStatus from "@/components/EstateStatus";
 import { coalesceStateNotifications, notificationRecordIds } from "@/lib/notificationPresentation";
 import {
   getNavigationItemState,
@@ -845,7 +845,7 @@ export const Sidebar = ({
         </div>
 
         <div className="px-3 pb-1">
-          <NexusGlobalPulse counts={navCounts} collapsed={collapsed} />
+          <EstateStatus token={token} collapsed={collapsed} />
         </div>
 
         {/* Global Module Search */}

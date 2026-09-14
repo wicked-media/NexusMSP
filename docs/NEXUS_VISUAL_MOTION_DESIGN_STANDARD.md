@@ -179,7 +179,7 @@ Celebrate a measurable operational outcome—such as completed recovery coverage
 - `NexusWorkspaceHeader`: canonical workspace identity, evidence state and action surface.
 - `TicketModuleHeader`: module variant with descriptive Queue, Triage, SLA and Dispatch navigation.
 - Devices Fleet Cockpit: high-density operational variant for endpoint evidence.
-- `NexusGlobalPulse`: sidebar estate pulse built from retained navigation evidence.
+- `EstateStatus`: compact sidebar operating-health summary backed by the authenticated Mission Control overview; it remains distinct from personal notifications and module work counts.
 - `NexusVerifiedSequence`: Work Session, Tickets, Nexus Verify, Diagnostics, and Assurance completion language.
 - `Nexus Expected State`: explicit evidence boundary and canonical Nexus Agent heartbeat coverage.
 - Appearance settings: user-controlled System, Full, Minimal, and Static motion modes.

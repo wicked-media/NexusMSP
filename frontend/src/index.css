@@ -1492,15 +1492,21 @@ html[data-motion="minimal"] .nexus-verified-sequence__marker,
 html[data-motion="none"] .nexus-verified-sequence__marker { animation: none !important; }
 @media (max-width: 720px) { .nexus-verified-sequence { align-items: flex-start; flex-direction: column; }.nexus-verified-sequence__seal { width: 100%; padding: .7rem 0 0; border-top: 1px solid hsl(var(--border)); border-left: 0; } }
 
-/* A calm estate heartbeat: current evidence is surfaced without becoming another alert feed. */
-.nexus-global-pulse { display:flex; width:100%; align-items:center; gap:.65rem; padding:.62rem .7rem; border:1px solid hsl(var(--border)); border-radius:.78rem; color:hsl(var(--foreground)); background:linear-gradient(120deg,hsl(var(--muted)/.34),hsl(var(--card)/.5)); text-align:left; transition: border-color var(--nx-motion-fast) var(--nx-ease-out), background-color var(--nx-motion-fast) var(--nx-ease-out), transform var(--nx-motion-fast) var(--nx-ease-out); }
-.nexus-global-pulse:hover { transform:translateY(-1px); border-color:hsl(var(--primary)/.38); background:hsl(var(--primary)/.07); }
-.nexus-global-pulse__orb { position:relative; display:grid; width:1.9rem; height:1.9rem; flex:0 0 auto; place-items:center; border:1px solid hsl(var(--border)); border-radius:.65rem; background:hsl(var(--background)/.55); }
-.nexus-global-pulse__orb svg { width:1rem; height:1rem; }.nexus-global-pulse.is-nominal .nexus-global-pulse__orb { color:hsl(160 78% 48%); border-color:hsl(160 78% 48%/.28); }.nexus-global-pulse.needs-attention .nexus-global-pulse__orb { color:hsl(38 92% 54%); border-color:hsl(38 92% 54%/.32); animation:nexus-global-pulse 3.4s ease-in-out infinite; }
-.nexus-global-pulse__eyebrow { display:flex; align-items:center; gap:.28rem; color:hsl(var(--muted-foreground)); font-size:.57rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }.nexus-global-pulse__eyebrow svg { width:.62rem; height:.62rem; color:hsl(var(--primary)); }.nexus-global-pulse strong,.nexus-global-pulse small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.nexus-global-pulse strong { margin-top:.12rem; font-size:.72rem; }.nexus-global-pulse small { margin-top:.1rem; color:hsl(var(--muted-foreground)); font-size:.61rem; }.nexus-global-pulse__arrow { width:.85rem; height:.85rem; margin-left:auto; color:hsl(var(--muted-foreground)); }.nexus-global-pulse.is-collapsed { justify-content:center; padding:.58rem; }.nexus-global-pulse.is-collapsed .nexus-global-pulse__orb { width:2rem; height:2rem; }
-@keyframes nexus-global-pulse { 0%,100% { box-shadow:0 0 0 0 hsl(38 92% 54% / 0); } 50% { box-shadow:0 0 0 4px hsl(38 92% 54% / .09); } }
-html[data-motion="minimal"] .nexus-global-pulse.needs-attention .nexus-global-pulse__orb,
-html[data-motion="none"] .nexus-global-pulse.needs-attention .nexus-global-pulse__orb { animation:none !important; }
+/* Mission Control's compact estate summary. Notifications and module badges retain their own jobs. */
+.nexus-estate-status { display:flex; width:100%; min-height:2.5rem; align-items:center; gap:.58rem; padding:.42rem .58rem; border:1px solid hsl(var(--border)/.78); border-radius:.72rem; color:hsl(var(--foreground)); background:hsl(var(--background)/.32); text-align:left; transition:border-color var(--nx-motion-fast) var(--nx-ease-out),background-color var(--nx-motion-fast) var(--nx-ease-out); }
+.nexus-estate-status:hover { border-color:hsl(var(--primary)/.34); background:hsl(var(--muted)/.42); }
+.nexus-estate-status:focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
+.nexus-estate-status__icon { display:grid; width:1.75rem; height:1.75rem; flex:0 0 auto; place-items:center; border:1px solid currentColor; border-radius:.58rem; background:hsl(var(--background)/.55); color:hsl(var(--muted-foreground)); opacity:.82; }
+.nexus-estate-status__icon svg { width:.9rem; height:.9rem; }
+.nexus-estate-status__copy { display:flex; min-width:0; flex:1 1 auto; align-items:baseline; justify-content:space-between; gap:.45rem; }
+.nexus-estate-status__copy span { overflow:hidden; color:hsl(var(--muted-foreground)); font-size:.65rem; font-weight:650; letter-spacing:.02em; text-overflow:ellipsis; white-space:nowrap; }
+.nexus-estate-status__copy strong { overflow:hidden; font-size:.68rem; font-weight:750; text-overflow:ellipsis; white-space:nowrap; }
+.nexus-estate-status__arrow { width:.78rem; height:.78rem; flex:0 0 auto; color:hsl(var(--muted-foreground)); }
+.nexus-estate-status.is-healthy .nexus-estate-status__icon { color:hsl(160 72% 45%); }.nexus-estate-status.is-stable .nexus-estate-status__icon { color:hsl(var(--primary)); }.nexus-estate-status.is-warning .nexus-estate-status__icon { color:hsl(38 92% 50%); }.nexus-estate-status.is-critical .nexus-estate-status__icon { color:hsl(0 78% 57%); animation:nexus-estate-critical 2.8s ease-in-out infinite; }
+.nexus-estate-status.is-collapsed { justify-content:center; min-height:2.5rem; padding:.35rem; }.nexus-estate-status.is-collapsed .nexus-estate-status__icon { width:1.85rem; height:1.85rem; }
+@keyframes nexus-estate-critical { 0%,100% { box-shadow:0 0 0 0 hsl(0 78% 57% / 0); } 50% { box-shadow:0 0 0 4px hsl(0 78% 57% / .1); } }
+html[data-motion="minimal"] .nexus-estate-status.is-critical .nexus-estate-status__icon,
+html[data-motion="none"] .nexus-estate-status.is-critical .nexus-estate-status__icon { animation:none !important; }
 
 /* Persistent, browser-local work context. Pinned objects are always explicit. */
 .nexus-object-dock { position:fixed; bottom:1rem; left:50%; z-index:35; display:flex; max-width:calc(100vw - 7rem); align-items:center; gap:.45rem; padding:.38rem .45rem; border:1px solid hsl(var(--border)/.9); border-radius:1rem; background:hsl(var(--card)/.94); box-shadow:0 18px 48px hsl(var(--nx-surface-shadow)/.38); backdrop-filter:blur(18px); transform:translateX(-50%); }
