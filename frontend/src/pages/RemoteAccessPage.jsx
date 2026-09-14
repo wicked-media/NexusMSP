@@ -30,6 +30,24 @@ import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigatio
 
 const TYPE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi };
 
+const NATIVE_REMOTE_STAGES = [
+  { id: "trust", label: "Trust core", detail: "Signed grants, consent, view/control separation and revocation", status: "Ready", icon: Shield },
+  { id: "companion", label: "Remote Companion", detail: "Attended desktop capture and guarded input inside the signed Nexus Agent", status: "Build next", icon: Laptop },
+  { id: "relay", label: "Nexus Relay", detail: "Mutually authenticated, bandwidth-bounded connection and reconnect path", status: "Pending", icon: Globe },
+  { id: "viewer", label: "Technician Viewer", detail: "Multi-monitor workspace with visible session state and stop controls", status: "Pending", icon: Monitor },
+];
+
+const NATIVE_REMOTE_TARGETS = [
+  "Multi-monitor",
+  "Reboot & reconnect",
+  "Secure clipboard and files",
+  "Session recording",
+  "Multi-technician sessions",
+  "Background diagnostics",
+  "In-session chat",
+  "Ticket and billing evidence",
+];
+
 function getRemoteMessage(value, fallback) {
   if (typeof value === "string" && value.trim()) return value;
   if (Array.isArray(value)) {
@@ -329,11 +347,14 @@ export default function RemoteAccessPage() {
       <OperationalPageHeader
         eyebrow="Managed access"
         title="Nexus Remote"
-        description="The first-party session desk for governed support: endpoint context, technician approval, client consent, transport hand-off and durable work evidence."
+        description="The first-party session desk for governed support: endpoint context, technician approval, client consent, connection lifecycle and durable work evidence."
         icon={Laptop}
         tone="sky"
+        signal="working"
+        signalLabel="Native engine in development"
+        signalDescription="The safety core is ready; companion, relay and viewer remain gated."
         actions={<>
-          <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Transport settings</Button>
+          <Button variant="outline" size="sm" onClick={() => { setSettingsForm(config || { server_url: "", api_key: "", relay_server: "", enabled: true }); setShowSettings(true); }} data-testid="settings-btn"><Settings className="w-4 h-4 mr-2" />Remote settings</Button>
           <Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-remote-access"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
         </>}
       />
@@ -347,10 +368,9 @@ export default function RemoteAccessPage() {
               <div className={`w-3 h-3 rounded-full ${serverConfigured ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
               <div>
                 <span className={`text-sm font-semibold ${serverConfigured ? "text-emerald-400" : "text-amber-400"}`}>
-                  {serverConfigured ? "Nexus Remote transport connected" : "Nexus Remote needs a transport"}
+                  {serverConfigured ? "Compatibility bridge online" : "Compatibility bridge not configured"}
                 </span>
-                {config?.server_url && <span className="text-xs text-muted-foreground ml-2">{config.server_url}</span>}
-                {serverConfigured && <Badge variant="outline" className="ml-2 text-[10px] text-cyan-300 border-cyan-400/25">RustDesk transport</Badge>}
+                {serverConfigured && <Badge variant="outline" className="ml-2 border-cyan-400/25 text-[10px] text-cyan-300">Interim transport</Badge>}
                 {livePeers && <span className="text-xs text-blue-400 ml-2">({livePeers.count} live peers)</span>}
                 {config?.auto_sync !== false && serverConfigured && <Badge variant="outline" className="ml-2 text-[10px] text-emerald-400 border-emerald-500/30">Auto-Sync ON</Badge>}
                 {config?.last_auto_sync && <span className="text-xs text-muted-foreground ml-2">Last auto-sync: {new Date(config.last_auto_sync).toLocaleString()}</span>}
@@ -361,10 +381,10 @@ export default function RemoteAccessPage() {
               {serverConfigured && (
                 <>
                   <Button size="sm" variant="outline" onClick={testConnection} disabled={testingConnection} data-testid="test-connection-btn">
-                    {testingConnection ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wifi className="w-3 h-3 mr-1" />}Test
+                    {testingConnection ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wifi className="w-3 h-3 mr-1" />}Test bridge
                   </Button>
                   <Button size="sm" variant="default" onClick={syncFromServer} disabled={syncing} data-testid="sync-live-btn">
-                    {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync Live
+                    {syncing ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <RefreshCw className="w-3 h-3 mr-1" />}Sync devices
                   </Button>
                 </>
               )}
@@ -414,21 +434,27 @@ export default function RemoteAccessPage() {
         </CardContent>
       </Card>
 
-      <Card className="overflow-hidden border-cyan-400/20 bg-[linear-gradient(112deg,rgba(14,116,144,0.12),rgba(15,23,42,0.88)_48%,rgba(30,64,175,0.08))]" data-testid="nexus-remote-control-plane">
+      <Card className="overflow-hidden border-cyan-400/20 bg-[linear-gradient(112deg,rgba(14,116,144,0.12),rgba(15,23,42,0.88)_48%,rgba(30,64,175,0.08))]" data-testid="nexus-remote-control-plane" data-native-roadmap="true">
         <CardContent className="p-4 md:p-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-[10px] uppercase tracking-[0.16em] text-cyan-100">Nexus-owned control plane</Badge>
-                <span className="text-xs text-muted-foreground">Provider-neutral by design</span>
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 xl:max-w-[34rem]">
+              <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/30 bg-cyan-400/10 text-[10px] uppercase tracking-[0.16em] text-cyan-100">Nexus Native</Badge><Badge variant="outline" className="border-emerald-400/25 text-[10px] text-emerald-300">Safety core ready</Badge></div>
+              <p className="mt-2 text-base font-semibold tracking-tight">A first-party remote engine, built in safety-gated stages.</p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">Nexus already owns scope, technician identity, consent, ticket context, time and audit evidence. The native engine now has signed grants and a local attended-session controller; capture, relay and viewer remain unavailable until their acceptance gates pass.</p>
+              <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Nexus Native target capabilities">
+                {NATIVE_REMOTE_TARGETS.map(capability => <Badge key={capability} variant="secondary" className="text-[9px] font-normal">{capability}</Badge>)}
               </div>
-              <p className="mt-2 text-base font-semibold tracking-tight">One safe remote journey, regardless of the screen transport.</p>
-              <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Nexus owns device scope, technician identity, consent, ticket and Work Session context, repair requests and audit evidence. RustDesk is the current configured screen transport; a future Nexus-native companion will plug into this same governed session boundary rather than bypass it.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => navigate("/nexus-agent")}><Rocket className="mr-1.5 h-3.5 w-3.5" />Open Nexus Agent</Button>
+                <Button size="sm" variant="ghost" onClick={() => setTab("sessions")}><History className="mr-1.5 h-3.5 w-3.5" />Session evidence</Button>
+              </div>
             </div>
-            <div className="grid shrink-0 gap-2 sm:grid-cols-3 xl:w-[34rem]">
-              <div className="rounded-xl border border-cyan-400/15 bg-black/10 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">1. Prepare</p><p className="mt-1 text-xs text-muted-foreground">Endpoint, ticket and agent readiness</p></div>
-              <div className="rounded-xl border border-cyan-400/15 bg-black/10 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">2. Authorise</p><p className="mt-1 text-xs text-muted-foreground">Consent, purpose and policy check</p></div>
-              <div className="rounded-xl border border-cyan-400/15 bg-black/10 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-cyan-200">3. Prove</p><p className="mt-1 text-xs text-muted-foreground">Session, outcome, time and audit</p></div>
+            <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2 xl:max-w-[38rem]">
+              {NATIVE_REMOTE_STAGES.map((stage, index) => {
+                const StageIcon = stage.icon;
+                const ready = stage.status === "Ready";
+                return <div key={stage.id} className={`rounded-xl border p-3 ${ready ? "border-emerald-400/25 bg-emerald-400/[0.06]" : "border-cyan-400/15 bg-black/10"}`}><div className="flex items-center justify-between gap-2"><span className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-cyan-100"><StageIcon className={`h-3.5 w-3.5 ${ready ? "text-emerald-300" : "text-cyan-300"}`} />{index + 1}. {stage.label}</span><Badge variant="outline" className={`text-[9px] ${ready ? "border-emerald-400/25 text-emerald-300" : "border-border text-muted-foreground"}`}>{stage.status}</Badge></div><p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">{stage.detail}</p></div>;
+              })}
             </div>
           </div>
         </CardContent>
@@ -450,9 +476,9 @@ export default function RemoteAccessPage() {
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
           <TabsTrigger value="devices">Nexus Fleet ({managedDevices.length})</TabsTrigger>
-          <TabsTrigger value="registered">Transport Registry ({registered.length})</TabsTrigger>
-          <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Transport Connectors ({providers.length})</TabsTrigger>
-          {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Live Transport ({livePeers.count})</TabsTrigger>}
+          <TabsTrigger value="registered">Remote Registry ({registered.length})</TabsTrigger>
+          <TabsTrigger value="integrations" data-testid="tab-integrations"><Plug className="w-3 h-3 mr-1" />Compatibility ({providers.length})</TabsTrigger>
+          {livePeers && <TabsTrigger value="live-peers" data-testid="tab-live-peers"><Wifi className="w-3 h-3 mr-1" />Bridge Health ({livePeers.count})</TabsTrigger>}
           <TabsTrigger value="sessions">Session Evidence ({sessions.length})</TabsTrigger>
         </TabsList>
 
@@ -681,9 +707,7 @@ export default function RemoteAccessPage() {
         {/* ============ INTEGRATIONS TAB ============ */}
         <TabsContent value="integrations" className="mt-4 space-y-4" data-testid="integrations-tab">
           <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Configure screen transports behind the Nexus Remote control plane. Enable only approved providers and keep their credentials server-side.</p>
-            </div>
+            <div><p className="text-sm font-medium">Compatibility bridges</p><p className="mt-1 text-xs text-muted-foreground">Temporary provider adapters remain available while Nexus Native completes companion, relay and viewer acceptance.</p></div>
             <Badge variant="outline" className="text-xs">{providers.filter(p => p.active).length} Active / {providers.length} Available</Badge>
           </div>
 
@@ -696,10 +720,10 @@ export default function RemoteAccessPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="min-w-36">
-                    <Label className="text-[10px] uppercase text-muted-foreground">Default transport</Label>
+                    <Label className="text-[10px] uppercase text-muted-foreground">Fallback bridge</Label>
                     <Select value={remotePolicy.default_provider} onValueChange={v => setRemotePolicy(p => ({ ...p, default_provider: v }))}>
                       <SelectTrigger className="h-8 text-xs mt-1"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="rustdesk">RustDesk</SelectItem><SelectItem value="splashtop">Splashtop</SelectItem></SelectContent>
+                      <SelectContent><SelectItem value="rustdesk">RustDesk compatibility</SelectItem><SelectItem value="splashtop">Splashtop compatibility</SelectItem><SelectItem value="nexus" disabled>Nexus Native · build in progress</SelectItem></SelectContent>
                     </Select>
                   </div>
                   <div className="flex items-center gap-2 pt-4"><Switch checked={!!remotePolicy.require_consent} onCheckedChange={v => setRemotePolicy(p => ({ ...p, require_consent: v }))} /><Label className="text-xs">Confirm consent</Label></div>
