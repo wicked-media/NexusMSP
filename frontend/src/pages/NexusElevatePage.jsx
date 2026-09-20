@@ -50,6 +50,7 @@ export default function NexusElevatePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const endpointScope = searchParams.get("device") || "";
+  const ticketScope = searchParams.get("ticket") || "";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [overview, setOverview] = useState(EMPTY_OVERVIEW);
   const [requests, setRequests] = useState([]);
@@ -100,6 +101,10 @@ export default function NexusElevatePage() {
   }, [headers, endpointScope]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (ticketScope) setSecureAccessTicket(ticketScope);
+  }, [ticketScope]);
 
   useEffect(() => {
     const refreshQueue = () => {
@@ -183,7 +188,8 @@ export default function NexusElevatePage() {
       const response = await axios.get(`${API}/nexus-agent/agents`, { headers });
       const agents = (response.data || []).filter((agent) => agent.client_id);
       setSecureAccessAgents(agents);
-      if (!secureAccessAgentId && agents[0]?.id) setSecureAccessAgentId(agents[0].id);
+      const scopedAgent = agents.find((agent) => agent.id === endpointScope);
+      if (!secureAccessAgentId && (scopedAgent || agents[0])?.id) setSecureAccessAgentId((scopedAgent || agents[0]).id);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Managed endpoints could not be loaded");
     } finally {
@@ -278,9 +284,10 @@ export default function NexusElevatePage() {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return requests
+      .filter((request) => !ticketScope || request.ticket_id === ticketScope)
       .filter((request) => status === "all" || request.status === status)
       .filter((request) => !query || [request.program_name, request.program_path, request.hostname, request.client_name, request.requested_by_name, request.publisher, request.ticket_id].some((value) => String(value || "").toLowerCase().includes(query)));
-  }, [requests, search, status]);
+  }, [requests, search, status, ticketScope]);
 
   const summary = overview.summary || EMPTY_OVERVIEW.summary;
   const settings = overview.settings || EMPTY_OVERVIEW.settings;
@@ -326,6 +333,8 @@ export default function NexusElevatePage() {
           <Button variant="ghost" size="sm" className="self-start text-emerald-200 hover:bg-emerald-500/10" onClick={() => navigate("/help/nexus-elevate-setup")}>Read the technician flow <ExternalLink className="ml-1 h-3.5 w-3.5" /></Button>
         </CardContent>
       </Card>
+
+      {ticketScope && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-4 py-3 text-sm" data-testid="nexus-elevate-ticket-scope"><div><span className="font-semibold text-cyan-100">Ticket-scoped Elevate view</span><span className="ml-2 text-muted-foreground">Showing governed privilege evidence for ticket {ticketScope}{endpointScope ? " and its linked endpoint" : ""}.</span></div><Button variant="ghost" size="sm" className="text-cyan-100 hover:bg-cyan-400/[0.10]" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(ticketScope)}`)}>Return to ticket</Button></div>}
 
       <Card className="border-sky-500/20 bg-sky-500/[0.025]" data-testid="nexus-secure-access-card">
         <CardContent className="p-4">
