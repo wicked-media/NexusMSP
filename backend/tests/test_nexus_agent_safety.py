@@ -1306,6 +1306,7 @@ def _stub_optional_integration_runtime(monkeypatch):
         return {"configured": False, "ready": False}
     monkeypatch.setattr(integrations_overview, "_artifact_storage_status", storage)
     monkeypatch.setattr(integrations_overview, "_nexus_agent_binary_info", lambda: {"exists": False})
+    monkeypatch.setattr(integrations_overview, "_nexus_remote_companion_binary_info", lambda: {"exists": False})
 
 
 def test_integration_saved_credentials_are_not_reported_as_verified(monkeypatch):

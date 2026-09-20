@@ -128,7 +128,14 @@ async def _latest_agent_evidence(current_user: dict, query: dict[str, Any] | Non
         return {}
     rows = await agents.find(
         _scoped_agent_query(current_user, {"is_active": True, **(query or {})}),
-        {"_id": 0, "last_seen": 1, "agent_version": 1, "nexus_elevate.state": 1},
+        {
+            "_id": 0,
+            "last_seen": 1,
+            "agent_version": 1,
+            "nexus_elevate.state": 1,
+            "remote_companion_state": 1,
+            "remote_companion_installed_at": 1,
+        },
     ).sort("last_seen", -1).to_list(1)
     return rows[0] if rows else {}
 
@@ -144,6 +151,16 @@ def _nexus_agent_binary_info() -> dict[str, Any]:
         return _binary_info()
     except (ImportError, OSError):
         return {"exists": False, "version": None}
+
+
+def _nexus_remote_companion_binary_info() -> dict[str, Any]:
+    """Expose only release presence/versioning evidence for Nexus Remote."""
+    try:
+        from app.routers.nexus_agent import _remote_companion_binary_info
+
+        return _remote_companion_binary_info()
+    except (ImportError, OSError):
+        return {"exists": False, "sha256": "", "size": 0}
 
 
 async def _microsoft_connector_evidence(current_user: dict) -> tuple[dict[str, Any], int]:
@@ -229,6 +246,7 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
         artifact_storage,
         agent_evidence,
         elevate_evidence,
+        native_remote_evidence,
         microsoft_evidence,
     ) = await asyncio.gather(
         _platform_setting(current_user, {"type": "cipp"}),
@@ -237,16 +255,19 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
         _artifact_storage_status(),
         _latest_agent_evidence(current_user),
         _latest_agent_evidence(current_user, {"nexus_elevate.state": "active"}),
+        _latest_agent_evidence(current_user, {"remote_companion_state": "installed"}),
         _microsoft_connector_evidence(current_user),
     )
     microsoft_settings, graph_verified_tenants = microsoft_evidence
     microsoft_value = microsoft_settings.get("value") if isinstance(microsoft_settings.get("value"), dict) else {}
     synergy_value = synergy_settings.get("value") if isinstance(synergy_settings.get("value"), dict) else {}
     agent_binary = _nexus_agent_binary_info()
+    native_remote_binary = _nexus_remote_companion_binary_info()
     agent_binary_available = bool(agent_binary.get("exists"))
     agent_available = agent_binary_available or bool(agent_evidence.get("last_seen"))
     elevate_enabled = bool(elevate_settings) and bool(elevate_settings.get("native_enabled", True))
     elevate_available = elevate_enabled and (agent_binary_available or bool(elevate_evidence.get("last_seen")))
+    native_remote_available = bool(native_remote_binary.get("exists")) or bool(native_remote_evidence.get("last_seen"))
     artifact_ready = bool(artifact_storage.get("ready")) and not bool(artifact_storage.get("public"))
     artifact_test_status = (
         "success"
@@ -289,6 +310,7 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
         _tile(key="synergy_wholesale", name="Synergy Wholesale", category="network", description="Governed domains, DNS, hosting, cPanel, SSL certificates and commercial lifecycle workflows.", configured=bool(synergy_value.get("reseller_id") and synergy_value.get("wsdl") and synergy_value.get("api_key_encrypted")), last_synced_at=synergy_value.get("last_synced_at"), last_test_status=synergy_value.get("last_test_status"), command_center="/web-studio", settings_anchor="synergy-wholesale-settings-card", management_owner="settings_configuration", evidence={"credential_storage": "server_encrypted" if synergy_value.get("api_key_encrypted") else "not_configured"}),
         _tile(key="supabase_artifacts", name="Private Artifact Storage", category="documentation", description="Private Supabase Storage for generated documents, customer files, ticket evidence and reports. MongoDB remains the metadata source of truth.", configured=bool(artifact_storage.get("configured")), last_test_status=artifact_test_status, settings_anchor="supabase-storage-card", management_owner="settings_configuration", evidence={"private_bucket_ready": artifact_ready}),
         _tile(key="nexus_agent", name="NexusOps Agent", category="remote-access", description="Native endpoint agent release and scoped heartbeat evidence for managed assets.", configured=agent_available, last_synced_at=agent_evidence.get("last_seen"), command_center="/nexus-agent", settings_anchor="nexus-agent-settings-card", management_owner="operations_health", evidence={"release_available": agent_binary_available, "release_version": agent_binary.get("version"), "fresh_agent_evidence": bool(agent_evidence.get("last_seen"))}),
+        _tile(key="nexus_remote", name="Nexus Remote", category="remote-access", description="Native, consent-governed remote access through the Nexus Agent and signed Remote Companion.", configured=native_remote_available, last_synced_at=native_remote_evidence.get("remote_companion_installed_at") or native_remote_evidence.get("last_seen"), command_center="/nexus-remote", management_owner="operations_health", evidence={"companion_release_available": bool(native_remote_binary.get("exists")), "active_companion_evidence": bool(native_remote_evidence.get("last_seen")), "transport": "nexus_native"}),
         _tile(key="nexus_elevate", name="Nexus Elevate", category="security", description="Native, approval-bound privilege elevation through eligible Nexus Agent endpoints.", configured=elevate_available, last_synced_at=elevate_evidence.get("last_seen"), command_center="/nexus-elevate", settings_anchor="nexus-elevate-settings-card", management_owner="operations_health", evidence={"release_available": agent_binary_available, "active_agent_evidence": bool(elevate_evidence.get("last_seen")), "native_enabled": elevate_enabled}),
     ]
     total = len(tiles)

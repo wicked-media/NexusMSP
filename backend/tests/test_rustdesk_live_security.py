@@ -365,16 +365,11 @@ def test_remote_session_audit_records_are_scoped_to_the_technician(monkeypatch):
     assert exc.value.status_code == 404
 
 
-def test_auto_sync_worker_delegates_to_the_governed_scoped_sync_service():
+def test_legacy_rustdesk_auto_sync_worker_is_retired():
     source = (Path(__file__).resolve().parents[1] / "server.py").read_text(encoding="utf-8")
-    start = source.index("async def _rustdesk_auto_sync_loop")
-    end = source.index("\n\nasync def _trmm_scheduled_broadcast_loop", start)
-    worker = source[start:end]
-
-    assert "sync_rustdesk_peers(" in worker
-    assert "system-rustdesk-auto-sync" in worker
-    assert 'update_many({"rustdesk_id": rd_id}' not in worker
-    assert "_rustdesk_api_request" not in worker
+    assert "async def _rustdesk_auto_sync_loop" not in source
+    assert 'RETIRED_ROUTERS = {"remote_providers", "rustdesk"}' in source
+    assert "sync_rustdesk_peers(" not in source
 
 
 def test_legacy_config_write_paths_validate_origins_and_encrypt_tokens(monkeypatch):

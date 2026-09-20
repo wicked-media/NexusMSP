@@ -155,6 +155,9 @@ async def _test_work_session_remote_handoff_has_one_canonical_time_owner(monkeyp
     }))
     monkeypatch.setattr(remote_runtime, "provider_is_active", lambda _provider: _async_value(True))
     monkeypatch.setattr(remote_runtime, "provider_device_id", lambda _device, _provider: _async_value("842931675"))
+    monkeypatch.setattr(remote_runtime, "native_device_readiness", lambda *_args: _async_value({"ready": True, "unattended_ready": False}))
+    monkeypatch.setattr(remote_runtime, "issue_grant", lambda **_kwargs: _async_value({"expires_at": "2026-09-30T00:00:00+00:00"}))
+    monkeypatch.setattr(remote_runtime, "revoke_grant", lambda **_kwargs: _async_value(None))
     monkeypatch.setattr(remote_runtime, "_connection_handoff", lambda _provider, _remote_id: _async_value({
         "launch_mode": "native_client",
         "connection_url": "rustdesk://842931675",
@@ -164,13 +167,14 @@ async def _test_work_session_remote_handoff_has_one_canonical_time_owner(monkeyp
     monkeypatch.setattr(remote_runtime, "log_activity", lambda *_args, **_kwargs: _async_value(None))
     monkeypatch.setattr(remote_runtime, "emit_platform_event", lambda **_kwargs: _async_value(None))
 
-    device = {"id": "device-1", "client_id": "client-1", "name": "Reception-PC", "device_type": "workstation"}
+    device = {"id": "device-1", "client_id": "client-1", "name": "Reception-PC", "device_type": "workstation", "nexus_agent_id": "842931675"}
     user = {"id": "tech-1", "name": "Alex Tech", "email": "alex@example.test", "role": "technician"}
     started = await remote_runtime.start_remote_session(
         device=device,
         user=user,
         data={
-            "provider": "rustdesk",
+            "provider": "nexus",
+            "mode": "view",
             "ticket_id": "ticket-1",
             "work_session_id": "work-1",
             "consent_confirmed": True,
@@ -216,13 +220,15 @@ async def _test_work_session_remote_handoff_rejects_another_technician(monkeypat
         "auto_create_time_entry": True,
         "auto_ticket_note": True,
     }))
+    monkeypatch.setattr(remote_runtime, "native_device_readiness", lambda *_args: _async_value({"ready": True, "unattended_ready": False}))
 
     with pytest.raises(HTTPException) as exc:
         await remote_runtime.start_remote_session(
-            device={"id": "device-1", "client_id": "client-1", "name": "Reception-PC"},
+            device={"id": "device-1", "client_id": "client-1", "name": "Reception-PC", "nexus_agent_id": "agent-1"},
             user={"id": "tech-2", "name": "Jamie Tech", "role": "technician"},
             data={
-                "provider": "rustdesk",
+                "provider": "nexus",
+                "mode": "view",
                 "ticket_id": "ticket-1",
                 "work_session_id": "work-1",
                 "consent_confirmed": True,

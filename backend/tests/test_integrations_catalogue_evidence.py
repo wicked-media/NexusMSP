@@ -169,6 +169,7 @@ def test_catalogue_exposes_real_new_connectors_without_leaking_secrets(monkeypat
         "synergy_wholesale",
         "supabase_artifacts",
         "nexus_agent",
+        "nexus_remote",
         "nexus_elevate",
         "microsoft_partner_center",
     }.issubset(tiles)
@@ -178,6 +179,8 @@ def test_catalogue_exposes_real_new_connectors_without_leaking_secrets(monkeypat
     assert tiles["synergy_wholesale"]["connection_state"] == "configured_unverified"
     assert tiles["supabase_artifacts"]["connection_state"] == "verified"
     assert tiles["nexus_agent"]["management_owner"] == "operations_health"
+    assert tiles["nexus_remote"]["management_owner"] == "operations_health"
+    assert tiles["nexus_remote"]["evidence"]["transport"] == "nexus_native"
     assert tiles["nexus_elevate"]["management_owner"] == "operations_health"
     assert tiles["synergy_wholesale"]["settings_anchor"] == "synergy-wholesale-settings-card"
     assert tiles["supabase_artifacts"]["settings_anchor"] == "supabase-storage-card"
