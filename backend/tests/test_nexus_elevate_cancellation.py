@@ -252,3 +252,29 @@ def test_overdue_review_escalates_once_without_changing_approval_authority(monke
     assert notifications.calls[0][0]["user_id"] == "on-call-tech"
     assert notifications.calls[0][2] is True
     assert audits[0][0] == "nexus_elevate_review_escalated"
+
+
+class _ReviewNotifications:
+    def __init__(self):
+        self.rows = []
+
+    async def find_one(self, query, _projection=None):
+        return next((row for row in self.rows if all(row.get(key) == value for key, value in query.items())), None)
+
+    async def insert_one(self, row):
+        self.rows.append(dict(row))
+
+
+def test_pending_review_routes_to_active_on_call_without_granting_approval(monkeypatch):
+    notifications = _ReviewNotifications()
+    monkeypatch.setattr(permission_elevation, "db", SimpleNamespace(notifications=notifications))
+    async def active_contacts(_tenant_id):
+        return ["primary-tech", "secondary-tech"]
+    monkeypatch.setattr(permission_elevation, "_active_on_call_approvers", active_contacts)
+    request = {"id": "elev-review", "tenant_id": "tenant-1", "program_name": "Tool.exe", "hostname": "PC-01"}
+
+    asyncio.run(permission_elevation._notify_native_elevation_review(request))
+
+    assert [row["user_id"] for row in notifications.rows] == ["primary-tech", "secondary-tech"]
+    assert all(row["type"] == "nexus_elevate_review" for row in notifications.rows)
+    assert all("approval" not in row for row in notifications.rows)

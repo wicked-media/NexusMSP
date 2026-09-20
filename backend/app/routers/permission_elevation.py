@@ -277,35 +277,44 @@ async def _write_native_audit(kind: str, request: dict, actor: dict | None = Non
 
 
 async def _notify_native_elevation_review(request: dict) -> None:
-    """Create one shared, actionable operator notification for a pending request."""
+    """Route a pending review to active on-call coverage or the shared queue.
+
+    Notification routing is deliberately advisory. Each recipient must still
+    hold the Elevate operator permission before an approval endpoint permits a
+    decision, so roster data can never create a privilege path by itself.
+    """
     request_id = request.get("id")
     if not request_id:
-        return
-    existing = await db.notifications.find_one({
-        "ref_id": request_id,
-        "type": "nexus_elevate_review",
-    }, {"_id": 0, "id": 1})
-    if existing:
         return
     executable = request.get("program_name") or PureWindowsPath(request.get("program_path") or "application.exe").name
     endpoint = request.get("hostname") or "a managed endpoint"
     requester = request.get("requested_by_name") or "An endpoint user"
-    await db.notifications.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": "all",
-        "type": "nexus_elevate_review",
-        "title": "Nexus Elevate approval required",
-        "message": f"{requester} requested {executable} on {endpoint}.",
-        "ref_id": request_id,
-        "ref_type": "nexus_elevate_request",
-        "action_url": f"/nexus-elevate?status=pending&request={request_id}",
-        "action_label": "Review request",
-        "severity": "warning",
-        "read": False,
-        "read_by": [],
-        "dismissed_by": [],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    recipients = await _active_on_call_approvers(str(request.get("tenant_id") or "nexus-local"))
+    for user_id in recipients or ["all"]:
+        existing = await db.notifications.find_one({
+            "ref_id": request_id,
+            "type": "nexus_elevate_review",
+            "user_id": user_id,
+        }, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "tenant_id": request.get("tenant_id") or "nexus-local",
+            "type": "nexus_elevate_review",
+            "title": "Nexus Elevate approval required",
+            "message": f"{requester} requested {executable} on {endpoint}.",
+            "ref_id": request_id,
+            "ref_type": "nexus_elevate_request",
+            "action_url": f"/nexus-elevate?status=pending&request={quote(str(request_id), safe='')}",
+            "action_label": "Review request",
+            "severity": "warning",
+            "read": False,
+            "read_by": [],
+            "dismissed_by": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
 
 
 async def _resolve_native_elevation_review_notification(request_id: str, resolution: str) -> None:
