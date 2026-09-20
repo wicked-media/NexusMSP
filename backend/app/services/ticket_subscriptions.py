@@ -69,7 +69,7 @@ async def notify_ticket_subscribers(*, ticket: dict[str, Any], comment: dict[str
     return created
 
 
-async def notify_ticket_subscribers_of_event(*, ticket: dict[str, Any], event_id: str, title: str, message: str, severity: str = "warning", actor_id: str | None = None) -> int:
+async def notify_ticket_subscribers_of_event(*, ticket: dict[str, Any], event_id: str, title: str, message: str, severity: str = "warning", actor_id: str | None = None, action_url: str | None = None) -> int:
     """Deliver a deduplicated operational handover alert for a ticket event."""
     tenant_id = str(ticket.get("tenant_id") or "nexus-local")
     ticket_id = str(ticket.get("id") or "")
@@ -91,6 +91,7 @@ async def notify_ticket_subscribers_of_event(*, ticket: dict[str, Any], event_id
                 "id": str(uuid.uuid4()), "tenant_id": tenant_id, "user_id": user_id,
                 "type": "ticket_elevation_alert", "title": title[:180], "message": message[:1000],
                 "ref_id": ticket_id, "ref_type": "ticket", "event_id": event_id,
+                "action_url": action_url or f"/tickets?ticket={ticket_id}", "action_label": "Open ticket",
                 "severity": severity, "read": False, "created_at": datetime.now(timezone.utc).isoformat(),
             }},
             upsert=True,

@@ -87,7 +87,7 @@ export default function NexusElevatePage() {
     try {
       const [overviewResult, requestsResult, secureAccessResult] = await Promise.all([
         axios.get(`${API}/nexus-elevate/overview`, { headers }),
-        axios.get(`${API}/nexus-elevate/requests`, { headers, params: endpointScope ? { device_id: endpointScope } : undefined }),
+        axios.get(`${API}/nexus-elevate/requests`, { headers, params: { ...(endpointScope ? { device_id: endpointScope } : {}), ...(ticketScope ? { ticket_id: ticketScope } : {}) } }),
         axios.get(`${API}/nexus-elevate/secure-access/requests`, { headers, params: endpointScope ? { agent_id: endpointScope } : undefined }),
       ]);
       setOverview(overviewResult.data || EMPTY_OVERVIEW);
@@ -98,7 +98,7 @@ export default function NexusElevatePage() {
     } finally {
       setLoading(false);
     }
-  }, [headers, endpointScope]);
+  }, [headers, endpointScope, ticketScope]);
 
   useEffect(() => { load(); }, [load]);
 

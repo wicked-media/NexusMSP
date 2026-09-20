@@ -1148,6 +1148,41 @@ def test_nexus_elevate_list_is_limited_to_the_technicians_clients(monkeypatch):
     assert captured[-1] == {"client_id": {"$in": ["client-a"]}}
 
 
+def test_nexus_elevate_ticket_filter_requires_a_ticket_in_the_technicians_scope(monkeypatch):
+    captured = []
+    caller = {
+        "id": "tech-1", "role": "technician", "tenant_id": "tenant-a",
+        "client_scope_mode": "restricted", "client_scope_ids": ["client-a"],
+        "permissions": {"agent_commands": {"execute": True}},
+    }
+
+    class Users:
+        async def find_one(self, *_args): return dict(caller)
+    class Tickets:
+        async def find_one(self, query, _projection):
+            captured.append(("ticket", query))
+            return {"id": "ticket-a", "client_id": "client-a", "tenant_id": "tenant-a"}
+    class Requests:
+        def find(self, query, _projection):
+            captured.append(("requests", query))
+            return _ListCursor([])
+
+    monkeypatch.setattr(permission_elevation, "db", type("ElevateDB", (), {
+        "users": Users(), "tickets": Tickets(), "nexus_elevate_requests": Requests(),
+    })())
+    result = asyncio.run(permission_elevation.list_nexus_elevate_requests(
+        status=None, client_id=None, device_id=None, ticket_id="ticket-a", limit=150, current_user=caller,
+    ))
+
+    assert result == {"requests": []}
+    ticket_query = next(query for kind, query in captured if kind == "ticket")
+    request_query = [query for kind, query in captured if kind == "requests"][-1]
+    assert "ticket-a" in str(ticket_query)
+    assert "tenant-a" in str(ticket_query)
+    assert "ticket-a" in str(request_query)
+    assert "client-a" in str(request_query)
+
+
 def test_nexus_elevate_foreign_request_cannot_be_approved(monkeypatch):
     denials = _InsertCollection()
     monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)

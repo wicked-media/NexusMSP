@@ -209,6 +209,23 @@ async def get_ticket_handover(ticket_id: str, hours: int = 0, current_user: dict
         for record in subscription_records
         if str(record.get("user_id")) in profiles_by_id
     ]
+    elevation_rows = await db.nexus_elevate_requests.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket["id"], "client_id": ticket.get("client_id")}),
+        {"_id": 0, "id": 1, "program_name": 1, "hostname": 1, "status": 1, "approved_until": 1, "requested_at": 1, "executed_at": 1, "denial_reason": 1, "expiration_reason": 1},
+    ).sort("requested_at", -1).to_list(20) if hasattr(db, "nexus_elevate_requests") else []
+    handover["elevation"] = [
+        {
+            "id": row.get("id"), "program_name": row.get("program_name") or "Elevation request",
+            "hostname": row.get("hostname") or "Managed endpoint", "status": row.get("status") or "unknown",
+            "approved_until": row.get("approved_until"), "requested_at": row.get("requested_at"),
+            "executed_at": row.get("executed_at"),
+        }
+        for row in elevation_rows
+    ]
+    handover["scope"] = handover["scope"].replace(
+        "active subscriber roster only.",
+        "active subscriber roster and ticket-linked Nexus Elevate lifecycle evidence only.",
+    )
     return handover
 
 

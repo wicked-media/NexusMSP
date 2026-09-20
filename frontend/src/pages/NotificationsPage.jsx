@@ -29,6 +29,7 @@ const typeConfig = {
   ticket_assigned: { icon: Ticket, color: "text-sky-400", bg: "bg-sky-500/10", label: "Ticket assigned" },
   ticket_updated: { icon: Ticket, color: "text-cyan-400", bg: "bg-cyan-500/10", label: "Ticket update" },
   ticket_escalated: { icon: Shield, color: "text-rose-400", bg: "bg-rose-500/10", label: "Escalation" },
+  ticket_elevation_alert: { icon: Shield, color: "text-amber-400", bg: "bg-amber-500/10", label: "Elevation handover" },
   new_lead: { icon: UserPlus, color: "text-emerald-400", bg: "bg-emerald-500/10", label: "New lead" },
   email_received: { icon: Mail, color: "text-blue-400", bg: "bg-blue-500/10", label: "Email received" },
   system: { icon: Bell, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "System" },

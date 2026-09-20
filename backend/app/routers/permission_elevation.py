@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import PureWindowsPath
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from app.database import db
@@ -202,7 +202,7 @@ async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict
         elif kind == "nexus_elevate_execution_failed":
             alert_title = "Elevation execution needs handover"
             alert_message = f"{program} failed on {request.get('hostname') or 'a managed endpoint'}. Review the Nexus Elevate evidence before continuing work."
-            severity = "error"
+            severity = "critical"
         else:
             alert_title = "Elevation approval expired"
             alert_message = f"{program} expired on {request.get('hostname') or 'a managed endpoint'} before a successful execution was recorded."
@@ -214,6 +214,7 @@ async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict
             message=alert_message,
             severity=severity,
             actor_id=(actor or {}).get("id"),
+            action_url=f"/nexus-elevate?ticket={quote(ticket_id, safe='')}&request={quote(str(request.get('id') or ''), safe='')}",
         )
 
 
@@ -1352,6 +1353,7 @@ async def list_nexus_elevate_requests(
     status: str | None = Query(None),
     client_id: str | None = Query(None),
     device_id: str | None = Query(None),
+    ticket_id: str | None = Query(None, max_length=120),
     limit: int = Query(150, ge=1, le=500),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1365,6 +1367,13 @@ async def list_nexus_elevate_requests(
         query["client_id"] = client_id
     if device_id:
         query["device_id"] = device_id
+    ticket_reference = ticket_id.strip() if isinstance(ticket_id, str) else ""
+    if ticket_reference:
+        ticket = await db.tickets.find_one(tenant_scoped_query(caller, {"id": ticket_reference}), {"_id": 0, "id": 1, "client_id": 1})
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        await assert_client_scope(caller, ticket.get("client_id"), operation="nexus_elevate.request.read", mask_not_found=True)
+        query["ticket_id"] = ticket["id"]
     rows = await db.nexus_elevate_requests.find(
         scoped_query(caller, query, site_field=None), {"_id": 0}
     ).sort("requested_at", -1).to_list(limit)

@@ -38,6 +38,7 @@ const notificationTypeVisuals = {
   chat_mention: { icon: MessageCircle, label: "Mention", tone: "info" },
   chat_broadcast: { icon: MessageCircle, label: "Message", tone: "info" },
   thread_reply: { icon: MessageCircle, label: "Reply", tone: "info" },
+  ticket_elevation_alert: { icon: ShieldAlert, label: "Elevation", tone: "warning" },
 };
 
 const notificationToneClasses = {
