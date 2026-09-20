@@ -67,3 +67,33 @@ async def notify_ticket_subscribers(*, ticket: dict[str, Any], comment: dict[str
         )
         created += int(bool(getattr(result, "upserted_id", None)))
     return created
+
+
+async def notify_ticket_subscribers_of_event(*, ticket: dict[str, Any], event_id: str, title: str, message: str, severity: str = "warning", actor_id: str | None = None) -> int:
+    """Deliver a deduplicated operational handover alert for a ticket event."""
+    tenant_id = str(ticket.get("tenant_id") or "nexus-local")
+    ticket_id = str(ticket.get("id") or "")
+    if not ticket_id or not event_id:
+        return 0
+    await ensure_ticket_subscription_indexes()
+    subscribers = await db.ticket_subscriptions.find(
+        {"tenant_id": tenant_id, "ticket_id": ticket_id, "active": True},
+        {"_id": 0, "user_id": 1},
+    ).to_list(100)
+    created = 0
+    for subscriber in subscribers:
+        user_id = str(subscriber.get("user_id") or "")
+        if not user_id or user_id == str(actor_id or ""):
+            continue
+        result = await db.notifications.update_one(
+            {"user_id": user_id, "type": "ticket_elevation_alert", "ref_id": ticket_id, "event_id": event_id},
+            {"$setOnInsert": {
+                "id": str(uuid.uuid4()), "tenant_id": tenant_id, "user_id": user_id,
+                "type": "ticket_elevation_alert", "title": title[:180], "message": message[:1000],
+                "ref_id": ticket_id, "ref_type": "ticket", "event_id": event_id,
+                "severity": severity, "read": False, "created_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+        created += int(bool(getattr(result, "upserted_id", None)))
+    return created

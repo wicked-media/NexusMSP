@@ -14,6 +14,7 @@ from app.database import db
 from app.auth import get_current_user
 from app.routers.tech_intel import _log_audit
 from app.services.secret_store import encrypt_secret
+from app.services.ticket_subscriptions import notify_ticket_subscribers_of_event
 from app.services.scope_permissions import (
     assert_client_scope,
     effective_scope,
@@ -41,6 +42,7 @@ _TICKET_ELEVATION_ACTIONS = {
     "nexus_elevate_revoked": ("nexus_elevate_revoked", "Queued elevation launch revoked"),
     "nexus_elevate_executed": ("nexus_elevate_executed", "Elevation executed"),
     "nexus_elevate_execution_failed": ("nexus_elevate_execution_failed", "Elevation execution failed"),
+    "nexus_elevate_expired": ("nexus_elevate_expired", "Elevation approval expired"),
 }
 
 
@@ -162,7 +164,7 @@ async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict
         ticket_query["$or"] = [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}]
     else:
         ticket_query["tenant_id"] = tenant_id
-    ticket = await db.tickets.find_one(ticket_query, {"_id": 0, "id": 1})
+    ticket = await db.tickets.find_one(ticket_query, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "tenant_id": 1})
     if not ticket:
         return
 
@@ -191,6 +193,28 @@ async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict
         {"$setOnInsert": entry},
         upsert=True,
     )
+    if kind in {"nexus_elevate_approved", "nexus_elevate_execution_failed", "nexus_elevate_expired"}:
+        if kind == "nexus_elevate_approved":
+            expires = str(request.get("approved_until") or "the approved window closes")
+            alert_title = "Elevation approval window is active"
+            alert_message = f"{program} was approved for {request.get('hostname') or 'a managed endpoint'} and expires at {expires}."
+            severity = "warning"
+        elif kind == "nexus_elevate_execution_failed":
+            alert_title = "Elevation execution needs handover"
+            alert_message = f"{program} failed on {request.get('hostname') or 'a managed endpoint'}. Review the Nexus Elevate evidence before continuing work."
+            severity = "error"
+        else:
+            alert_title = "Elevation approval expired"
+            alert_message = f"{program} expired on {request.get('hostname') or 'a managed endpoint'} before a successful execution was recorded."
+            severity = "warning"
+        await notify_ticket_subscribers_of_event(
+            ticket=ticket,
+            event_id=f"elevate:{request.get('id')}:{kind}",
+            title=alert_title,
+            message=alert_message,
+            severity=severity,
+            actor_id=(actor or {}).get("id"),
+        )
 
 
 async def _write_native_audit(kind: str, request: dict, actor: dict | None = None, details: dict | None = None) -> None:

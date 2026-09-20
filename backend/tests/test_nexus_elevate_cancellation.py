@@ -150,9 +150,14 @@ class _TicketAuditRows:
 
 def test_elevation_lifecycle_is_projected_to_its_validated_ticket(monkeypatch):
     ticket_audit = _TicketAuditRows()
+    alerts = []
     monkeypatch.setattr(permission_elevation, "db", SimpleNamespace(
         tickets=_TicketRows(), ticket_audit_log=ticket_audit,
     ))
+    async def notify(**kwargs):
+        alerts.append(kwargs)
+        return 1
+    monkeypatch.setattr(permission_elevation, "notify_ticket_subscribers_of_event", notify)
     request = {
         "id": "elev-4", "ticket_id": "ticket-1", "tenant_id": "nexus-local",
         "client_id": "client-1", "device_id": "agent-1", "program_name": "Tool.exe",
@@ -172,6 +177,8 @@ def test_elevation_lifecycle_is_projected_to_its_validated_ticket(monkeypatch):
     entry = update["$setOnInsert"]
     assert entry["details"] == "Elevation approved: Tool.exe on PC-01."
     assert entry["metadata"]["agent_command_id"] == "cmd-4"
+    assert alerts[0]["event_id"] == "elevate:elev-4:nexus_elevate_approved"
+    assert alerts[0]["severity"] == "warning"
 
 
 def test_agent_ticket_reference_is_resolved_to_a_stable_same_scope_id(monkeypatch):

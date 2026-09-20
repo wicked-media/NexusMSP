@@ -72,6 +72,45 @@ class TicketSubscriptionUpdate(BaseModel):
     subscribed: bool
 
 
+@router.get("/tickets/{ticket_id}/nexus-elevate")
+async def get_ticket_nexus_elevate(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Return safe, ticket-local Elevate evidence after ticket scope is proven."""
+    ticket = await _ticket_in_tenant_scope(ticket_id, current_user, "ticket.audit.read")
+    device_ids = list(dict.fromkeys([
+        *[str(value) for value in ticket.get("device_ids") or [] if value],
+        *([str(ticket["device_id"])] if ticket.get("device_id") else []),
+    ]))
+    requests, devices = await asyncio.gather(
+        db.nexus_elevate_requests.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket["id"], "client_id": ticket.get("client_id")}),
+            {"_id": 0, "id": 1, "device_id": 1, "hostname": 1, "program_name": 1, "status": 1,
+             "requested_at": 1, "approved_at": 1, "approved_until": 1, "executed_at": 1,
+             "execution_exit_code": 1, "denial_reason": 1, "expiration_reason": 1},
+        ).sort("requested_at", -1).to_list(100),
+        db.devices.find(
+            tenant_scoped_query(current_user, {"id": {"$in": device_ids}, "client_id": ticket.get("client_id")}),
+            {"_id": 0, "id": 1, "nexus_agent_id": 1},
+        ).to_list(100),
+    )
+    device_agent_ids = [str(device.get("nexus_agent_id")) for device in devices if device.get("nexus_agent_id")]
+    agents = await db.nexus_agents.find(
+        tenant_scoped_query(current_user, {"id": {"$in": device_agent_ids}, "client_id": ticket.get("client_id"), "is_active": True}),
+        {"_id": 0, "id": 1, "hostname": 1, "last_seen": 1, "nexus_elevate": 1},
+    ).to_list(100) if device_agent_ids else []
+    linked_agents = [
+        {
+            "id": agent.get("id"), "hostname": agent.get("hostname") or "Managed endpoint",
+            "last_seen": agent.get("last_seen"),
+            "elevate_state": (agent.get("nexus_elevate") or {}).get("state") or "not_ready",
+        }
+        for agent in agents
+    ]
+    return {
+        "ticket_id": ticket["id"], "requests": requests, "linked_agents": linked_agents,
+        "can_open_elevate": bool(linked_agents),
+    }
+
+
 @router.get("/tickets/{ticket_id}/subscribers")
 async def get_ticket_subscribers(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await _ticket_in_tenant_scope(ticket_id, current_user, "ticket.comment.read")

@@ -19,6 +19,7 @@ import TicketJumpAccessRequest from "@/components/tickets/TicketJumpAccessReques
 import TicketServiceTierWidget from "@/components/tickets/TicketServiceTierWidget";
 import TicketServiceKitPanel from "@/components/tickets/TicketServiceKitPanel";
 import TicketServiceKitDialog from "@/components/tickets/TicketServiceKitDialog";
+import TicketElevateEvidence from "@/components/tickets/TicketElevateEvidence";
 import { TicketModuleHeader, TicketToolAction, TicketToolsCenter, TicketWorkspaceTabs } from "@/components/tickets/TicketWorkspaceShell";
 import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
@@ -2320,6 +2321,8 @@ export default function TicketsPage() {
 
         {/* Finance Intel: Quote Nudge banner */}
         <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
+
+        {!ticketFocusMode && <TicketElevateEvidence ticket={viewingTicket} headers={headers} />}
 
         <Card className={`${ticketFocusMode ? "hidden" : ""} overflow-hidden rounded-xl border border-violet-400/12 bg-violet-500/[0.035]`} data-testid="ticket-advanced-edge-tools">
           <CardContent className="flex flex-col gap-2.5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
