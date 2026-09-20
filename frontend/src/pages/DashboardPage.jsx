@@ -13,7 +13,7 @@ import {
   MessageSquare, Activity, AlertCircle, CheckCircle,
   Shield, HardDrive, ExternalLink, Plus,
   ChevronDown, ChevronRight, TrendingUp, Zap, Server, Laptop, Wifi, Eye, Cpu, Sparkles,
-  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, Mail
+  Lock, Unlock, RotateCcw, X, PlusCircle, LayoutGrid, Mail, BellRing
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -60,6 +60,7 @@ const WIDGET_META = {
   "fleet-health": { label: "Fleet Health",           icon: Cpu },
   "ops-insights": { label: "Operational Insights",   icon: Eye },
   "open-tix":     { label: "Open Tickets",           icon: Ticket },
+  "subscribed-tix": { label: "Subscribed Tickets",   icon: BellRing },
   "alerts":       { label: "Alerts",                 icon: AlertTriangle },
   "activity":     { label: "Activity Feed",          icon: Zap },
 };
@@ -77,20 +78,21 @@ const DEFAULT_LAYOUT_LG = [
   { i: "ticket-trend",x: 0, y: 15, w: 6,  h: 6, minH: 4, minW: 4 },
   { i: "fleet-health",x: 6, y: 15, w: 6,  h: 6, minH: 4, minW: 4 },
   { i: "ops-insights",x: 0, y: 21, w: 12, h: 5, minH: 4, minW: 6 },
-  { i: "team-pins",   x: 0, y: 26, w: 12, h: 3, minH: 2, minW: 6 },
-  { i: "blueprint",   x: 0, y: 29, w: 12, h: 4, minH: 3, minW: 4 },
-  { i: "threat",      x: 0, y: 33, w: 12, h: 2, minH: 1, minW: 6 },
+  { i: "subscribed-tix", x: 0, y: 26, w: 6, h: 5, minH: 4, minW: 4 },
+  { i: "team-pins",   x: 6, y: 26, w: 6, h: 5, minH: 2, minW: 4 },
+  { i: "blueprint",   x: 0, y: 31, w: 12, h: 4, minH: 3, minW: 4 },
+  { i: "threat",      x: 0, y: 35, w: 12, h: 2, minH: 1, minW: 6 },
   // Optional modules retain placements so restoring them from Customise is
   // immediate and never causes widget overlap.
-  { i: "cross-bridge",x: 0, y: 35, w: 12, h: 5, minH: 3, minW: 6 },
-  { i: "whats-new",   x: 0, y: 40, w: 6,  h: 5, minH: 4, minW: 4 },
-  { i: "churn",       x: 6, y: 40, w: 6,  h: 5, minH: 3, minW: 4 },
-  { i: "huntress",    x: 0, y: 45, w: 12, h: 4, minH: 2, minW: 6 },
+  { i: "cross-bridge",x: 0, y: 37, w: 12, h: 5, minH: 3, minW: 6 },
+  { i: "whats-new",   x: 0, y: 42, w: 6,  h: 5, minH: 4, minW: 4 },
+  { i: "churn",       x: 6, y: 42, w: 6,  h: 5, minH: 3, minW: 4 },
+  { i: "huntress",    x: 0, y: 47, w: 12, h: 4, minH: 2, minW: 6 },
 ];
 
 const DEFAULT_HIDDEN_WIDGETS = new Set(["cross-bridge", "whats-new", "churn", "huntress"]);
-const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v7";
-const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v7";
+const LAYOUT_STORAGE_KEY = "nx-dashboard-layout-v8";
+const HIDDEN_STORAGE_KEY = "nx-dashboard-hidden-v8";
 export default function DashboardPage() {
   const { token, user } = useAuth();
   const navigate = useNavigate();
@@ -102,6 +104,7 @@ export default function DashboardPage() {
   const [ticketTrends, setTicketTrends] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [subscribedTickets, setSubscribedTickets] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
   const [devices, setDevices] = useState([]);
   const [mspIntel, setMspIntel] = useState(null);
@@ -123,7 +126,7 @@ export default function DashboardPage() {
       .then(response => response.data)
       .catch(() => fallback);
     try {
-      const [statsData, trendsData, alertsData, ticketsData, activityData, enhancedData, devicesData, missionData, brainData] = await Promise.all([
+      const [statsData, trendsData, alertsData, ticketsData, activityData, enhancedData, devicesData, missionData, brainData, subscribedData] = await Promise.all([
         dashboardGet("/dashboard/stats", { open_tickets: 0 }),
         dashboardGet("/dashboard/ticket-trends", []),
         dashboardGet("/alerts?status=active", []),
@@ -135,6 +138,7 @@ export default function DashboardPage() {
         dashboardGet("/devices", []),
         dashboardGet("/mission-control/overview", null),
         dashboardGet("/mission-control/brain", null),
+        dashboardGet("/tickets/subscribed", { tickets: [] }),
       ]);
       setStats(statsData || { open_tickets: 0 });
       setEnhancedStats(enhancedData || null);
@@ -151,6 +155,7 @@ export default function DashboardPage() {
         });
       setAlerts([...(Array.isArray(alertsData) ? alertsData : []), ...liveAgentAlerts]);
       setTickets((Array.isArray(ticketsData) ? ticketsData : []).slice(0, 8));
+      setSubscribedTickets(Array.isArray(subscribedData?.tickets) ? subscribedData.tickets.slice(0, 8) : []);
       setActivityFeed(Array.isArray(activityData) ? activityData : []);
       setDevices(resolvedDevices);
       setMissionControl(missionData);
@@ -450,6 +455,16 @@ export default function DashboardPage() {
               {(mspIntel?.urgentPredictions || []).length === 0 && <p className="text-[10px] text-emerald-400/80 px-2 py-1.5">No urgent predictions</p>}
             </div>
           </CardContent>
+        </Card>
+      </div>
+      )}
+
+      {!hiddenWidgets.has("subscribed-tix") && (
+      <div key="subscribed-tix" className="nx-widget-card">
+        <button onClick={(e) => { e.stopPropagation(); hideWidget("subscribed-tix"); }} className="nx-widget-hide" data-testid="hide-widget-subscribed-tix" aria-label="Hide Subscribed Tickets"><X className="w-3 h-3" /></button>
+        <Card className="h-full overflow-hidden border-violet-500/20 bg-gradient-to-br from-card via-card to-violet-500/[0.035]" data-testid="subscribed-tickets-widget">
+          <CardHeader className="flex flex-row items-center justify-between pb-2"><div><CardTitle className="flex items-center gap-2 text-sm font-semibold"><BellRing className="h-4 w-4 text-violet-300" />Subscribed tickets</CardTitle><p className="mt-1 text-[10px] text-muted-foreground">Work you chose to follow for handover continuity.</p></div><Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-violet-200 hover:bg-violet-500/10" onClick={() => navigate("/tickets")}>View all</Button></CardHeader>
+          <CardContent className="space-y-2 pb-3">{subscribedTickets.length ? subscribedTickets.slice(0, 4).map((ticket) => <button key={ticket.id} type="button" onClick={() => navigate(ticketPath(ticket))} className="flex w-full items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/35 px-3 py-2 text-left transition-colors hover:border-violet-400/30 hover:bg-violet-500/[0.045]"><span className="min-w-0"><span className="block truncate text-xs font-medium">{ticket.ticket_number || "Ticket"} · {ticket.title || "Untitled ticket"}</span><span className="mt-0.5 block truncate text-[10px] text-muted-foreground">{ticket.client_name || "Client not recorded"}{ticket.updated_at ? ` · updated ${formatDistanceToNow(new Date(ticket.updated_at), { addSuffix: true })}` : ""}</span></span><Badge variant="outline" className={`shrink-0 text-[9px] ${priorityColors[ticket.priority] || "text-muted-foreground"}`}>{String(ticket.status || "open").replace(/_/g, " ")}</Badge></button>) : <div className="rounded-lg border border-dashed border-violet-400/20 bg-violet-500/[0.025] px-3 py-5 text-center text-xs text-muted-foreground">You are not following any tickets in your permitted scope yet. Use <span className="font-medium text-violet-200">Subscribe</span> on a ticket to keep its handover updates here.</div>}</CardContent>
         </Card>
       </div>
       )}

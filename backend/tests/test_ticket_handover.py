@@ -148,3 +148,45 @@ def test_subscriber_change_records_target_in_audit_metadata(monkeypatch):
         "subscriber_name": "Robin",
         "subscription_active": True,
     }
+
+
+def test_dashboard_subscribed_tickets_remains_tenant_and_client_scoped(monkeypatch):
+    class Subscriptions:
+        def __init__(self):
+            self.query = None
+
+        def find(self, query, _projection):
+            self.query = query
+            return self
+
+        async def to_list(self, _limit):
+            return [{"ticket_id": "ticket-1"}]
+
+    class TicketRows:
+        def __init__(self):
+            self.query = None
+
+        def find(self, query, _projection):
+            self.query = query
+            return self
+
+        def sort(self, *_args):
+            return self
+
+        async def to_list(self, _limit):
+            return [{"id": "ticket-1", "title": "Followed work", "client_id": "client-1"}]
+
+    subscriptions = Subscriptions()
+    ticket_rows = TicketRows()
+    async def indexes():
+        return None
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(ticket_subscriptions=subscriptions, tickets=ticket_rows))
+    monkeypatch.setattr(tickets, "ensure_ticket_subscription_indexes", indexes)
+
+    result = asyncio.run(tickets.list_my_subscribed_tickets(
+        {"id": "tech-1", "role": "admin", "tenant_id": "tenant-a"}
+    ))
+
+    assert result["total"] == 1
+    assert subscriptions.query == {"tenant_id": "tenant-a", "user_id": "tech-1", "active": True}
+    assert ticket_rows.query == {"$and": [{"id": {"$in": ["ticket-1"]}}, {"tenant_id": "tenant-a"}]}

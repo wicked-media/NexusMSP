@@ -72,6 +72,32 @@ class TicketSubscriptionUpdate(BaseModel):
     subscribed: bool
 
 
+@router.get("/tickets/subscribed")
+async def list_my_subscribed_tickets(current_user: dict = Depends(get_current_user)):
+    """Return ticket work explicitly followed by the signed-in technician.
+
+    A subscription is only a delivery preference. Each resulting ticket is
+    still filtered by the caller's tenant and client scope before it reaches
+    the dashboard, so following a ticket can never become a visibility grant.
+    """
+    tenant_id = platform_tenant_id(current_user)
+    await ensure_ticket_subscription_indexes()
+    subscriptions = await db.ticket_subscriptions.find(
+        {"tenant_id": tenant_id, "user_id": str(current_user.get("id") or ""), "active": True},
+        {"_id": 0, "ticket_id": 1, "created_at": 1, "updated_at": 1},
+    ).to_list(250)
+    ticket_ids = [str(row.get("ticket_id")) for row in subscriptions if row.get("ticket_id")]
+    if not ticket_ids:
+        return {"tickets": [], "total": 0}
+    tickets = await db.tickets.find(
+        scoped_query(current_user, tenant_scoped_query(current_user, {"id": {"$in": ticket_ids}})),
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1, "priority": 1,
+         "client_id": 1, "client_name": 1, "assigned_to": 1, "assigned_name": 1,
+         "updated_at": 1, "created_at": 1},
+    ).sort("updated_at", -1).to_list(100)
+    return {"tickets": tickets, "total": len(tickets)}
+
+
 @router.get("/tickets/{ticket_id}/nexus-elevate")
 async def get_ticket_nexus_elevate(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Return safe, ticket-local Elevate evidence after ticket scope is proven."""
