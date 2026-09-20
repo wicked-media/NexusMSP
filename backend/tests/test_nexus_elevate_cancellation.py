@@ -278,3 +278,38 @@ def test_pending_review_routes_to_active_on_call_without_granting_approval(monke
     assert [row["user_id"] for row in notifications.rows] == ["primary-tech", "secondary-tech"]
     assert all(row["type"] == "nexus_elevate_review" for row in notifications.rows)
     assert all("approval" not in row for row in notifications.rows)
+
+
+class _PolicyCursor:
+    def __init__(self):
+        self.query = None
+
+    def sort(self, *_args):
+        return self
+
+    async def to_list(self, _limit):
+        return []
+
+
+class _PolicyRows:
+    def __init__(self):
+        self.cursor = _PolicyCursor()
+
+    def find(self, query, _projection=None):
+        self.cursor.query = query
+        return self.cursor
+
+
+def test_policy_evaluation_is_partitioned_to_the_request_tenant(monkeypatch):
+    policies = _PolicyRows()
+    monkeypatch.setattr(permission_elevation, "db", SimpleNamespace(nexus_elevate_policies=policies))
+
+    result = asyncio.run(permission_elevation._evaluate_native_policy({"tenant_id": "tenant-2"}))
+
+    assert result["decision"] == "approval"
+    assert policies.cursor.query == {
+        "$and": [
+            {"enabled": True, "archived_at": {"$in": [None, ""]}},
+            {"tenant_id": "tenant-2"},
+        ],
+    }

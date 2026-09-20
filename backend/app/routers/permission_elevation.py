@@ -647,7 +647,9 @@ async def _evaluate_native_policy(request: dict) -> dict:
     before starting the process.
     """
     policies = await db.nexus_elevate_policies.find(
-        {"enabled": True, "archived_at": {"$in": [None, ""]}}, {"_id": 0}
+        tenant_scoped_query({"tenant_id": request.get("tenant_id") or "nexus-local"}, {
+            "enabled": True, "archived_at": {"$in": [None, ""]},
+        }), {"_id": 0}
     ).sort("priority", -1).to_list(500)
     action_rank = {"deny": 3, "approval": 2, "allow": 1}
     ordered = sorted(policies, key=lambda item: (-int(item.get("priority") or 0), -action_rank.get(item.get("action"), 0), str(item.get("created_at") or "")))
@@ -781,7 +783,9 @@ async def _queue_policy_auto_approval(request: dict, policy_match: dict) -> str:
 async def list_nexus_elevate_policies(current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    policies = await db.nexus_elevate_policies.find({"archived_at": {"$in": [None, ""]}}, {"_id": 0}).sort("priority", -1).to_list(500)
+    policies = await db.nexus_elevate_policies.find(
+        tenant_scoped_query(caller, {"archived_at": {"$in": [None, ""]}}), {"_id": 0}
+    ).sort("priority", -1).to_list(500)
     policies = [policy for policy in policies if _policy_visible_to_caller(policy, caller)]
     clients = await db.clients.find(
         scoped_query(caller, {}, field="id", site_field=None), {"_id": 0, "id": 1, "name": 1}
@@ -806,6 +810,7 @@ async def create_nexus_elevate_policy(data: dict, current_user: dict = Depends(g
     now = datetime.now(timezone.utc).isoformat()
     policy = {
         "id": f"nep-{uuid.uuid4().hex[:16]}",
+        "tenant_id": platform_tenant_id(caller),
         **payload,
         "version": 1,
         "created_at": now,
@@ -825,7 +830,9 @@ async def create_nexus_elevate_policy(data: dict, current_user: dict = Depends(g
 async def update_nexus_elevate_policy(policy_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_admin(caller)
-    existing = await db.nexus_elevate_policies.find_one({"id": policy_id, "archived_at": {"$in": [None, ""]}}, {"_id": 0})
+    existing = await db.nexus_elevate_policies.find_one(
+        tenant_scoped_query(caller, {"id": policy_id, "archived_at": {"$in": [None, ""]}}), {"_id": 0}
+    )
     if not existing:
         raise HTTPException(status_code=404, detail="Nexus Elevate policy not found")
     payload = _policy_payload(data, existing)
@@ -836,7 +843,9 @@ async def update_nexus_elevate_policy(policy_id: str, data: dict, current_user: 
         "updated_by_id": caller.get("id"),
         "updated_by_name": caller.get("name"),
     }
-    await db.nexus_elevate_policies.update_one({"id": policy_id}, {"$set": update})
+    await db.nexus_elevate_policies.update_one(
+        tenant_scoped_query(caller, {"id": policy_id}), {"$set": update}
+    )
     existing.update(update)
     await _write_policy_audit("nexus_elevate_policy_updated", existing, caller, {"action": existing["action"], "mode": existing["mode"], "version": existing["version"]})
     return {"policy": _policy_view(existing)}
@@ -846,11 +855,16 @@ async def update_nexus_elevate_policy(policy_id: str, data: dict, current_user: 
 async def archive_nexus_elevate_policy(policy_id: str, current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_admin(caller)
-    policy = await db.nexus_elevate_policies.find_one({"id": policy_id, "archived_at": {"$in": [None, ""]}}, {"_id": 0})
+    policy = await db.nexus_elevate_policies.find_one(
+        tenant_scoped_query(caller, {"id": policy_id, "archived_at": {"$in": [None, ""]}}), {"_id": 0}
+    )
     if not policy:
         raise HTTPException(status_code=404, detail="Nexus Elevate policy not found")
     archived_at = datetime.now(timezone.utc).isoformat()
-    await db.nexus_elevate_policies.update_one({"id": policy_id}, {"$set": {"enabled": False, "archived_at": archived_at, "archived_by_id": caller.get("id")}})
+    await db.nexus_elevate_policies.update_one(
+        tenant_scoped_query(caller, {"id": policy_id}),
+        {"$set": {"enabled": False, "archived_at": archived_at, "archived_by_id": caller.get("id")}},
+    )
     policy.update({"enabled": False, "archived_at": archived_at})
     await _write_policy_audit("nexus_elevate_policy_archived", policy, caller)
     return {"ok": True}
@@ -872,6 +886,7 @@ async def simulate_nexus_elevate_policy(data: dict, current_user: dict = Depends
     if client_id:
         await assert_client_scope(caller, client_id, operation="nexus_elevate.policy.simulate")
     request = {
+        "tenant_id": platform_tenant_id(caller),
         "device_id": device_id,
         "client_id": client_id,
         "program_path": program_path,
@@ -1441,8 +1456,12 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
     expiring = [row for row in requests if row.get("status") == "approved" and row.get("approved_until") and row["approved_until"] <= (now + timedelta(minutes=10)).isoformat()]
     failed = [row for row in requests if row.get("status") in {"failed", "expired"}]
     recent = [await _request_view(row) for row in requests[:8]]
-    active_policies = sum(1 for policy in await db.nexus_elevate_policies.find({"enabled": True, "archived_at": {"$in": [None, ""]}}, {"_id": 0, "match": 1}).to_list(500) if _policy_visible_to_caller(policy, caller))
-    enforced_policies = sum(1 for policy in await db.nexus_elevate_policies.find({"enabled": True, "mode": "enforce", "archived_at": {"$in": [None, ""]}}, {"_id": 0, "match": 1}).to_list(500) if _policy_visible_to_caller(policy, caller))
+    active_policies = sum(1 for policy in await db.nexus_elevate_policies.find(
+        tenant_scoped_query(caller, {"enabled": True, "archived_at": {"$in": [None, ""]}}), {"_id": 0, "match": 1}
+    ).to_list(500) if _policy_visible_to_caller(policy, caller))
+    enforced_policies = sum(1 for policy in await db.nexus_elevate_policies.find(
+        tenant_scoped_query(caller, {"enabled": True, "mode": "enforce", "archived_at": {"$in": [None, ""]}}), {"_id": 0, "match": 1}
+    ).to_list(500) if _policy_visible_to_caller(policy, caller))
     return {
         "settings": settings,
         "summary": {
