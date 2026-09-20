@@ -129,3 +129,61 @@ def test_dispatched_elevation_launch_is_not_falsely_reported_as_revoked(monkeypa
     assert requests.rows[0]["status"] == "approved"
     assert commands.rows[0]["status"] == "dispatched"
     assert audit == []
+
+
+class _TicketRows:
+    def __init__(self):
+        self.query = None
+
+    async def find_one(self, _query, _projection=None):
+        self.query = _query
+        return {"id": "ticket-1"}
+
+
+class _TicketAuditRows:
+    def __init__(self):
+        self.calls = []
+
+    async def update_one(self, query, update, upsert=False):
+        self.calls.append((query, update, upsert))
+
+
+def test_elevation_lifecycle_is_projected_to_its_validated_ticket(monkeypatch):
+    ticket_audit = _TicketAuditRows()
+    monkeypatch.setattr(permission_elevation, "db", SimpleNamespace(
+        tickets=_TicketRows(), ticket_audit_log=ticket_audit,
+    ))
+    request = {
+        "id": "elev-4", "ticket_id": "ticket-1", "tenant_id": "nexus-local",
+        "client_id": "client-1", "device_id": "agent-1", "program_name": "Tool.exe",
+        "hostname": "PC-01", "status": "approved", "agent_command_id": "cmd-4",
+    }
+
+    asyncio.run(permission_elevation._write_ticket_elevation_evidence(
+        "nexus_elevate_approved", request, {"id": "tech-1", "name": "Alex Technician"}, {}
+    ))
+
+    assert len(ticket_audit.calls) == 1
+    query, update, upsert = ticket_audit.calls[0]
+    assert query == {
+        "ticket_id": "ticket-1", "elevation_request_id": "elev-4", "action": "nexus_elevate_approved",
+    }
+    assert upsert is True
+    entry = update["$setOnInsert"]
+    assert entry["details"] == "Elevation approved: Tool.exe on PC-01."
+    assert entry["metadata"]["agent_command_id"] == "cmd-4"
+
+
+def test_agent_ticket_reference_is_resolved_to_a_stable_same_scope_id(monkeypatch):
+    tickets = _TicketRows()
+    monkeypatch.setattr(permission_elevation, "db", SimpleNamespace(tickets=tickets))
+
+    ticket_id = asyncio.run(permission_elevation._resolve_agent_ticket_id(
+        {"client_id": "client-1", "tenant_id": "tenant-1"}, "TKT-1042"
+    ))
+
+    assert ticket_id == "ticket-1"
+    assert tickets.query == {
+        "client_id": "client-1", "tenant_id": "tenant-1",
+        "$or": [{"id": "TKT-1042"}, {"ticket_number": "TKT-1042"}],
+    }

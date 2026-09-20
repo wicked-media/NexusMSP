@@ -30,6 +30,19 @@ SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 SECURE_ACCESS_PROVIDERS = {"entra_pim", "windows_laps"}
 SECURE_ACCESS_CONNECTOR_KEY = "nexus_secure_access_connector"
 
+_TICKET_ELEVATION_ACTIONS = {
+    "nexus_elevate_requested": ("nexus_elevate_requested", "Elevation requested"),
+    "nexus_elevate_policy_auto_approved": ("nexus_elevate_policy_auto_approved", "Elevation policy queued a launch"),
+    "nexus_elevate_policy_denied": ("nexus_elevate_policy_denied", "Elevation policy blocked a request"),
+    "nexus_elevate_policy_review_required": ("nexus_elevate_policy_review_required", "Elevation policy requires technician review"),
+    "nexus_elevate_approved": ("nexus_elevate_approved", "Elevation approved"),
+    "nexus_elevate_denied": ("nexus_elevate_denied", "Elevation denied"),
+    "nexus_elevate_cancelled": ("nexus_elevate_cancelled", "Elevation request withdrawn"),
+    "nexus_elevate_revoked": ("nexus_elevate_revoked", "Queued elevation launch revoked"),
+    "nexus_elevate_executed": ("nexus_elevate_executed", "Elevation executed"),
+    "nexus_elevate_execution_failed": ("nexus_elevate_execution_failed", "Elevation execution failed"),
+}
+
 
 def _ensure_admin(caller: dict):
     if caller.get("role") != "admin" and not caller.get("is_admin"):
@@ -101,6 +114,85 @@ async def _native_settings() -> dict:
     }
 
 
+def _ticket_query_for_agent(agent: dict, ticket_reference: str) -> dict:
+    """Constrain a linked ticket to the enrolled endpoint's client and tenant."""
+    client_id = str(agent.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=409, detail="The managed endpoint must be assigned to a client before linking a ticket")
+    reference_query = {"client_id": client_id, "$or": [{"id": ticket_reference}, {"ticket_number": ticket_reference}]}
+    tenant_id = str(agent.get("tenant_id") or "nexus-local")
+    if tenant_id == "nexus-local":
+        return {
+            "$and": [
+                reference_query,
+                {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}]},
+            ]
+        }
+    return {**reference_query, "tenant_id": tenant_id}
+
+
+async def _resolve_agent_ticket_id(agent: dict, ticket_reference: str) -> str:
+    """Resolve an optional display number to a stable, same-scope ticket ID."""
+    reference = str(ticket_reference or "").strip()
+    if not reference:
+        return ""
+    if len(reference) > 120:
+        raise HTTPException(status_code=400, detail="Ticket reference is too long")
+    ticket = await db.tickets.find_one(_ticket_query_for_agent(agent, reference), {"_id": 0, "id": 1})
+    if not ticket or not ticket.get("id"):
+        raise HTTPException(status_code=422, detail="Linked ticket is not available for this managed endpoint")
+    return str(ticket["id"])
+
+
+async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict | None, details: dict) -> None:
+    """Project safe Elevate lifecycle evidence into a validated ticket timeline.
+
+    The Elevate request and command remain authoritative. This is a derived,
+    idempotent ticket-local audit projection to make handovers and reviews
+    visible where service work is managed.
+    """
+    mapping = _TICKET_ELEVATION_ACTIONS.get(kind)
+    ticket_id = str(request.get("ticket_id") or "").strip()
+    tenant_id = str(request.get("tenant_id") or "").strip()
+    client_id = str(request.get("client_id") or "").strip()
+    if not mapping or not ticket_id or not tenant_id or not client_id:
+        return
+    ticket_query = {"id": ticket_id, "client_id": client_id}
+    if tenant_id == "nexus-local":
+        ticket_query["$or"] = [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}]
+    else:
+        ticket_query["tenant_id"] = tenant_id
+    ticket = await db.tickets.find_one(ticket_query, {"_id": 0, "id": 1})
+    if not ticket:
+        return
+
+    action, label = mapping
+    program = str(request.get("program_name") or PureWindowsPath(request.get("program_path") or "application.exe").name)
+    metadata = {
+        "nexus_elevate_kind": kind,
+        "elevation_request_id": request.get("id"),
+        "agent_id": request.get("device_id"),
+        "agent_command_id": request.get("agent_command_id") or details.get("agent_command_id") or details.get("command_id"),
+        "status": request.get("status"),
+    }
+    entry = {
+        "id": f"ticket-elevate:{ticket_id}:{request.get('id')}:{action}",
+        "ticket_id": ticket_id,
+        "action": action,
+        "details": f"{label}: {program} on {request.get('hostname') or 'managed endpoint'}.",
+        "user_id": (actor or {}).get("id") or f"nexus-agent:{request.get('device_id') or 'unknown'}",
+        "user_name": (actor or {}).get("name") or "Nexus Elevate",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "elevation_request_id": request.get("id"),
+        "metadata": {key: value for key, value in metadata.items() if value not in (None, "")},
+    }
+    await db.ticket_audit_log.update_one(
+        {"ticket_id": ticket_id, "elevation_request_id": request.get("id"), "action": action},
+        {"$setOnInsert": entry},
+        upsert=True,
+    )
+
+
 async def _write_native_audit(kind: str, request: dict, actor: dict | None = None, details: dict | None = None) -> None:
     """Persist a purpose-built, immutable-style event alongside the global audit."""
     event = {
@@ -127,6 +219,13 @@ async def _write_native_audit(kind: str, request: dict, actor: dict | None = Non
             # The primary elevation audit must still succeed if the older
             # cross-platform audit writer has a transient issue.
             pass
+    try:
+        await _write_ticket_elevation_evidence(kind, request, actor, details or {})
+    except Exception:
+        # Ticket evidence is a derived projection. It must never conceal or
+        # reverse the authoritative Elevate audit if an older ticket timeline
+        # collection is temporarily unavailable.
+        pass
 
 
 async def _notify_native_elevation_review(request: dict) -> None:
@@ -1506,6 +1605,7 @@ async def create_native_elevation_request(
     if settings["require_justification"] and len(justification) < 8:
         raise HTTPException(status_code=400, detail="A technician or end-user justification of at least 8 characters is required")
     requested_duration = max(5, min(settings["max_duration_minutes"], int(data.get("requested_duration_minutes") or settings["max_duration_minutes"])))
+    ticket_id = await _resolve_agent_ticket_id(agent, str(data.get("ticket_id") or ""))
     request_id = f"nel-{uuid.uuid4().hex[:16]}"
     requester = data.get("requester") if isinstance(data.get("requester"), dict) else {}
     request_channel = "local_companion" if x_nexus_local_companion == "1" else "agent"
@@ -1515,6 +1615,7 @@ async def create_native_elevation_request(
         "provider": "native",
         "device_id": agent["id"],
         "client_id": agent.get("client_id") or "",
+        "tenant_id": str(agent.get("tenant_id") or "nexus-local"),
         "hostname": agent.get("hostname") or data.get("hostname") or "Managed endpoint",
         "program_path": program_path,
         "program_name": PureWindowsPath(program_path).name,
@@ -1526,7 +1627,7 @@ async def create_native_elevation_request(
         "requested_by_sid": str(requester.get("sid") or data.get("requester_sid") or "").strip()[:200],
         "session_id": str(data.get("session_id") or "").strip()[:100],
         "justification": justification[:4000],
-        "ticket_id": str(data.get("ticket_id") or "").strip()[:100],
+        "ticket_id": ticket_id,
         "requested_duration_minutes": requested_duration,
         "requested_at": datetime.now(timezone.utc).isoformat(),
         "agent_version": str(data.get("agent_version") or "").strip()[:100],

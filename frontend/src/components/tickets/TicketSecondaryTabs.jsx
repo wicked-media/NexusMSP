@@ -8,7 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Plus, CheckCircle, Loader2, Paperclip, FileText, Download, Trash2,
   ShoppingCart, Receipt, History, Boxes, Clock,
-  BellRing, Building2, CalendarClock, GitPullRequest, MonitorCog, Tags, UserCheck,
+  BellRing, Building2, CalendarClock, GitPullRequest, MonitorCog, ShieldCheck, Tags, UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -260,6 +260,16 @@ export function TicketAuditTab({ auditLog }) {
     csat_sent: { label: "Sent satisfaction survey", Icon: BellRing, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
     ticket_subscriber_added: { label: "Added ticket subscriber", Icon: BellRing, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
     ticket_subscriber_removed: { label: "Removed ticket subscriber", Icon: BellRing, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
+    nexus_elevate_requested: { label: "Nexus Elevate requested", Icon: ShieldCheck, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
+    nexus_elevate_policy_auto_approved: { label: "Nexus Elevate policy queued launch", Icon: ShieldCheck, tone: "border-cyan-500/25 bg-cyan-500/[0.10] text-cyan-300" },
+    nexus_elevate_policy_denied: { label: "Nexus Elevate policy blocked request", Icon: ShieldCheck, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
+    nexus_elevate_policy_review_required: { label: "Nexus Elevate policy requires review", Icon: ShieldCheck, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
+    nexus_elevate_approved: { label: "Nexus Elevate approved", Icon: ShieldCheck, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
+    nexus_elevate_denied: { label: "Nexus Elevate denied", Icon: ShieldCheck, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
+    nexus_elevate_cancelled: { label: "Nexus Elevate request withdrawn", Icon: ShieldCheck, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
+    nexus_elevate_revoked: { label: "Nexus Elevate queued launch revoked", Icon: ShieldCheck, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
+    nexus_elevate_executed: { label: "Nexus Elevate executed", Icon: ShieldCheck, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
+    nexus_elevate_execution_failed: { label: "Nexus Elevate execution failed", Icon: ShieldCheck, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
   };
   const describe = (entry) => entry.details || Object.entries(entry.changes || {})
     .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`).join(" · ");
