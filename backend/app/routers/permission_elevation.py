@@ -146,6 +146,22 @@ async def _resolve_agent_ticket_id(agent: dict, ticket_reference: str) -> str:
     return str(ticket["id"])
 
 
+async def _resolve_caller_ticket_id(caller: dict, client_id: str, ticket_reference: str) -> str:
+    """Resolve an operator-entered ticket number only inside the target client scope."""
+    reference = str(ticket_reference or "").strip()
+    if not reference:
+        return ""
+    if len(reference) > 120:
+        raise HTTPException(status_code=400, detail="Ticket reference is too long")
+    ticket = await db.tickets.find_one(
+        tenant_scoped_query(caller, {"client_id": client_id, "$or": [{"id": reference}, {"ticket_number": reference}]}),
+        {"_id": 0, "id": 1},
+    )
+    if not ticket or not ticket.get("id"):
+        raise HTTPException(status_code=422, detail="Linked ticket is not available for this managed endpoint")
+    return str(ticket["id"])
+
+
 async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict | None, details: dict) -> None:
     """Project safe Elevate lifecycle evidence into a validated ticket timeline.
 
@@ -1061,9 +1077,7 @@ async def create_secure_access_request(data: dict, current_user: dict = Depends(
     justification = str(data.get("justification") or "").strip()
     if len(justification) < 8 or len(justification) > 2000:
         raise HTTPException(status_code=400, detail="Provide a justification between 8 and 2000 characters")
-    ticket_id = str(data.get("ticket_id") or "").strip()
-    if len(ticket_id) > 120:
-        raise HTTPException(status_code=400, detail="Ticket reference is too long")
+    ticket_id = await _resolve_caller_ticket_id(caller, client_id, str(data.get("ticket_id") or ""))
     requested_minutes = int(data.get("requested_duration_minutes") or 30)
     if requested_minutes < 5 or requested_minutes > NATIVE_ELEVATE_MAX_DURATION:
         raise HTTPException(status_code=400, detail=f"Requested duration must be 5-{NATIVE_ELEVATE_MAX_DURATION} minutes")
@@ -1108,6 +1122,7 @@ async def create_secure_access_request(data: dict, current_user: dict = Depends(
 async def list_secure_access_requests(
     provider: str | None = Query(None),
     agent_id: str | None = Query(None),
+    ticket_id: str | None = Query(None, max_length=120),
     limit: int = Query(100, ge=1, le=300),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1121,6 +1136,13 @@ async def list_secure_access_requests(
         query["provider"] = normalised
     if agent_id:
         query["agent_id"] = agent_id
+    ticket_reference = ticket_id.strip() if isinstance(ticket_id, str) else ""
+    if ticket_reference:
+        ticket = await db.tickets.find_one(tenant_scoped_query(caller, {"id": ticket_reference}), {"_id": 0, "id": 1, "client_id": 1})
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        await assert_client_scope(caller, ticket.get("client_id"), operation="nexus_secure_access.request.read", mask_not_found=True)
+        query["ticket_id"] = ticket["id"]
     rows = await db.nexus_secure_access_requests.find(
         tenant_scoped_query(caller, scoped_query(caller, query, site_field=None)), {"_id": 0}
     ).sort("requested_at", -1).to_list(limit)
