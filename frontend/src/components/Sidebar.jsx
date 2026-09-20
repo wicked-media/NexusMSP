@@ -39,6 +39,8 @@ const notificationTypeVisuals = {
   chat_broadcast: { icon: MessageCircle, label: "Message", tone: "info" },
   thread_reply: { icon: MessageCircle, label: "Reply", tone: "info" },
   ticket_elevation_alert: { icon: ShieldAlert, label: "Elevation", tone: "warning" },
+  nexus_elevate_review: { icon: ShieldAlert, label: "Elevation review", tone: "warning" },
+  nexus_elevate_review_escalation: { icon: ShieldAlert, label: "Elevation overdue", tone: "critical" },
 };
 
 const notificationToneClasses = {

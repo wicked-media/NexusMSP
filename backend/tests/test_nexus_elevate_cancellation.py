@@ -194,3 +194,61 @@ def test_agent_ticket_reference_is_resolved_to_a_stable_same_scope_id(monkeypatc
         "client_id": "client-1", "tenant_id": "tenant-1",
         "$or": [{"id": "TKT-1042"}, {"ticket_number": "TKT-1042"}],
     }
+
+
+class _EscalationCursor:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def to_list(self, _limit):
+        return [dict(row) for row in self.rows]
+
+
+class _EscalationRequests(_Rows):
+    def find(self, _query, _projection=None):
+        return _EscalationCursor(self.rows)
+
+    async def update_one(self, query, update):
+        for row in self.rows:
+            if row.get("id") == query.get("id") and row.get("status") == query.get("status"):
+                if row.get("approval_escalated_at") not in (None, ""):
+                    return _Result()
+                row.update(update.get("$set", {}))
+                return _Result(1)
+        return _Result()
+
+
+class _Notifications:
+    def __init__(self):
+        self.calls = []
+
+    async def update_one(self, query, update, upsert=False):
+        self.calls.append((query, update, upsert))
+
+
+def test_overdue_review_escalates_once_without_changing_approval_authority(monkeypatch):
+    requests = _EscalationRequests([{
+        "id": "elev-overdue", "status": "pending", "tenant_id": "tenant-1",
+        "program_name": "Tool.exe", "hostname": "PC-01",
+        "approval_due_at": "2020-01-01T00:00:00+00:00",
+    }])
+    notifications = _Notifications()
+    monkeypatch.setattr(permission_elevation, "db", SimpleNamespace(
+        nexus_elevate_requests=requests, notifications=notifications,
+    ))
+    async def active_contacts(_tenant_id):
+        return ["on-call-tech"]
+    audits = []
+    async def write_audit(kind, request, _actor, details):
+        audits.append((kind, request["status"], details))
+    monkeypatch.setattr(permission_elevation, "_active_on_call_approvers", active_contacts)
+    monkeypatch.setattr(permission_elevation, "_write_native_audit", write_audit)
+
+    count = asyncio.run(permission_elevation._escalate_overdue_native_reviews({"tenant_id": "tenant-1"}))
+
+    assert count == 1
+    assert requests.rows[0]["status"] == "pending"
+    assert requests.rows[0]["approval_escalated_at"]
+    assert notifications.calls[0][0]["user_id"] == "on-call-tech"
+    assert notifications.calls[0][2] is True
+    assert audits[0][0] == "nexus_elevate_review_escalated"

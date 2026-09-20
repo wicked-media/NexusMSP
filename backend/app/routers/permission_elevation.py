@@ -27,6 +27,7 @@ router = APIRouter()
 
 ELEVATE_SETTINGS_ID = "nexus_elevate"
 NATIVE_ELEVATE_MAX_DURATION = 60
+NATIVE_ELEVATE_APPROVAL_SLA_MINUTES = 15
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
 SECURE_ACCESS_PROVIDERS = {"entra_pim", "windows_laps"}
 SECURE_ACCESS_CONNECTOR_KEY = "nexus_secure_access_connector"
@@ -43,6 +44,7 @@ _TICKET_ELEVATION_ACTIONS = {
     "nexus_elevate_executed": ("nexus_elevate_executed", "Elevation executed"),
     "nexus_elevate_execution_failed": ("nexus_elevate_execution_failed", "Elevation execution failed"),
     "nexus_elevate_expired": ("nexus_elevate_expired", "Elevation approval expired"),
+    "nexus_elevate_review_escalated": ("nexus_elevate_review_escalated", "Elevation approval review escalated"),
 }
 
 
@@ -106,6 +108,7 @@ async def _native_settings() -> dict:
         "native_enabled": bool(stored.get("native_enabled", True)),
         "auto_deploy_companion": bool(stored.get("auto_deploy_companion", True)),
         "max_duration_minutes": max(5, min(NATIVE_ELEVATE_MAX_DURATION, int(stored.get("max_duration_minutes") or 15))),
+        "approval_sla_minutes": max(5, min(120, int(stored.get("approval_sla_minutes") or NATIVE_ELEVATE_APPROVAL_SLA_MINUTES))),
         "require_justification": bool(stored.get("require_justification", True)),
         "require_sha256": True,
         "keeper_bridge_enabled": bool(stored.get("keeper_bridge_enabled", False)),
@@ -209,7 +212,7 @@ async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict
         {"$setOnInsert": entry},
         upsert=True,
     )
-    if kind in {"nexus_elevate_approved", "nexus_elevate_execution_failed", "nexus_elevate_expired"}:
+    if kind in {"nexus_elevate_approved", "nexus_elevate_execution_failed", "nexus_elevate_expired", "nexus_elevate_review_escalated"}:
         if kind == "nexus_elevate_approved":
             expires = str(request.get("approved_until") or "the approved window closes")
             alert_title = "Elevation approval window is active"
@@ -219,9 +222,13 @@ async def _write_ticket_elevation_evidence(kind: str, request: dict, actor: dict
             alert_title = "Elevation execution needs handover"
             alert_message = f"{program} failed on {request.get('hostname') or 'a managed endpoint'}. Review the Nexus Elevate evidence before continuing work."
             severity = "critical"
-        else:
+        elif kind == "nexus_elevate_expired":
             alert_title = "Elevation approval expired"
             alert_message = f"{program} expired on {request.get('hostname') or 'a managed endpoint'} before a successful execution was recorded."
+            severity = "warning"
+        else:
+            alert_title = "Elevation approval review escalated"
+            alert_message = f"{program} on {request.get('hostname') or 'a managed endpoint'} is still awaiting an authorised Nexus Elevate decision."
             severity = "warning"
         await notify_ticket_subscribers_of_event(
             ticket=ticket,
@@ -1265,6 +1272,78 @@ async def put_secure_access_settings(data: dict, current_user: dict = Depends(ge
     return await _secure_access_connector_settings(caller)
 
 
+async def _active_on_call_approvers(tenant_id: str) -> list[str]:
+    """Return active roster contacts for an overdue approval, scoped to its tenant.
+
+    Roster membership routes attention only; it does not grant approval rights.
+    The approve endpoint continues to enforce the operator permission independently.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    shifts = await db.on_call_roster.find({
+        "tenant_id": tenant_id,
+        "start_time": {"$lte": now},
+        "end_time": {"$gte": now},
+        "status": {"$ne": "cancelled"},
+    }, {"_id": 0, "tech_id": 1, "shift_type": 1}).to_list(50)
+    priority = {"primary": 0, "lead": 1, "secondary": 2}
+    ordered = sorted(shifts, key=lambda shift: priority.get(str(shift.get("shift_type") or ""), 9))
+    return list(dict.fromkeys(str(shift.get("tech_id") or "").strip() for shift in ordered if shift.get("tech_id")))[:10]
+
+
+async def _escalate_overdue_native_reviews(query: dict) -> int:
+    """Escalate overdue pending reviews once, without changing approval authority.
+
+    Queue readers invoke this bounded sweep with their own tenant/client scope.
+    A compare-and-set update makes the escalation idempotent across concurrent
+    technicians and prevents a page refresh from repeatedly paging on-call.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = now.isoformat()
+    candidates = await db.nexus_elevate_requests.find({
+        **query,
+        "status": "pending",
+        "approval_due_at": {"$lte": cutoff},
+        "approval_escalated_at": {"$in": [None, ""]},
+    }, {"_id": 0}).to_list(250)
+    escalated = 0
+    for request in candidates:
+        result = await db.nexus_elevate_requests.update_one({
+            "id": request.get("id"),
+            "status": "pending",
+            "approval_due_at": request.get("approval_due_at"),
+            "approval_escalated_at": {"$in": [None, ""]},
+        }, {"$set": {"approval_escalated_at": cutoff}})
+        if not getattr(result, "matched_count", 0):
+            continue
+        request["approval_escalated_at"] = cutoff
+        executable = request.get("program_name") or PureWindowsPath(request.get("program_path") or "application.exe").name
+        endpoint = request.get("hostname") or "a managed endpoint"
+        recipients = await _active_on_call_approvers(str(request.get("tenant_id") or "nexus-local"))
+        audience = recipients or ["all"]
+        for user_id in audience:
+            await db.notifications.update_one(
+                {"ref_id": request.get("id"), "type": "nexus_elevate_review_escalation", "user_id": user_id},
+                {"$setOnInsert": {
+                    "id": str(uuid.uuid4()), "user_id": user_id,
+                    "tenant_id": request.get("tenant_id") or "nexus-local",
+                    "type": "nexus_elevate_review_escalation",
+                    "title": "Nexus Elevate review is overdue",
+                    "message": f"{executable} on {endpoint} is still awaiting an authorised decision.",
+                    "ref_id": request.get("id"), "ref_type": "nexus_elevate_request",
+                    "action_url": f"/nexus-elevate?status=pending&request={quote(str(request.get('id') or ''), safe='')}",
+                    "action_label": "Review overdue request", "severity": "warning",
+                    "read": False, "read_by": [], "dismissed_by": [], "created_at": cutoff,
+                }}, upsert=True,
+            )
+        await _write_native_audit("nexus_elevate_review_escalated", request, None, {
+            "approval_due_at": request.get("approval_due_at"),
+            "routed_to_on_call": bool(recipients),
+            "recipient_count": len(audience),
+        })
+        escalated += 1
+    return escalated
+
+
 @router.get("/nexus-elevate/secure-access/requests/{request_id}")
 async def get_secure_access_request(request_id: str, current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
@@ -1295,6 +1374,9 @@ async def put_nexus_elevate_settings(data: dict, current_user: dict = Depends(ge
     max_duration = int(data.get("max_duration_minutes") or 15)
     if max_duration < 5 or max_duration > NATIVE_ELEVATE_MAX_DURATION:
         raise HTTPException(status_code=400, detail=f"Maximum approval duration must be 5-{NATIVE_ELEVATE_MAX_DURATION} minutes")
+    approval_sla = int(data.get("approval_sla_minutes") or NATIVE_ELEVATE_APPROVAL_SLA_MINUTES)
+    if approval_sla < 5 or approval_sla > 120:
+        raise HTTPException(status_code=400, detail="Approval review SLA must be 5-120 minutes")
     connector_reference = str(data.get("keeper_connector_reference") or "").strip()
     if len(connector_reference) > 300:
         raise HTTPException(status_code=400, detail="Keeper connector reference is too long")
@@ -1302,6 +1384,7 @@ async def put_nexus_elevate_settings(data: dict, current_user: dict = Depends(ge
         "native_enabled": bool(data.get("native_enabled", True)),
         "auto_deploy_companion": bool(data.get("auto_deploy_companion", True)),
         "max_duration_minutes": max_duration,
+        "approval_sla_minutes": approval_sla,
         "require_justification": bool(data.get("require_justification", True)),
         "keeper_bridge_enabled": bool(data.get("keeper_bridge_enabled", False)),
         # This is intentionally only a secret-manager reference. NexusMSP does
@@ -1324,6 +1407,7 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
     await _expire_stale_native_approvals()
+    await _escalate_overdue_native_reviews(scoped_query(caller, {}, site_field=None))
     now = datetime.now(timezone.utc)
     settings = await _native_settings()
     requests = await db.nexus_elevate_requests.find(
@@ -1344,6 +1428,7 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
     elevate_active = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "nexus_elevate.state": "active"}, site_field=None))
     elevate_deploying = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "nexus_elevate.state": "deploying"}, site_field=None))
     pending = [row for row in requests if row.get("status") == "pending"]
+    overdue_reviews = [row for row in pending if row.get("approval_due_at") and row["approval_due_at"] <= now.isoformat()]
     expiring = [row for row in requests if row.get("status") == "approved" and row.get("approved_until") and row["approved_until"] <= (now + timedelta(minutes=10)).isoformat()]
     failed = [row for row in requests if row.get("status") in {"failed", "expired"}]
     recent = [await _request_view(row) for row in requests[:8]]
@@ -1353,6 +1438,7 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
         "settings": settings,
         "summary": {
             "pending": len(pending),
+            "overdue_reviews": len(overdue_reviews),
             "approved": sum(1 for row in requests if row.get("status") == "approved"),
             "expiring_soon": len(expiring),
             "failed_or_expired": len(failed),
@@ -1396,8 +1482,10 @@ async def list_nexus_elevate_requests(
             raise HTTPException(status_code=404, detail="Ticket not found")
         await assert_client_scope(caller, ticket.get("client_id"), operation="nexus_elevate.request.read", mask_not_found=True)
         query["ticket_id"] = ticket["id"]
+    scoped_request_query = scoped_query(caller, query, site_field=None)
+    await _escalate_overdue_native_reviews(scoped_request_query)
     rows = await db.nexus_elevate_requests.find(
-        scoped_query(caller, query, site_field=None), {"_id": 0}
+        scoped_request_query, {"_id": 0}
     ).sort("requested_at", -1).to_list(limit)
     return {"requests": [await _request_view(row) for row in rows]}
 
@@ -1664,6 +1752,7 @@ async def create_native_elevation_request(
     request_id = f"nel-{uuid.uuid4().hex[:16]}"
     requester = data.get("requester") if isinstance(data.get("requester"), dict) else {}
     request_channel = "local_companion" if x_nexus_local_companion == "1" else "agent"
+    requested_at = datetime.now(timezone.utc)
     request = {
         "id": request_id,
         "status": "pending",
@@ -1684,7 +1773,8 @@ async def create_native_elevation_request(
         "justification": justification[:4000],
         "ticket_id": ticket_id,
         "requested_duration_minutes": requested_duration,
-        "requested_at": datetime.now(timezone.utc).isoformat(),
+        "requested_at": requested_at.isoformat(),
+        "approval_due_at": (requested_at + timedelta(minutes=settings["approval_sla_minutes"])).isoformat(),
         "agent_version": str(data.get("agent_version") or "").strip()[:100],
         "request_channel": request_channel,
     }
