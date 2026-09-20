@@ -8,7 +8,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
-from app.services.scope_permissions import scoped_query
+from app.services.scope_permissions import scoped_query, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -18,6 +18,44 @@ logger = logging.getLogger(__name__)
 # its remote API is slow. Detailed live PBX troubleshooting belongs in Voice;
 # this small budget only covers optional call activity in the shared feed.
 DASHBOARD_PBX_ACTIVITY_TIMEOUT_SECONDS = 2.0
+
+
+def _report_scope(current_user: dict, query: dict | None = None, *, field: str = "client_id") -> dict:
+    """Apply both tenant and client scope to evidence used by dashboard reports."""
+    return scoped_query(current_user, tenant_scoped_query(current_user, query), field=field, site_field=None)
+
+
+def _report_number(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _report_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_resolution_hours(ticket: dict) -> float | None:
+    started = _report_timestamp(ticket.get("created_at"))
+    finished = next((_report_timestamp(ticket.get(field)) for field in ("resolved_at", "closed_at", "completed_at") if _report_timestamp(ticket.get(field))), None)
+    if not started or not finished or finished < started:
+        return None
+    return (finished - started).total_seconds() / 3600
+
+
+def _ticket_sla_met(ticket: dict) -> bool | None:
+    finished = next((_report_timestamp(ticket.get(field)) for field in ("resolved_at", "closed_at", "completed_at") if _report_timestamp(ticket.get(field))), None)
+    deadline = next((_report_timestamp(ticket.get(field)) for field in ("sla_due_at", "resolution_due_at", "due_at") if _report_timestamp(ticket.get(field))), None)
+    if not finished or not deadline:
+        return None
+    return finished <= deadline
 
 
 async def _recent_yeastar_call_activity(limit: int, current_user: dict) -> list[dict]:
@@ -246,17 +284,17 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
 @router.get("/reports/technician-utilization")
 async def get_tech_utilization(current_user: dict = Depends(get_current_user)):
     """Technician utilization report"""
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
-    entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
+    users = await db.users.find(tenant_scoped_query(current_user), {"_id": 0, "password_hash": 0}).to_list(100)
+    entries = await db.time_entries.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    tickets = await db.tickets.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
     tech_data = []
     for u in users:
         user_entries = [e for e in entries if e.get("user_id") == u["id"]]
         user_tickets = [t for t in tickets if t.get("assigned_to") == u["id"]]
-        total_min = sum(e.get("minutes", 0) for e in user_entries)
-        billable_min = sum(e.get("minutes", 0) for e in user_entries if e.get("billable"))
-        revenue = sum(e.get("total_amount", 0) for e in user_entries if e.get("billable"))
+        total_min = sum(_report_number(e.get("minutes")) for e in user_entries)
+        billable_min = sum(_report_number(e.get("minutes")) for e in user_entries if e.get("billable"))
+        revenue = sum(_report_number(e.get("total_amount")) for e in user_entries if e.get("billable"))
         resolved = len([t for t in user_tickets if t.get("status") in ("resolved", "closed")])
         tech_data.append({
             "id": u["id"], "name": u["name"], "role": u.get("role", "technician"),
@@ -273,7 +311,7 @@ async def get_tech_utilization(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/ticket-analytics")
 async def get_ticket_analytics(current_user: dict = Depends(get_current_user)):
     """Comprehensive ticket analytics"""
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
+    tickets = await db.tickets.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
     by_status = {}
     by_priority = {}
     by_client = {}
@@ -288,23 +326,25 @@ async def get_ticket_analytics(current_user: dict = Depends(get_current_user)):
         cat = t.get("category", "support")
         by_category[cat] = by_category.get(cat, 0) + 1
 
+    resolution_hours = [duration for ticket in tickets if (duration := _ticket_resolution_hours(ticket)) is not None]
+    sla_results = [result for ticket in tickets if (result := _ticket_sla_met(ticket)) is not None]
     return {
         "total": len(tickets),
         "by_status": [{"name": k, "value": v} for k, v in by_status.items()],
         "by_priority": [{"name": k, "value": v} for k, v in by_priority.items()],
         "by_client": sorted([{"name": k, "value": v} for k, v in by_client.items()], key=lambda x: -x["value"]),
         "by_category": [{"name": k, "value": v} for k, v in by_category.items()],
-        "avg_resolution_hours": 4.2,
-        "sla_compliance": 87.5,
+        "avg_resolution_hours": round(sum(resolution_hours) / len(resolution_hours), 1) if resolution_hours else None,
+        "sla_compliance": round((sum(1 for result in sla_results if result) / len(sla_results)) * 100, 1) if sla_results else None,
     }
 
 @router.get("/reports/client-analytics")
 async def get_client_analytics(current_user: dict = Depends(get_current_user)):
     """Client-level analytics"""
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
-    entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
+    clients = await db.clients.find(_report_scope(current_user, field="id"), {"_id": 0}).to_list(1000)
+    tickets = await db.tickets.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    entries = await db.time_entries.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
     result = []
     for c in clients:
@@ -312,7 +352,7 @@ async def get_client_analytics(current_user: dict = Depends(get_current_user)):
         ct = [t for t in tickets if t.get("client_id") == cid]
         cd = [d for d in devices if d.get("client_id") == cid]
         ce = [e for e in entries if e.get("client_id") == cid]
-        billable_amt = sum(e.get("total_amount", 0) for e in ce if e.get("billable"))
+        billable_amt = sum(_report_number(e.get("total_amount")) for e in ce if e.get("billable"))
         result.append({
             "id": cid, "name": c["name"], "industry": c.get("industry", "Other"),
             "mrr": c.get("mrr", 0),
@@ -328,15 +368,15 @@ async def get_client_analytics(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/revenue")
 async def get_revenue_report(current_user: dict = Depends(get_current_user)):
     """Revenue and billing analytics"""
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
-    entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
+    clients = await db.clients.find(_report_scope(current_user, field="id"), {"_id": 0}).to_list(1000)
+    invoices = await db.invoices.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    entries = await db.time_entries.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
-    total_mrr = sum(c.get("mrr", 0) for c in clients)
-    total_invoiced = sum(i.get("total", 0) for i in invoices)
-    paid = sum(i.get("total", 0) for i in invoices if i.get("status") == "paid")
-    outstanding = sum(i.get("total", 0) for i in invoices if i.get("status") in ("sent", "draft"))
-    billable_rev = sum(e.get("total_amount", 0) for e in entries if e.get("billable"))
+    total_mrr = sum(_report_number(c.get("mrr")) for c in clients)
+    total_invoiced = sum(_report_number(i.get("total")) for i in invoices)
+    paid = sum(_report_number(i.get("total")) for i in invoices if i.get("status") == "paid")
+    outstanding = sum(_report_number(i.get("total")) for i in invoices if i.get("status") in ("sent", "draft", "overdue"))
+    billable_rev = sum(_report_number(e.get("total_amount")) for e in entries if e.get("billable"))
 
     mrr_by_client = sorted(
         [{"name": c["name"], "mrr": c.get("mrr", 0)} for c in clients if c.get("mrr", 0) > 0],
@@ -362,8 +402,8 @@ async def get_revenue_report(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/device-analytics")
 async def get_device_analytics(current_user: dict = Depends(get_current_user)):
     """Device/infrastructure analytics"""
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
-    alerts = await db.alerts.find({}, {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    alerts = await db.alerts.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
     by_type = {}
     by_os = {}
