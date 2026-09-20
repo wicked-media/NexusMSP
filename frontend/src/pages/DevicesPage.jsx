@@ -40,7 +40,7 @@ import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/Workspa
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
 const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20", archived: "bg-zinc-500/10 text-zinc-500 border-zinc-500/20" };
-const effectiveDeviceStatus = (device, rustdeskStatus) => (device.archived || device.status === "archived") ? "archived" : (rustdeskStatus || device.status);
+const effectiveDeviceStatus = device => (device.archived || device.status === "archived") ? "archived" : device.status;
 const ELEVATE_STATE_META = {
   active: { label: "Elevate active", className: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300" },
   deploying: { label: "Elevate deploying", className: "border-sky-500/30 bg-sky-500/15 text-sky-300" },
@@ -136,8 +136,6 @@ export default function DevicesPage() {
   const [selectedDiscovered, setSelectedDiscovered] = useState([]);
   const [importLoading, setImportLoading] = useState(false);
   const [deviceViewers, setDeviceViewers] = useState({});
-  const [rdStatusMap, setRdStatusMap] = useState({});
-  const [activeProviders, setActiveProviders] = useState([]);
   const [liveChatBusy, setLiveChatBusy] = useState({});
   const [siteMap, setSiteMap] = useState([]);
   const [tab, setTab] = useState("pulse");
@@ -209,16 +207,6 @@ export default function DevicesPage() {
         const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers });
         setDeviceViewers(vRes.data);
       } catch { setDeviceViewers({}); }
-      // Fetch RustDesk live status
-      try {
-        const rdRes = await axios.get(`${API}/rustdesk/live/status-map`, { headers });
-        if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
-      } catch {}
-      // Fetch active remote providers (TRMM/RustDesk/etc.) once per page load
-      try {
-        const pRes = await axios.get(`${API}/remote-providers/active`, { headers });
-        setActiveProviders(pRes.data || []);
-      } catch { setActiveProviders([]); }
       // Site map data
       try {
         const sRes = await axios.get(`${API}/devices/sites-map`, { headers });
@@ -252,16 +240,12 @@ export default function DevicesPage() {
   };
 
 
-  // Poll for active remote viewers and RustDesk status every 15 seconds
+  // Poll the Nexus-owned active-viewer evidence every 15 seconds.
   useEffect(() => {
     const poll = setInterval(async () => {
       try {
-        const [vRes, rdRes] = await Promise.all([
-          axios.get(`${API}/devices/active-remote-viewers`, { headers }).catch(() => ({ data: {} })),
-          axios.get(`${API}/rustdesk/live/status-map`, { headers }).catch(() => ({ data: {} })),
-        ]);
+        const vRes = await axios.get(`${API}/devices/active-remote-viewers`, { headers }).catch(() => ({ data: {} }));
         setDeviceViewers(vRes.data);
-        if (rdRes.data?.status_map) setRdStatusMap(rdRes.data.status_map);
       } catch {}
     }, 15000);
     return () => clearInterval(poll);
@@ -272,7 +256,7 @@ export default function DevicesPage() {
     const current = activeDevices.filter((device) => telemetryState(device) === "observed").length;
     const stale = activeDevices.filter((device) => telemetryState(device) === "stale").length;
     const attention = activeDevices.filter((device) => {
-      const status = effectiveDeviceStatus(device, device.rustdesk_id ? rdStatusMap[device.rustdesk_id] : null);
+      const status = effectiveDeviceStatus(device);
       return ["offline", "warning", "critical", "needs_attention", "degraded"].includes(String(status || "").toLowerCase());
     }).length;
     return {
@@ -281,10 +265,10 @@ export default function DevicesPage() {
       awaitingTelemetry: Math.max(0, activeDevices.length - current - stale),
       attention,
     };
-  }, [activeDevices, rdStatusMap]);
+  }, [activeDevices]);
   const filtered = devices.filter(d => {
     if (filterSource && d.source !== filterSource) return false;
-    const status = effectiveDeviceStatus(d, d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null);
+    const status = effectiveDeviceStatus(d);
     if (filterStatus === "all" && status === "archived") return false;
     if (filterStatus !== "all" && status !== filterStatus) return false;
     if (filterType !== "all" && d.device_type !== filterType) return false;
@@ -764,7 +748,7 @@ export default function DevicesPage() {
                   <TableRow><TableCell colSpan={12} className="text-center py-12 text-muted-foreground">No devices found</TableCell></TableRow>
                 ) : filtered.map(d => {
                   const viewers = deviceViewers[d.id] || [];
-                  const displayStatus = effectiveDeviceStatus(d, d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null);
+                  const displayStatus = effectiveDeviceStatus(d);
                   const isRemoted = displayStatus !== "archived" && viewers.length > 0;
                   const rowDensity = density === "dense" ? "h-8 text-[11px]" : density === "compact" ? "h-10 text-xs" : "";
                   return (
@@ -807,18 +791,7 @@ export default function DevicesPage() {
                               </Badge>
                             )}
                             <ElevatePill device={d} />
-                            {(() => {
-                              const rdLive = d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null;
-                              const effectiveStatus = displayStatus;
-                              return (
-                                <>
-                                  <Badge className={STATUS_COLORS[effectiveStatus] + " border text-[9px] capitalize px-1.5"}>{effectiveStatus}</Badge>
-                                  {!d.archived && rdLive && rdLive !== d.status && (
-                                    <span className="text-[9px] px-1 rounded bg-blue-500/10 text-blue-400">RD</span>
-                                  )}
-                                </>
-                              );
-                            })()}
+                            <Badge className={STATUS_COLORS[displayStatus] + " border text-[9px] capitalize px-1.5"}>{displayStatus}</Badge>
                             {isRemoted && (
                               <Badge className="bg-gradient-to-r from-cyan-500/15 to-blue-500/15 text-cyan-400 text-[9px] border-cyan-500/30 gap-1 shadow-[0_0_8px_rgba(34,211,238,0.2)]"
                                 style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.12), rgba(139,92,246,0.12), rgba(59,130,246,0.12))", backgroundSize: "200% 200%", animation: "viewerShimmer 2s ease-in-out infinite" }}
@@ -858,7 +831,6 @@ export default function DevicesPage() {
                             device={d}
                             status={displayStatus}
                             compact
-                            providersOverride={activeProviders}
                             testid={`row-remote-${d.id}`}
                           />
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0 hover:bg-fuchsia-500/15" title="AI Diagnose"
@@ -891,7 +863,7 @@ export default function DevicesPage() {
           ) : filtered.map(d => {
             const DevIcon = DEVICE_ICONS[d.device_type] || Monitor;
             const viewers = deviceViewers[d.id] || [];
-            const displayStatus = effectiveDeviceStatus(d, d.rustdesk_id ? rdStatusMap[d.rustdesk_id] : null);
+            const displayStatus = effectiveDeviceStatus(d);
             const isRemoted = displayStatus !== "archived" && viewers.length > 0;
             return (
               <Card key={d.id} className={`cursor-pointer hover:border-primary/30 transition-colors group ${isRemoted ? "border-cyan-500/30 bg-cyan-500/[0.02]" : ""}`} onClick={() => navigate(`/devices/${d.id}`)} data-testid={`device-card-${d.id}`}>
@@ -956,7 +928,6 @@ export default function DevicesPage() {
                         device={d}
                         status={displayStatus}
                         compact
-                        providersOverride={activeProviders}
                         testid={`card-remote-${d.id}`}
                       />
                       <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />

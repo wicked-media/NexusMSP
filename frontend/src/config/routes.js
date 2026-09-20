@@ -85,8 +85,8 @@ export const routeConfig = [
   { path: "/domotz", component: page("DomotzPage"), auth: true, layout: true },
   // Nexus Remote is the product-facing workspace. Keep /remote-access as a
   // compatibility path for existing ticket, device and Work Session links.
-  { path: "/nexus-remote", component: page("RemoteAccessPage"), auth: true, layout: true },
-  { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
+  { path: "/nexus-remote", component: page("NativeRemoteAccessPage"), auth: true, layout: true },
+  { path: "/remote-access", component: page("NativeRemoteAccessPage"), auth: true, layout: true },
   { path: "/acronis", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center?tab=tenants" },
   { path: "/proxmox", component: page("ProxmoxPage"), auth: true, layout: true },
   { path: "/splynx-dashboard", component: page("SplynxDashboardPage"), auth: true, layout: true },

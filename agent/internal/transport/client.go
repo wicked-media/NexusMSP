@@ -154,6 +154,40 @@ func (c *Client) Download(path, destination string) error {
 	return closeErr
 }
 
+// Upload sends a bounded binary only to an authenticated Nexus Agent endpoint.
+// Callers calculate and provide the SHA-256 so the server can reject a changed
+// endpoint file before it becomes a technician-downloadable artifact.
+func (c *Client) Upload(path, source, sha256 string) error {
+	file, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	request, err := http.NewRequest(http.MethodPut, c.base+path, file)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("X-Nexus-Transfer-SHA256", sha256)
+	request.Header.Set("User-Agent", "nexus-agent/"+c.version)
+	c.mu.RLock()
+	token := c.token
+	c.mu.RUnlock()
+	if token != "" {
+		request.Header.Set("X-Agent-Token", token)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		body, _ := io.ReadAll(response.Body)
+		return &HTTPError{Status: response.StatusCode, Message: strings.TrimSpace(string(body))}
+	}
+	return nil
+}
+
 type HTTPError struct {
 	Status  int
 	Message string

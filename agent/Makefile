@@ -1,7 +1,7 @@
 VERSION ?= 0.1.11-endpoint-readiness
 LDFLAGS  = -s -w -X main.Version=$(VERSION)
 
-.PHONY: all windows chat windows-chat windows-tray linux edge-linux edge-windows test clean fmt vet tidy
+.PHONY: all windows chat windows-chat windows-tray windows-remote linux edge-linux edge-windows test clean fmt vet tidy
 
 all: windows windows-chat windows-tray
 
@@ -22,6 +22,12 @@ windows-tray:
 	@echo ">> building windows/amd64 nexus-agent-tray ($(VERSION))"
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS) -H=windowsgui" -o dist/nexus-agent-tray.exe ./cmd/nexus-tray
 	@ls -lah dist/nexus-agent-tray.exe
+
+windows-remote:
+	@mkdir -p dist
+	@echo ">> building windows/amd64 nexus-remote-companion ($(VERSION))"
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o dist/nexus-remote-companion.exe ./cmd/nexus-remote-companion
+	@ls -lah dist/nexus-remote-companion.exe
 
 linux:
 	@mkdir -p dist

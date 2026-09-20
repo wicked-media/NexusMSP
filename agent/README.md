@@ -18,8 +18,9 @@ Cross-platform RMM agent (Windows-first) for the NexusOps platform.
 - HTTPS control plane with signed command envelopes and replay protection.
 - Signed update manifests are evaluated on heartbeat; the agent fails closed if
   the version, pinned signing key, signature or artifact fingerprint is wrong.
-- Nexus Remote session governance is first-party. Current screen/input transport
-  remains the explicitly labelled RustDesk adapter; see `docs/NEXUS_REMOTE_PRODUCT.md`.
+- Nexus Remote is first-party. The Windows service brokers only a
+  policy-hash-verified, attended, view-only Remote Companion; it never starts
+  or repairs an external remote-access provider.
 
 ## Nexus Shield deployment profile
 
@@ -40,9 +41,10 @@ an endpoint automatically. Those actions remain explicit, reviewed workflows.
 ```bash
 cd /app/agent
 make all             # Build service, Client Chat and Tray for windows/amd64
+make windows-remote  # Build the Native Remote user-session companion
 ```
 
-The production API image builds those three components from the checked-in
+The production API image builds these components from the checked-in
 Agent source in its Docker build stage. It does not copy a developer's
 ignored `agent/dist` directory or any per-device `config.json` into the image.
 Pass the same `NEXUS_AGENT_VERSION` build argument and API environment value
@@ -54,6 +56,7 @@ The backend's installer builder produces a ZIP per client containing:
 
 - `nexus-agent.exe`
 - `nexus-client-chat.exe` and `nexus-agent-tray.exe`
+- `nexus-remote-companion.exe` when the Native Remote build is available
 - `config.json` (per-client enrollment token + server URL, ACL-restricted to
   `SYSTEM` and local Administrators after installation)
 - `install.bat` (silent installer — creates service "NexusOps Agent" + auto-start)

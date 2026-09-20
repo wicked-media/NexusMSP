@@ -43,5 +43,5 @@ def build_handover(ticket, comments, children, *, since=None):
         "evidence": evidence[:30], "matching_note_count": len(evidence),
         "undated_notes": undated, "open_children": open_children,
         "limited": len(comments) >= 200 or len(children) >= 100 or len(evidence) > 30,
-        "scope": "Recorded ticket notes and child work only. Emails, calls, remote sessions and attachments are not included. Notes are evidence of what was recorded, not verification that an action succeeded.",
+        "scope": "Recorded ticket notes, child work and active subscriber roster only. Emails, calls, remote sessions and attachments are not included. Notes are evidence of what was recorded, not verification that an action succeeded.",
     }

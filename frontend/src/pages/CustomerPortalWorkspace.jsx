@@ -1022,7 +1022,7 @@ export default function CustomerPortalWorkspace() {
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricTile icon={Wifi} label="Online" value={devices.filter((device) => device.status === "online").length} detail="Reporting to the management platform" tone="emerald" />
         <MetricTile icon={WifiOff} label="Offline" value={devices.filter((device) => device.status !== "online").length} detail="May be powered down or disconnected" tone="amber" />
-        <MetricTile icon={ShieldCheck} label="Remote-ready" value={devices.filter((device) => device.remote_ready ?? device.rustdesk_available).length} detail={canRemote ? "Online, enrolled, and available for secure access" : "Access requires portal permission"} tone="sky" />
+        <MetricTile icon={ShieldCheck} label="Remote-ready" value={devices.filter(device => device.remote_ready).length} detail={canRemote ? "Online, enrolled, and available for secure access" : "Access requires portal permission"} tone="sky" />
       </div>
       {devices.length ? (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -1062,13 +1062,13 @@ export default function CustomerPortalWorkspace() {
                     <p className="mt-0.5 text-[11px] text-slate-400">{dateLabel(device.last_check_in || device.last_heartbeat || device.last_seen, true)}</p>
                     <p className={cx(
                       "mt-1 flex items-center gap-1.5 text-[9px]",
-                      (device.remote_ready ?? device.rustdesk_available) ? "text-emerald-300" : "text-slate-600",
+                      device.remote_ready ? "text-emerald-300" : "text-slate-600",
                     )}>
                       <span className={cx(
                         "h-1.5 w-1.5 rounded-full",
-                        (device.remote_ready ?? device.rustdesk_available) ? "bg-emerald-300" : "bg-slate-700",
+                        device.remote_ready ? "bg-emerald-300" : "bg-slate-700",
                       )} />
-                      {device.remote_access_reason || ((device.remote_ready ?? device.rustdesk_available) ? "Remote ready" : "Remote unavailable")}
+                      {device.remote_access_reason || (device.remote_ready ? "Remote ready" : "Remote unavailable")}
                     </p>
                   </div>
                   <div className="flex gap-2">
@@ -1081,7 +1081,7 @@ export default function CustomerPortalWorkspace() {
                     {canRemote && (
                       <Button
                         size="sm"
-                        disabled={!(device.remote_ready ?? device.rustdesk_available) || connectingDeviceId === device.id}
+                        disabled={!device.remote_ready || connectingDeviceId === device.id}
                         onClick={() => { setConsentDevice(device); setConsentChecked(false); }}
                         title={device.remote_access_reason || "Authorise a secure remote session"}
                         className="h-8 rounded-lg bg-emerald-400 px-2.5 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-300"

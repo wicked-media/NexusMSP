@@ -5,9 +5,7 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
-from app.services.secret_store import decrypt_secret, encrypt_secret
-from app.services.rustdesk_provider_security import is_masked_secret, normalise_rustdesk_server_url
+from app.services.scope_permissions import assert_client_scope, platform_tenant_id, scope_query
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import (
@@ -16,27 +14,36 @@ from app.services.remote_runtime import (
     heartbeat_remote_session,
     mark_remote_session_opened,
     provider_device_id,
-    provider_is_active,
     queue_remote_repair,
     remote_health_for_device,
     remote_policy,
-    rustdesk_config,
     start_remote_session,
 )
 from app.models import *
 
 router = APIRouter()
 
+NATIVE_REMOTE_HEARTBEAT_STALE_SECONDS = 20
+
+
+def _native_session_freshness(session: dict) -> dict:
+    """Expose derived capture freshness without changing session authority."""
+    if session.get("provider") != "nexus" or session.get("status") != "active":
+        return {"capture_freshness": "not_active", "capture_age_seconds": None}
+    try:
+        observed = datetime.fromisoformat(str(session.get("last_heartbeat_at") or "").replace("Z", "+00:00"))
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        age = max(0, int((datetime.now(timezone.utc) - observed).total_seconds()))
+    except (TypeError, ValueError):
+        return {"capture_freshness": "unknown", "capture_age_seconds": None}
+    return {
+        "capture_freshness": "fresh" if age <= NATIVE_REMOTE_HEARTBEAT_STALE_SECONDS else "stale",
+        "capture_age_seconds": age,
+    }
+
 async def _remote_policy():
     return await remote_policy()
-
-
-async def _provider_is_active(provider_id: str) -> bool:
-    return await provider_is_active(provider_id)
-
-
-async def _rustdesk_config() -> dict:
-    return await rustdesk_config()
 
 
 def _device_provider_id(device: dict, provider_id: str) -> Optional[str]:
@@ -60,6 +67,7 @@ async def save_remote_access_policy(data: dict, current_user: dict = Depends(get
         "default_provider",
         "allow_fallback",
         "require_consent",
+        "allow_standing_authorisation",
         "require_ticket_reference",
         "auto_create_time_entry",
         "auto_ticket_note",
@@ -67,8 +75,8 @@ async def save_remote_access_policy(data: dict, current_user: dict = Depends(get
         "repair_cooldown_minutes",
     }
     updates = {key: value for key, value in data.items() if key in allowed}
-    if updates.get("default_provider") not in (None, "rustdesk", "splashtop"):
-        raise HTTPException(status_code=422, detail="Choose RustDesk or Splashtop as the default provider")
+    if updates.get("default_provider") not in (None, "nexus"):
+        raise HTTPException(status_code=422, detail="Nexus Native is the only supported remote provider")
     updates.update({"type": "remote_access_policy", "updated_at": datetime.now(timezone.utc).isoformat()})
     await db.settings.update_one({"type": "remote_access_policy"}, {"$set": updates}, upsert=True)
     await log_activity(
@@ -96,22 +104,23 @@ async def get_device_remote_options(device_id: str, request: Request, current_us
         request=request,
     )
     policy = await _remote_policy()
-    assigned = device.get("remote_provider") or "inherit"
-    providers = []
-    for provider_id, name in (("rustdesk", "RustDesk"), ("splashtop", "Splashtop")):
-        provider_device_id = await provider_device_id(device, provider_id)
-        active = await _provider_is_active(provider_id)
-        selected = provider_id == (policy["default_provider"] if assigned == "inherit" else assigned)
-        providers.append({
-            "id": provider_id,
-            "name": name,
-            "active": active,
-            "assigned": assigned == provider_id,
-            "selected": selected,
-            "device_identifier": provider_device_id,
-            "ready": bool(active and provider_device_id),
-            "reason": None if active and provider_device_id else ("Provider is not enabled" if not active else "This device has not been enrolled"),
-        })
+    assigned = "nexus"
+    provider_device_identifier = await provider_device_id(device, "nexus")
+    from app.services.native_remote import device_readiness
+    readiness = await device_readiness(device, platform_tenant_id(current_user))
+    providers = [{
+        "id": "nexus",
+        "name": "Nexus Native",
+        "active": True,
+        "assigned": True,
+        "selected": True,
+        "device_identifier": provider_device_identifier,
+        "ready": bool(readiness.get("ready")),
+        "reason": None if readiness.get("ready") else readiness.get("detail"),
+        "state": readiness.get("state"),
+        "unattended_enabled": bool(device.get("remote_unattended_access_enabled")),
+        "unattended_ready": bool(readiness.get("unattended_ready")),
+    }]
     return {"device_id": device_id, "assigned_provider": assigned, "policy": policy, "providers": providers}
 
 
@@ -127,22 +136,26 @@ async def save_device_remote_access(device_id: str, data: dict, request: Request
         operation="device.remote.configure",
         request=request,
     )
-    provider = data.get("remote_provider", "inherit")
-    if provider not in ("inherit", "rustdesk", "splashtop"):
-        raise HTTPException(status_code=422, detail="Unsupported remote provider")
-    ids = dict(device.get("remote_provider_ids") or {})
-    for provider_id in ("rustdesk", "splashtop"):
-        value = data.get(f"{provider_id}_id")
-        if value is not None:
-            if value:
-                ids[provider_id] = value.strip()
-            else:
-                ids.pop(provider_id, None)
-    await db.devices.update_one({"id": device_id}, {"$set": {
+    provider = data.get("remote_provider", "nexus")
+    if provider not in ("inherit", "nexus"):
+        raise HTTPException(status_code=422, detail="Third-party remote providers are retired")
+    now = datetime.now(timezone.utc).isoformat()
+    updates = {
         "remote_provider": provider,
-        "remote_provider_ids": ids,
-        "remote_access_updated_at": datetime.now(timezone.utc).isoformat(),
-    }})
+        "remote_access_updated_at": now,
+    }
+    if "unattended_access_enabled" in data:
+        requested = data["unattended_access_enabled"]
+        if not isinstance(requested, bool):
+            raise HTTPException(status_code=422, detail="Unattended access must be a boolean setting")
+        if requested and data.get("standing_authorisation_acknowledged") is not True:
+            raise HTTPException(status_code=422, detail="Confirm standing authorisation before enabling unattended access")
+        updates.update({
+            "remote_unattended_access_enabled": requested,
+            "remote_unattended_access_updated_at": now,
+            "remote_unattended_access_updated_by": str(current_user.get("id") or ""),
+        })
+    await db.devices.update_one({"id": device_id}, {"$set": updates})
     await log_activity(
         current_user,
         "remote_device_configured",
@@ -150,7 +163,7 @@ async def save_device_remote_access(device_id: str, data: dict, request: Request
         device_id,
         device.get("name", ""),
         f"Remote provider assignment changed to {provider}",
-        metadata={"remote_provider_ids": sorted(ids)},
+        metadata={"remote_provider": provider, "unattended_access_enabled": updates.get("remote_unattended_access_enabled")},
     )
     return await get_device_remote_options(device_id, request, current_user)
 
@@ -174,125 +187,39 @@ async def start_provider_remote_session(device_id: str, data: dict, request: Req
         correlation_id=request_correlation_id(request),
     )
 
-# ============== RUSTDESK / REMOTE ACCESS ENDPOINTS ==============
+# ============== NEXUS NATIVE REMOTE COMPATIBILITY ENDPOINTS ==============
 
 @router.get("/remote/status")
 async def get_remote_status(current_user: dict = Depends(get_current_user)):
-    settings = await _rustdesk_config()
-    return {"configured": bool(settings.get("server_url"))}
+    return {"configured": True, "provider": "nexus", "native": True}
 
 @router.post(
     "/remote/settings",
     dependencies=[Depends(require_action("device.remote.configure"))],
 )
-async def save_remote_settings(settings: RustDeskSettings, current_user: dict = Depends(get_current_user)):
-    await assert_global_scope(current_user, operation="remote.settings.update")
-    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
-    if not user or (user.get("role") != "admin" and not user.get("is_admin")):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
-    legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
-    server_url = normalise_rustdesk_server_url(settings.server_url)
-    current_secret = decrypt_secret(legacy_value.get("api_key_encrypted")) or str(legacy_value.get("api_key") or "")
-    incoming_secret = settings.api_key
-    if incoming_secret is not None and not is_masked_secret(incoming_secret):
-        current_secret = str(incoming_secret).strip()
-    shared = {
-        "server_url": server_url,
-        "relay_server": settings.relay_server,
-        "api_key_encrypted": encrypt_secret(current_secret) if current_secret else "",
-    }
-    await db.settings.update_one(
-        {"type": "rustdesk"},
-        {"$set": {
-            "type": "rustdesk",
-            "server_url": server_url,
-            "api_key_encrypted": shared["api_key_encrypted"],
-            "relay_server": settings.relay_server,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }, "$unset": {"api_key": ""}},
-        upsert=True
+async def save_remote_settings(settings: dict, current_user: dict = Depends(get_current_user)):
+    raise HTTPException(
+        status_code=410,
+        detail="External transport settings are retired. Nexus Native uses the enrolled Nexus Agent.",
     )
-    await db.settings.update_one(
-        {"key": "rustdesk_config"},
-        {"$set": {
-            "key": "rustdesk_config",
-            "value": {key: value for key, value in {**legacy_value, **shared, "enabled": True}.items() if key != "api_key"},
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "updated_by": current_user["id"],
-        }},
-        upsert=True,
-    )
-    return {"message": "RustDesk settings saved"}
 
 @router.get("/remote/settings")
 async def get_remote_settings(current_user: dict = Depends(get_current_user)):
-    await assert_global_scope(current_user, operation="remote.settings.read")
-    settings = await _rustdesk_config()
-    if not settings or not settings.get("server_url"):
-        return {"configured": False}
-    return {
-        "configured": True,
-        "server_url": settings.get('server_url'),
-        "relay_server": settings.get('relay_server')
-    }
+    return {"configured": True, "provider": "nexus", "native": True, "settings_managed_by": "nexus_agent"}
 
 @router.get("/remote/agents")
 async def get_remote_agents(current_user: dict = Depends(get_current_user)):
-    """Get available remote agent downloads"""
-    agents = [
-        {
-            "id": "windows-x64",
-            "name": "NexusOps Agent for Windows",
-            "platform": "windows",
-            "arch": "x64",
-            "version": "1.3.2",
-            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-x86_64.exe",
-            "size": "18.5 MB",
-            "instructions": "1. Download and run the installer\n2. Enter your RustDesk ID server address\n3. Note your device ID for remote access"
-        },
-        {
-            "id": "windows-x86",
-            "name": "NexusOps Agent for Windows (32-bit)",
-            "platform": "windows",
-            "arch": "x86",
-            "version": "1.3.2",
-            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-x86-sciter.exe",
-            "size": "12.3 MB",
-            "instructions": "1. Download and run the installer\n2. Enter your RustDesk ID server address\n3. Note your device ID for remote access"
-        },
-        {
-            "id": "macos-universal",
-            "name": "NexusOps Agent for macOS",
-            "platform": "macos",
-            "arch": "universal",
-            "version": "1.3.2",
-            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2.dmg",
-            "size": "22.1 MB",
-            "instructions": "1. Download and open the DMG file\n2. Drag RustDesk to Applications\n3. Open and configure server settings\n4. Grant accessibility permissions when prompted"
-        },
-        {
-            "id": "linux-x64",
-            "name": "NexusOps Agent for Linux (Debian/Ubuntu)",
-            "platform": "linux",
-            "arch": "x64",
-            "version": "1.3.2",
-            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-x86_64.deb",
-            "size": "15.8 MB",
-            "instructions": "1. Download the .deb package\n2. Install: sudo dpkg -i rustdesk-*.deb\n3. Run: rustdesk\n4. Configure server settings"
-        },
-        {
-            "id": "linux-rpm",
-            "name": "NexusOps Agent for Linux (RHEL/Fedora)",
-            "platform": "linux",
-            "arch": "x64",
-            "version": "1.3.2",
-            "download_url": "https://github.com/rustdesk/rustdesk/releases/download/1.3.2/rustdesk-1.3.2-0.x86_64.rpm",
-            "size": "16.2 MB",
-            "instructions": "1. Download the .rpm package\n2. Install: sudo rpm -i rustdesk-*.rpm\n3. Run: rustdesk\n4. Configure server settings"
-        }
-    ]
-    return agents
+    """The first-party capability ships only through the enrolled Nexus Agent."""
+    return [{
+        "id": "nexus-agent",
+        "name": "Nexus Agent with Remote Companion",
+        "provider": "nexus",
+        "download_url": None,
+        "manage_url": "/nexus-agent",
+        "instructions": "Build and deploy the signed Nexus Agent package, then confirm native_remote_v1 readiness.",
+    }]
+
+
 
 @router.post("/remote/sessions", dependencies=[Depends(require_action("device.remote.start"))])
 async def create_remote_session(device_id: str, request: Request, session_type: str = "remote_desktop", current_user: dict = Depends(get_current_user)):
@@ -321,7 +248,7 @@ async def get_remote_sessions(
         query["user_id"] = user_id
     
     sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(200)
-    return sessions
+    return [{**session, **_native_session_freshness(session)} for session in sessions]
 
 @router.get("/remote/active-sessions")
 async def get_active_remote_sessions(current_user: dict = Depends(get_current_user)):
@@ -336,6 +263,7 @@ async def get_active_remote_sessions(current_user: dict = Depends(get_current_us
             s["live_duration_minutes"] = int((now - started).total_seconds() / 60)
         except:
             s["live_duration_minutes"] = 0
+        s.update(_native_session_freshness(s))
     return sessions
 
 @router.post("/remote/sessions/{session_id}/opened")

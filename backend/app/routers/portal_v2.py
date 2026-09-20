@@ -13,9 +13,10 @@ from app.auth import hash_password, verify_password
 from app.services.nexus_document_pdf import render_nexus_document_pdf
 from app.services.portal_audit import record_portal_event
 from app.services.public_url import configured_public_base_url
-from app.services.remote_runtime import build_rustdesk_uri, rustdesk_config
+
 from app.services.scope_permissions import platform_tenant_id
 from app.services.ticket_conversation import sanitise_ticket_rich_text
+from app.services.ticket_subscriptions import notify_ticket_subscribers
 
 router = APIRouter(prefix="/portal/v2", tags=["Portal V2"])
 portal_security = HTTPBearer(auto_error=False)
@@ -841,6 +842,12 @@ async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Dep
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.ticket_comments.insert_one(dict(message))
+    try:
+        await notify_ticket_subscribers(ticket=ticket, comment=message, actor_id=None)
+    except Exception:
+        # The customer reply is already durable. Preserve it rather than
+        # rejecting the portal action when a technician notification retries.
+        pass
     update = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if ticket.get("status") in {"on_hold", "resolved", "closed"}:
         update["status"] = "open"
@@ -881,69 +888,11 @@ async def portal_devices(user: dict = Depends(get_portal_user)):
             "compliance_score": 1,
         },
     ).to_list(500)
-    rd_devices = await db.rustdesk_devices.find(
-        {"client_id": user.get("client_id")},
-        {
-            "_id": 0,
-            "id": 1,
-            "device_id": 1,
-            "linked_device_id": 1,
-            "rustdesk_id": 1,
-            "name": 1,
-            "hostname": 1,
-            "status": 1,
-            "last_seen": 1,
-            "last_online": 1,
-            "updated_at": 1,
-        },
-    ).to_list(500)
-
-    config = await rustdesk_config()
-    provider_enabled = bool(config.get("enabled", True))
-    rd_by_dev_id = {
-        remote_id: rd
-        for rd in rd_devices
-        for remote_id in (rd.get("linked_device_id"), rd.get("device_id"))
-        if remote_id
-    }
-    rd_by_name = {
-        str(remote_name).strip().lower(): rd
-        for rd in rd_devices
-        for remote_name in (rd.get("name"), rd.get("hostname"))
-        if remote_name
-    }
-
     for device in devices:
-        mapping = (
-            rd_by_dev_id.get(device.get("id"))
-            or rd_by_name.get(str(device.get("name") or "").strip().lower())
-            or rd_by_name.get(str(device.get("hostname") or "").strip().lower())
-        )
-        rustdesk_id = str(device.get("rustdesk_id") or (mapping or {}).get("rustdesk_id") or "").strip()
-        is_online = str(device.get("status") or "").lower() == "online"
-        remote_ready = bool(rustdesk_id and provider_enabled and is_online)
-        if remote_ready:
-            readiness_reason = "Ready for secure client access"
-        elif not rustdesk_id:
-            readiness_reason = "Remote agent is not enrolled"
-        elif not provider_enabled:
-            readiness_reason = "Remote access is disabled by your MSP"
-        else:
-            readiness_reason = "Device must be online before connecting"
-
-        device["last_check_in"] = _latest_timestamp(
-            device.get("last_heartbeat"),
-            device.get("last_seen"),
-            device.get("rd_last_seen"),
-            (mapping or {}).get("last_seen"),
-            (mapping or {}).get("last_online"),
-            (mapping or {}).get("updated_at"),
-        )
-        device["remote_provider"] = "rustdesk" if rustdesk_id else None
-        device["remote_ready"] = remote_ready
-        device["remote_access_reason"] = readiness_reason
-        device["rustdesk_available"] = remote_ready
-        device["rustdesk_device_id"] = (mapping or {}).get("id") or device.get("id") if rustdesk_id else None
+        device["last_check_in"] = _latest_timestamp(device.get("last_heartbeat"), device.get("last_seen"))
+        device["remote_provider"] = "nexus"
+        device["remote_ready"] = False
+        device["remote_access_reason"] = "Native portal remote access is not available yet. Contact your technician."
         device.pop("rustdesk_id", None)
     return devices
 
@@ -955,185 +904,10 @@ async def portal_remote_connect(
     data: dict = None,
     user: dict = Depends(get_portal_user),
 ):
-    """Initiate a RustDesk remote-connect session from the client portal.
-    Strictly scoped to the portal user's own client_id.
-    Requires explicit consent acknowledgement for audit compliance."""
-    data = data or {}
-    if not data.get("consent_acknowledged"):
-        raise HTTPException(status_code=400, detail="Consent acknowledgement required to initiate a remote session")
+    """Retire the external-provider launch without removing portal history."""
     if not user.get("can_remote_devices", False):
-        raise HTTPException(status_code=403, detail="Remote access not permitted. Ask your MSP to enable it on your portal account.")
-
-    client_id = user.get("client_id")
-    device = await db.devices.find_one(
-        {"id": device_id, "client_id": client_id},
-        {
-            "_id": 0,
-            "id": 1,
-            "name": 1,
-            "hostname": 1,
-            "os": 1,
-            "device_type": 1,
-            "status": 1,
-            "rustdesk_id": 1,
-        },
-    )
-    mapping = None
-    if device:
-        names = [name for name in (device.get("name"), device.get("hostname")) if name]
-        mapping = await db.rustdesk_devices.find_one(
-            {
-                "client_id": client_id,
-                "$or": [
-                    {"linked_device_id": device_id},
-                    {"device_id": device_id},
-                    *[{"name": name} for name in names],
-                    *[{"hostname": name} for name in names],
-                ],
-            },
-            {
-                "_id": 0,
-                "id": 1,
-                "device_id": 1,
-                "linked_device_id": 1,
-                "name": 1,
-                "hostname": 1,
-                "rustdesk_id": 1,
-            },
-        )
-    else:
-        mapping = await db.rustdesk_devices.find_one(
-            {"id": device_id, "client_id": client_id},
-            {
-                "_id": 0,
-                "id": 1,
-                "device_id": 1,
-                "linked_device_id": 1,
-                "name": 1,
-                "hostname": 1,
-                "rustdesk_id": 1,
-            },
-        )
-        linked_device_id = (mapping or {}).get("linked_device_id") or (mapping or {}).get("device_id")
-        if linked_device_id:
-            device = await db.devices.find_one(
-                {"id": linked_device_id, "client_id": client_id},
-                {
-                    "_id": 0,
-                    "id": 1,
-                    "name": 1,
-                    "hostname": 1,
-                    "os": 1,
-                    "device_type": 1,
-                    "status": 1,
-                    "rustdesk_id": 1,
-                },
-            )
-
-    if not device:
-        raise HTTPException(status_code=404, detail="Managed device not found for this client")
-
-    rd_id = str(device.get("rustdesk_id") or (mapping or {}).get("rustdesk_id") or "").strip()
-    if not rd_id:
-        raise HTTPException(status_code=404, detail="No RustDesk agent registered for this device. Please contact your MSP.")
-    if str(device.get("status") or "").lower() != "online":
-        raise HTTPException(status_code=409, detail="This device is offline. Wait for it to check in before connecting.")
-
-    config = await rustdesk_config()
-    if not config.get("enabled", True):
-        raise HTTPException(status_code=409, detail="Remote access is disabled by your MSP")
-    relay = (config.get("relay_server") or "").strip()
-    server_url = (config.get("server_url") or "").strip().rstrip("/")
-    server_host = ""
-    if relay:
-        server_host = relay.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    elif server_url:
-        server_host = server_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
-    connection_url = build_rustdesk_uri(rd_id, relay, server_url)
-
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-    session_id = str(uuid.uuid4())
-    request_context = _request_context(request)
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
-    resolved_device_id = device.get("id")
-    resolved_device_name = device.get("name") or device.get("hostname") or (mapping or {}).get("name") or "Managed device"
-
-    record = {
-        "id": session_id,
-        "type": "portal_remote",
-        "client_id": client_id,
-        "client_name": (client or {}).get("name", ""),
-        "portal_user_id": user.get("id"),
-        "portal_user_name": user.get("name") or user.get("email", ""),
-        "portal_user_email": user.get("email", ""),
-        "device_id": resolved_device_id,
-        "device_name": resolved_device_name,
-        "device_os": device.get("os", ""),
-        "rustdesk_id": rd_id,
-        "started_at": now_iso,
-        "ended_at": None,
-        "duration_seconds": None,
-        "status": "active",
-        "consent_acknowledged": True,
-        "consent_acknowledged_at": now_iso,
-        "consent_text": data.get("consent_text",
-            "I acknowledge this remote access session is being initiated by me and will be recorded for audit, compliance (SOC 2 / ISO 27001), and service-quality purposes. "
-            "An MSP technician may observe or assist during the session."),
-        "ip_address": request_context.get("ip_address"),
-        "user_agent": request_context.get("user_agent"),
-        "created_at": now_iso,
-    }
-    await db.remote_session_records.insert_one(record)
-
-    # Also log to rustdesk_sessions for admin-side visibility
-    await db.rustdesk_sessions.insert_one({
-        "id": session_id,
-        "device_id": resolved_device_id,
-        "client_id": client_id,
-        "rustdesk_id": rd_id,
-        "user_id": user.get("id"),
-        "user_name": user.get("name", user.get("email", "Portal user")),
-        "initiated_via": "client_portal",
-        "status": "initiated",
-        "started_at": now_iso,
-        "ended_at": None,
-        "session_record_id": session_id,
-    })
-    if mapping and mapping.get("id"):
-        await db.rustdesk_devices.update_one(
-            {"id": mapping.get("id")},
-            {"$set": {"last_connected": now_iso, "status": "connected"}},
-        )
-    await db.devices.update_one(
-        {"id": resolved_device_id, "client_id": client_id},
-        {"$set": {"last_remote_connected_at": now_iso}},
-    )
-    await record_portal_event(
-        action="portal_remote_session_started",
-        client_id=client_id,
-        client_name=(client or {}).get("name", ""),
-        portal_user=user,
-        outcome="success",
-        details=f"Client-authorised remote session started for {resolved_device_name}",
-        metadata={
-            "session_id": session_id,
-            "device_id": resolved_device_id,
-            "device_name": resolved_device_name,
-            "provider": "rustdesk",
-            "consent_acknowledged": True,
-        },
-        **request_context,
-    )
-
-    return {
-        "message": "Remote connection initiated",
-        "session_id": session_id,
-        "rustdesk_id": rd_id,
-        "connection_url": connection_url,
-        "server_host": server_host,
-        "download_url": "https://rustdesk.com/download",
-    }
+        raise HTTPException(status_code=403, detail="Remote access not permitted")
+    raise HTTPException(status_code=410, detail="External remote access is retired. Native portal sessions are not available yet.")
 
 
 @router.post("/remote-sessions/{session_id}/end")

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sync"
 	"time"
 )
 
@@ -18,29 +17,36 @@ type SignedGrant struct {
 	Signature []byte
 }
 type grantPayload struct {
-	Version   int       `json:"version"`
-	SessionID string    `json:"session_id"`
-	TenantID  string    `json:"tenant_id"`
-	DeviceID  string    `json:"device_id"`
-	ActorID   string    `json:"actor_id"`
-	Mode      Mode      `json:"mode"`
-	IssuedAt  time.Time `json:"issued_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Version         int       `json:"version"`
+	SessionID       string    `json:"session_id"`
+	TenantID        string    `json:"tenant_id"`
+	DeviceID        string    `json:"device_id"`
+	ActorID         string    `json:"actor_id"`
+	Mode            Mode      `json:"mode"`
+	IssuedAt        time.Time `json:"issued_at"`
+	ExpiresAt       time.Time `json:"expires_at"`
+	ConsentRequired *bool     `json:"consent_required,omitempty"`
+	TechnicianName  string    `json:"technician_name,omitempty"`
+	Purpose         string    `json:"purpose,omitempty"`
 }
 
-// Verifier is scoped to an agent process. Durable replay prevention is still
-// required before production deployment; restarting this verifier clears it.
 type Verifier struct {
-	mu   sync.Mutex
-	key  ed25519.PublicKey
-	used map[string]time.Time
+	key    ed25519.PublicKey
+	replay ReplayStore
 }
 
 func NewVerifier(key ed25519.PublicKey) (*Verifier, error) {
+	return NewVerifierWithReplayStore(key, NewMemoryReplayStore(4096))
+}
+
+func NewVerifierWithReplayStore(key ed25519.PublicKey, replay ReplayStore) (*Verifier, error) {
 	if len(key) != ed25519.PublicKeySize {
 		return nil, errors.New("invalid remote trust key")
 	}
-	return &Verifier{key: append(ed25519.PublicKey(nil), key...), used: make(map[string]time.Time)}, nil
+	if replay == nil {
+		return nil, errors.New("remote replay store is required")
+	}
+	return &Verifier{key: append(ed25519.PublicKey(nil), key...), replay: replay}, nil
 }
 
 func (v *Verifier) Accept(envelope SignedGrant, tenantID, deviceID string, now time.Time) (*Session, error) {
@@ -57,29 +63,28 @@ func (v *Verifier) Accept(envelope SignedGrant, tenantID, deviceID string, now t
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, errors.New("invalid remote payload")
 	}
-	if decoder.Decode(new(any)) != io.EOF || payload.Version != 1 {
+	if decoder.Decode(new(any)) != io.EOF || (payload.Version != 1 && payload.Version != 2) {
 		return nil, errors.New("unsupported remote payload")
+	}
+	consentRequired := true // V1 is permanently attended-only.
+	if payload.Version == 2 {
+		if payload.ConsentRequired == nil || *payload.ConsentRequired {
+			return nil, errors.New("invalid standing-authorisation payload")
+		}
+		consentRequired = false
+		if len(payload.TechnicianName) > 160 || len(payload.Purpose) > 500 {
+			return nil, errors.New("invalid remote display metadata")
+		}
 	}
 	if payload.IssuedAt.IsZero() || payload.IssuedAt.After(now) || !payload.ExpiresAt.After(payload.IssuedAt) || payload.ExpiresAt.Sub(payload.IssuedAt) > time.Hour {
 		return nil, errors.New("invalid remote lifetime")
 	}
-	session, err := New(Grant{SessionID: payload.SessionID, TenantID: payload.TenantID, DeviceID: payload.DeviceID, ActorID: payload.ActorID, Mode: payload.Mode, ExpiresAt: payload.ExpiresAt}, tenantID, deviceID, now)
+	session, err := New(Grant{SessionID: payload.SessionID, TenantID: payload.TenantID, DeviceID: payload.DeviceID, ActorID: payload.ActorID, Mode: payload.Mode, ExpiresAt: payload.ExpiresAt, ConsentRequired: consentRequired, TechnicianName: payload.TechnicianName, Purpose: payload.Purpose}, tenantID, deviceID, now)
 	if err != nil {
 		return nil, err
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	for id, expiry := range v.used {
-		if !expiry.After(now) {
-			delete(v.used, id)
-		}
+	if err := v.replay.Use(payload.SessionID, payload.ExpiresAt, now); err != nil {
+		return nil, err
 	}
-	if _, exists := v.used[payload.SessionID]; exists {
-		return nil, errors.New("remote grant already used")
-	}
-	if len(v.used) >= 4096 {
-		return nil, errors.New("remote grant capacity reached")
-	}
-	v.used[payload.SessionID] = payload.ExpiresAt
 	return session, nil
 }

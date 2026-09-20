@@ -67,16 +67,29 @@ export default function NexusElevatePage() {
   const [companionLoading, setCompanionLoading] = useState(false);
   const [companionDeploying, setCompanionDeploying] = useState(false);
   const [policyCount, setPolicyCount] = useState(null);
+  const [secureAccessOpen, setSecureAccessOpen] = useState(false);
+  const [secureAccessAgents, setSecureAccessAgents] = useState([]);
+  const [secureAccessRequests, setSecureAccessRequests] = useState([]);
+  const [secureAccessAgentId, setSecureAccessAgentId] = useState("");
+  const [secureAccessProvider, setSecureAccessProvider] = useState("entra_pim");
+  const [secureAccessTicket, setSecureAccessTicket] = useState("");
+  const [secureAccessReason, setSecureAccessReason] = useState("");
+  const [secureAccessLoading, setSecureAccessLoading] = useState(false);
+  const [secureAccessSubmitting, setSecureAccessSubmitting] = useState(false);
+  const [secureAccessReadiness, setSecureAccessReadiness] = useState(null);
+  const [secureAccessReadinessLoading, setSecureAccessReadinessLoading] = useState(false);
 
   const load = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
     try {
-      const [overviewResult, requestsResult] = await Promise.all([
+      const [overviewResult, requestsResult, secureAccessResult] = await Promise.all([
         axios.get(`${API}/nexus-elevate/overview`, { headers }),
         axios.get(`${API}/nexus-elevate/requests`, { headers, params: endpointScope ? { device_id: endpointScope } : undefined }),
+        axios.get(`${API}/nexus-elevate/secure-access/requests`, { headers, params: endpointScope ? { agent_id: endpointScope } : undefined }),
       ]);
       setOverview(overviewResult.data || EMPTY_OVERVIEW);
       setRequests(requestsResult.data?.requests || []);
+      setSecureAccessRequests(secureAccessResult.data?.requests || []);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Nexus Elevate could not be loaded");
     } finally {
@@ -161,6 +174,59 @@ export default function NexusElevatePage() {
     }
   };
 
+  const openSecureAccess = async () => {
+    setSecureAccessOpen(true);
+    setSecureAccessLoading(true);
+    try {
+      const response = await axios.get(`${API}/nexus-agent/agents`, { headers });
+      const agents = (response.data || []).filter((agent) => agent.client_id);
+      setSecureAccessAgents(agents);
+      if (!secureAccessAgentId && agents[0]?.id) setSecureAccessAgentId(agents[0].id);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Managed endpoints could not be loaded");
+    } finally {
+      setSecureAccessLoading(false);
+    }
+  };
+
+  const createSecureAccessRequest = async () => {
+    if (!secureAccessAgentId) return toast.error("Choose a client-assigned Nexus Agent");
+    if (secureAccessReason.trim().length < 8) return toast.error("Record a technician justification of at least 8 characters");
+    setSecureAccessSubmitting(true);
+    try {
+      const response = await axios.post(`${API}/nexus-elevate/secure-access/requests`, {
+        provider: secureAccessProvider,
+        agent_id: secureAccessAgentId,
+        ticket_id: secureAccessTicket,
+        justification: secureAccessReason,
+        requested_duration_minutes: 30,
+      }, { headers });
+      setSecureAccessRequests((current) => [response.data.request, ...current]);
+      setSecureAccessOpen(false);
+      setSecureAccessReason("");
+      setSecureAccessTicket("");
+      toast.success("Secure access hand-off recorded. Complete the Microsoft-controlled step with your own sign-in.");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Secure access request could not be recorded");
+    } finally {
+      setSecureAccessSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!secureAccessOpen || !secureAccessAgentId) {
+      setSecureAccessReadiness(null);
+      return undefined;
+    }
+    let active = true;
+    setSecureAccessReadinessLoading(true);
+    axios.get(`${API}/nexus-elevate/secure-access/readiness`, { headers, params: { agent_id: secureAccessAgentId } })
+      .then((response) => { if (active) setSecureAccessReadiness(response.data || null); })
+      .catch((error) => { if (active) toast.error(error.response?.data?.detail || "Microsoft access readiness could not be checked"); })
+      .finally(() => { if (active) setSecureAccessReadinessLoading(false); });
+    return () => { active = false; };
+  }, [headers, secureAccessAgentId, secureAccessOpen]);
+
   const decide = async () => {
     if (!selected) return;
     if (reason.trim().length < 8) {
@@ -213,6 +279,7 @@ export default function NexusElevatePage() {
             <WorkspaceActionMenuItem icon={FileKey2} onSelect={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}>Settings</WorkspaceActionMenuItem>
             <WorkspaceActionMenuItem icon={ShieldCheck} onSelect={jumpToPolicies}>Policies</WorkspaceActionMenuItem>
           </WorkspaceActionMenu>
+          <Button variant="outline" size="sm" onClick={openSecureAccess}><FileKey2 className="mr-1 h-4 w-4" />Secure Microsoft access</Button>
           <Button variant="outline" size="sm" onClick={openCompanionRollout}><MonitorCog className="mr-1 h-4 w-4" />Companion repair</Button>
           <Button size="sm" onClick={() => load()} disabled={loading}><RefreshCw className={`mr-1 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh queue</Button>
         </>}
@@ -235,6 +302,13 @@ export default function NexusElevatePage() {
         </CardContent>
       </Card>
 
+      <Card className="border-sky-500/20 bg-sky-500/[0.025]" data-testid="nexus-secure-access-card">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><p className="font-semibold text-sky-100">Secure Microsoft access hand-offs</p><p className="mt-1 max-w-4xl text-sm text-muted-foreground">Record an Entra PIM activation or Windows LAPS retrieval against the exact endpoint and ticket. Nexus keeps the scope and audit trail; Microsoft remains the authentication and credential authority. No passkey, password, MFA response, token, or LAPS password is collected here.</p></div><div className="flex shrink-0 gap-2"><Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}>Connector setup</Button><Button variant="outline" size="sm" onClick={openSecureAccess}>New hand-off</Button></div></div>
+          {secureAccessRequests.length > 0 && <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">{secureAccessRequests.slice(0, 6).map((request) => <div key={request.id} className="rounded-lg border border-border/70 bg-background/30 px-3 py-2 text-xs"><div className="flex items-center justify-between gap-2"><span className="font-medium">{request.provider === "entra_pim" ? "Entra PIM" : "Windows LAPS"}</span><Badge variant="outline" className="text-[9px] uppercase">{String(request.status || "requested").replace(/_/g, " ")}</Badge></div><p className="mt-1 truncate text-muted-foreground">{request.device_name || request.hostname || "Managed endpoint"}{request.ticket_id ? ` · ${request.ticket_id}` : ""}</p><p className="mt-1 text-[10px] text-muted-foreground">{displayTime(request.requested_at)}</p></div>)}</div>}
+        </CardContent>
+      </Card>
+
       <ElevatePolicyWorkspace api={API} headers={headers} onPolicyCountChange={updatePolicyCount} />
 
       <div className="flex flex-wrap gap-3">
@@ -253,6 +327,10 @@ export default function NexusElevatePage() {
           <DialogHeader><DialogTitle className="flex items-center gap-2"><MonitorCog className="h-5 w-5 text-emerald-300" />Repair or retry Elevate companion</DialogTitle></DialogHeader>
           <div className="space-y-4"><p className="text-sm text-muted-foreground">Nexus automatically delivers the signed Client Chat + Elevate companion when an eligible Windows agent enrols or checks in. Use this only to force an immediate retry or repair. The agent verifies the SHA-256 and copies the companion to its installation directory; it never launches a customer-session window itself.</p><div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3 text-xs text-emerald-100">Only online agents running the current companion-rollout version are eligible. Devices become <strong>Elevate active</strong> only after a verified agent result—not when this command is merely queued.</div><Select value={companionScope} onValueChange={setCompanionScope}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All online, updated agents</SelectItem><SelectItem value="one">One online agent</SelectItem></SelectContent></Select>{companionScope === "one" && <Select value={companionAgentId} onValueChange={setCompanionAgentId} disabled={companionLoading}><SelectTrigger><SelectValue placeholder={companionLoading ? "Loading agents..." : "Choose an online agent"} /></SelectTrigger><SelectContent>{companionAgents.length === 0 ? <SelectItem value="none" disabled>No online agents found</SelectItem> : companionAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.hostname || agent.id} · {agent.client_name || agent.client_id || "Unassigned"} · {agent.agent_version || "unknown"}</SelectItem>)}</SelectContent></Select>}<div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setCompanionOpen(false)} disabled={companionDeploying}>Cancel</Button><Button onClick={deployCompanion} disabled={companionDeploying || companionLoading}>{companionDeploying && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Queue immediate retry</Button></div></div>
         </DialogContent>
+      </Dialog>
+
+      <Dialog open={secureAccessOpen} onOpenChange={setSecureAccessOpen}>
+        <DialogContent className="max-w-xl" data-testid="nexus-secure-access-dialog"><DialogHeader><DialogTitle className="flex items-center gap-2"><FileKey2 className="h-5 w-5 text-sky-300" />Secure Microsoft access hand-off</DialogTitle></DialogHeader><div className="space-y-4"><p className="text-sm text-muted-foreground">This creates a device- and ticket-bound audit record before you continue in your own Microsoft sign-in session. Nexus will not autofill, store, replay, or view passkeys, passwords, MFA responses, tokens, or LAPS credentials.</p><div className="grid gap-3 sm:grid-cols-2"><div><Label>Microsoft workflow</Label><Select value={secureAccessProvider} onValueChange={setSecureAccessProvider}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="entra_pim">Activate eligible Entra PIM role</SelectItem><SelectItem value="windows_laps">Retrieve Windows LAPS in Microsoft</SelectItem></SelectContent></Select></div><div><Label>Managed endpoint</Label><Select value={secureAccessAgentId} onValueChange={setSecureAccessAgentId} disabled={secureAccessLoading}><SelectTrigger className="mt-1"><SelectValue placeholder={secureAccessLoading ? "Loading endpoints..." : "Choose endpoint"} /></SelectTrigger><SelectContent>{secureAccessAgents.length === 0 ? <SelectItem value="none" disabled>No client-assigned agents available</SelectItem> : secureAccessAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.hostname || agent.id} · {agent.client_name || agent.client_id}</SelectItem>)}</SelectContent></Select></div></div>{secureAccessReadinessLoading ? <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />Checking technician identity and tenant mapping…</div> : secureAccessReadiness && <div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.05] p-3 text-xs"><p className="font-semibold text-sky-100">Provider verification preflight</p><p className="mt-1 text-muted-foreground">Microsoft identity: {secureAccessReadiness.technician_identity?.microsoft_identity_bound ? "bound to this technician" : "not yet bound"} · Client Entra tenant: {secureAccessReadiness.client?.provider_tenant_mapped ? "mapped" : "not mapped"}.</p><p className="mt-1 text-amber-200">Delegated secure-access connector: {String(secureAccessReadiness.provider_connection?.delegated_secure_access_connector || "awaiting_registration").replace(/_/g, " ")}. A fresh Microsoft sign-in will still be required.</p></div>}<div><Label htmlFor="secure-access-ticket">Ticket reference (optional)</Label><Input id="secure-access-ticket" className="mt-1" value={secureAccessTicket} onChange={(event) => setSecureAccessTicket(event.target.value)} placeholder="INC-1234" /></div><div><Label htmlFor="secure-access-reason">Technician justification</Label><Textarea id="secure-access-reason" className="mt-1" rows={3} value={secureAccessReason} onChange={(event) => setSecureAccessReason(event.target.value)} placeholder="Why is this time-bound provider access required?" /></div><div className="rounded-lg border border-sky-500/20 bg-sky-500/[0.05] p-3 text-xs text-sky-100">{secureAccessProvider === "entra_pim" ? "Next: activate only your eligible Entra role and complete Microsoft-required MFA/approval." : "Next: retrieve LAPS only in the Microsoft-controlled experience using your authorised account."}</div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setSecureAccessOpen(false)} disabled={secureAccessSubmitting}>Cancel</Button><Button onClick={createSecureAccessRequest} disabled={secureAccessSubmitting || secureAccessLoading || secureAccessReason.trim().length < 8}>{secureAccessSubmitting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Record secure hand-off</Button></div></div></DialogContent>
       </Dialog>
 
       <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>

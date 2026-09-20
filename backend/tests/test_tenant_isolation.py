@@ -1193,6 +1193,16 @@ def test_nexus_elevate_foreign_request_cannot_be_approved(monkeypatch):
     assert denials.rows[0]["operation"] == "nexus_elevate.request.approve"
 
 
+def test_secure_access_guidance_never_offers_credential_replay():
+    pim = permission_elevation._secure_access_provider_guidance("entra_pim")
+    laps = permission_elevation._secure_access_provider_guidance("windows_laps")
+
+    assert "passkey" in pim["credential_handling"].lower()
+    assert "token" in pim["credential_handling"].lower()
+    assert "laps password" in laps["credential_handling"].lower()
+    assert "never" in laps["credential_handling"].lower()
+
+
 def test_nexus_verify_requires_an_independent_authorised_approver():
     record = {
         "created_by_id": "tech-1",

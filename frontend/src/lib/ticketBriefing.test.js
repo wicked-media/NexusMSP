@@ -24,7 +24,7 @@ test("summary shows provenance and becomes stale when the source changes", async
   await render(ticket);
   await act(async () => container.querySelector('[data-testid="copilot-summarize"]').click());
   expect(container.textContent).toContain("Outlook fails to start.");
-  expect(container.textContent).toContain("Does not include conversation or work history");
+  expect(container.textContent).toContain("recorded conversation update");
   await render({ ...ticket, description: "Now opens" });
   expect(container.textContent).toContain("Ticket changed");
 });

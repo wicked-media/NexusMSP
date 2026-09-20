@@ -19,11 +19,12 @@ import (
 	"nexusagent/internal/heartbeat"
 	"nexusagent/internal/identity"
 	"nexusagent/internal/localbroker"
+	"nexusagent/internal/nexusremote"
 	"nexusagent/internal/transport"
 )
 
 // Version is injected at build time via -ldflags.
-var Version = "0.1.11-endpoint-readiness"
+var Version = "0.1.12-native-remote"
 
 func main() {
 	var (
@@ -128,6 +129,9 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	}
 
 	tr.SetToken(cfg.AgentToken)
+	if err := nexusremote.StartCompanionBridge(ctx, cfg, tr); err != nil {
+		log.Printf("[native-remote] companion bridge unavailable: %v", err)
+	}
 	localBroker, err := localbroker.Start(cfg)
 	if err != nil {
 		log.Printf("[local-broker] WARN: user-session companion bridge is unavailable: %v", err)

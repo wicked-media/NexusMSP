@@ -7,18 +7,28 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import PureWindowsPath
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from app.database import db
 from app.auth import get_current_user
 from app.routers.tech_intel import _log_audit
-from app.services.scope_permissions import assert_client_scope, effective_scope, scoped_query
+from app.services.secret_store import encrypt_secret
+from app.services.scope_permissions import (
+    assert_client_scope,
+    effective_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
 ELEVATE_SETTINGS_ID = "nexus_elevate"
 NATIVE_ELEVATE_MAX_DURATION = 60
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
+SECURE_ACCESS_PROVIDERS = {"entra_pim", "windows_laps"}
+SECURE_ACCESS_CONNECTOR_KEY = "nexus_secure_access_connector"
 
 
 def _ensure_admin(caller: dict):
@@ -215,6 +225,101 @@ async def _request_view(request: dict) -> dict:
         item["asset_id"] = device.get("id")
         item["asset_name"] = device.get("name") or item.get("hostname") or "Managed asset"
     return item
+
+
+def _secure_access_provider_guidance(provider: str) -> dict:
+    """Return safe, credential-free next steps for a provider-bound request.
+
+    Nexus intentionally cannot complete these actions by accepting a copied
+    password, passkey, recovery code, refresh token, or an operator attestation.
+    A future delegated provider adapter must write connector-verified evidence
+    before it may advance a request beyond ``provider_action_required``.
+    """
+    if provider == "entra_pim":
+        return {
+            "title": "Activate your eligible Entra role",
+            "instructions": [
+                "Use your own Microsoft Entra sign-in session.",
+                "Activate only the eligible role required for this ticket and endpoint.",
+                "Complete Microsoft-required MFA or approval in Entra.",
+            ],
+            "credential_handling": "Nexus never receives or replays the technician's passkey, password, MFA response, or token.",
+        }
+    return {
+        "title": "Retrieve Windows LAPS through Microsoft",
+        "instructions": [
+            "Use your own authorised Microsoft Entra or Intune session.",
+            "Retrieve the credential only through the Microsoft-controlled LAPS experience.",
+            "Use it only for the approved endpoint and ticket scope.",
+        ],
+        "credential_handling": "Nexus never receives, stores, displays, or transfers a Windows LAPS password.",
+    }
+
+
+async def _write_secure_access_audit(kind: str, request: dict, actor: dict, details: dict | None = None) -> None:
+    event = {
+        "id": str(uuid.uuid4()),
+        "kind": kind,
+        "request_id": request.get("id"),
+        "tenant_id": request.get("tenant_id"),
+        "client_id": request.get("client_id"),
+        "device_id": request.get("device_id"),
+        "agent_id": request.get("agent_id"),
+        "actor_id": actor.get("id"),
+        "actor_name": actor.get("name"),
+        "details": details or {},
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.nexus_secure_access_audit.insert_one(event)
+    try:
+        await _log_audit(actor, kind, request.get("id"), "Nexus secure access request", {
+            "provider": request.get("provider"),
+            "client_id": request.get("client_id"),
+            "device_id": request.get("device_id"),
+            "ticket_id": request.get("ticket_id"),
+            **(details or {}),
+        })
+    except Exception:
+        # The request-specific audit is authoritative for this workflow.
+        pass
+
+
+def _secure_access_connector_query(caller: dict) -> dict:
+    return tenant_scoped_query(caller, {"key": SECURE_ACCESS_CONNECTOR_KEY}, tenant_field="platform_tenant_id")
+
+
+async def _secure_access_connector_settings(caller: dict) -> dict:
+    stored = await db.settings.find_one(_secure_access_connector_query(caller), {"_id": 0}) or {}
+    value = stored.get("value") if isinstance(stored.get("value"), dict) else {}
+    configured = bool(value.get("tenant_id") and value.get("client_id") and value.get("client_secret_encrypted"))
+    return {
+        # The credential record is deliberately inert until the provider
+        # adapter has a connector-verified PIM/LAPS contract.  Configuration
+        # must never make the UI imply that Nexus can already activate roles.
+        "enabled": False,
+        "state": "configured_pending_provider_adapter" if configured else "awaiting_registration",
+        "tenant_id": str(value.get("tenant_id") or ""),
+        "client_id": str(value.get("client_id") or ""),
+        "redirect_uri": str(value.get("redirect_uri") or ""),
+        "client_secret_configured": bool(value.get("client_secret_encrypted")),
+        "required_setup": [
+            "Create a dedicated Entra app registration for Nexus secure access.",
+            "Add the exact redirect URI and grant only the reviewed delegated permissions.",
+            "Complete tenant-admin consent, then enable the connector in Nexus.",
+        ],
+        "updated_at": value.get("updated_at"),
+    }
+
+
+def _normalise_secure_access_redirect(raw: Any) -> str:
+    value = str(raw or "").strip()
+    if not value or len(value) > 500:
+        raise HTTPException(status_code=400, detail="A valid redirect URI is required")
+    parsed = urlparse(value)
+    local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    if not (parsed.scheme == "https" or local_http) or not parsed.netloc or parsed.query or parsed.fragment:
+        raise HTTPException(status_code=400, detail="Redirect URI must use HTTPS (or localhost HTTP) and contain no query or fragment")
+    return value
 
 
 def _policy_visible_to_caller(policy: dict, caller: dict) -> bool:
@@ -800,6 +905,234 @@ async def break_glass(data: dict, current_user: dict = Depends(get_current_user)
 # ---------------------------------------------------------------------------
 # Nexus Elevate: native, agent-backed endpoint privilege approvals
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Nexus Elevate: provider-bound technician access requests
+# ---------------------------------------------------------------------------
+
+@router.post("/nexus-elevate/secure-access/requests")
+async def create_secure_access_request(data: dict, current_user: dict = Depends(get_current_user)):
+    """Record a scoped request to use a Microsoft-controlled access workflow.
+
+    This intentionally creates no endpoint command and does not attempt to
+    impersonate the technician at Entra, Intune, or the target endpoint.  It
+    gives the subsequent delegated connector a stable, tenant-bound request to
+    verify before it can offer a provider hand-off.
+    """
+    caller = await _get_caller(current_user)
+    _ensure_native_elevation_operator(caller)
+    provider = str(data.get("provider") or "").strip().lower()
+    if provider not in SECURE_ACCESS_PROVIDERS:
+        raise HTTPException(status_code=400, detail="Choose Microsoft Entra PIM or Windows LAPS")
+    agent_id = str(data.get("agent_id") or "").strip()
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="An enrolled Nexus Agent is required")
+    agent = await db.nexus_agents.find_one(tenant_scoped_query(caller, {"id": agent_id}), {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=404, detail="Managed endpoint not found")
+    client_id = str(agent.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=409, detail="The endpoint must be assigned to a client before secure access can be requested")
+    await assert_client_scope(caller, client_id, operation="nexus_secure_access.request.create", mask_not_found=True)
+    justification = str(data.get("justification") or "").strip()
+    if len(justification) < 8 or len(justification) > 2000:
+        raise HTTPException(status_code=400, detail="Provide a justification between 8 and 2000 characters")
+    ticket_id = str(data.get("ticket_id") or "").strip()
+    if len(ticket_id) > 120:
+        raise HTTPException(status_code=400, detail="Ticket reference is too long")
+    requested_minutes = int(data.get("requested_duration_minutes") or 30)
+    if requested_minutes < 5 or requested_minutes > NATIVE_ELEVATE_MAX_DURATION:
+        raise HTTPException(status_code=400, detail=f"Requested duration must be 5-{NATIVE_ELEVATE_MAX_DURATION} minutes")
+
+    device = await db.devices.find_one(
+        tenant_scoped_query(caller, {"nexus_agent_id": agent_id}),
+        {"_id": 0, "id": 1, "name": 1, "site_id": 1},
+    ) or {}
+    now = datetime.now(timezone.utc).isoformat()
+    request = {
+        "id": f"nsa-{uuid.uuid4().hex[:16]}",
+        "tenant_id": platform_tenant_id(caller),
+        "provider": provider,
+        "status": "provider_action_required",
+        "client_id": client_id,
+        "site_id": device.get("site_id") or agent.get("site_id"),
+        "device_id": device.get("id"),
+        "device_name": device.get("name") or agent.get("hostname") or "Managed endpoint",
+        "agent_id": agent_id,
+        "hostname": agent.get("hostname") or "",
+        "ticket_id": ticket_id,
+        "justification": justification,
+        "requested_duration_minutes": requested_minutes,
+        "requested_by_id": caller.get("id"),
+        "requested_by_name": caller.get("name") or caller.get("email") or "Technician",
+        "requested_at": now,
+        "provider_action_required_at": now,
+        # Explicitly record the non-secret boundary so a future adapter cannot
+        # quietly expand this data model into a credential vault.
+        "credential_material": "never_collected",
+        "provider_verification": None,
+    }
+    await db.nexus_secure_access_requests.insert_one(request)
+    await _write_secure_access_audit("nexus_secure_access_requested", request, caller, {
+        "requested_duration_minutes": requested_minutes,
+        "credential_material": "never_collected",
+    })
+    return {"request": {key: value for key, value in request.items() if key != "_id"}, "provider_guidance": _secure_access_provider_guidance(provider)}
+
+
+@router.get("/nexus-elevate/secure-access/requests")
+async def list_secure_access_requests(
+    provider: str | None = Query(None),
+    agent_id: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=300),
+    current_user: dict = Depends(get_current_user),
+):
+    caller = await _get_caller(current_user)
+    _ensure_native_elevation_operator(caller)
+    query: dict[str, Any] = {}
+    if provider:
+        normalised = provider.strip().lower()
+        if normalised not in SECURE_ACCESS_PROVIDERS:
+            raise HTTPException(status_code=400, detail="Unknown secure-access provider")
+        query["provider"] = normalised
+    if agent_id:
+        query["agent_id"] = agent_id
+    rows = await db.nexus_secure_access_requests.find(
+        tenant_scoped_query(caller, scoped_query(caller, query, site_field=None)), {"_id": 0}
+    ).sort("requested_at", -1).to_list(limit)
+    return {
+        "requests": rows,
+        "capabilities": {
+            "provider_verified_handoff": False,
+            "credential_replay": False,
+            "laps_password_storage": False,
+        },
+    }
+
+
+@router.get("/nexus-elevate/secure-access/readiness")
+async def get_secure_access_readiness(
+    agent_id: str = Query(..., min_length=1, max_length=200),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return a non-secret readiness preflight for a provider hand-off.
+
+    A Nexus SSO identity binding is useful context, but deliberately is not
+    treated as an Entra access token, a passkey assertion, or proof that the
+    caller currently holds an eligible privileged role.
+    """
+    caller = await _get_caller(current_user)
+    _ensure_native_elevation_operator(caller)
+    agent = await db.nexus_agents.find_one(tenant_scoped_query(caller, {"id": agent_id}), {"_id": 0})
+    if not agent:
+        raise HTTPException(status_code=404, detail="Managed endpoint not found")
+    client_id = str(agent.get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=409, detail="The endpoint must be assigned to a client before access readiness can be checked")
+    await assert_client_scope(caller, client_id, operation="nexus_secure_access.readiness", mask_not_found=True)
+    client = await db.clients.find_one(
+        tenant_scoped_query(caller, {"id": client_id}),
+        {"_id": 0, "id": 1, "name": 1, "cipp_tenant_id": 1, "m365_tenant_id": 1, "office365_tenant_id": 1},
+    ) or {}
+    connection = await db.m365_tenant_connections.find_one(
+        tenant_scoped_query(caller, {"client_id": client_id}, tenant_field="platform_tenant_id"),
+        {"_id": 0, "tenant_id": 1, "tenant_name": 1, "graph_verified": 1, "access_status": 1},
+    ) or {}
+    provider_tenant_id = str(
+        connection.get("tenant_id")
+        or client.get("m365_tenant_id")
+        or client.get("office365_tenant_id")
+        or client.get("cipp_tenant_id")
+        or ""
+    ).strip()
+    microsoft_identity_bound = bool(caller.get("sso_provider") == "microsoft" and caller.get("microsoft_id"))
+    connector = await _secure_access_connector_settings(caller)
+    return {
+        "agent": {"id": agent.get("id"), "hostname": agent.get("hostname"), "client_id": client_id},
+        "client": {"id": client_id, "name": client.get("name"), "provider_tenant_mapped": bool(provider_tenant_id)},
+        "technician_identity": {
+            "microsoft_identity_bound": microsoft_identity_bound,
+            "identity_subject": "bound" if microsoft_identity_bound else "not_bound",
+            "provider_session_reauthentication_required": True,
+        },
+        "provider_connection": {
+            "entra_tenant_id": provider_tenant_id or None,
+            "tenant_name": connection.get("tenant_name") or None,
+            "graph_evidence_verified": bool(connection.get("graph_verified")),
+            "delegated_secure_access_connector": connector["state"],
+        },
+        "ready_for_provider_verification": bool(connector["enabled"] and microsoft_identity_bound and provider_tenant_id),
+        "next_requirement": "Configure a dedicated delegated Microsoft access connector with approved redirect URI and least-privilege consent. Nexus SSO and Partner Center credentials are not reused." if not connector["enabled"] else "Provider verification still requires a fresh Microsoft sign-in and eligible role activation.",
+    }
+
+
+@router.get("/nexus-elevate/secure-access/settings")
+async def get_secure_access_settings(current_user: dict = Depends(get_current_user)):
+    caller = await _get_caller(current_user)
+    _ensure_admin(caller)
+    return await _secure_access_connector_settings(caller)
+
+
+@router.put("/nexus-elevate/secure-access/settings")
+async def put_secure_access_settings(data: dict, current_user: dict = Depends(get_current_user)):
+    """Store write-only registration metadata for the future delegated adapter.
+
+    Saving this configuration does not initiate OAuth, grant consent, retrieve
+    LAPS credentials, or activate a PIM role.  The secret is encrypted before
+    persistence and is never returned by either settings or readiness routes.
+    """
+    caller = await _get_caller(current_user)
+    _ensure_admin(caller)
+    existing = await db.settings.find_one(_secure_access_connector_query(caller), {"_id": 0}) or {}
+    previous = existing.get("value") if isinstance(existing.get("value"), dict) else {}
+    tenant_id = str(data.get("tenant_id") or previous.get("tenant_id") or "").strip()
+    client_id = str(data.get("client_id") or previous.get("client_id") or "").strip()
+    redirect_uri = _normalise_secure_access_redirect(data.get("redirect_uri") or previous.get("redirect_uri"))
+    if not tenant_id or len(tenant_id) > 200 or not client_id or len(client_id) > 200:
+        raise HTTPException(status_code=400, detail="Tenant ID and application client ID are required")
+    supplied_secret = str(data.get("client_secret") or "").strip()
+    encrypted_secret = encrypt_secret(supplied_secret) if supplied_secret else str(previous.get("client_secret_encrypted") or "")
+    if not encrypted_secret:
+        raise HTTPException(status_code=400, detail="Enter the application client secret before saving the connector")
+    requested_enabled = bool(data.get("enabled", False))
+    value = {
+        "enabled": False,
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "client_secret_encrypted": encrypted_secret,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": caller.get("id"),
+    }
+    await db.settings.update_one(
+        _secure_access_connector_query(caller),
+        {"$set": {"key": SECURE_ACCESS_CONNECTOR_KEY, "platform_tenant_id": platform_tenant_id(caller), "value": value}},
+        upsert=True,
+    )
+    await _write_secure_access_audit("nexus_secure_access_connector_configured", {"id": SECURE_ACCESS_CONNECTOR_KEY, "tenant_id": platform_tenant_id(caller)}, caller, {
+        "enabled": False,
+        "activation_requested": requested_enabled,
+        "tenant_id_configured": True,
+        "client_id_configured": True,
+        "client_secret_configured": True,
+    })
+    return await _secure_access_connector_settings(caller)
+
+
+@router.get("/nexus-elevate/secure-access/requests/{request_id}")
+async def get_secure_access_request(request_id: str, current_user: dict = Depends(get_current_user)):
+    caller = await _get_caller(current_user)
+    _ensure_native_elevation_operator(caller)
+    request = await db.nexus_secure_access_requests.find_one(
+        tenant_scoped_query(caller, {"id": request_id}), {"_id": 0}
+    )
+    if not request:
+        raise HTTPException(status_code=404, detail="Secure access request not found")
+    await assert_client_scope(caller, request.get("client_id"), site_id=request.get("site_id"), operation="nexus_secure_access.request.read", mask_not_found=True)
+    events = await db.nexus_secure_access_audit.find(
+        tenant_scoped_query(caller, {"request_id": request_id}), {"_id": 0}
+    ).sort("at", -1).to_list(100)
+    return {"request": request, "provider_guidance": _secure_access_provider_guidance(request["provider"]), "audit": events}
 
 @router.get("/nexus-elevate/settings")
 async def get_nexus_elevate_settings(current_user: dict = Depends(get_current_user)):

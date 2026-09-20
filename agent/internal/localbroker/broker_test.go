@@ -99,3 +99,32 @@ func TestBrokerRejectsUntrustedElevationIdentifiers(t *testing.T) {
 		t.Fatalf("invalid request id code = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
+
+func TestBrokerDoesNotExposeRemoteGrantAuthority(t *testing.T) {
+	var gotPath, gotToken string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotToken = r.Header.Get("X-Agent-Token")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	broker, err := newServer(&config.Config{ServerURL: upstream.URL, AgentToken: "service-token"}, upstream.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	broker.handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/remote/grants/session-123/ack", strings.NewReader(`{"outcome":"accepted"}`)))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("response code = %d", response.Code)
+	}
+	if gotPath != "" || gotToken != "" {
+		t.Fatalf("unexpected forward path=%q token=%q", gotPath, gotToken)
+	}
+
+	response = httptest.NewRecorder()
+	broker.handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/remote/grants/not%20valid/ack", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("invalid session id code = %d", response.Code)
+	}
+}

@@ -86,6 +86,11 @@ func svcInstall(cfg *config.Config) error {
 			return fmt.Errorf("register tray companion: %w", err)
 		}
 	}
+	if remotePath := filepath.Join(filepath.Dir(exe), "nexus-remote-companion.exe"); fileExists(remotePath) {
+		if err := installRemoteCompanionLauncher(remotePath); err != nil {
+			return fmt.Errorf("register remote companion: %w", err)
+		}
+	}
 	return svcStart()
 }
 
@@ -113,6 +118,7 @@ func configureServiceRecovery() error {
 func svcUninstall() error {
 	_ = svcStop()
 	_ = removeTrayLauncher()
+	_ = removeRemoteCompanionLauncher()
 	out, err := exec.Command("sc", "delete", svcName).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("sc delete: %v: %s", err, string(out))
@@ -123,21 +129,37 @@ func svcUninstall() error {
 func fileExists(path string) bool { _, err := os.Stat(path); return err == nil }
 
 func installTrayLauncher(trayPath string) error {
+	return installUserLauncher("NexusOpsAgentTray", trayPath)
+}
+
+func installRemoteCompanionLauncher(remotePath string) error {
+	return installUserLauncher("NexusRemoteCompanion", remotePath)
+}
+
+func installUserLauncher(name, executable string) error {
 	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
 	defer key.Close()
-	return key.SetStringValue("NexusOpsAgentTray", fmt.Sprintf(`"%s"`, trayPath))
+	return key.SetStringValue(name, fmt.Sprintf(`"%s"`, executable))
 }
 
 func removeTrayLauncher() error {
+	return removeUserLauncher("NexusOpsAgentTray")
+}
+
+func removeRemoteCompanionLauncher() error {
+	return removeUserLauncher("NexusRemoteCompanion")
+}
+
+func removeUserLauncher(name string) error {
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `Software\Microsoft\Windows\CurrentVersion\Run`, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
 	defer key.Close()
-	err = key.DeleteValue("NexusOpsAgentTray")
+	err = key.DeleteValue(name)
 	if err == registry.ErrNotExist {
 		return nil
 	}

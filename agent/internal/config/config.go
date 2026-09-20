@@ -2,9 +2,11 @@
 package config
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -56,6 +58,7 @@ type PlatformPolicy struct {
 	Commands       map[string]any  `json:"commands,omitempty"`
 	SelfRepair     map[string]any  `json:"self_repair,omitempty"`
 	DNS            map[string]any  `json:"dns,omitempty"`
+	NativeRemote   map[string]any  `json:"native_remote,omitempty"`
 }
 
 type UpdateEvidence struct {
@@ -268,8 +271,36 @@ func (c *Config) RuntimeCapabilities() []string {
 			"nexus_canary",
 			"approved_elevation_launch",
 		)
+		if c.NativeRemoteCompanionReady() {
+			capabilities = append(capabilities, "native_remote_v1", "native_remote_v2")
+		}
 	}
 	return capabilities
+}
+
+// NativeRemoteCompanionReady fails closed unless the authenticated policy pins
+// the exact installed Remote Companion build. Merely placing an executable in
+// the agent directory must never make native remote access available.
+func (c *Config) NativeRemoteCompanionReady() bool {
+	if c == nil || c.PlatformPolicy == nil || c.PlatformPolicy.NativeRemote == nil {
+		return false
+	}
+	enabled, _ := c.PlatformPolicy.NativeRemote["enabled"].(bool)
+	expected, _ := c.PlatformPolicy.NativeRemote["companion_sha256"].(string)
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	if !enabled || len(expected) != sha256.Size*2 {
+		return false
+	}
+	file, err := os.Open(filepath.Join(c.BaseDir(), "nexus-remote-companion.exe"))
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return false
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil)) == expected
 }
 
 // ApplyPlatformPolicy persists the service-controlled cadence alongside the

@@ -615,6 +615,7 @@ def test_installer_records_the_configured_agent_intervals():
         binary_bytes=b"agent-binary",
         chat_companion_bytes=b"chat-companion",
         tray_companion_bytes=b"tray-companion",
+        remote_companion_bytes=b"native-remote-companion",
         heartbeat_secs=120,
         poll_secs=30,
     )
@@ -629,8 +630,8 @@ def test_installer_records_the_configured_agent_intervals():
     assert 'icacls "%INSTDIR%\\config.json" /inheritance:r' in install_script
     assert "*S-1-5-18:(F)" in install_script
     assert "*S-1-5-32-544:(F)" in install_script
-    assert {"nexus-client-chat.exe", "nexus-agent-tray.exe"} <= names
-    assert release_manifest["bundled_components"] == {"client_chat": True, "agent_tray": True}
+    assert {"nexus-client-chat.exe", "nexus-agent-tray.exe", "nexus-remote-companion.exe"} <= names
+    assert release_manifest["bundled_components"] == {"client_chat": True, "agent_tray": True, "native_remote": True}
 
 
 def test_public_registration_cannot_request_an_elevated_role():
@@ -1042,6 +1043,7 @@ class CommandConsoleSessions:
     def __init__(self):
         self.doc = {
             "id": "session-1",
+            "tenant_id": "nexus-local",
             "status": "active",
             "user_id": "operator-1",
             "device_id": "device-1",
@@ -1052,7 +1054,9 @@ class CommandConsoleSessions:
         }
 
     async def find_one(self, query, *_args, **_kwargs):
-        if query.get("id") == self.doc["id"] and query.get("user_id", self.doc["user_id"]) == self.doc["user_id"]:
+        clauses = query.get("$and", [query])
+        direct = next((clause for clause in clauses if "id" in clause), {})
+        if direct.get("id") == self.doc["id"] and direct.get("user_id", self.doc["user_id"]) == self.doc["user_id"]:
             return dict(self.doc)
         return None
 

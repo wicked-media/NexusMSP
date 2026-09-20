@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,12 +62,17 @@ type commandPayload struct {
 	Arguments     []string `json:"arguments,omitempty"`
 	SHA256        string   `json:"sha256,omitempty"`
 	TraySHA256    string   `json:"tray_sha256,omitempty"`
+	RemoteSHA256  string   `json:"remote_sha256,omitempty"`
 	ApprovedUntil string   `json:"approved_until,omitempty"`
 	CanaryID      string   `json:"canary_id,omitempty"`
 	CanaryPath    string   `json:"canary_path,omitempty"`
 	Actions       []string `json:"actions,omitempty"`
 	Reason        string   `json:"reason,omitempty"`
 	Provider      string   `json:"provider,omitempty"`
+	TransferID    string   `json:"transfer_id,omitempty"`
+	Destination   string   `json:"destination,omitempty"`
+	SourcePath    string   `json:"source_path,omitempty"`
+	Directory     string   `json:"directory,omitempty"`
 }
 
 type commandAuthorization struct {
@@ -91,7 +97,7 @@ type commandAuthorization struct {
 
 type cmdItem struct {
 	ID            string               `json:"id"`
-	Kind          string               `json:"kind"` // run_script, reboot, shutdown, run_powershell, run_cmd, kill_process, elevate_launch, install_companion, canary_deploy, remote_repair
+	Kind          string               `json:"kind"` // run_script, reboot, shutdown, run_powershell, run_cmd, file_transfer_download and governed maintenance commands
 	Payload       commandPayload       `json:"payload"`
 	PayloadRaw    json.RawMessage      `json:"-"`
 	Authorization commandAuthorization `json:"authorization"`
@@ -490,6 +496,10 @@ func (l *Loop) execute(c cmdItem) (res cmdResult) {
 		res = installCompanion(l.tr, c, res)
 		return res
 
+	case "install_remote_companion":
+		res = installRemoteCompanion(l.tr, c, res)
+		return res
+
 	case "canary_deploy":
 		res = deployRansomwareCanary(c, res)
 		return res
@@ -536,6 +546,15 @@ func (l *Loop) execute(c cmdItem) (res cmdResult) {
 		res = repairRemoteAccess(ctx, c, res)
 		return res
 
+	case "file_transfer_download":
+		return downloadFileTransfer(l.tr, c, res)
+
+	case "file_transfer_upload":
+		return uploadFileTransfer(l.tr, c, res)
+
+	case "file_browser_list":
+		return listDirectory(c, res)
+
 	case "ping":
 		res.Stdout = "pong"
 
@@ -546,85 +565,139 @@ func (l *Loop) execute(c cmdItem) (res cmdResult) {
 	return res
 }
 
-// repairRemoteAccess is deliberately bounded. It can check the locally
-// installed RustDesk service and start it when stopped, but it never downloads
-// software, changes credentials, rewrites relay configuration, or kills an
-// active technician session.
-func repairRemoteAccess(ctx context.Context, c cmdItem, res cmdResult) cmdResult {
-	provider := strings.ToLower(strings.TrimSpace(c.Payload.Provider))
-	if provider == "" {
-		provider = "rustdesk"
-	}
-	if provider != "rustdesk" {
-		res.Status = "error"
-		res.Stderr = "bounded repair is currently available for RustDesk only"
+func downloadFileTransfer(client *transport.Client, c cmdItem, res cmdResult) cmdResult {
+	if client == nil || strings.TrimSpace(c.Payload.TransferID) == "" || strings.TrimSpace(c.Payload.Destination) == "" {
+		res.Status, res.Stderr = "error", "file transfer command is incomplete"
 		return res
 	}
-
-	type evidence struct {
-		Provider string `json:"provider"`
-		Status   string `json:"status"`
-		Action   string `json:"action"`
-		Detail   string `json:"detail"`
+	destination := filepath.Clean(c.Payload.Destination)
+	if !filepath.IsAbs(destination) || destination == filepath.VolumeName(destination)+string(filepath.Separator) {
+		res.Status, res.Stderr = "error", "file transfer destination must be a non-root absolute path"
+		return res
 	}
-	report := evidence{Provider: provider, Status: "attention", Action: "none"}
-
-	switch runtime.GOOS {
-	case "windows":
-		query := exec.CommandContext(ctx, "sc.exe", "query", "RustDesk")
-		output, err := query.CombinedOutput()
-		text := strings.TrimSpace(string(output))
-		if err != nil {
-			report.Detail = "RustDesk Windows service was not found; reinstall through the signed Nexus Agent package"
-			break
-		}
-		if strings.Contains(strings.ToUpper(text), "RUNNING") {
-			report.Status = "healthy"
-			report.Action = "verified"
-			report.Detail = "RustDesk Windows service is running"
-			break
-		}
-		start := exec.CommandContext(ctx, "sc.exe", "start", "RustDesk")
-		startOutput, startErr := start.CombinedOutput()
-		if startErr != nil {
-			report.Detail = "RustDesk service exists but could not be started: " + truncate(string(startOutput), 2048)
-			break
-		}
-		report.Status = "healthy"
-		report.Action = "service_started"
-		report.Detail = "RustDesk Windows service was started"
-	case "linux":
-		query := exec.CommandContext(ctx, "systemctl", "is-active", "rustdesk")
-		if output, err := query.CombinedOutput(); err == nil && strings.TrimSpace(string(output)) == "active" {
-			report.Status = "healthy"
-			report.Action = "verified"
-			report.Detail = "RustDesk service is active"
-			break
-		}
-		start := exec.CommandContext(ctx, "systemctl", "start", "rustdesk")
-		output, err := start.CombinedOutput()
-		if err != nil {
-			report.Detail = "RustDesk service could not be started: " + truncate(string(output), 2048)
-			break
-		}
-		report.Status = "healthy"
-		report.Action = "service_started"
-		report.Detail = "RustDesk service was started"
-	default:
-		report.Detail = "Automatic RustDesk service repair is not yet supported on " + runtime.GOOS
+	if _, err := os.Stat(destination); err == nil {
+		res.Status, res.Stderr = "error", "file transfer will not overwrite an existing destination"
+		return res
 	}
-
-	encoded, err := json.Marshal(report)
+	if _, err := os.Stat(filepath.Dir(destination)); err != nil {
+		res.Status, res.Stderr = "error", "file transfer destination directory does not exist"
+		return res
+	}
+	temporary := destination + ".nexus-transfer-partial"
+	defer os.Remove(temporary)
+	if err := client.Download("/api/nexus-agent/file-transfers/"+url.PathEscape(c.Payload.TransferID)+"/content", temporary); err != nil {
+		res.Status, res.Stderr = "error", err.Error()
+		return res
+	}
+	file, err := os.Open(temporary)
 	if err != nil {
-		res.Status = "error"
-		res.Stderr = err.Error()
+		res.Status, res.Stderr = "error", err.Error()
 		return res
 	}
-	res.Stdout = string(encoded)
-	if report.Status != "healthy" {
-		res.Status = "error"
-		res.Stderr = report.Detail
+	digest := sha256.New()
+	_, copyErr := io.Copy(digest, file)
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil || !strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), strings.TrimSpace(c.Payload.SHA256)) {
+		res.Status, res.Stderr = "error", "file transfer SHA-256 verification failed"
+		return res
 	}
+	if err := os.Rename(temporary, destination); err != nil {
+		res.Status, res.Stderr = "error", err.Error()
+		return res
+	}
+	res.Stdout = "file transfer completed: " + destination
+	return res
+}
+
+func uploadFileTransfer(client *transport.Client, c cmdItem, res cmdResult) cmdResult {
+	if client == nil || strings.TrimSpace(c.Payload.TransferID) == "" || strings.TrimSpace(c.Payload.SourcePath) == "" {
+		res.Status, res.Stderr = "error", "file retrieval command is incomplete"
+		return res
+	}
+	source := filepath.Clean(c.Payload.SourcePath)
+	info, err := os.Stat(source)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 25*1024*1024 {
+		res.Status, res.Stderr = "error", "endpoint source must be an existing regular file no larger than 25MB"
+		return res
+	}
+	file, err := os.Open(source)
+	if err != nil {
+		res.Status, res.Stderr = "error", err.Error()
+		return res
+	}
+	digest := sha256.New()
+	_, copyErr := io.Copy(digest, file)
+	_ = file.Close()
+	if copyErr != nil {
+		res.Status, res.Stderr = "error", copyErr.Error()
+		return res
+	}
+	sha := hex.EncodeToString(digest.Sum(nil))
+	if err := client.Upload("/api/nexus-agent/file-transfers/"+url.PathEscape(c.Payload.TransferID)+"/content", source, sha); err != nil {
+		res.Status, res.Stderr = "error", err.Error()
+		return res
+	}
+	res.Stdout = "file retrieval staged: " + filepath.Base(source)
+	return res
+}
+
+// listDirectory is deliberately read-only. The Agent returns a bounded direct
+// listing only; browsing never grants the browser a filesystem handle.
+func listDirectory(c cmdItem, res cmdResult) cmdResult {
+	directory := filepath.Clean(strings.TrimSpace(c.Payload.Directory))
+	if !filepath.IsAbs(directory) {
+		res.Status, res.Stderr = "error", "directory must be an absolute path"
+		return res
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		res.Status, res.Stderr = "error", err.Error()
+		return res
+	}
+	type entry struct {
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		Directory bool   `json:"directory"`
+		Size      int64  `json:"size,omitempty"`
+		Modified  string `json:"modified,omitempty"`
+	}
+	capacity := len(entries)
+	if capacity > 250 {
+		capacity = 250
+	}
+	result := make([]entry, 0, capacity)
+	for _, item := range entries {
+		if len(result) == 250 {
+			break
+		}
+		info, infoErr := item.Info()
+		if infoErr != nil {
+			continue
+		}
+		result = append(result, entry{Name: item.Name(), Path: filepath.Join(directory, item.Name()), Directory: item.IsDir(), Size: info.Size(), Modified: info.ModTime().UTC().Format(time.RFC3339)})
+	}
+	encoded, err := json.Marshal(struct {
+		Directory string  `json:"directory"`
+		Entries   []entry `json:"entries"`
+		Truncated bool    `json:"truncated"`
+	}{directory, result, len(entries) > len(result)})
+	if err != nil {
+		res.Status, res.Stderr = "error", err.Error()
+		return res
+	}
+	res.Stdout = truncate(string(encoded), 64*1024)
+	return res
+}
+
+// repairRemoteAccess remains a safe compatibility response for already queued
+// commands. Native Remote has no provider-service repair path: its signed
+// companion is verified by the agent policy and attended access is granted per
+// session. In particular, this must never start a retired RustDesk service.
+func repairRemoteAccess(ctx context.Context, c cmdItem, res cmdResult) cmdResult {
+	_ = ctx
+	_ = c
+	res.Status = "error"
+	res.Stderr = "remote provider repair is retired; Native Remote requires a policy-verified companion and a new attended session"
 	return res
 }
 
@@ -763,6 +836,48 @@ func installCompanion(tr *transport.Client, c cmdItem, res cmdResult) cmdResult 
 	return res
 }
 
+// installRemoteCompanion updates only the protected service's Native Remote
+// companion. The command is server-signed, the agent verifies the exact
+// artifact hash, and the service deliberately never launches a GUI into a
+// user session; the normal user-session Run registration starts it at sign-in.
+func installRemoteCompanion(tr *transport.Client, c cmdItem, res cmdResult) cmdResult {
+	if runtime.GOOS != "windows" {
+		res.Status = "error"
+		res.Stderr = "Nexus Remote Companion is currently supported on Windows endpoints only"
+		return res
+	}
+	expectedHash := strings.TrimSpace(c.Payload.RemoteSHA256)
+	if len(expectedHash) != 64 {
+		res.Status = "error"
+		res.Stderr = "remote companion rollout has an invalid expected SHA-256"
+		return res
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		res.Status = "error"
+		res.Stderr = "could not locate agent install directory: " + err.Error()
+		return res
+	}
+	installDir := filepath.Dir(executable)
+	// A running user-session companion holds the executable image open. Stop
+	// only this named component before its hash-checked replacement; it starts
+	// again at the next sign-in and never inherits the service's Session 0.
+	_ = exec.Command("taskkill", "/F", "/IM", "nexus-remote-companion.exe").Run()
+	remotePath := filepath.Join(installDir, "nexus-remote-companion.exe")
+	if err := installVerifiedCompanion(tr, "/api/nexus-agent/remote-companion/latest", remotePath, expectedHash, "Nexus Remote Companion"); err != nil {
+		res.Status = "error"
+		res.Stderr = err.Error()
+		return res
+	}
+	if err := installRemoteCompanionLauncher(remotePath); err != nil {
+		res.Status = "error"
+		res.Stderr = "Nexus Remote Companion was installed but could not be registered for user sign-in: " + err.Error()
+		return res
+	}
+	res.Stdout = "Nexus Remote Companion installed and registered for user sign-in"
+	return res
+}
+
 func installVerifiedCompanion(tr *transport.Client, route, destination, expectedHash, name string) error {
 	temporary := destination + ".download"
 	defer os.Remove(temporary)
@@ -793,6 +908,18 @@ func installTrayLauncher(trayPath string) error {
 	).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("register tray launcher: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func installRemoteCompanionLauncher(remotePath string) error {
+	value := `"` + remotePath + `"`
+	out, err := exec.Command(
+		"reg", "add", `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`,
+		"/v", "NexusRemoteCompanion", "/t", "REG_SZ", "/d", value, "/f",
+	).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("register remote companion launcher: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

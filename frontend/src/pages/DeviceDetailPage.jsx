@@ -56,7 +56,6 @@ export default function DeviceDetailPage() {
   const [loadError, setLoadError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [diskHealth, setDiskHealth] = useState([]);
-  const [rdLiveStatus, setRdLiveStatus] = useState(null);
   const [patchWindowOpen, setPatchWindowOpen] = useState(false);
   const [safetyCheckOpen, setSafetyCheckOpen] = useState(false);
   const [deviceEditorOpen, setDeviceEditorOpen] = useState(false);
@@ -107,21 +106,6 @@ export default function DeviceDetailPage() {
   }, [deviceId, token]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
-
-  // Poll RustDesk live status for this device
-  useEffect(() => {
-    const fetchRdStatus = async () => {
-      try {
-        const res = await axios.get(`${API}/rustdesk/live/status-map`, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.data?.status_map && data?.device?.rustdesk_id) {
-          setRdLiveStatus(res.data.status_map[data.device.rustdesk_id] || null);
-        }
-      } catch {}
-    };
-    fetchRdStatus();
-    const interval = setInterval(fetchRdStatus, 15000);
-    return () => clearInterval(interval);
-  }, [token, data?.device?.rustdesk_id]);
 
   const openDeviceEditor = async () => {
     if (!data?.device) return;
@@ -283,7 +267,7 @@ export default function DeviceDetailPage() {
 
   const dev = data.device;
   const isArchived = Boolean(dev.archived) || dev.status === "archived";
-  const effectiveStatus = isArchived ? "archived" : (rdLiveStatus || dev.status);
+  const effectiveStatus = isArchived ? "archived" : dev.status;
   const observedAt = dev.last_heartbeat || dev.last_seen || dev.telemetry_at || dev.observed_at;
   const observedDate = observedAt ? new Date(observedAt) : null;
   const telemetryState = !observedDate || Number.isNaN(observedDate.getTime())
@@ -489,6 +473,7 @@ export default function DeviceDetailPage() {
             </div>
             {isArchived ? <Button className="nx-device-quick-actions__primary justify-start" onClick={restoreManagedAsset} disabled={lifecycleBusy}><RotateCcw className="mr-2 h-4 w-4" />Restore device</Button> : activeWorkTickets.length === 1 ? <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(workSessionPath(activeWorkTickets[0]))}><Wrench className="mr-2 h-4 w-4" />Start work</Button> : <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Plus className="mr-2 h-4 w-4" />Create ticket</Button>}
             <div className="nx-device-quick-actions__remote"><RemoteAccessButton device={dev} status={effectiveStatus} testid="remote-access-btn" /></div>
+            {!isArchived && dev.nexus_agent_id && <Button variant="outline" className="justify-start" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)}><Terminal className="mr-2 h-4 w-4" />Terminal & files</Button>}
             {activeTab !== "tickets" && <Button variant="outline" className="justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Ticket className="mr-2 h-4 w-4" />Create linked ticket</Button>}
             <Button variant="outline" className="justify-start" onClick={() => setSafetyCheckOpen(true)}><ShieldCheck className="mr-2 h-4 w-4" />Safe-to-touch check</Button>
             <Button variant="outline" className="justify-start" onClick={() => setActiveTab("patches")}><Download className="mr-2 h-4 w-4" />Check patches</Button>

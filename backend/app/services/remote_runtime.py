@@ -1,16 +1,10 @@
-"""Governed remote-access runtime for Nexus Remote.
-
-Remote providers are transports.  This service owns the durable MSP evidence:
-client scope, ticket association, consent, technician identity, session
-lifecycle, time entry, ticket note, platform events and endpoint repair.
-"""
+"""Governed first-party remote-access runtime for Nexus Remote."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from math import ceil
 from typing import Any
-from urllib.parse import urlparse
 import uuid
 
 from fastapi import HTTPException
@@ -19,13 +13,21 @@ from app.database import db
 from app.routers.nexus_agent import queue_command_for_device
 from app.services.activity import log_activity
 from app.services.platform_foundation import emit_platform_event
+from app.services.native_remote import (
+    device_readiness as native_device_readiness,
+    grant_for_session,
+    issue_grant,
+    revoke_grant,
+)
+from app.services.scope_permissions import platform_tenant_id
 from app.services.ticket_time import create_canonical_ticket_time_entry, sync_ticket_time_cache
 
 
 REMOTE_POLICY_DEFAULTS: dict[str, Any] = {
-    "default_provider": "rustdesk",
-    "allow_fallback": True,
+    "default_provider": "nexus",
+    "allow_fallback": False,
     "require_consent": True,
+    "allow_standing_authorisation": False,
     "require_ticket_reference": False,
     "auto_create_time_entry": True,
     "auto_ticket_note": True,
@@ -102,24 +104,6 @@ def ticket_links_device(ticket: dict, device_id: str) -> bool:
     return str(device_id) in linked
 
 
-def _provider_host(value: Any) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    parsed = urlparse(raw if "://" in raw else f"//{raw}")
-    return str(parsed.hostname or "").strip()
-
-
-def build_rustdesk_uri(rustdesk_id: Any, relay_server: Any = None, server_url: Any = None) -> str:
-    """Build a native URI without ever embedding an unattended password."""
-
-    remote_id = str(rustdesk_id or "").strip()
-    if not remote_id:
-        raise HTTPException(status_code=409, detail="This device has no RustDesk identity")
-    host = _provider_host(relay_server) or _provider_host(server_url)
-    return f"rustdesk://{remote_id}@{host}" if host else f"rustdesk://{remote_id}"
-
-
 async def ensure_remote_runtime_indexes() -> None:
     await db.remote_sessions.create_index("id", unique=True, name="remote_session_id_unique")
     await db.remote_sessions.create_index(
@@ -148,65 +132,24 @@ async def ensure_remote_runtime_indexes() -> None:
 
 async def remote_policy() -> dict[str, Any]:
     stored = await db.settings.find_one({"type": "remote_access_policy"}, {"_id": 0}) or {}
-    return {**REMOTE_POLICY_DEFAULTS, **stored}
-
-
-async def rustdesk_config() -> dict[str, Any]:
-    typed = await db.settings.find_one({"type": "rustdesk"}, {"_id": 0}) or {}
-    legacy = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0}) or {}
-    legacy_value = legacy.get("value") if isinstance(legacy.get("value"), dict) else {}
     return {
-        **legacy_value,
-        **{
-            key: value
-            for key, value in typed.items()
-            if key != "_id" and value not in (None, "")
-        },
+        **REMOTE_POLICY_DEFAULTS,
+        **stored,
+        "default_provider": "nexus",
+        "allow_fallback": False,
+        "require_consent": True,
+        "allow_standing_authorisation": bool(stored.get("allow_standing_authorisation", False)),
     }
 
 
 async def provider_is_active(provider_id: str) -> bool:
-    if provider_id == "rustdesk":
-        config = await rustdesk_config()
-        return bool(config.get("server_url") and config.get("enabled", True))
-    if provider_id == "trmm":
-        config = await db.settings.find_one({"type": "tactical_rmm"}, {"_id": 0}) or {}
-        return bool(config.get("base_url") and config.get("api_key_full"))
-    config = await db.settings.find_one({"type": f"remote_{provider_id}"}, {"_id": 0}) or {}
-    return bool(config.get("active"))
+    return provider_id == "nexus"
 
 
 async def provider_device_id(device: dict, provider_id: str) -> str:
-    if provider_id == "rustdesk":
-        direct = str(device.get("rustdesk_id") or "").strip()
-        if direct:
-            return direct
-        client_id = str(device.get("client_id") or "").strip()
-        # A registry mapping is valid only for the same canonical client. This
-        # protects remote-session handoff from historical unowned or
-        # cross-client RustDesk links while the registry is being reconciled.
-        if not client_id:
-            return ""
-        mapping = await db.rustdesk_devices.find_one(
-            {
-                "client_id": client_id,
-                "$or": [
-                    {"linked_device_id": device.get("id")},
-                    {"device_id": device.get("id")},
-                ]
-            },
-            {"_id": 0, "rustdesk_id": 1},
-        )
-        return str((mapping or {}).get("rustdesk_id") or "").strip()
-    if provider_id == "trmm":
-        return str(device.get("trmm_agent_id") or "").strip()
-    identifiers = device.get("remote_provider_ids") or {}
-    return str(
-        identifiers.get(provider_id)
-        or device.get(f"{provider_id}_id")
-        or device.get(f"{provider_id}_uuid")
-        or ""
-    ).strip()
+    if provider_id == "nexus":
+        return str(device.get("nexus_agent_id") or "").strip()
+    return ""
 
 
 async def validate_ticket_for_remote(ticket_id: str, device: dict) -> dict:
@@ -303,31 +246,14 @@ async def work_session_time_owner_for_remote(session: dict, ticket: dict | None)
 
 
 async def _connection_handoff(provider: str, provider_id: str) -> dict[str, Any]:
-    if provider == "rustdesk":
-        config = await rustdesk_config()
+    if provider == "nexus":
         return {
-            "launch_mode": "native_client",
-            "connection_url": build_rustdesk_uri(
-                provider_id,
-                config.get("relay_server"),
-                config.get("server_url"),
-            ),
-            "web_client_url": str(config.get("server_url") or "").strip() or None,
-            "relay_server": _provider_host(config.get("relay_server") or config.get("server_url")) or None,
-        }
-    if provider == "splashtop":
-        return {
-            "launch_mode": "provider_handoff",
+            "launch_mode": "nexus_native",
             "connection_url": None,
             "web_client_url": None,
             "relay_server": None,
         }
-    return {
-        "launch_mode": "provider_handoff",
-        "connection_url": None,
-        "web_client_url": None,
-        "relay_server": None,
-    }
+    raise HTTPException(status_code=410, detail="Third-party remote transports are retired")
 
 
 async def start_remote_session(
@@ -346,8 +272,17 @@ async def start_remote_session(
     ).strip().lower()
     if provider == "inherit":
         provider = str(policy["default_provider"])
-    if provider not in {"rustdesk", "splashtop", "trmm"}:
-        raise HTTPException(status_code=422, detail="Unsupported remote provider")
+    if provider != "nexus":
+        raise HTTPException(
+            status_code=410,
+            detail="Third-party remote transports are retired. Use Nexus Native Remote.",
+        )
+    requested_mode = str(data.get("mode") or "view").strip().lower()
+    if requested_mode != "view":
+        raise HTTPException(
+            status_code=422,
+            detail="Nexus Native Remote is currently limited to attended view-only access",
+        )
 
     ticket_id = str(data.get("ticket_id") or "").strip() or None
     ticket = await validate_ticket_for_remote(ticket_id, device) if ticket_id else None
@@ -373,38 +308,59 @@ async def start_remote_session(
     consent_method = str(data.get("consent_method") or "attended_prompt").strip().lower()
     if consent_method not in CONSENT_METHODS:
         raise HTTPException(status_code=422, detail="Choose a supported consent method")
-    if policy["require_consent"] and not consent_confirmed:
+    standing_authorisation = consent_method == "standing_authorisation"
+    if standing_authorisation and not (
+        policy.get("allow_standing_authorisation")
+        and bool(device.get("remote_unattended_access_enabled"))
+    ):
         raise HTTPException(
             status_code=422,
-            detail="End-user consent must be confirmed before starting a remote session",
+            detail="Standing authorisation is not enabled for this managed endpoint",
         )
-    if not await provider_is_active(provider):
+    if not consent_confirmed:
         raise HTTPException(
-            status_code=409,
-            detail=f"{provider.title()} is not enabled in Remote Access settings",
+            status_code=422,
+            detail="Confirm the applicable endpoint authorisation before starting a remote session",
         )
-
     remote_id = await provider_device_id(device, provider)
     if not remote_id:
         raise HTTPException(
             status_code=409,
-            detail=f"This device has not been enrolled in {provider.title()}",
+            detail="This device is not linked to an enrolled Nexus Agent",
+        )
+    readiness = await native_device_readiness(device, platform_tenant_id(user))
+    if not readiness.get("ready"):
+        raise HTTPException(status_code=409, detail=readiness.get("detail") or "Nexus Remote Companion is not ready")
+    if standing_authorisation and not readiness.get("unattended_ready"):
+        raise HTTPException(
+            status_code=409,
+            detail="Upgrade the Nexus Remote Companion before using standing authorisation",
         )
 
     idempotency_key = str(data.get("idempotency_key") or "").strip() or None
     if idempotency_key:
         existing = await db.remote_sessions.find_one(
-            {"user_id": user.get("id"), "idempotency_key": idempotency_key},
+            {"tenant_id": platform_tenant_id(user), "user_id": user.get("id"), "idempotency_key": idempotency_key},
             {"_id": 0},
         )
         if existing:
+            if (existing.get("device_id") != device.get("id")
+                    or existing.get("ticket_id") != ticket_id
+                    or existing.get("access_mode") != requested_mode
+                    or bool(existing.get("standing_authorisation")) != standing_authorisation
+                    or existing.get("status") not in {"authorised", "active"}):
+                raise HTTPException(status_code=409, detail="Idempotency key belongs to a different or closed remote request")
             handoff = await _connection_handoff(existing["provider"], existing["provider_device_id"])
-            return {"session": existing, "provider": existing["provider"], **handoff, "reused": True}
+            grant = await grant_for_session(
+                tenant_id=platform_tenant_id(user), session_id=existing["id"]
+            )
+            return {"session": existing, "provider": existing["provider"], "grant": grant, **handoff, "reused": True}
 
     client = await db.clients.find_one({"id": device.get("client_id")}, {"_id": 0}) or {}
     now = utc_now()
     session = {
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(user),
         "device_id": str(device.get("id") or ""),
         "device_name": device.get("name") or device.get("hostname"),
         "client_id": device.get("client_id"),
@@ -416,7 +372,6 @@ async def start_remote_session(
         "status": "authorised",
         "provider": provider,
         "provider_device_id": remote_id,
-        "rustdesk_id": remote_id if provider == "rustdesk" else device.get("rustdesk_id"),
         "ticket_id": ticket_id,
         "ticket_number": (ticket or {}).get("ticket_number"),
         "work_session_id": (work_session or {}).get("id"),
@@ -426,7 +381,11 @@ async def start_remote_session(
         "consent_confirmed": consent_confirmed,
         "consent_method": consent_method if consent_confirmed else None,
         "consent_confirmed_at": now if consent_confirmed else None,
-        "launch_status": "ready" if provider == "rustdesk" else "handoff_required",
+        "local_prompt_required": not standing_authorisation,
+        "standing_authorisation": standing_authorisation,
+        "launch_status": "awaiting_agent",
+        "access_mode": requested_mode,
+        "authorisation_audited": False,
         "device_type": device.get("device_type", "workstation"),
         # A valid Work Session owns the single canonical time entry for this
         # technician journey.  Do not let a crafted browser payload turn the
@@ -441,6 +400,27 @@ async def start_remote_session(
         "duration_minutes": 0,
     }
     await db.remote_sessions.insert_one(dict(session))
+    try:
+        grant = await issue_grant(
+            session=session,
+            user=user,
+            mode=session["access_mode"],
+            consent_required=not standing_authorisation,
+        )
+    except Exception:
+        await db.remote_sessions.update_one(
+            {"id": session["id"]},
+            {"$set": {"status": "failed", "launch_status": "grant_failed", "ended_at": utc_now()}},
+        )
+        raise
+    # This is a display projection of the authoritative grant expiry, not a
+    # second grant record. It lets technician workflows show the fixed signed
+    # session limit without exposing any grant payload or signature.
+    session["native_grant_expires_at"] = grant.get("expires_at")
+    await db.remote_sessions.update_one(
+        {"id": session["id"], "tenant_id": session["tenant_id"], "status": "authorised"},
+        {"$set": {"native_grant_expires_at": session["native_grant_expires_at"]}},
+    )
     await log_activity(
         user,
         "remote_authorised",
@@ -484,17 +464,19 @@ async def start_remote_session(
             "status": "authorised",
         },
     )
+    await db.remote_sessions.update_one(
+        {"id": session["id"], "tenant_id": session["tenant_id"], "status": "authorised"},
+        {"$set": {"authorisation_audited": True}},
+    )
+    session["authorisation_audited"] = True
     handoff = await _connection_handoff(provider, remote_id)
     return {
         "session": session,
         "provider": provider,
+        "grant": grant,
         **handoff,
         "reused": False,
-        "message": (
-            "Launch is authorised and recorded. Open the RustDesk client to continue."
-            if provider == "rustdesk"
-            else f"Open this endpoint from the {provider.title()} technician console."
-        ),
+        "message": "Nexus Native grant issued. Waiting for the enrolled endpoint companion.",
     }
 
 
@@ -511,6 +493,8 @@ async def mark_remote_session_opened(
     the explicit confirmation below is the boundary at which an authorised
     session becomes active and begins eligible service-time measurement.
     """
+    if session.get("provider") == "nexus":
+        raise HTTPException(status_code=409, detail="Native sessions require verified transport evidence; browser confirmation cannot activate billing")
     if session.get("status") == "ended":
         raise HTTPException(status_code=409, detail="This remote session has already ended")
     if str(session.get("user_id")) != str(user.get("id")) and not (
@@ -609,6 +593,16 @@ async def end_remote_session_record(
     data: dict,
     correlation_id: str | None = None,
 ) -> dict[str, Any]:
+    if session.get("provider") == "nexus":
+        if session.get("tenant_id") != platform_tenant_id(user):
+            raise HTTPException(status_code=404, detail="Remote session not found")
+        administrator = bool(user.get("is_admin") or str(user.get("role") or "").lower() == "admin")
+        if str(session.get("user_id")) != str(user.get("id")) and not administrator:
+            raise HTTPException(status_code=403, detail="Only the session technician or an administrator can end it")
+        await revoke_grant(
+            tenant_id=session["tenant_id"], session_id=session["id"],
+            actor_id=str(user.get("id") or ""), reason=str(data.get("notes") or "Session ended"),
+        )
     if session.get("status") == "ended":
         return {
             "message": "Session already ended",
@@ -809,11 +803,9 @@ async def end_remote_session_record(
 
 async def remote_health_for_device(device: dict) -> dict[str, Any]:
     policy = await remote_policy()
-    provider = str(device.get("remote_provider") or policy["default_provider"])
-    if provider == "inherit":
-        provider = str(policy["default_provider"])
+    provider = "nexus"
     remote_id = await provider_device_id(device, provider)
-    provider_active = await provider_is_active(provider)
+    readiness = await native_device_readiness(device)
     agent = None
     if device.get("nexus_agent_id"):
         agent = await db.nexus_agents.find_one(
@@ -829,10 +821,10 @@ async def remote_health_for_device(device: dict) -> dict[str, Any]:
     agent_online = age_seconds is not None and age_seconds <= 300
     checks = [
         {
-            "id": "provider",
-            "label": f"{provider.title()} provider",
-            "status": "healthy" if provider_active else "blocked",
-            "detail": "Enabled and configured" if provider_active else "Provider settings are incomplete",
+            "id": "trust",
+            "label": "Nexus trust boundary",
+            "status": "healthy",
+            "detail": "Short-lived signed grants and local consent are enforced",
         },
         {
             "id": "identity",
@@ -841,14 +833,10 @@ async def remote_health_for_device(device: dict) -> dict[str, Any]:
             "detail": f"Identity {remote_id}" if remote_id else "No remote identity is linked",
         },
         {
-            "id": "agent",
-            "label": "Nexus Agent heartbeat",
-            "status": "healthy" if agent_online else ("attention" if agent else "unavailable"),
-            "detail": (
-                f"Checked in {age_seconds}s ago"
-                if agent_online
-                else ("Agent is stale or offline" if agent else "No Nexus Agent is linked")
-            ),
+            "id": "companion",
+            "label": "Remote Companion",
+            "status": "healthy" if readiness.get("ready") else "blocked",
+            "detail": readiness.get("detail"),
         },
     ]
     if any(item["status"] == "blocked" for item in checks):
@@ -864,11 +852,11 @@ async def remote_health_for_device(device: dict) -> dict[str, Any]:
         "provider": provider,
         "provider_device_id": remote_id or None,
         "status": status,
-        "ready": bool(provider_active and remote_id),
+        "ready": bool(readiness.get("ready")),
         "agent_online": agent_online,
         "last_checked_at": utc_now(),
         "checks": checks,
-        "repair_available": bool(agent_online),
+        "repair_available": False,
         "policy": {
             "auto_repair": bool(policy["auto_repair"]),
             "repair_cooldown_minutes": int(policy["repair_cooldown_minutes"]),
@@ -893,6 +881,11 @@ async def queue_remote_repair(
 ) -> dict[str, Any]:
     await ensure_remote_runtime_indexes()
     health = await remote_health_for_device(device)
+    if health["provider"] == "nexus":
+        raise HTTPException(
+            status_code=409,
+            detail="Nexus Native self-repair will be enabled with the signed Remote Companion package",
+        )
     if not health["agent_online"]:
         raise HTTPException(
             status_code=409,

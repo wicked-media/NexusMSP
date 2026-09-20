@@ -258,6 +258,8 @@ export function TicketAuditTab({ auditLog }) {
     blocked_on: { label: "Marked blocked", Icon: History, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
     unblocked: { label: "Removed blocker", Icon: CheckCircle, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
     csat_sent: { label: "Sent satisfaction survey", Icon: BellRing, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
+    ticket_subscriber_added: { label: "Added ticket subscriber", Icon: BellRing, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
+    ticket_subscriber_removed: { label: "Removed ticket subscriber", Icon: BellRing, tone: "border-zinc-500/25 bg-zinc-500/[0.10] text-zinc-300" },
   };
   const describe = (entry) => entry.details || Object.entries(entry.changes || {})
     .map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`).join(" · ");

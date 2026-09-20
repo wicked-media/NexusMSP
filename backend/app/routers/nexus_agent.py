@@ -52,8 +52,9 @@ from app.services.agent_trust import (
     sign_update_manifest,
 )
 from app.services.action_permissions import require_action
+from app.services.native_remote import signing_identity
 from app.services.platform_foundation import emit_platform_event
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, platform_tenant_id, scoped_query
 from app.services.time_machine import record_endpoint_state_snapshot
 
 logger = logging.getLogger("nexus_agent")
@@ -76,6 +77,8 @@ _LOCAL_CHAT_COMPANION_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-client-
 _CONTAINER_CHAT_COMPANION_BINARY = Path("/app/agent/dist/nexus-client-chat.exe")
 _LOCAL_TRAY_COMPANION_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-agent-tray.exe"
 _CONTAINER_TRAY_COMPANION_BINARY = Path("/app/agent/dist/nexus-agent-tray.exe")
+_LOCAL_REMOTE_COMPANION_BINARY = _PROJECT_ROOT / "agent" / "dist" / "nexus-remote-companion.exe"
+_CONTAINER_REMOTE_COMPANION_BINARY = Path("/app/agent/dist/nexus-remote-companion.exe")
 AGENT_BINARY_PATH = Path(os.environ["NEXUS_AGENT_BINARY"]) if os.environ.get("NEXUS_AGENT_BINARY") else (
     _CONTAINER_AGENT_BINARY if _CONTAINER_AGENT_BINARY.exists() else _LOCAL_AGENT_BINARY
 )
@@ -85,10 +88,52 @@ CHAT_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_CHAT_COMPANION_BINARY"]) if 
 TRAY_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_TRAY_COMPANION_BINARY"]) if os.environ.get("NEXUS_TRAY_COMPANION_BINARY") else (
     _CONTAINER_TRAY_COMPANION_BINARY if _CONTAINER_TRAY_COMPANION_BINARY.exists() else _LOCAL_TRAY_COMPANION_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.11-endpoint-readiness"
+REMOTE_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_REMOTE_COMPANION_BINARY"]) if os.environ.get("NEXUS_REMOTE_COMPANION_BINARY") else (
+    _CONTAINER_REMOTE_COMPANION_BINARY if _CONTAINER_REMOTE_COMPANION_BINARY.exists() else _LOCAL_REMOTE_COMPANION_BINARY
+)
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.12-native-remote"
 MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
+
+
+async def _native_remote_policy(agent_id: str, client_id: str, tenant_id: str) -> dict[str, Any]:
+    """Issue the canonical device binding trusted by the Remote Companion."""
+    _, identity = await signing_identity(tenant_id)
+    device = await db.devices.find_one(
+        {"nexus_agent_id": agent_id, "client_id": client_id, "archived": {"$ne": True}},
+        {"_id": 0, "id": 1, "tenant_id": 1},
+    )
+    managed_device_id = str((device or {}).get("id") or "")
+    # Legacy unpartitioned devices belong only to nexus-local; never promote
+    # them into an explicitly tenant-bound companion policy by fallback.
+    device_tenant = str((device or {}).get("tenant_id") or "nexus-local")
+    binding_valid = bool(managed_device_id and device_tenant == tenant_id)
+    companion = _remote_companion_binary_info()
+    enabled = binding_valid and bool(companion["exists"] and companion["sha256"])
+    reason = None
+    if not binding_valid:
+        reason = "A canonical tenant-bound managed device is required before Native Remote can be enabled."
+    elif not companion["exists"]:
+        reason = "The signed Nexus Remote Companion artifact is unavailable on the server."
+    return {
+        "enabled": enabled,
+        "schema_version": 1,
+        "tenant_id": tenant_id,
+        "managed_device_id": managed_device_id,
+        "grant_algorithm": "Ed25519",
+        "grant_key_id": identity["key_id"],
+        "grant_public_key_b64": identity["public_key_b64"],
+        # This policy is authenticated by the agent control plane. The agent
+        # verifies the installed companion against this digest before it can
+        # advertise or broker Native Remote capability.
+        "companion_sha256": companion["sha256"],
+        "companion_size": companion["size"],
+        "maximum_grant_lifetime_seconds": 600,
+        "replay_store_required": True,
+        "attended_only": True,
+        "reason": reason,
+    }
 
 # Bundled into every newly generated Windows installer. This profile enables
 # evidence collection and Canary integrity monitoring only; it does not claim
@@ -120,6 +165,7 @@ NEXUS_DNS_AGENT_PROFILE = {
 _binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 _companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 _tray_companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
+_remote_companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 
 
 def _binary_info() -> dict[str, Any]:
@@ -165,6 +211,24 @@ def _tray_companion_binary_info() -> dict[str, Any]:
     return {
         "sha256": _tray_companion_binary_cache["sha256"],
         "size": _tray_companion_binary_cache["size"],
+        "exists": True,
+    }
+
+
+def _remote_companion_binary_info() -> dict[str, Any]:
+    """Return the fingerprint for the signed Nexus Remote Companion."""
+    if not REMOTE_COMPANION_BINARY_PATH.exists():
+        return {"sha256": "", "size": 0, "exists": False}
+    stat = REMOTE_COMPANION_BINARY_PATH.stat()
+    if _remote_companion_binary_cache["mtime"] != stat.st_mtime or not _remote_companion_binary_cache["sha256"]:
+        digest = hashlib.sha256()
+        with REMOTE_COMPANION_BINARY_PATH.open("rb") as fp:
+            for chunk in iter(lambda: fp.read(1024 * 64), b""):
+                digest.update(chunk)
+        _remote_companion_binary_cache.update({"mtime": stat.st_mtime, "sha256": digest.hexdigest(), "size": stat.st_size})
+    return {
+        "sha256": _remote_companion_binary_cache["sha256"],
+        "size": _remote_companion_binary_cache["size"],
         "exists": True,
     }
 
@@ -255,6 +319,40 @@ async def _ensure_elevate_companion_for_agent(agent: dict) -> str:
         queued_state["nexus_elevate.tray_companion_sha256"] = tray_companion["sha256"]
     await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": queued_state, "$inc": {"nexus_elevate.deployment_attempts": 1}})
     await _audit(db, "nexus_elevate_companion_queued", {"device_id": agent["id"], "command_id": command_id})
+    return "deploying"
+
+
+async def _ensure_native_remote_companion_for_agent(agent: dict) -> str:
+    """Queue a hash-pinned Remote Companion only for an eligible current agent."""
+    if not agent.get("id") or not agent.get("is_active", True) or not _is_windows_agent(agent):
+        return "not_eligible"
+    if agent.get("agent_version") != AGENT_VERSION:
+        return "requires_agent_update"
+    tenant_id = str(agent.get("tenant_id") or "nexus-local")
+    policy = await _native_remote_policy(str(agent["id"]), str(agent.get("client_id") or ""), tenant_id)
+    if not policy.get("enabled"):
+        return "not_enabled"
+    companion = _remote_companion_binary_info()
+    if agent.get("remote_companion_sha256") == companion["sha256"] and agent.get("remote_companion_installed_at"):
+        return "current"
+    existing = await db.nexus_agent_commands.find_one({
+        "device_id": agent["id"], "kind": "install_remote_companion",
+        "status": {"$in": ["pending", "dispatched"]}, "payload.remote_sha256": companion["sha256"],
+    }, {"_id": 0, "id": 1})
+    if existing:
+        return "deploying"
+    command_id = str(uuid.uuid4())
+    await db.nexus_agent_commands.insert_one({
+        "id": command_id, "device_id": agent["id"], "client_id": agent.get("client_id"),
+        "kind": "install_remote_companion",
+        "payload": {"remote_sha256": companion["sha256"], "reason": "native_remote_release"},
+        "status": "pending", "queued_by": "Nexus Native Remote release", "created_at": _now(),
+    })
+    await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+        "remote_companion_state": "deploying", "remote_companion_expected_sha256": companion["sha256"],
+        "remote_companion_command_id": command_id, "remote_companion_deployment_requested_at": _now(),
+    }})
+    await _audit(db, "native_remote_companion_queued", {"device_id": agent["id"], "command_id": command_id})
     return "deploying"
 
 
@@ -935,7 +1033,14 @@ async def enroll(req: EnrollRequest):
     reported_capabilities = [item for item in req.capabilities if isinstance(item, str)][:20]
     reported_runtime_capabilities = [item for item in req.runtime_capabilities if isinstance(item, str)][:64]
     settings = await db.nexus_agent_settings.find_one({"_id": "settings"}, {"_id": 0}) or {}
-    policy = build_agent_policy(settings, dns_profile)
+    tenant_id = str(tok.get("tenant_id") or "nexus-local")
+    initial_agent = await db.nexus_agents.find_one(
+        {"client_id": client_id, "hostname": req.hostname}, {"_id": 0, "id": 1},
+    ) or {}
+    policy = build_agent_policy(
+        settings, dns_profile,
+        await _native_remote_policy(str(initial_agent.get("id") or ""), client_id, tenant_id),
+    )
 
     # Idempotency Ã¢â‚¬â€ try to find an existing agent for (hostname, client_id, mac)
     existing = None
@@ -961,6 +1066,7 @@ async def enroll(req: EnrollRequest):
             {"id": existing["id"]},
             {"$set": {
                 "agent_token": new_token,
+                "tenant_id": tenant_id,
                 "is_active": True,
                 "last_seen": _now(),
                 "os": req.os, "arch": req.arch,
@@ -1021,6 +1127,7 @@ async def enroll(req: EnrollRequest):
     doc = {
         "id": device_id,
         "client_id": client_id,
+        "tenant_id": tenant_id,
         "hostname": req.hostname,
         "os": req.os,
         "arch": req.arch,
@@ -1385,6 +1492,10 @@ async def heartbeat(
         await _mirror_elevate_state_to_device(agent["id"], elevate_state)
     except Exception:
         logger.exception("[nexus-agent] failed to reconcile Nexus Elevate after heartbeat")
+    try:
+        await _ensure_native_remote_companion_for_agent({**agent, **update})
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile Nexus Remote Companion after heartbeat")
 
     # Mirror into devices collection so the existing /devices page sees live data.
     try:
@@ -1585,7 +1696,12 @@ async def heartbeat(
             "nexus_dns.profile_offered_at": now,
         }})
 
-    policy = build_agent_policy(settings, dns_profile)
+    policy = build_agent_policy(
+        settings, dns_profile,
+        await _native_remote_policy(
+            agent["id"], str(agent.get("client_id") or ""), str(agent.get("tenant_id") or "nexus-local"),
+        ),
+    )
     reported_checksum = str(p.policy_evidence.get("checksum_sha256") or "").lower()
     policy_status = "acknowledged" if reported_checksum and secrets.compare_digest(
         reported_checksum,
@@ -1791,6 +1907,28 @@ async def command_result(
             )
     except Exception:
         logger.exception("[nexus-agent] failed to mirror command-console result")
+    # File transfer status is evidence from the bound Agent command result;
+    # staging a file is never represented as successful endpoint delivery.
+    try:
+        transfer_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"], "kind": "file_transfer_download"},
+            {"_id": 0, "payload": 1},
+        )
+        transfer_id = str(((transfer_command or {}).get("payload") or {}).get("transfer_id") or "")
+        if transfer_id:
+            transfer_status = "completed" if res.status == "ok" else ("timed_out" if res.status == "timeout" else "failed")
+            await db.agent_file_transfers.update_one(
+                {
+                    "id": transfer_id, "tenant_id": platform_tenant_id(agent),
+                    "agent_id": agent["id"], "client_id": agent.get("client_id"), "status": {"$in": ["queued", "dispatched"]},
+                },
+                {"$set": {
+                    "status": transfer_status, "completed_at": _now(), "agent_exit_code": res.exit_code,
+                    "agent_detail": (res.stdout or res.stderr or "Agent returned no transfer detail.")[:1000],
+                }},
+            )
+    except Exception:
+        logger.exception("[nexus-agent] failed to reconcile file transfer")
     try:
         mirrored = await db.devices.find_one({"nexus_agent_id": agent["id"]}, {"_id": 0, "id": 1, "name": 1})
         command = await db.nexus_agent_commands.find_one({"id": res.id, "device_id": agent["id"]}, {"_id": 0, "kind": 1})
@@ -1867,6 +2005,26 @@ async def command_result(
             await _notify_elevate_companion_failure(agent, res.stderr or res.stdout or "Companion deployment failed")
     except Exception:
         logger.exception("[nexus-agent] failed to record companion deployment")
+    try:
+        remote_command = await db.nexus_agent_commands.find_one(
+            {"id": res.id, "device_id": agent["id"], "kind": "install_remote_companion"},
+            {"_id": 0},
+        )
+        if remote_command and res.status == "ok":
+            remote_hash = str((remote_command.get("payload") or {}).get("remote_sha256") or "")
+            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+                "remote_companion_state": "installed", "remote_companion_sha256": remote_hash,
+                "remote_companion_installed_at": _now(), "remote_companion_last_error": "",
+            }})
+            await _audit(db, "native_remote_companion_installed", {"device_id": agent["id"], "command_id": res.id})
+        elif remote_command:
+            await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {
+                "remote_companion_state": "deployment_failed",
+                "remote_companion_last_error": (res.stderr or res.stdout or "Remote Companion deployment failed")[:500],
+                "remote_companion_last_attempt_at": _now(),
+            }})
+    except Exception:
+        logger.exception("[nexus-agent] failed to record Nexus Remote Companion deployment")
     try:
         canary_command = await db.nexus_agent_commands.find_one(
             {"id": res.id, "device_id": agent["id"], "kind": "canary_deploy"},
@@ -2214,6 +2372,7 @@ def _build_installer_zip(
     binary_bytes: bytes,
     chat_companion_bytes: bytes | None = None,
     tray_companion_bytes: bytes | None = None,
+    remote_companion_bytes: bytes | None = None,
     heartbeat_secs: int = 60,
     poll_secs: int = 10,
 ) -> bytes:
@@ -2235,6 +2394,7 @@ def _build_installer_zip(
     }
     companion_copy_line = 'copy /Y "%~dp0nexus-client-chat.exe" "%INSTDIR%\\nexus-client-chat.exe" >nul\r\n' if chat_companion_bytes else ""
     tray_copy_line = 'copy /Y "%~dp0nexus-agent-tray.exe" "%INSTDIR%\\nexus-agent-tray.exe" >nul\r\n' if tray_companion_bytes else ""
+    remote_copy_line = 'copy /Y "%~dp0nexus-remote-companion.exe" "%INSTDIR%\\nexus-remote-companion.exe" >nul\r\n' if remote_companion_bytes else ""
     companion_start_menu_lines = (
         'if not exist "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP" mkdir "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP"\r\n'
         'copy /Y "%~dp0Open Nexus Client Chat.bat" "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP\\Nexus Client Chat.bat" >nul\r\n'
@@ -2249,6 +2409,7 @@ def _build_installer_zip(
         "bundled_components": {
             "client_chat": bool(chat_companion_bytes),
             "agent_tray": bool(tray_companion_bytes),
+            "native_remote": bool(remote_companion_bytes),
         },
         **sign_update_manifest(version=AGENT_VERSION, sha256=agent_sha256, size=len(binary_bytes)),
     }
@@ -2273,6 +2434,7 @@ def _build_installer_zip(
         "if errorlevel 1 ( echo Could not protect config.json & exit /b 1 )\r\n"
         + companion_copy_line
         + tray_copy_line
+        + remote_copy_line
         + companion_start_menu_lines
         + "cd /d \"%INSTDIR%\"\r\n"
         "\"%INSTDIR%\\nexus-agent.exe\" -run install\r\n"
@@ -2299,6 +2461,8 @@ def _build_installer_zip(
             z.writestr("Open Nexus Client Chat.bat", "@echo off\r\n\"%ProgramFiles%\\NexusOps Agent\\nexus-client-chat.exe\"\r\n")
         if tray_companion_bytes:
             z.writestr("nexus-agent-tray.exe", tray_companion_bytes)
+        if remote_companion_bytes:
+            z.writestr("nexus-remote-companion.exe", remote_companion_bytes)
         z.writestr("config.json", json.dumps(config, indent=2))
         z.writestr("install.bat", install_bat)
         z.writestr("uninstall.bat", uninstall_bat)
@@ -2341,6 +2505,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     agent_binary_sha256 = hashlib.sha256(binary_bytes).hexdigest()
     chat_companion_bytes = CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None
     tray_companion_bytes = TRAY_COMPANION_BINARY_PATH.read_bytes() if TRAY_COMPANION_BINARY_PATH.exists() else None
+    remote_companion_bytes = REMOTE_COMPANION_BINARY_PATH.read_bytes() if REMOTE_COMPANION_BINARY_PATH.exists() else None
     includes_client_chat = bool(chat_companion_bytes)
     includes_agent_tray = bool(tray_companion_bytes)
     # Nexus Elevate is delivered through the protected agent service together
@@ -2358,6 +2523,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
     enrollment_token = secrets.token_urlsafe(28)
     await db.nexus_agent_enrollment_tokens.insert_one({
         "token": enrollment_token,
+        "tenant_id": platform_tenant_id(user),
         "client_id": req.client_id,
         "client_name": client["name"],
         "is_active": True,
@@ -2378,6 +2544,7 @@ async def build_installer(req: InstallerBuildRequest, request: Request, user=Dep
         binary_bytes=binary_bytes,
         chat_companion_bytes=chat_companion_bytes,
         tray_companion_bytes=tray_companion_bytes,
+        remote_companion_bytes=remote_companion_bytes,
         heartbeat_secs=heartbeat_secs,
         poll_secs=poll_secs,
     )
@@ -2504,6 +2671,7 @@ async def installer_download(token: str):
             binary_bytes=current_binary,
             chat_companion_bytes=CHAT_COMPANION_BINARY_PATH.read_bytes() if CHAT_COMPANION_BINARY_PATH.exists() else None,
             tray_companion_bytes=TRAY_COMPANION_BINARY_PATH.read_bytes() if TRAY_COMPANION_BINARY_PATH.exists() else None,
+            remote_companion_bytes=REMOTE_COMPANION_BINARY_PATH.read_bytes() if REMOTE_COMPANION_BINARY_PATH.exists() else None,
             heartbeat_secs=int(manifest.get("heartbeat_secs") or 60),
             poll_secs=int(manifest.get("poll_secs") or 10),
         )
@@ -2862,6 +3030,22 @@ async def latest_tray_companion(
         content=TRAY_COMPANION_BINARY_PATH.read_bytes(),
         media_type="application/vnd.microsoft.portable-executable",
         headers={"Content-Disposition": 'attachment; filename="nexus-agent-tray.exe"'},
+    )
+
+
+@router.get("/nexus-agent/remote-companion/latest")
+async def latest_remote_companion(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    """Authenticated Native Remote Companion download for enrolled agents only."""
+    await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    if not REMOTE_COMPANION_BINARY_PATH.exists():
+        raise HTTPException(404, "Nexus Remote Companion binary is not built")
+    return Response(
+        content=REMOTE_COMPANION_BINARY_PATH.read_bytes(),
+        media_type="application/vnd.microsoft.portable-executable",
+        headers={"Content-Disposition": 'attachment; filename="nexus-remote-companion.exe"'},
     )
 
 

@@ -44,8 +44,107 @@ def test_queries_are_tenant_scoped_and_read_only(monkeypatch):
     async def permitted(*args):
         return {"id": "t", "client_id": "c"}
     monkeypatch.setattr(tickets, "_ticket_in_scope", permitted)
-    monkeypatch.setattr(tickets, "db", SimpleNamespace(ticket_comments=Rows(), tickets=Rows()))
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(ticket_comments=Rows(), tickets=Rows(), ticket_subscriptions=Rows()))
     result = asyncio.run(tickets.get_ticket_handover("t", 0, {"id": "u", "tenant_id": "tenant-a"}))
     assert result["evidence"] == []
-    assert all(query["$and"][1] == {"tenant_id": "tenant-a"} for query in queries)
+    assert all(query["$and"][1] == {"tenant_id": "tenant-a"} for query in queries[:2])
     assert queries[1]["$and"][0]["client_id"] == "c"
+    assert queries[2] == {"tenant_id": "tenant-a", "ticket_id": "t", "active": True}
+
+
+def test_handover_returns_active_subscriber_profiles(monkeypatch):
+    class Rows:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def find(self, _query, _projection):
+            return self
+
+        def sort(self, *_args):
+            return self
+
+        async def to_list(self, _limit):
+            return self.rows
+
+    async def permitted(*_args):
+        return {"id": "t", "client_id": "c"}
+
+    monkeypatch.setattr(tickets, "_ticket_in_scope", permitted)
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(
+        ticket_comments=Rows([]),
+        tickets=Rows([]),
+        ticket_subscriptions=Rows([{"user_id": "tech-1"}]),
+        users=Rows([{"id": "tech-1", "name": "Robin"}]),
+    ))
+    result = asyncio.run(tickets.get_ticket_handover("t", 0, {"id": "u", "tenant_id": "tenant-a"}))
+    assert result["subscribers"] == [{"user_id": "tech-1", "user": {"id": "tech-1", "name": "Robin"}}]
+
+
+def test_ticket_audit_preserves_structured_subscriber_evidence(monkeypatch):
+    class AuditLog:
+        def __init__(self):
+            self.entries = []
+
+        async def insert_one(self, entry):
+            self.entries.append(entry)
+
+    audit_log = AuditLog()
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(ticket_audit_log=audit_log))
+
+    asyncio.run(tickets.ticket_audit(
+        "ticket-1",
+        {"id": "actor-1", "name": "Alex"},
+        "ticket_subscriber_added",
+        "Subscribed Robin to ticket updates",
+        metadata={"subscriber_user_id": "tech-1", "subscriber_name": "Robin", "subscription_active": True},
+    ))
+
+    assert audit_log.entries[0]["metadata"] == {
+        "subscriber_user_id": "tech-1",
+        "subscriber_name": "Robin",
+        "subscription_active": True,
+    }
+
+
+def test_subscriber_change_records_target_in_audit_metadata(monkeypatch):
+    class Users:
+        async def find_one(self, _query, _projection):
+            return {"id": "tech-1", "name": "Robin"}
+
+    class Subscriptions:
+        async def update_one(self, *_args, **_kwargs):
+            return None
+
+    audit_calls = []
+
+    async def ticket_in_scope(*_args):
+        return {"id": "ticket-1", "client_id": "client-1", "site_id": "site-1"}
+
+    async def indexes():
+        return None
+
+    async def audit(*args, **kwargs):
+        audit_calls.append((args, kwargs))
+
+    async def subscribers(*_args):
+        return {"ticket_id": "ticket-1", "subscribers": [], "subscribed": True}
+
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(users=Users(), ticket_subscriptions=Subscriptions()))
+    monkeypatch.setattr(tickets, "_ticket_in_tenant_scope", ticket_in_scope)
+    monkeypatch.setattr(tickets, "ensure_ticket_subscription_indexes", indexes)
+    monkeypatch.setattr(tickets, "ticket_audit", audit)
+    monkeypatch.setattr(tickets, "get_ticket_subscribers", subscribers)
+
+    result = asyncio.run(tickets.update_ticket_subscriber(
+        "ticket-1",
+        tickets.TicketSubscriptionUpdate(user_id="tech-1", subscribed=True),
+        {"id": "tech-1", "name": "Robin", "tenant_id": "tenant-a"},
+    ))
+
+    assert result["subscribed"] is True
+    assert audit_calls[0][0][2] == "ticket_subscriber_added"
+    assert audit_calls[0][1]["metadata"] == {
+        "subscriber_user_id": "tech-1",
+        "subscriber_name": "Robin",
+        "subscription_active": True,
+    }

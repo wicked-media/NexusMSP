@@ -1,16 +1,28 @@
 import asyncio
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException
+import pytest
 
 from app.services import remote_runtime
-from app.services.remote_runtime import (
-    build_rustdesk_uri,
-    normalise_session_type,
-    parse_datetime,
-    ticket_links_device,
-)
+from app.routers import remote as remote_routes
+from app.services.remote_runtime import normalise_session_type, parse_datetime, ticket_links_device
+
+
+def test_native_session_freshness_is_derived_from_protected_heartbeat():
+    now = datetime.now(timezone.utc)
+    fresh = remote_routes._native_session_freshness({
+        "provider": "nexus", "status": "active", "last_heartbeat_at": now.isoformat(),
+    })
+    stale = remote_routes._native_session_freshness({
+        "provider": "nexus", "status": "active",
+        "last_heartbeat_at": (now - timedelta(seconds=30)).isoformat(),
+    })
+
+    assert fresh["capture_freshness"] == "fresh"
+    assert stale["capture_freshness"] == "stale"
 
 
 class _RustDeskRegistry:
@@ -73,21 +85,6 @@ class _WorkSessionRuntimeDB:
         self.time_entries = _Rows()
 
 
-def test_rustdesk_uri_uses_configured_relay_without_credentials():
-    uri = build_rustdesk_uri(
-        "842931675",
-        "https://relay.nexus.example:21117/path",
-        "https://fallback.nexus.example",
-    )
-    assert uri == "rustdesk://842931675@relay.nexus.example"
-    assert "password" not in uri
-
-
-def test_rustdesk_uri_falls_back_to_server_then_plain_identity():
-    assert build_rustdesk_uri("42", None, "id.nexus.example:21116") == "rustdesk://42@id.nexus.example"
-    assert build_rustdesk_uri("42") == "rustdesk://42"
-
-
 def test_remote_session_types_are_an_explicit_allow_list():
     assert normalise_session_type("TERMINAL") == "terminal"
     try:
@@ -109,22 +106,27 @@ def test_session_timestamps_accept_zulu_and_reject_invalid_values():
     assert parse_datetime("not-a-date") is None
 
 
-def test_rustdesk_registry_mapping_requires_the_same_canonical_client(monkeypatch):
-    fake_db = _RuntimeDB({
-        "client_id": "client-b",
-        "linked_device_id": "device-a",
-        "rustdesk_id": "peer-b",
-    })
-    monkeypatch.setattr(remote_runtime, "db", fake_db)
+def test_native_provider_identity_uses_only_the_linked_nexus_agent():
+    assert asyncio.run(remote_runtime.provider_device_id({"nexus_agent_id": "agent-1"}, "nexus")) == "agent-1"
+    assert asyncio.run(remote_runtime.provider_device_id({"rustdesk_id": "legacy-peer"}, "rustdesk")) == ""
 
-    remote_id = asyncio.run(remote_runtime.provider_device_id(
-        {"id": "device-a", "client_id": "client-a"},
-        "rustdesk",
-    ))
 
-    assert remote_id == ""
-    assert fake_db.rustdesk_devices.query["client_id"] == "client-a"
-    assert asyncio.run(remote_runtime.provider_device_id(
-        {"id": "unowned-device", "client_id": ""},
-        "rustdesk",
-    )) == ""
+def test_native_session_rejects_control_mode_before_creating_any_record(monkeypatch):
+    async def no_indexes():
+        return None
+
+    async def native_policy():
+        return dict(remote_runtime.REMOTE_POLICY_DEFAULTS)
+
+    monkeypatch.setattr(remote_runtime, "ensure_remote_runtime_indexes", no_indexes)
+    monkeypatch.setattr(remote_runtime, "remote_policy", native_policy)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(remote_runtime.start_remote_session(
+            device={"id": "device-1", "client_id": "client-1"},
+            user={"id": "tech-1", "tenant_id": "tenant-1"},
+            data={"provider": "nexus", "mode": "control"},
+        ))
+
+    assert error.value.status_code == 422
+    assert "view-only" in error.value.detail

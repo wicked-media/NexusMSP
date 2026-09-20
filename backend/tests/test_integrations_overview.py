@@ -119,7 +119,7 @@ class TestIntegrationsOverviewEndpoint:
         data = response.json()
         
         expected_keys = [
-            "rustdesk", "cipp", "huntress", "hudu", "acronis", "pax8",
+            "cipp", "huntress", "hudu", "acronis", "pax8",
             "domotz", "stripe", "xero", "yeastar", "microsoft365", "sms",
             "splynx", "syncro", "suped", "unifi", "synergy_wholesale",
             "supabase_artifacts", "nexus_agent", "nexus_elevate",
@@ -145,7 +145,6 @@ class TestIntegrationsOverviewEndpoint:
         
         # Expected command centers
         expected_command_centers = {
-            "rustdesk": "/remote-access",
             "microsoft_partner_center": "/control-plane?module=microsoft365&view=connections",
             "cipp": "/control-plane?module=microsoft365&view=connections",
             "huntress": "/security-dashboard",

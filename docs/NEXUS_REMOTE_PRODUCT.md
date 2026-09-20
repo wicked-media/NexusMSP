@@ -17,23 +17,21 @@ Nexus owns:
 - time, ticket notes, activity records and platform events; and
 - endpoint readiness and safe repair requests through Nexus Agent.
 
-The current screen transport is explicitly a RustDesk adapter. RustDesk is not
-the Nexus business model or source of truth: it carries pixels and input while
-the governed session record remains a Nexus `remote_sessions` document. The
-same boundary allows approved providers to be replaced without changing ticket
-or billing behaviour.
+The user has explicitly chosen to retire RustDesk now and build a native
+Nexus transport. External provider routes and launch handoffs are disabled;
+historical records remain evidence only. There is currently no working native
+screen transport. The governed session record remains a Nexus
+`remote_sessions` document.
 
 ## What is available now
 
 - Nexus Remote workspace at `/nexus-remote`, with `/remote-access` retained for
   existing deep links.
-- A provider-neutral fleet, transport registry, connector, live-peer and
-  session-evidence workspace.
+- A native-only fleet readiness and session-evidence workspace.
 - Server-side target scope checks, consent, purpose, idempotency, ticket/Work
-  Session binding, audit events and explicit "connection opened" confirmation.
-- Agent-backed remote-health checks and repair queues.
-- A RustDesk transport adapter whose credentials remain server-side and whose
-  live probe accepts only an approved saved configuration.
+  Session binding and audit events. Browser confirmation cannot activate native sessions.
+- Agent-backed capability readiness, signed grant issuance and endpoint delivery.
+- Go grant verification, local-consent state and restart-persistent replay protection.
 
 ## What is not claimed yet
 
@@ -66,8 +64,9 @@ gaps, not as features already delivered.
 
 ## Engineering rules
 
-- Preserve provider adapters during a staged rollout; do not break existing
-  RustDesk sessions to introduce branding.
+- External providers are retired by explicit product decision. Do not silently
+  restore them as a fallback. Do not delete historical evidence or uninstall
+  endpoint software as a side effect of API retirement.
 - Keep all remote business logic in the Nexus API/domain layer. Browser code
   must not compose transport state with client records or own sensitive tokens.
 - `remote_sessions` remains the authoritative session-evidence store. Provider

@@ -222,7 +222,11 @@ def sign_agent_command_payload(signed_payload: str) -> dict[str, str]:
     }
 
 
-def build_agent_policy(settings: dict[str, Any], dns_profile: dict[str, Any]) -> dict[str, Any]:
+def build_agent_policy(
+    settings: dict[str, Any],
+    dns_profile: dict[str, Any],
+    native_remote: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return a deterministic, cacheable policy document for every heartbeat."""
     document = {
         "schema_version": 1,
@@ -236,6 +240,7 @@ def build_agent_policy(settings: dict[str, Any], dns_profile: dict[str, Any]) ->
             "nexus_dns": bool(dns_profile.get("enabled", True)),
             "nexus_elevate": True,
             "client_chat": True,
+            "nexus_remote": bool(native_remote),
         },
         "updates": {
             "enabled": bool(settings.get("auto_update_enabled", True)),
@@ -260,6 +265,10 @@ def build_agent_policy(settings: dict[str, Any], dns_profile: dict[str, Any]) ->
             "mode": dns_profile.get("mode", "visibility"),
             "deployment_id": dns_profile.get("deployment_id", ""),
             "local_policy_cache": bool(dns_profile.get("local_policy_cache", True)),
+        },
+        "native_remote": native_remote or {
+            "enabled": False,
+            "reason": "trust_identity_unavailable",
         },
     }
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":"))

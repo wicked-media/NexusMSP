@@ -129,6 +129,10 @@ ROUTER_PRIORITY = [
     "invoice_pdf",
 ]
 
+# Provider-specific remote routes are no longer part of the live API. Historical
+# records stay in MongoDB for audit and migration, but cannot launch RustDesk.
+RETIRED_ROUTERS = {"remote_providers", "rustdesk"}
+
 
 # FastAPI matches route parameters by position and converter, not by the
 # parameter variable name.  Keep registry ownership equally structural so
@@ -260,7 +264,7 @@ def discover_and_register_routers():
     import app.routers as routers_pkg
     discovered = {}
     for _importer, modname, _ispkg in pkgutil.iter_modules(routers_pkg.__path__):
-        if modname.startswith('_'):
+        if modname.startswith('_') or modname in RETIRED_ROUTERS:
             continue
         try:
             module = importlib.import_module(f'app.routers.{modname}')
@@ -381,7 +385,6 @@ def background_worker_specs():
     from app.routers.maintenance_windows import maintenance_window_scheduler
 
     return (
-        ("rustdesk-sync", _rustdesk_auto_sync_loop),
         ("recurring-invoices", _recurring_invoice_scheduler),
         ("standup-digest", _standup_digest_scheduler),
         ("warroom-escalation", _warroom_escalation_loop),
@@ -712,6 +715,11 @@ async def _boot_warmup():
     except Exception as e:
         logger.error(f"Time Machine index initialization failed: {e}")
     try:
+        from app.services.native_remote import ensure_native_remote_indexes
+        await ensure_native_remote_indexes()
+    except Exception as e:
+        logger.error(f"Nexus Native Remote index initialization failed: {e}")
+    try:
         from app.routers.invoice_pdf import ensure_document_pdf_capability_indexes
         await ensure_document_pdf_capability_indexes()
     except Exception as e:
@@ -800,65 +808,6 @@ async def _automation_runtime_loop():
             logger.error(f"Automation runtime worker failed: {e}")
             await asyncio.sleep(10)
 
-
-async def _rustdesk_auto_sync_loop():
-    """Run the same scoped RustDesk reconciliation used by the governed API."""
-    import asyncio
-    while True:
-        try:
-            await asyncio.sleep(300)  # 5 minutes
-            config = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
-            if not config:
-                continue
-            val = config.get("value", {})
-            if not val.get("enabled") or not val.get("server_url") or not val.get("auto_sync", True):
-                continue
-            # Never rebuild an outbound provider URL or update by an unscoped
-            # RustDesk ID here.  The governed sync validates the saved origin,
-            # decrypts server-owned credentials and only reconciles canonical,
-            # client-owned Nexus assets.
-            try:
-                from app.routers.rustdesk import sync_rustdesk_peers
-
-                request = FastAPIRequest({
-                    "type": "http",
-                    "method": "POST",
-                    "path": "/internal/rustdesk/auto-sync",
-                    "headers": [],
-                })
-                request.state.correlation_id = str(uuid.uuid4())
-                result = await sync_rustdesk_peers(
-                    request,
-                    {
-                        "id": "system-rustdesk-auto-sync",
-                        "name": "Nexus RustDesk Auto Sync",
-                        "role": "admin",
-                        "is_admin": True,
-                        "client_scope_mode": "all",
-                    },
-                )
-                now = datetime.now(timezone.utc).isoformat()
-                await db.settings.update_one(
-                    {"key": "rustdesk_config"},
-                    {"$set": {
-                        "value.last_auto_sync": now,
-                        "value.last_auto_sync_peers": int(result.get("synced") or 0),
-                    }},
-                )
-                logger.info(
-                    "RustDesk auto-sync: synced=%s created=%s updated=%s skipped_unowned=%s skipped_ambiguous=%s",
-                    result.get("synced", 0),
-                    result.get("created", 0),
-                    result.get("updated", 0),
-                    result.get("skipped_unowned", 0),
-                    result.get("skipped_ambiguous", 0),
-                )
-            except Exception as e:
-                logger.debug(f"RustDesk auto-sync skipped: {e}")
-        except Exception as e:
-            logger.debug(f"RustDesk auto-sync loop error: {e}")
-            import asyncio
-            await asyncio.sleep(60)
 
 async def _trmm_scheduled_broadcast_loop():
     """Removed â€” TRMM has been replaced by NexusOps Agent. This stub keeps backwards-compat with any old references."""

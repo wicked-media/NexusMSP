@@ -1,6 +1,12 @@
 package config
 
-import "testing"
+import (
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestValidateServerURL(t *testing.T) {
 	tests := []struct {
@@ -43,5 +49,28 @@ func TestApplyPlatformPolicyClampsCadence(t *testing.T) {
 	cfg.ApplyPlatformPolicy(&PlatformPolicy{HeartbeatSecs: 1, PollSecs: 999})
 	if cfg.HeartbeatSecs != 15 || cfg.PollSecs != 300 {
 		t.Fatalf("unexpected policy cadence: heartbeat=%d poll=%d", cfg.HeartbeatSecs, cfg.PollSecs)
+	}
+}
+
+func TestNativeRemoteCompanionReadyRequiresPinnedDigest(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("trusted remote companion")
+	if err := os.WriteFile(filepath.Join(dir, "nexus-remote-companion.exe"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	cfg := &Config{
+		configPath: filepath.Join(dir, "config.json"),
+		PlatformPolicy: &PlatformPolicy{NativeRemote: map[string]any{
+			"enabled":          true,
+			"companion_sha256": fmt.Sprintf("%x", digest),
+		}},
+	}
+	if !cfg.NativeRemoteCompanionReady() {
+		t.Fatal("matching policy-pinned companion should be eligible")
+	}
+	cfg.PlatformPolicy.NativeRemote["companion_sha256"] = "0000000000000000000000000000000000000000000000000000000000000000"
+	if cfg.NativeRemoteCompanionReady() {
+		t.Fatal("mismatched companion digest must fail closed")
 	}
 }

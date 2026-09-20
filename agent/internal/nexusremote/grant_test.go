@@ -38,3 +38,14 @@ func TestInvalidTrustKey(t *testing.T) {
 		t.Fatal("empty key accepted")
 	}
 }
+
+func TestVersionTwoRequiresExplicitNoConsent(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	now := time.Now().UTC()
+	payload, _ := json.Marshal(grantPayload{Version: 2, SessionID: "session-v2", TenantID: "tenant", DeviceID: "device", ActorID: "tech", Mode: View, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+	envelope := SignedGrant{Payload: payload, Signature: ed25519.Sign(priv, append([]byte(grantDomain), payload...))}
+	verifier, _ := NewVerifier(pub)
+	if _, err := verifier.Accept(envelope, "tenant", "device", now); err == nil {
+		t.Fatal("V2 grant without explicit consent policy accepted")
+	}
+}

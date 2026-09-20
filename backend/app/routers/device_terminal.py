@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.routers.nexus_agent import queue_command_for_device, require_agent_operator
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_record_scope
+from app.services.scope_permissions import assert_record_scope, platform_tenant_id, tenant_scoped_query
 
 
 router = APIRouter()
@@ -29,7 +29,7 @@ def _is_admin(user: dict) -> bool:
 
 
 def _session_scope(session_id: str, user: dict) -> dict:
-    query = {"id": session_id}
+    query = tenant_scoped_query(user, {"id": session_id})
     if not _is_admin(user):
         query["user_id"] = user.get("id")
     return query
@@ -37,7 +37,7 @@ def _session_scope(session_id: str, user: dict) -> dict:
 
 @router.get("/device-terminal/sessions")
 async def get_terminal_sessions(current_user: dict = Depends(require_agent_operator)):
-    query = {} if _is_admin(current_user) else {"user_id": current_user.get("id")}
+    query = tenant_scoped_query(current_user, {} if _is_admin(current_user) else {"user_id": current_user.get("id")})
     return await db.terminal_sessions.find(query, {"_id": 0, "commands": 0}).sort("started_at", -1).to_list(50)
 
 
@@ -71,6 +71,7 @@ async def create_terminal_session(data: dict, current_user: dict = Depends(requi
         "id": f"term-{uuid.uuid4().hex[:12]}",
         "device_id": device_id,
         "client_id": device.get("client_id"),
+        "tenant_id": platform_tenant_id(current_user),
         "agent_id": device["nexus_agent_id"],
         "device_name": device.get("name") or "Managed asset",
         "client_name": device.get("client_name") or "",

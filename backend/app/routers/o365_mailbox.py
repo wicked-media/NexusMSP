@@ -16,6 +16,7 @@ from app.services.microsoft365_credentials import (
     load_microsoft365_client_secret,
 )
 from app.services.secret_store import encrypt_secret
+from app.services.ticket_subscriptions import notify_ticket_subscribers
 
 router = APIRouter()
 # Every shared sender is selected centrally in Mailbox & Email.  Keep this
@@ -749,6 +750,12 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             "created_at": received_at,
         }
         await db.ticket_comments.insert_one(comment)
+        try:
+            await notify_ticket_subscribers(ticket=threaded_ticket, comment=comment, actor_id=None)
+        except Exception:
+            # The customer email is already durably captured. Subscriber
+            # delivery may be retried independently and must not reject it.
+            pass
         await db.tickets.update_one(
             {"id": threaded_ticket["id"], "client_id": known_client.get("id")},
             {"$set": {

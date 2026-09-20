@@ -47,7 +47,8 @@ const Toaster = ({ ...props }) => {
       closeButton
       expand={false}
       richColors={false}
-      gap={8}
+      gap={10}
+      offset={16}
       icons={{
         success: <CheckCircle2 className="h-4 w-4" />,
         info: <Info className="h-4 w-4" />,
@@ -58,13 +59,12 @@ const Toaster = ({ ...props }) => {
       className="toaster group"
       toastOptions={{
         classNames: {
-          toast:
-            `nx-toast group toast !text-foreground ${styleClass} ${densityClass}`,
-          content: "!gap-0.5",
-          title: "!text-[13px] !font-semibold !leading-5",
-          description: "!text-xs !leading-[1.45] !text-muted-foreground",
-          icon: "nx-toast__icon !h-7 !w-7 !shrink-0 !rounded-lg !border !border-current/15 !bg-current/[0.06]",
-          closeButton: "nx-toast__close !h-6 !w-6 !border-border/80 !bg-card !text-muted-foreground hover:!bg-muted hover:!text-foreground",
+          toast: `nx-toast group toast !overflow-hidden !text-foreground ${styleClass} ${densityClass}`,
+          content: "!min-w-0 !gap-1",
+          title: "!text-[13px] !font-semibold !leading-5 !tracking-[-0.01em]",
+          description: "!text-xs !leading-[1.5] !text-muted-foreground",
+          icon: "nx-toast__icon !flex !h-8 !w-8 !shrink-0 !self-center !items-center !justify-center !rounded-[10px] !border !border-current/15 !bg-current/[0.08]",
+          closeButton: "nx-toast__close !inline-flex !h-6 !w-6 !items-center !justify-center !rounded-md !border-border/70 !bg-card/80 !text-muted-foreground hover:!bg-muted hover:!text-foreground",
           actionButton: "!h-7 !rounded-md !bg-primary !px-2.5 !text-[11px] !font-semibold !text-primary-foreground hover:!brightness-110",
           cancelButton: "!h-7 !rounded-md !bg-muted !px-2.5 !text-[11px] !font-medium !text-muted-foreground hover:!bg-accent hover:!text-foreground",
         },

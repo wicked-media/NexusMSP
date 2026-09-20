@@ -214,14 +214,12 @@ def _tile(*, key: str, name: str, category: str, description: str, configured: b
 @router.get("/integrations-overview")
 async def integrations_overview(current_user: dict = Depends(get_current_user)):
     """Expose configured vs verified state without returning secrets or guessing health."""
-    setting_types = ["huntress", "hudu", "acronis", "pax8", "stripe", "o365_mailbox", "sms", "xero", "splynx", "syncro", "suped", "domotz", "rustdesk", "unifi"]
+    setting_types = ["huntress", "hudu", "acronis", "pax8", "stripe", "o365_mailbox", "sms", "xero", "splynx", "syncro", "suped", "domotz", "unifi"]
     setting_documents = await asyncio.gather(
         *(_get_settings(current_user, setting_type) for setting_type in setting_types)
     )
     settings = dict(zip(setting_types, setting_documents, strict=True))
     unifi_settings = _visible_site_manager_settings(settings["unifi"], current_user)
-    rustdesk_legacy = await _platform_setting(current_user, {"key": "rustdesk_config"})
-    rustdesk_legacy_value = rustdesk_legacy.get("value") if isinstance(rustdesk_legacy.get("value"), dict) else {}
     pax8_value = settings["pax8"].get("value") if isinstance(settings["pax8"].get("value"), dict) else {}
 
     (
@@ -272,7 +270,6 @@ async def integrations_overview(current_user: dict = Depends(get_current_user)):
     yeastar_status = "failed" if any(pbx.get("status") in {"offline", "authentication_failed"} for pbx in yeastar_pbxs) else None
 
     tiles = [
-        _tile(key="rustdesk", name="RustDesk", category="remote-access", description="Self-hosted remote access for managed endpoints", configured=bool(settings["rustdesk"].get("server_url") or rustdesk_legacy_value.get("server_url")), last_synced_at=settings["rustdesk"].get("last_sync") or rustdesk_legacy_value.get("last_auto_sync") or rustdesk_legacy_value.get("last_sync"), last_test_status=settings["rustdesk"].get("last_test_status") or rustdesk_legacy_value.get("last_test_status"), command_center="/remote-access", settings_path="/remote-access"),
         _tile(key="microsoft_partner_center", name="Microsoft Partner Center", category="security", description="CSP customer discovery and tenant onboarding. Graph and GDAP action authority stay separately verified in Nexus Control Plane.", configured=bool(microsoft_value.get("app_id") and (microsoft_value.get("partner_tenant_id") or microsoft_value.get("tenant_id")) and (microsoft_value.get("app_secret_encrypted") or microsoft_value.get("app_secret"))), last_synced_at=microsoft_value.get("last_synced"), last_test_status=microsoft_value.get("last_test_status"), command_center="/control-plane?module=microsoft365&view=connections", settings_path="/control-plane?module=microsoft365&view=connections", management_owner="operations_health", evidence={"graph_verified_tenant_count": graph_verified_tenants, "graph_action_access_proven": graph_verified_tenants > 0}),
         _tile(key="cipp", name="CIPP compatibility adapter", category="security", description="Optional compatibility adapter for an existing CIPP deployment. Nexus remains the operational workspace and does not treat the adapter as native Graph proof.", configured=bool(cipp_settings.get("base_url") and (cipp_settings.get("api_key_encrypted") or cipp_settings.get("api_key_full"))), last_synced_at=cipp_settings.get("last_synced_at"), last_test_status=cipp_settings.get("last_test_status"), command_center="/control-plane?module=microsoft365&view=connections", settings_anchor="cipp-settings-card", management_owner="settings_configuration"),
         _tile(key="huntress", name="Huntress", category="security", description="Managed Detection & Response", configured=_configured(settings["huntress"], "api_key", "secret_key"), last_synced_at=settings["huntress"].get("last_synced_at"), last_test_status=settings["huntress"].get("last_test_status"), command_center="/security-dashboard", settings_anchor="huntress-settings-card"),

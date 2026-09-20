@@ -28,7 +28,6 @@ import AICopilotStrip from "@/components/tickets/AICopilotStrip";
 import TicketRequestRecord from "@/components/tickets/TicketRequestRecord";
 import TicketHandoverDialog from "@/components/tickets/TicketHandoverDialog";
 import TicketQueueRecovery from "@/components/tickets/TicketQueueRecovery";
-import NexusVerifiedSequence from "@/components/NexusVerifiedSequence";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import HeroTile from "@/components/HeroTile";
 import WorkspaceControlBar from "@/components/WorkspaceControlBar";
@@ -93,7 +92,7 @@ import { STANDARD_SERVICE_KIT, serviceKitContextFor } from "@/lib/serviceKits";
 import {
   LOCAL_PREVIEW_CLIENTS, LOCAL_PREVIEW_DEVICES, LOCAL_PREVIEW_NOTE_COUNTS,
   LOCAL_PREVIEW_PRODUCTS, LOCAL_PREVIEW_SCRIPTS, LOCAL_PREVIEW_SERVICES,
-  LOCAL_PREVIEW_TICKETS, LOCAL_PREVIEW_USERS, localPreviewCollection,
+  LOCAL_PREVIEW_TICKETS, LOCAL_PREVIEW_USERS, isLocalTicketPreview, localPreviewCollection,
   localPreviewRecord, localPreviewTicketDetail,
 } from "@/lib/ticketPreviewData";
 
@@ -200,6 +199,7 @@ export default function TicketsPage() {
   const [ticketNotes, setTicketNotes] = useState([]);
   const [ticketEmails, setTicketEmails] = useState([]);
   const [ticketParticipants, setTicketParticipants] = useState([]);
+  const [ticketSubscribers, setTicketSubscribers] = useState([]);
   const [childTickets, setChildTickets] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
@@ -628,10 +628,11 @@ export default function TicketsPage() {
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, participantRes, cRes, tRes, aRes, sRes, attRes, prodRes, poRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
+      const [nRes, eRes, participantRes, subscriberRes, cRes, tRes, aRes, sRes, attRes, prodRes, poRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/participants`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/tickets/${ticket.id}/subscribers`, { headers }).catch(() => ({ data: { subscribers: [] } })),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/time-entries`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/audit-log`, { headers }),
@@ -649,6 +650,7 @@ export default function TicketsPage() {
       setTicketNotes(localPreviewCollection(collectionFromResponse(nRes.data, ["comments", "notes"]), previewDetail.comments));
       setTicketEmails(localPreviewCollection(collectionFromResponse(eRes.data, ["emails"]), previewDetail.emails));
       setTicketParticipants(collectionFromResponse(participantRes.data, ["participants"]));
+      setTicketSubscribers(collectionFromResponse(subscriberRes.data, ["subscribers"]));
       setChildTickets(localPreviewCollection(collectionFromResponse(cRes.data, ["tickets", "children"]), previewDetail.children));
       setTimeEntries(localPreviewCollection(collectionFromResponse(tRes.data, ["time_entries"]), previewDetail.time_entries));
       setAuditLog(localPreviewCollection(collectionFromResponse(aRes.data, ["audit_log", "events"]), previewDetail.audit_log));
@@ -823,6 +825,26 @@ export default function TicketsPage() {
         return;
       }
       toast.error(detail || "Failed to update ticket");
+    }
+  };
+
+  const updateTicketSubscriber = async (userId, subscribed) => {
+    if (!viewingTicket?.id || !userId) return;
+    if (isLocalTicketPreview() && viewingTicket.id.startsWith("ticket-preview-")) {
+      toast.info("Subscribers are available on live tickets. Create or open a live ticket to test notifications.");
+      return;
+    }
+    try {
+      const { data } = await axios.put(`${API}/tickets/${viewingTicket.id}/subscribers`, {
+        user_id: userId,
+        subscribed,
+      }, { headers });
+      setTicketSubscribers(data?.subscribers || []);
+      const auditResponse = await axios.get(`${API}/tickets/${viewingTicket.id}/audit-log`, { headers }).catch(() => null);
+      if (auditResponse) setAuditLog(collectionFromResponse(auditResponse.data, ["audit_log", "events"]));
+      toast.success(subscribed ? "Ticket subscriber added" : "Ticket subscriber removed");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not update ticket subscribers");
     }
   };
 
@@ -2013,13 +2035,6 @@ export default function TicketsPage() {
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
     const ticketCompleted = ["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase());
-    const ticketStage = (() => {
-      const status = String(viewingTicket.status || "").toLowerCase();
-      if (status === "closed") return 6;
-      if (status === "resolved") return 5;
-      if (status === "in_progress" || status === "on_hold") return 2;
-      return 1;
-    })();
     const slaHours = viewingTicket.sla_due && !ticketCompleted ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
     const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
     const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
@@ -2111,7 +2126,6 @@ export default function TicketsPage() {
           />
         )}
 
-        {!ticketFocusMode && <NexusVerifiedSequence complete={ticketStage} label="Nexus service record" className="shadow-sm" />}
         {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, briefing and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
 
         <TicketServiceKitPanel
@@ -2723,6 +2737,13 @@ export default function TicketsPage() {
                     <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
+                <div className="rounded-xl border border-violet-400/15 bg-violet-500/[0.045] p-3" data-testid="ticket-subscribers">
+                  <div className="flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-200">Subscribers</p><p className="mt-1 text-[11px] leading-4 text-zinc-400">{isLocalTicketPreview() && viewingTicket.id?.startsWith("ticket-preview-") ? "Preview ticket — create or open a live ticket to manage handover notifications." : "Receive in-app alerts for replies and internal notes through handover."}</p></div><Bell className="mt-0.5 h-4 w-4 text-violet-300" /></div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {ticketSubscribers.length ? ticketSubscribers.map((subscriber) => <Badge key={subscriber.user_id} variant="outline" className="h-6 border-violet-400/20 bg-black/10 px-2 text-[10px] text-violet-100">{subscriber.user?.name || "Technician"}{subscriber.user_id === user?.id && <button type="button" className="ml-1.5 text-violet-300 hover:text-rose-300" aria-label="Unsubscribe me" onClick={() => updateTicketSubscriber(user.id, false)}>×</button>}</Badge>) : <span className="text-[11px] text-zinc-500">No subscribers yet</span>}
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2"><Button type="button" size="sm" variant="outline" className="h-8 border-violet-400/25 text-xs text-violet-100" disabled={isLocalTicketPreview() && viewingTicket.id?.startsWith("ticket-preview-")} onClick={() => updateTicketSubscriber(user?.id, !ticketSubscribers.some((subscriber) => subscriber.user_id === user?.id))}>{ticketSubscribers.some((subscriber) => subscriber.user_id === user?.id) ? "Unsubscribe me" : "Subscribe me"}</Button><Select value="" disabled={isLocalTicketPreview() && viewingTicket.id?.startsWith("ticket-preview-")} onValueChange={(userId) => updateTicketSubscriber(userId, true)}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Add technician" /></SelectTrigger><SelectContent>{users.filter((technician) => technician.id !== user?.id && !ticketSubscribers.some((subscriber) => subscriber.user_id === technician.id)).map((technician) => <SelectItem key={technician.id} value={technician.id}>{technician.name}</SelectItem>)}</SelectContent></Select></div>
+                </div>
                 <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Category</Label>
                   <Select value={viewingTicket.category || "support"} onValueChange={v => handleUpdateTicket("category", v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -2863,6 +2884,11 @@ export default function TicketsPage() {
 
         <TicketHandoverDialog key={`handover-${viewingTicket.id}`} open={handoverOpen} onOpenChange={setHandoverOpen} ticket={viewingTicket} headers={headers}
           onOpenActivity={(noteId) => {
+            if (!noteId) {
+              setDetailTab("audit");
+              window.requestAnimationFrame(() => document.querySelector('[data-testid="ticket-workspace-tabs"]')?.scrollIntoView({ behavior: "smooth", block: "start" }));
+              return;
+            }
             setDetailTab("conversation");
             window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
               const note = noteId && Array.from(document.querySelectorAll('[data-testid]')).find(element => element.getAttribute('data-testid') === `note-${noteId}`);

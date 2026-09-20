@@ -28,7 +28,6 @@ const ICON_BY_KEY = {
   splynx: Cloud,
   syncro: Cloud,
   suped: Shield,
-  rustdesk: Activity,
   yeastar: Phone,
   unifi: Wifi,
   cipp: Cloud,

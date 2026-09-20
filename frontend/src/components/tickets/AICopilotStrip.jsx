@@ -13,7 +13,8 @@ import { API } from "@/App";
  * (or fires actions) via the provided handlers.
  *
  * Heuristics-first (zero-cost): age, SLA, blocker, device telemetry hooks,
- * patches, status. AI summarisation is opt-in via the "Summarise" button.
+ * patches, status. The opt-in briefing is server-built from authorised ticket
+ * evidence, including recorded conversation and activity.
  */
 export default function AICopilotStrip({ ticket, deviceStatus, headers, onActionClick }) {
   const [summary, setSummary] = useState(null);
@@ -47,13 +48,13 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
     setLoading(true);
     setSummaryError("");
     try {
-      const r = await axios.post(`${API}/ai/proofread`, { text: `Summarise this support ticket in 1 sentence. Title: ${ticket.title}. Description: ${(ticket.description || "").slice(0, 1500)}` }, { headers });
+      const r = await axios.post(`${API}/tickets/${ticket.id}/case-briefing`, {}, { headers });
       const d = r.data || {};
-      const text = typeof d === "string" ? d : (d.improved || d.corrected || d.text || d.summary || null);
+      const text = typeof d === "string" ? d : (d.summary || null);
       if (requestId !== summaryRequest.current) return;
-      if (typeof text === "string" && text.trim()) setSummary({ text: text.trim(), sourceVersion, generatedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
-      else setSummaryError("No summary was returned. The original request remains available below.");
-    } catch { if (requestId === summaryRequest.current) setSummaryError("Summary unavailable. You can continue working from the original request."); }
+      if (typeof text === "string" && text.trim()) setSummary({ text: text.trim(), source: d.source || {}, mode: d.mode || "ai", sourceVersion, generatedAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+      else setSummaryError("No case brief was returned. The recorded ticket history remains available.");
+    } catch (error) { if (requestId === summaryRequest.current) setSummaryError(error?.response?.data?.detail || "Case briefing unavailable. You can continue working from the recorded ticket history."); }
     finally { if (requestId === summaryRequest.current) setLoading(false); }
   };
 
@@ -89,7 +90,7 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
   const hasCreatedAt = createdAt && Number.isFinite(createdAt.getTime());
   const ageHours = hasCreatedAt ? Math.max(0, differenceInHours(new Date(), createdAt)) : null;
   const ageLabel = ageHours == null ? "" : ageHours < 24 ? `${ageHours}h old` : `${Math.round(ageHours / 24)}d old`;
-  const assignedTechnician = ticket.assigned_to_name || ticket.assignee_name || ticket.assigned_to_display_name || (ticket.assigned_to ? "Assigned" : null);
+  const assignedTechnician = ticket.assigned_to_name || ticket.assignee_name || ticket.assigned_name || ticket.assigned_to_display_name || (ticket.assigned_to ? "Assigned" : null);
   const activityAt = ticket.last_activity_at || ticket.updated_at || ticket.created_at;
   const activityDate = activityAt ? new Date(activityAt) : null;
   const hasActivityDate = activityDate && Number.isFinite(activityDate.getTime());
@@ -154,10 +155,10 @@ export default function AICopilotStrip({ ticket, deviceStatus, headers, onAction
       {(summary || summaryError || summaryStale) && (
         <div className="relative space-y-2 border-t border-white/[0.06] px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>{summary ? `AI request summary · generated ${summary.generatedAt}` : "Summary unavailable. The original request remains the source of truth."}</span>
+            <span>{summary ? `${summary.mode === "ai" ? "AI case brief" : "Evidence case brief · AI unavailable"} · generated ${summary.generatedAt}` : "Case briefing unavailable. The recorded ticket history remains the source of truth."}</span>
             {summaryStale && <span role="status" className="text-amber-300">Ticket changed · refresh this brief</span>}
           </div>
-          {summary && <><p className="whitespace-pre-wrap text-sm leading-6 text-foreground" data-testid="copilot-summary">{summary.text}</p><p className="text-xs text-muted-foreground">Source: ticket title and first 1,500 characters of the description. Does not include conversation or work history; review before using.</p><details className="text-xs"><summary className="cursor-pointer text-cyan-300">View current source request</summary><p className="mt-2 whitespace-pre-wrap text-muted-foreground">{ticket.title}{"\n"}{(ticket.description || "").slice(0, 1500)}</p></details></>}
+          {summary && <><p className="whitespace-pre-wrap text-sm leading-6 text-foreground" data-testid="copilot-summary">{summary.text}</p><p className="text-xs text-muted-foreground">Source: ticket record, {summary.source?.conversation_entries ?? 0} recorded conversation update{summary.source?.conversation_entries === 1 ? "" : "s"}, and {summary.source?.activity_entries ?? 0} activity event{summary.source?.activity_entries === 1 ? "" : "s"}. Review before acting{summary.source?.limited ? "; the evidence window was capped." : "."}</p><details className="text-xs"><summary className="cursor-pointer text-cyan-300">View recorded request</summary><p className="mt-2 whitespace-pre-wrap text-muted-foreground">{ticket.title}{"\n"}{ticket.description || "No request description recorded."}</p></details></>}
           {summaryError && <p role="status" className="text-xs text-amber-300">{summaryError}</p>}
         </div>
       )}

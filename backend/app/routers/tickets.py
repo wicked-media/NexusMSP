@@ -25,6 +25,7 @@ from app.services.scope_permissions import (
     tenant_scoped_query,
 )
 from app.services.ticket_conversation import sanitise_ticket_rich_text
+from app.services.ticket_subscriptions import ensure_ticket_subscription_indexes, notify_ticket_subscribers
 from app.services.upload_security import upload_is_releasable
 from app.services.ticket_time import (
     create_canonical_ticket_time_entry,
@@ -65,6 +66,72 @@ class TicketConversationEntryCreate(BaseModel):
     time: Optional[TicketConversationTime] = None
 
 
+class TicketSubscriptionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: str = Field(min_length=1, max_length=120)
+    subscribed: bool
+
+
+@router.get("/tickets/{ticket_id}/subscribers")
+async def get_ticket_subscribers(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    ticket = await _ticket_in_tenant_scope(ticket_id, current_user, "ticket.comment.read")
+    await ensure_ticket_subscription_indexes()
+    records = await db.ticket_subscriptions.find(
+        {"tenant_id": platform_tenant_id(current_user), "ticket_id": ticket["id"], "active": True},
+        {"_id": 0, "user_id": 1, "created_at": 1, "created_by": 1},
+    ).to_list(100)
+    user_ids = [str(record.get("user_id")) for record in records if record.get("user_id")]
+    user_query = {"id": {"$in": user_ids}, "is_active": {"$ne": False}}
+    tenant_id = platform_tenant_id(current_user)
+    if tenant_id != "nexus-local":
+        user_query["tenant_id"] = tenant_id
+    else:
+        user_query["$or"] = [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}]
+    users = await db.users.find(
+        user_query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "avatar": 1},
+    ).to_list(100)
+    profiles = {str(user["id"]): user for user in users}
+    subscribers = [{**record, "user": profiles.get(str(record.get("user_id")))} for record in records if profiles.get(str(record.get("user_id")))]
+    return {"ticket_id": ticket["id"], "subscribers": subscribers, "subscribed": str(current_user.get("id")) in user_ids}
+
+
+@router.put("/tickets/{ticket_id}/subscribers", dependencies=[Depends(require_action("ticket.conversation.create"))])
+async def update_ticket_subscriber(ticket_id: str, payload: TicketSubscriptionUpdate, current_user: dict = Depends(get_current_user)):
+    ticket = await _ticket_in_tenant_scope(ticket_id, current_user, "ticket.comment.create")
+    if payload.user_id != str(current_user.get("id")):
+        await assert_action_permission(current_user, "ticket.handoff.manage")
+    tenant_id = platform_tenant_id(current_user)
+    target_query = {"id": payload.user_id, "is_active": {"$ne": False}}
+    if tenant_id != "nexus-local":
+        target_query["tenant_id"] = tenant_id
+    else:
+        target_query["$or"] = [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}]
+    target = await db.users.find_one(target_query, {"_id": 0, "id": 1, "name": 1})
+    if not target:
+        raise HTTPException(status_code=422, detail="Choose an active Nexus technician")
+    await ensure_ticket_subscription_indexes()
+    scope = {"tenant_id": tenant_id, "ticket_id": ticket["id"], "user_id": payload.user_id}
+    now = datetime.now(timezone.utc).isoformat()
+    if payload.subscribed:
+        await db.ticket_subscriptions.update_one(scope, {"$set": {"active": True, "updated_at": now}, "$setOnInsert": {"id": str(uuid.uuid4()), "client_id": ticket.get("client_id"), "site_id": ticket.get("site_id"), "created_at": now, "created_by": str(current_user.get("id") or "")}}, upsert=True)
+    else:
+        await db.ticket_subscriptions.update_one(scope, {"$set": {"active": False, "updated_at": now, "removed_by": str(current_user.get("id") or "")}})
+    technician_name = str(target.get("name") or "technician").strip()
+    await ticket_audit(
+        ticket["id"],
+        current_user,
+        "ticket_subscriber_added" if payload.subscribed else "ticket_subscriber_removed",
+        f"{'Subscribed' if payload.subscribed else 'Unsubscribed'} {technician_name} {'to' if payload.subscribed else 'from'} ticket updates",
+        metadata={
+            "subscriber_user_id": str(target["id"]),
+            "subscriber_name": technician_name,
+            "subscription_active": payload.subscribed,
+        },
+    )
+    return await get_ticket_subscribers(ticket_id, current_user)
+
+
 @router.get("/tickets/{ticket_id}/handover")
 async def get_ticket_handover(ticket_id: str, hours: int = 0, current_user: dict = Depends(get_current_user)):
     from app.services.ticket_handover import build_handover
@@ -74,14 +141,140 @@ async def get_ticket_handover(ticket_id: str, hours: int = 0, current_user: dict
     ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.comment.read")
     # Compose evidence only after authorising the parent; also constrain explicit
     # tenant ownership so a mismatched child document cannot leak across tenants.
-    comments, children = await asyncio.gather(
+    comments, children, subscription_records = await asyncio.gather(
         db.ticket_comments.find(tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
             {"_id": 0, "id": 1, "content": 1, "created_at": 1, "user_name": 1, "is_internal": 1, "visibility": 1}).sort("created_at", -1).to_list(200),
         db.tickets.find(tenant_scoped_query(current_user, {"parent_id": ticket_id, "client_id": ticket.get("client_id")}),
             {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1}).to_list(100),
+        db.ticket_subscriptions.find(
+            {"tenant_id": platform_tenant_id(current_user), "ticket_id": ticket_id, "active": True},
+            {"_id": 0, "user_id": 1, "created_at": 1},
+        ).to_list(100),
     )
     since = datetime.now(timezone.utc) - timedelta(hours=hours) if hours else None
-    return build_handover(ticket, comments, children, since=since)
+    subscriber_ids = [str(record.get("user_id")) for record in subscription_records if record.get("user_id")]
+    subscriber_query: dict[str, Any] = {"id": {"$in": subscriber_ids}, "is_active": {"$ne": False}}
+    tenant_id = platform_tenant_id(current_user)
+    if tenant_id == "nexus-local":
+        subscriber_query["$or"] = [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}]
+    else:
+        subscriber_query["tenant_id"] = tenant_id
+    subscriber_profiles = await db.users.find(
+        subscriber_query,
+        {"_id": 0, "id": 1, "name": 1, "avatar": 1},
+    ).to_list(100) if subscriber_ids else []
+    profiles_by_id = {str(profile["id"]): profile for profile in subscriber_profiles}
+    handover = build_handover(ticket, comments, children, since=since)
+    handover["subscribers"] = [
+        {"user_id": record["user_id"], "user": profiles_by_id[str(record["user_id"])]}
+        for record in subscription_records
+        if str(record.get("user_id")) in profiles_by_id
+    ]
+    return handover
+
+
+@router.post("/tickets/{ticket_id}/case-briefing")
+async def create_ticket_case_briefing(ticket_id: str, current_user: dict = Depends(get_current_user)):
+    """Produce a bounded, read-only AI briefing from authorised ticket evidence.
+
+    The response is intentionally ephemeral: it is not a ticket note, does not
+    alter ticket state, and is always labelled as an AI summary rather than a
+    source of record.
+    """
+    from app.routers.ai_service import get_chat, hydrate_openai_connection
+    from app.services.ai_provider import UserMessage
+    from app.services.ticket_handover import plain_text
+
+    ticket = await _ticket_in_tenant_scope(ticket_id, current_user, "ticket.comment.read")
+    comments, audit_events = await asyncio.gather(
+        db.ticket_comments.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+            {"_id": 0, "content": 1, "created_at": 1, "user_name": 1, "is_internal": 1, "visibility": 1},
+        ).sort("created_at", -1).to_list(30),
+        db.ticket_audit_log.find(
+            {"ticket_id": ticket_id},
+            {"_id": 0, "action": 1, "details": 1, "created_at": 1, "user_name": 1},
+        ).sort("created_at", -1).to_list(12),
+    )
+    assigned_user_id = str(ticket.get("assigned_to") or ticket.get("assignee_id") or "").strip()
+    owner_name = plain_text(
+        ticket.get("assigned_to_name") or ticket.get("assignee_name") or ticket.get("assigned_to_display_name"),
+        120,
+    )
+    if not owner_name and assigned_user_id:
+        assignee = await db.users.find_one(
+            tenant_scoped_query(current_user, {"id": assigned_user_id}),
+            {"_id": 0, "name": 1},
+        )
+        owner_name = plain_text((assignee or {}).get("name"), 120)
+    note_lines = [
+        f"- {plain_text(note.get('created_at'), 40)} | {plain_text(note.get('user_name'), 80) or 'Author not recorded'} | "
+        f"{'internal' if note.get('is_internal') or note.get('visibility') == 'internal' else 'customer-visible'}: {plain_text(note.get('content'), 700)}"
+        for note in comments
+        if plain_text(note.get("content"), 20)
+    ]
+    audit_lines = [
+        f"- {plain_text(event.get('created_at'), 40)} | {plain_text(event.get('user_name'), 80) or 'System'} | "
+        f"{plain_text(event.get('action'), 100)}: {plain_text(event.get('details'), 350)}"
+        for event in audit_events
+    ]
+    prompt = "\n".join([
+        f"Ticket: {plain_text(ticket.get('ticket_number'), 50)} — {plain_text(ticket.get('title'), 240)}",
+        f"Status: {plain_text(ticket.get('status'), 50)} | Priority: {plain_text(ticket.get('priority'), 50)} | Owner: {owner_name or 'Unassigned'}",
+        f"Original request: {plain_text(ticket.get('description'), 1800) or 'No description recorded.'}",
+        "Latest recorded conversation:",
+        "\n".join(note_lines) or "- No recorded conversation.",
+        "Recent recorded activity:",
+        "\n".join(audit_lines) or "- No recorded activity.",
+    ])
+    source = {
+        "ticket": True,
+        "conversation_entries": len(note_lines),
+        "activity_entries": len(audit_lines),
+        "limited": len(comments) >= 30 or len(audit_events) >= 12,
+    }
+
+    def evidence_fallback() -> str:
+        """Useful, explicit fallback when an AI provider is unavailable."""
+        owner = owner_name or "unassigned"
+        status = (plain_text(ticket.get("status"), 50) or "not recorded").replace("_", " ")
+        priority = plain_text(ticket.get("priority"), 50) or "not recorded"
+        request = plain_text(ticket.get("description"), 420) or "No request description recorded."
+        latest_note = note_lines[0][2:] if note_lines else "No recorded conversation update."
+        latest_activity = audit_lines[0][2:] if audit_lines else "No recorded ticket activity."
+        if owner == "unassigned":
+            next_action = "Assign an accountable technician, then record the first response."
+        elif not note_lines:
+            next_action = "Record the first work or customer update before progressing the ticket."
+        elif status in {"resolved", "closed"}:
+            next_action = "Review the recorded resolution and closure evidence."
+        else:
+            next_action = "Review the latest recorded update and document the next action."
+        return "\n".join([
+            f"Current situation: {status.title()} · {priority.title()} · Owner: {owner}. {request}",
+            f"Recorded work: {latest_note} Latest activity: {latest_activity}",
+            f"Next documented action: {next_action}",
+        ])
+
+    if not await hydrate_openai_connection():
+        return {"summary": evidence_fallback(), "source": source, "mode": "evidence_fallback"}
+
+    system_message = (
+        "You prepare a concise MSP technician handover. Use only the supplied record. "
+        "Do not invent diagnostics, outcomes, commitments, or causes. State uncertainty when evidence is missing. "
+        "Return 3 short labelled sections: Current situation, Recorded work, and Next documented action. "
+        "Keep it below 150 words and use plain text."
+    )
+    try:
+        chat = await get_chat(f"ticket-brief-{uuid.uuid4().hex[:12]}", system_message)
+        response = await chat.send_message(UserMessage(text=prompt))
+    except Exception:
+        logger.exception("ticket case briefing failed ticket_id=%s", ticket_id)
+        return {"summary": evidence_fallback(), "source": source, "mode": "evidence_fallback"}
+    summary = str(response or "").strip()
+    if not summary:
+        return {"summary": evidence_fallback(), "source": source, "mode": "evidence_fallback"}
+    return {"summary": summary, "source": source, "mode": "ai"}
 
 
 async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -> dict:
@@ -934,6 +1127,10 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.ticket_comments.insert_one(dict(comment))
+    try:
+        await notify_ticket_subscribers(ticket=ticket, comment=comment, actor_id=current_user.get("id"))
+    except Exception:
+        logger.exception("ticket subscriber notification failed ticket_id=%s comment_id=%s", ticket_id, comment["id"])
     # Queue recovery relies on explicit activity evidence rather than treating
     # a missing response field as customer silence. Record every technician
     # update, and only record a reply when a customer-visible update was made.
@@ -1190,6 +1387,10 @@ async def create_ticket_conversation_entry(
                 }
             )
         await db.ticket_comments.insert_one(dict(comment))
+        try:
+            await notify_ticket_subscribers(ticket=ticket, comment=comment, actor_id=current_user.get("id"))
+        except Exception:
+            logger.exception("ticket subscriber notification failed ticket_id=%s comment_id=%s", ticket["id"], comment["id"])
         await db.ticket_conversation_actions.update_one(
             action_scope,
             {"$set": {"comment_id": comment["id"], "updated_at": now}},
@@ -1443,7 +1644,14 @@ async def add_ticket_time_entry(ticket_id: str, entry_data: dict, current_user: 
 
 # ============== TICKET AUDIT LOG ==============
 
-async def ticket_audit(ticket_id: str, user: dict, action: str, details: str):
+async def ticket_audit(
+    ticket_id: str,
+    user: dict,
+    action: str,
+    details: str,
+    metadata: Optional[Dict[str, Any]] = None,
+):
+    """Append immutable ticket activity with optional structured evidence."""
     entry = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
@@ -1451,6 +1659,7 @@ async def ticket_audit(ticket_id: str, user: dict, action: str, details: str):
         "user_name": user.get("name", "System"),
         "action": action,
         "details": details,
+        "metadata": metadata or {},
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.ticket_audit_log.insert_one(entry)

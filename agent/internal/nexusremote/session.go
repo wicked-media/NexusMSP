@@ -24,6 +24,11 @@ type Grant struct {
 	ActorID   string
 	Mode      Mode
 	ExpiresAt time.Time
+	// ConsentRequired is true for all V1 grants. False is accepted only from a
+	// signed V2 standing-authorisation grant after endpoint policy allows it.
+	ConsentRequired bool
+	TechnicianName  string
+	Purpose         string
 }
 
 type Session struct {
@@ -72,3 +77,12 @@ func (s *Session) Authorize(input bool, now time.Time) error {
 
 // Revoke is terminal: reconnects cannot silently restore consent.
 func (s *Session) Revoke() { s.mu.Lock(); defer s.mu.Unlock(); s.revoked = true; s.consented = false }
+
+// DisplayMetadata is signed grant metadata suitable for the endpoint-owned
+// presence notice. It is never supplied by the browser or an unsigned pipe
+// message.
+func (s *Session) DisplayMetadata() (string, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.grant.TechnicianName, s.grant.Purpose
+}

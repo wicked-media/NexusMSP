@@ -81,7 +81,7 @@ const KIND = {
     icon: WifiOff,
     tone: "amber",
     description:
-      "A client-scoped RustDesk relay with governed Nexus Remote controls.",
+      "A client-scoped Nexus Native session path with signed grants, consent and service evidence.",
   },
 };
 const TONE = {
