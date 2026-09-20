@@ -4,15 +4,20 @@ from typing import Optional
 import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query, tenant_scoped_query
 
 router = APIRouter()
+
+
+def _financial_scope(current_user: dict, query: dict | None = None) -> dict:
+    return scoped_query(current_user, tenant_scoped_query(current_user, query or {}), site_field=None)
 
 # ============== COMPREHENSIVE FINANCIAL REPORTING ==============
 
 @router.get("/reports/financial/revenue-summary")
 async def revenue_summary(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Monthly revenue summary with MRR, ARR, collections, outstanding"""
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     monthly = {}
 
@@ -32,7 +37,7 @@ async def revenue_summary(months: int = 12, current_user: dict = Depends(get_cur
             monthly[created]["invoice_count"] += 1
 
     # Calculate MRR from active contracts
-    contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(500)
+    contracts = await db.contracts.find(_financial_scope(current_user, {"status": "active"}), {"_id": 0}).to_list(500)
     mrr = sum(float(c.get("value", 0)) for c in contracts)
     arr = mrr * 12
 
@@ -56,13 +61,16 @@ AGING_BUCKETS = (
 )
 
 
-async def build_accounts_receivable_aging() -> dict:
+async def build_accounts_receivable_aging(query: dict | None = None) -> dict:
     """Build the single, reusable accounts-receivable ageing evidence snapshot."""
-    invoices = await db.invoices.find({
+    criteria = {
         "payment_status": {"$in": ["unpaid", "partial"]},
         "status": {"$ne": "cancelled"},
         "is_split_parent": {"$ne": True},
-    }, {"_id": 0}).to_list(5000)
+    }
+    if query:
+        criteria = {"$and": [criteria, query]}
+    invoices = await db.invoices.find(criteria, {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
 
     buckets = {key: [] for key, _, _ in AGING_BUCKETS}
@@ -113,13 +121,13 @@ async def build_accounts_receivable_aging() -> dict:
 @router.get("/reports/financial/aging")
 async def accounts_receivable_aging(current_user: dict = Depends(get_current_user)):
     """Accounts receivable ageing report retained in the Reports workspace."""
-    return await build_accounts_receivable_aging()
+    return await build_accounts_receivable_aging(_financial_scope(current_user))
 
 
 @router.get("/reports/financial/profit-loss")
 async def profit_loss_report(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Profit & Loss statement"""
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     monthly = {}
 
@@ -151,7 +159,7 @@ async def profit_loss_report(months: int = 12, current_user: dict = Depends(get_
 @router.get("/reports/financial/client-revenue")
 async def client_revenue_report(current_user: dict = Depends(get_current_user)):
     """Revenue breakdown per client"""
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     client_data = {}
 
     for inv in invoices:
@@ -176,7 +184,7 @@ async def client_revenue_report(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/financial/service-revenue")
 async def service_revenue_report(current_user: dict = Depends(get_current_user)):
     """Revenue breakdown by service type / line item"""
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     services = {}
 
     for inv in invoices:
@@ -201,7 +209,7 @@ async def service_revenue_report(current_user: dict = Depends(get_current_user))
 @router.get("/reports/financial/payment-collection")
 async def payment_collection_report(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Payment collection trends and methods"""
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
 
     methods = {}
@@ -235,7 +243,7 @@ async def payment_collection_report(months: int = 12, current_user: dict = Depen
 @router.get("/reports/financial/tax-summary")
 async def tax_summary_report(current_user: dict = Depends(get_current_user)):
     """Tax summary for accounting"""
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     quarterly = {}
 
@@ -267,8 +275,8 @@ async def tax_summary_report(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/financial/monthly-allocations")
 async def monthly_allocations_report(current_user: dict = Depends(get_current_user)):
     """Monthly cost/revenue allocations for accounts team"""
-    contracts = await db.contracts.find({"status": "active"}, {"_id": 0}).to_list(500)
-    invoices = await db.invoices.find({"is_split_parent": {"$ne": True}}, {"_id": 0}).to_list(5000)
+    contracts = await db.contracts.find(_financial_scope(current_user, {"status": "active"}), {"_id": 0}).to_list(500)
+    invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
     now = datetime.now(timezone.utc)
     current_month = now.strftime("%Y-%m")
 
