@@ -1386,6 +1386,99 @@ async def deny_nexus_elevate_request(request_id: str, data: dict, current_user: 
     return {"request": await _request_view(request)}
 
 
+@router.post("/nexus-elevate/requests/{request_id}/cancel")
+async def cancel_nexus_elevate_request(request_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Withdraw a pending request or cancel a launch that has not left Nexus.
+
+    A request is only marked revoked after its matching agent command was still
+    pending and has been cancelled. Once an agent has dispatched a command,
+    this route refuses to imply that an already-running process was stopped.
+    """
+    caller = await _get_caller(current_user)
+    _ensure_native_elevation_operator(caller)
+    request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
+    if not request:
+        raise HTTPException(status_code=404, detail="Elevation request not found")
+    await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.cancel", mask_not_found=True)
+    reason = str(data.get("reason") or "").strip()
+    if len(reason) < 8:
+        raise HTTPException(status_code=400, detail="A cancellation reason of at least 8 characters is required")
+    now = datetime.now(timezone.utc).isoformat()
+
+    if request.get("status") == "pending":
+        update = {
+            "status": "cancelled",
+            "cancelled_at": now,
+            "cancelled_by_id": caller.get("id"),
+            "cancelled_by_name": caller.get("name"),
+            "cancellation_reason": reason,
+        }
+        result = await db.nexus_elevate_requests.update_one(
+            {"id": request_id, "status": "pending"}, {"$set": update}
+        )
+        if not getattr(result, "matched_count", 0):
+            raise HTTPException(status_code=409, detail="This elevation request was already decided by another technician")
+        request.update(update)
+        try:
+            await _resolve_native_elevation_review_notification(request_id, "cancelled")
+        except Exception:
+            pass
+        await _write_native_audit("nexus_elevate_cancelled", request, caller, {"reason": reason, "stage": "review"})
+        return {"request": await _request_view(request), "message": "Elevation request withdrawn before approval"}
+
+    if request.get("status") != "approved" or not request.get("agent_command_id"):
+        raise HTTPException(status_code=409, detail="Only pending requests or approved launches that have not been dispatched can be cancelled")
+
+    # Reserve the transition before touching the agent command. This prevents
+    # two reviewers from both reporting a revocation and gives the agent a
+    # stable, deny-by-default request state during the cancellation attempt.
+    reserved = await db.nexus_elevate_requests.find_one_and_update(
+        {"id": request_id, "status": "approved", "agent_command_id": request["agent_command_id"]},
+        {"$set": {"status": "revoking", "revocation_requested_at": now, "revocation_requested_by_id": caller.get("id")}},
+    )
+    if not reserved:
+        raise HTTPException(status_code=409, detail="This approved launch changed state before it could be cancelled")
+
+    command = await db.nexus_agent_commands.find_one_and_update(
+        {"id": request["agent_command_id"], "elevation_request_id": request_id, "status": "pending"},
+        {"$set": {"status": "cancelled", "cancelled_at": now, "cancelled_by": caller.get("id") or caller.get("email")}},
+    )
+    if not command:
+        # The agent may have fetched this command between the reservation and
+        # cancellation attempt. Restore the truthful approved state; never
+        # represent a dispatched or executed launch as revoked.
+        await db.nexus_elevate_requests.update_one(
+            {"id": request_id, "status": "revoking"},
+            {"$set": {"status": "approved"}, "$unset": {"revocation_requested_at": "", "revocation_requested_by_id": ""}},
+        )
+        raise HTTPException(status_code=409, detail="The agent already received this launch; Nexus cannot claim it was cancelled")
+
+    update = {
+        "status": "revoked",
+        "revoked_at": now,
+        "revoked_by_id": caller.get("id"),
+        "revoked_by_name": caller.get("name"),
+        "revocation_reason": reason,
+    }
+    result = await db.nexus_elevate_requests.update_one(
+        {"id": request_id, "status": "revoking"},
+        {"$set": update},
+    )
+    if not getattr(result, "matched_count", 0):
+        raise RuntimeError("Nexus Elevate command was cancelled but the request state could not be finalised")
+    request.update(update)
+    try:
+        await _resolve_native_elevation_review_notification(request_id, "revoked")
+    except Exception:
+        pass
+    await _write_native_audit("nexus_elevate_revoked", request, caller, {
+        "reason": reason,
+        "stage": "queued_launch",
+        "agent_command_id": request.get("agent_command_id"),
+    })
+    return {"request": await _request_view(request), "message": "Queued elevation launch revoked before agent dispatch"}
+
+
 # Agent-facing endpoints: these are deliberately independent of Keeper EPM.
 # The future tray/companion sends the request using the enrolled agent token;
 # it never receives an administrator JWT or a capability to self-approve.

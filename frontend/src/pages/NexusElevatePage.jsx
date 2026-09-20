@@ -32,6 +32,8 @@ const STATUS_STYLE = {
   approved: "border-sky-500/30 bg-sky-500/15 text-sky-200",
   executed: "border-emerald-500/30 bg-emerald-500/15 text-emerald-200",
   denied: "border-zinc-500/30 bg-zinc-500/15 text-zinc-300",
+  cancelled: "border-zinc-500/30 bg-zinc-500/15 text-zinc-300",
+  revoked: "border-violet-500/30 bg-violet-500/15 text-violet-200",
   failed: "border-rose-500/30 bg-rose-500/15 text-rose-200",
   expired: "border-rose-500/30 bg-rose-500/15 text-rose-200",
 };
@@ -128,7 +130,7 @@ export default function NexusElevatePage() {
 
   useEffect(() => {
     const requestedStatus = searchParams.get("status");
-    if (requestedStatus && ["pending", "approved", "executed", "denied", "failed", "expired"].includes(requestedStatus)) {
+    if (requestedStatus && ["pending", "approved", "executed", "denied", "cancelled", "revoked", "failed", "expired"].includes(requestedStatus)) {
       setStatus(requestedStatus);
     }
     const requestId = searchParams.get("request");
@@ -251,6 +253,28 @@ export default function NexusElevatePage() {
     }
   };
 
+  const cancelRequest = async () => {
+    if (!selected) return;
+    if (reason.trim().length < 8) {
+      toast.error("Record a cancellation reason of at least 8 characters");
+      return;
+    }
+    setActing(true);
+    try {
+      const response = await axios.post(`${API}/nexus-elevate/requests/${encodeURIComponent(selected.id)}/cancel`, { reason }, { headers });
+      const updated = response.data?.request;
+      toast.success(response.data?.message || "Elevation request cancelled and audited");
+      setSelected(null);
+      setDetail(null);
+      if (updated) setRequests((current) => current.map((item) => item.id === updated.id ? updated : item));
+      await load({ quiet: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not cancel the elevation request");
+    } finally {
+      setActing(false);
+    }
+  };
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return requests
@@ -262,6 +286,7 @@ export default function NexusElevatePage() {
   const settings = overview.settings || EMPTY_OVERVIEW.settings;
   const selectedStatus = selected?.status;
   const canDecide = selectedStatus === "pending";
+  const canCancel = selectedStatus === "pending" || selectedStatus === "approved";
   const jumpToPolicies = () => document.getElementById("nexus-elevate-policies")?.scrollIntoView({ behavior: "smooth", block: "start" });
   const updatePolicyCount = useCallback((policies) => setPolicyCount(policies.filter((policy) => policy.enabled).length), []);
 
@@ -313,7 +338,7 @@ export default function NexusElevatePage() {
 
       <div className="flex flex-wrap gap-3">
         <div className="relative min-w-[260px] flex-1"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search program, asset, client, requester, or ticket..." data-testid="nexus-elevate-search" /></div>
-        <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-[180px]" data-testid="nexus-elevate-status-filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All request states</SelectItem><SelectItem value="pending">Awaiting review</SelectItem><SelectItem value="approved">Approved / queued</SelectItem><SelectItem value="executed">Executed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="expired">Expired</SelectItem></SelectContent></Select>
+        <Select value={status} onValueChange={setStatus}><SelectTrigger className="w-[180px]" data-testid="nexus-elevate-status-filter"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All request states</SelectItem><SelectItem value="pending">Awaiting review</SelectItem><SelectItem value="approved">Approved / queued</SelectItem><SelectItem value="executed">Executed</SelectItem><SelectItem value="denied">Denied</SelectItem><SelectItem value="cancelled">Withdrawn</SelectItem><SelectItem value="revoked">Queued launch revoked</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="expired">Expired</SelectItem></SelectContent></Select>
         {endpointScope && <Button variant="outline" size="sm" onClick={() => navigate("/nexus-elevate")}>Endpoint scope <span className="ml-1 text-muted-foreground">×</span></Button>}
         <span className="self-center text-xs text-muted-foreground">{filtered.length} shown</span>
       </div>
@@ -340,7 +365,7 @@ export default function NexusElevatePage() {
             <div className="grid gap-3 rounded-xl border border-border bg-muted/25 p-4 sm:grid-cols-2"><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Approved program</p><p className="mt-1 break-all text-sm font-medium">{selected.program_name}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{selected.program_path}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Endpoint context</p><p className="mt-1 text-sm font-medium">{selected.asset_name || selected.hostname}</p><p className="mt-1 text-xs text-muted-foreground">{selected.client_name || "Unassigned client"} · {selected.requested_by_name || "Endpoint user"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Fingerprint (verified on endpoint)</p><p className="mt-1 break-all font-mono text-[10px] text-emerald-300">{selected.sha256}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Publisher and arguments</p><p className="mt-1 text-xs">{selected.publisher || "Unknown publisher"}</p><p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{(selected.arguments || []).join(" ") || "No arguments"}</p></div></div>
             <div className="rounded-lg border border-border bg-background/40 p-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Requester justification</p><p className="mt-1 whitespace-pre-wrap text-sm">{selected.justification || "No justification supplied"}</p>{selected.parent_process && <p className="mt-2 font-mono text-[10px] text-muted-foreground">Parent process: {selected.parent_process}</p>}</div>
             {detail?.audit?.length > 0 && <div><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Audit timeline</p><div className="space-y-2">{detail.audit.map((event) => <div key={event.id} className="flex gap-3 rounded-lg border border-border/70 px-3 py-2 text-xs"><Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /><div><span className="font-medium capitalize">{String(event.kind || "event").replace(/_/g, " ")}</span><span className="ml-2 text-muted-foreground">{displayTime(event.at)}</span></div></div>)}</div></div>}
-            {canDecide ? <div className="space-y-3 border-t border-border pt-4"><div className="flex gap-2"><Button variant={decision === "approve" ? "default" : "outline"} size="sm" onClick={() => setDecision("approve")}>Approve controlled launch</Button><Button variant={decision === "deny" ? "destructive" : "outline"} size="sm" onClick={() => setDecision("deny")}>Deny request</Button></div>{decision === "approve" && <div className="max-w-xs"><Label htmlFor="elevation-duration">Time bound</Label><Select value={duration} onValueChange={setDuration}><SelectTrigger id="elevation-duration" className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{[5, 10, 15, 30, 45, 60].filter((value) => value <= (settings.max_duration_minutes || 15)).map((value) => <SelectItem key={value} value={String(value)}>{value} minutes</SelectItem>)}</SelectContent></Select></div>}<div><Label htmlFor="elevation-decision-reason">{decision === "approve" ? "Approval rationale" : "Denial rationale"}</Label><Textarea id="elevation-decision-reason" className="mt-1" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={decision === "approve" ? "Why is this precise, time-bound launch appropriate?" : "Explain why the request cannot be approved and what the requester should do next."} /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setSelected(null)} disabled={acting}>Cancel</Button><Button variant={decision === "deny" ? "destructive" : "default"} onClick={decide} disabled={acting || reason.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{decision === "approve" ? "Approve and queue" : "Deny and record"}</Button></div></div> : <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">This request is already <strong className="capitalize text-foreground">{selected.status}</strong>. Its full activity remains above for audit.</div>}
+            {(canDecide || canCancel) ? <div className="space-y-3 border-t border-border pt-4">{canDecide && <div className="flex flex-wrap gap-2"><Button variant={decision === "approve" ? "default" : "outline"} size="sm" onClick={() => setDecision("approve")}>Approve controlled launch</Button><Button variant={decision === "deny" ? "destructive" : "outline"} size="sm" onClick={() => setDecision("deny")}>Deny request</Button></div>}{selectedStatus === "approved" && <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3 text-xs text-amber-100">A queued launch can be revoked only while the endpoint has not received its command. Nexus will refuse to claim a dispatched or running process was stopped.</div>}{canDecide && decision === "approve" && <div className="max-w-xs"><Label htmlFor="elevation-duration">Time bound</Label><Select value={duration} onValueChange={setDuration}><SelectTrigger id="elevation-duration" className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{[5, 10, 15, 30, 45, 60].filter((value) => value <= (settings.max_duration_minutes || 15)).map((value) => <SelectItem key={value} value={String(value)}>{value} minutes</SelectItem>)}</SelectContent></Select></div>}<div><Label htmlFor="elevation-decision-reason">{selectedStatus === "approved" ? "Revocation rationale" : decision === "approve" ? "Approval rationale" : "Denial rationale"}</Label><Textarea id="elevation-decision-reason" className="mt-1" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder={selectedStatus === "approved" ? "Why must this queued launch be revoked before dispatch?" : decision === "approve" ? "Why is this precise, time-bound launch appropriate?" : "Explain why the request cannot be approved and what the requester should do next."} /></div><div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => setSelected(null)} disabled={acting}>Close</Button>{canCancel && <Button variant="outline" className="border-rose-500/35 text-rose-200 hover:bg-rose-500/10" onClick={cancelRequest} disabled={acting || reason.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{selectedStatus === "approved" ? "Revoke queued launch" : "Withdraw request"}</Button>}{canDecide && <Button variant={decision === "deny" ? "destructive" : "default"} onClick={decide} disabled={acting || reason.trim().length < 8}>{acting && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{decision === "approve" ? "Approve and queue" : "Deny and record"}</Button>}</div></div> : <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">This request is already <strong className="capitalize text-foreground">{selected.status}</strong>. Its full activity remains above for audit.</div>}
           </div>}
         </DialogContent>
       </Dialog>
