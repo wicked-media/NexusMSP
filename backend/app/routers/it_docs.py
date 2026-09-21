@@ -6,7 +6,14 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
-from app.services.scope_permissions import assert_global_scope, assert_record_scope, effective_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_global_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.models import *
 
 router = APIRouter()
@@ -355,12 +362,12 @@ def _retire_legacy_runbook_execution() -> None:
 
 async def _knowledge_runbook_in_scope(runbook_id: str, current_user: dict, operation: str) -> dict:
     candidate = await db.runbooks.find_one(
-        {"id": runbook_id, "source_ticket_id": {"$exists": True}},
+        tenant_scoped_query(current_user, {"id": runbook_id, "source_ticket_id": {"$exists": True}}),
         {"_id": 0},
     )
     if not candidate:
         raise HTTPException(status_code=404, detail="Resource not found")
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.runbooks,
         runbook_id,
@@ -389,7 +396,7 @@ async def get_runbooks(
             {"category": {"$regex": pattern, "$options": "i"}},
         ]
     return await db.runbooks.find(
-        scoped_query(current_user, query, site_field=None),
+        scoped_query(current_user, tenant_scoped_query(current_user, query), site_field=None),
         {"_id": 0},
     ).sort("created_at", -1).to_list(100)
 

@@ -79,6 +79,21 @@ def _restricted_user():
     }
 
 
+def _tenant_restricted_user():
+    return {**_restricted_user(), "tenant_id": "tenant-a"}
+
+
+def _nested_values(value, key):
+    if isinstance(value, dict):
+        if key in value:
+            yield value[key]
+        for child in value.values():
+            yield from _nested_values(child, key)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _nested_values(child, key)
+
+
 def test_knowledge_library_filters_to_ticket_derived_records_inside_client_scope(monkeypatch):
     rows = _Rows([{
         "id": "runbook-a",
@@ -95,7 +110,28 @@ def test_knowledge_library_filters_to_ticket_derived_records_inside_client_scope
     query = rows.find_queries[0]
     assert "client-a" in str(query)
     assert "source_ticket_id" in str(query)
-    assert query["$and"][0]["$or"][0]["title"]["$regex"] == r"disk\.\*"
+    assert r"disk\.\*" in list(_nested_values(query, "$regex"))
+    assert "nexus-local" in str(query)
+
+
+def test_knowledge_runbooks_apply_tenant_scope_to_list_and_detail_reads(monkeypatch):
+    rows = _Rows([{
+        "id": "runbook-a",
+        "client_id": "client-a",
+        "tenant_id": "tenant-a",
+        "source_ticket_id": "ticket-a",
+        "published": True,
+        "title": "Disk alert recovery",
+    }])
+    monkeypatch.setattr(it_docs, "db", SimpleNamespace(runbooks=rows))
+
+    result = asyncio.run(it_docs.get_runbooks(current_user=_tenant_restricted_user()))
+    detail = asyncio.run(it_docs.get_runbook("runbook-a", _tenant_restricted_user()))
+
+    assert result[0]["id"] == "runbook-a"
+    assert detail["id"] == "runbook-a"
+    assert "tenant-a" in str(rows.find_queries[0])
+    assert all("tenant-a" in str(query) for query in rows.find_one_queries)
 
 
 def test_foreign_knowledge_runbook_is_masked_before_mutation(monkeypatch):
