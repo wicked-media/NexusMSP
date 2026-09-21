@@ -800,8 +800,7 @@ export default function TeamChatPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="team-chat-page">
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d141b] text-zinc-100 shadow-[0_24px_70px_-40px_rgba(0,0,0,0.95)]">
+    <div className="flex h-full min-h-0 flex-col gap-3" data-testid="team-chat-page">
         <NexusWorkspaceHeader
           eyebrow="Service desk"
           title="Chat"
@@ -821,6 +820,7 @@ export default function TeamChatPage() {
           </>}
         />
 
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d141b] text-zinc-100 shadow-[0_24px_70px_-40px_rgba(0,0,0,0.95)]">
       <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[288px] xl:w-[320px] shrink-0 flex-col border-r border-white/[0.07] bg-[#111a22]`}>
         <div className="border-b border-white/[0.07] px-4 pb-3 pt-4">
