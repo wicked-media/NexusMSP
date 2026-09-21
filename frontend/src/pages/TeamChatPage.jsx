@@ -503,7 +503,7 @@ export default function TeamChatPage() {
         setChannels(current => [channel, ...current.filter(existing => existing.id !== channel.id)]);
       }
       await Promise.all([loadWorkspace({ quiet: true }), loadDirectRequests({ quiet: true })]);
-      setMode("chat");
+      setMode("customer");
       if (channelId) {
         selectChannel(channelId);
         toast.success("Private customer conversation approved.");
@@ -770,7 +770,7 @@ export default function TeamChatPage() {
           <div className="mb-3 flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Messages</p>
-              <h2 className="text-xl font-semibold text-white">{mode === "activity" ? "Inbox" : mode === "saved" ? "Saved" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct chats"}</h2>
+              <h2 className="text-xl font-semibold text-white">{mode === "activity" ? "Inbox" : mode === "saved" ? "Saved" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : mode === "customer" ? "Client conversations" : "Direct chats"}</h2>
             </div>
             <div className="flex items-center gap-1.5">
               <Button variant="ghost" size="sm" onClick={() => setMode("saved")} aria-pressed={mode === "saved"} aria-label="Saved conversations" className={`h-9 w-9 rounded-lg p-0 ${mode === "saved" ? "bg-amber-500/10 text-amber-200" : "text-zinc-400 hover:bg-white/[0.08] hover:text-white"}`}>
@@ -790,10 +790,11 @@ export default function TeamChatPage() {
               </DropdownMenu>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-black/20 p-1" aria-label="Chat sections">
+          <div className="grid grid-cols-3 gap-1 rounded-xl bg-black/20 p-1" aria-label="Chat sections">
             {[
               ["activity", "Inbox", Activity, unread],
-              ["chat", "Direct", MessageCircle, pendingDirectRequests.length],
+              ["chat", "Direct", MessageCircle, 0],
+              ["customer", "Clients", Building2, pendingDirectRequests.length],
               ["teams", "Channels", Users, 0],
               ["work", "Work rooms", FileText, 0],
             ].map(([value, label, Icon, badge]) => (
@@ -842,7 +843,7 @@ export default function TeamChatPage() {
 
         <ScrollArea className="flex-1">
           <div className="p-2">
-            {mode === "chat" && (
+            {mode === "customer" && (
               <DirectRequestInbox
                 requests={pendingDirectRequests}
                 state={directRequestState}
@@ -858,7 +859,7 @@ export default function TeamChatPage() {
               <div className="px-6 py-16 text-center">
                 <MessageCircle className="mx-auto mb-3 h-9 w-9 text-zinc-700" />
                 <p className="text-sm font-medium text-zinc-300">{mode === "activity" ? "You’re all caught up" : "No conversations found"}</p>
-                <p className="mt-1 text-xs text-zinc-600">{mode === "activity" ? "New mentions and unread chats appear here." : mode === "work" ? "Ticket Pass creates a secure room around the work." : "Start a chat or create a team channel."}</p>
+                <p className="mt-1 text-xs text-zinc-600">{mode === "activity" ? "New mentions and unread chats appear here." : mode === "work" ? "Ticket Pass creates a secure room around the work." : mode === "customer" ? "Approved customer conversations appear here after a technician reviews the request." : "Start a chat or create a team channel."}</p>
               </div>
             ) : visibleChannels.map(channel => (
               <ConversationRow
@@ -1170,7 +1171,7 @@ export default function TeamChatPage() {
         headers={headers}
         onCreated={channel => {
           setChannels(current => [channel, ...current.filter(existing => existing.id !== channel.id)]);
-          setMode(channel.kind === "team" ? "teams" : channel.kind === "object" ? "work" : "chat");
+          setMode(channel.kind === "team" ? "teams" : channel.kind === "object" ? "work" : channel.kind === "client_direct" ? "customer" : "chat");
           setActiveId(channel.id);
           setSearchParams({ channel: channel.id }, { replace: true });
           setMobileConversationOpen(true);

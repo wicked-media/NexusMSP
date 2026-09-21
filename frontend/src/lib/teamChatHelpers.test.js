@@ -15,14 +15,16 @@ describe("team chat helpers", () => {
     { id: "team-1", kind: "team", display_name: "Service Desk", unread_count: 2 },
     { id: "dm-1", kind: "dm", display_name: "Alex Smith", unread_count: 0 },
     { id: "group-1", kind: "group_dm", name: "Escalations", unread_count: 3 },
+    { id: "client-1", kind: "client_direct", display_name: "Contoso", unread_count: 1 },
     { id: "object-1", kind: "object", display_name: "TKT-1042 · Mail flow", unread_count: 1 },
   ];
 
   test("separates chats, teams, and unread activity", () => {
     expect(filterChatChannels(channels, "teams").map(channel => channel.id)).toEqual(["team-1"]);
     expect(filterChatChannels(channels, "chat").map(channel => channel.id)).toEqual(["dm-1", "group-1"]);
+    expect(filterChatChannels(channels, "customer").map(channel => channel.id)).toEqual(["client-1"]);
     expect(filterChatChannels(channels, "work").map(channel => channel.id)).toEqual(["object-1"]);
-    expect(filterChatChannels(channels, "activity").map(channel => channel.id)).toEqual(["team-1", "group-1", "object-1"]);
+    expect(filterChatChannels(channels, "activity").map(channel => channel.id)).toEqual(["team-1", "group-1", "client-1", "object-1"]);
     expect(filterChatChannels([...channels, { id: "saved-1", kind: "team", is_saved: true }], "saved").map(channel => channel.id)).toEqual(["saved-1"]);
   });
 
@@ -52,7 +54,7 @@ describe("team chat helpers", () => {
   });
 
   test("totals unread conversation counts", () => {
-    expect(totalUnread(channels)).toBe(6);
+    expect(totalUnread(channels)).toBe(7);
   });
 
   test("counts active presence states without treating away or offline users as online", () => {
