@@ -20,7 +20,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from app.auth import get_current_user
 from app.database import db
 from app.services.platform_foundation import emit_platform_event, request_correlation_id
-from app.services.scope_permissions import scoped_query
+from app.services.scope_permissions import platform_tenant_id, scoped_query, tenant_scoped_query
 
 
 router = APIRouter()
@@ -87,11 +87,12 @@ def _stable_id(prefix: str, *parts: object) -> str:
 
 def _personal_decision_query(current_user: dict) -> dict:
     """Keep a technician's recommendation decisions within their Nexus tenant."""
-    query = {"user_id": current_user.get("id")}
-    tenant_id = str(current_user.get("tenant_id") or "").strip()
-    if tenant_id:
-        query["tenant_id"] = tenant_id
-    return query
+    return {"user_id": current_user.get("id"), "tenant_id": platform_tenant_id(current_user)}
+
+
+def _intelligence_scope(current_user: dict, query: dict | None = None, *, field: str = "client_id") -> dict:
+    """Apply platform partition and technician boundary to intelligence evidence."""
+    return scoped_query(current_user, tenant_scoped_query(current_user, query), field=field, site_field=None)
 
 
 def _valid_recommendation_id(value: object) -> str:
@@ -369,9 +370,9 @@ def _score_search_record(query: str, record: dict, fields: Iterable[str]) -> tup
 async def _overview_records(current_user: dict) -> tuple[list[dict], list[dict], list[dict]]:
     """Load only the evidence records the caller is authorised to inspect."""
     tickets, runbooks, articles = await asyncio.gather(
-        db.tickets.find(scoped_query(current_user), {"_id": 0}).sort("updated_at", -1).to_list(1000),
-        db.runbooks.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
-        db.kb_articles.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.tickets.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(1000),
+        db.runbooks.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.kb_articles.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(500),
     )
     return tickets, runbooks, articles
 
@@ -380,7 +381,7 @@ async def _overview_records(current_user: dict) -> tuple[list[dict], list[dict],
 async def second_brain_overview(current_user: dict = Depends(get_current_user)):
     tickets, runbooks, articles = await _overview_records(current_user)
     operational_decisions = await db.context_relationships.find(
-        scoped_query(current_user, {}, site_field=None),
+        _intelligence_scope(current_user),
         {"_id": 0},
     ).to_list(500)
     knowledge = [*runbooks, *articles]
@@ -429,12 +430,12 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
         raise HTTPException(status_code=400, detail="Keep memory searches under 240 characters")
 
     tickets, runbooks, articles, clients, audit, decisions = await asyncio.gather(
-        db.tickets.find(scoped_query(current_user), {"_id": 0}).sort("updated_at", -1).to_list(600),
-        db.runbooks.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(300),
-        db.kb_articles.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
-        db.clients.find(scoped_query(current_user, {}, field="id", site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(300),
-        db.audit_logs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("created_at", -1).to_list(500),
-        db.context_relationships.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.tickets.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(600),
+        db.runbooks.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(300),
+        db.kb_articles.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(500),
+        db.clients.find(_intelligence_scope(current_user, field="id"), {"_id": 0}).sort("updated_at", -1).to_list(300),
+        db.audit_logs.find(_intelligence_scope(current_user), {"_id": 0}).sort("created_at", -1).to_list(500),
+        db.context_relationships.find(_intelligence_scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(500),
     )
     source_records = [
         (
@@ -551,7 +552,7 @@ async def decide_recommendation(
             "recommendation_id": recommendation_id,
             "user_id": current_user.get("id"),
             "user_name": current_user.get("name") or current_user.get("email"),
-            "tenant_id": str(current_user.get("tenant_id") or "").strip() or None,
+            "tenant_id": platform_tenant_id(current_user),
             "status": status,
             "reason": reason,
             "updated_at": _now(),
@@ -568,7 +569,7 @@ async def decide_recommendation(
         "action": "second_brain_recommendation_reviewed",
         "actor_id": current_user.get("id"),
         "actor_name": current_user.get("name") or current_user.get("email"),
-        "tenant_id": str(current_user.get("tenant_id") or "").strip() or None,
+        "tenant_id": platform_tenant_id(current_user),
         "target_id": recommendation_id,
         "details": {"status": status, "reason": reason, "external_changes": False},
         "correlation_id": correlation_id,
@@ -586,7 +587,7 @@ async def decide_recommendation(
         actor=current_user,
         correlation_id=correlation_id,
         idempotency_key=f"second-brain:{recommendation_id}:{current_user.get('id')}:{status}:{reason}",
-        partition_key=str(current_user.get("tenant_id") or "nexus-local"),
+        partition_key=platform_tenant_id(current_user),
     )
     return {
         "recommendation_id": recommendation_id,

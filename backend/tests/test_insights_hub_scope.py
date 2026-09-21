@@ -66,6 +66,20 @@ def _scope_clause(query):
     return {"client_id": {"$in": ["client-a"]}} in clauses
 
 
+def _tenant_clause(query):
+    if query.get("tenant_id") == "tenant-a":
+        return True
+    clauses = query.get("$and", [])
+    return {"tenant_id": "tenant-a"} in clauses
+
+
+def _client_identity_clause(query):
+    if query.get("id") == {"$in": ["client-a"]}:
+        return True
+    clauses = query.get("$and", [])
+    return {"id": {"$in": ["client-a"]}} in clauses
+
+
 def test_fleet_and_finance_insight_reads_are_limited_to_client_scope(monkeypatch):
     devices = _FindCollection()
     invoices = _FindCollection()
@@ -208,7 +222,13 @@ def test_second_brain_overview_and_search_scope_every_client_owned_source(monkey
     assert all(_scope_clause(query) for query in articles.queries)
     assert all(_scope_clause(query) for query in audit.queries)
     assert all(_scope_clause(query) for query in relationships.queries)
-    assert clients.queries[0] == {"id": {"$in": ["client-a"]}}
+    assert _client_identity_clause(clients.queries[0])
+    assert all(_tenant_clause(query) for query in tickets.queries)
+    assert all(_tenant_clause(query) for query in runbooks.queries)
+    assert all(_tenant_clause(query) for query in articles.queries)
+    assert all(_tenant_clause(query) for query in clients.queries)
+    assert all(_tenant_clause(query) for query in audit.queries)
+    assert all(_tenant_clause(query) for query in relationships.queries)
     assert decisions.queries[0] == {"user_id": "tech-1", "tenant_id": "tenant-a"}
 
 
