@@ -264,21 +264,19 @@ export const navGroups = [
           { path: "/auto-ops?tab=predictive", label: "Predictive risk" },
         ],
       },
+      {
+        path: "/insights", icon: Sparkles, label: "Nexus Intelligence",
+        children: [
+          { path: "/insights", label: "Second Brain" },
+          { path: "/insights?tab=runbooks", label: "Runbooks" },
+        ],
+      },
     ]
   },
   {
     id: "reports",
     title: "Reports & Comms",
     items: [
-      {
-        path: "/insights", icon: Sparkles, label: "Insights Hub",
-        children: [
-          { path: "/insights?tab=overload", label: "Technician load" },
-          { path: "/insights?tab=patches", label: "Patch anomalies" },
-          { path: "/insights?tab=trajectory", label: "Device trajectory" },
-          { path: "/insights?tab=runbooks", label: "Runbooks" },
-        ],
-      },
       {
         path: "/reports", icon: BarChart3, label: "Reports",
         workspacePaths: ["/incident-heatmap"],

@@ -1,9 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import axios from "axios";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
-import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import SecondBrainView from "@/components/insights/SecondBrainView";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
@@ -21,6 +20,16 @@ import { toast } from "sonner";
 
 const fmt$ = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const INSIGHT_SURFACE = "overflow-hidden rounded-2xl border border-border/70 bg-card/90 shadow-[0_18px_45px_-34px_rgba(0,0,0,0.95)]";
+const LEGACY_INSIGHT_DESTINATIONS = {
+  overload: "/team-hub?tab=command&view=capacity",
+  patches: "/patch-compliance",
+  trajectory: "/devices",
+  battery: "/devices",
+  ar: "/reports?tab=commercial",
+  xp: "/team-hub?tab=command&view=skills",
+  vault: "/compliance?tab=insurance",
+  brief: "/voice",
+};
 
 function InsightNotice({ icon: Icon = Sparkles, title, description, action }) {
   return (
@@ -44,10 +53,16 @@ function useApi(token) {
 export default function InsightsHubPage() {
   const { token } = useAuth();
   const api = useApi(token);
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
-  const validTabs = ["brain", "overload", "patches", "trajectory", "battery", "ar", "xp", "vault", "brief", "runbooks"];
+  const validTabs = ["brain", "runbooks"];
   const [tab, setTab] = useState(validTabs.includes(requestedTab) ? requestedTab : "brain");
+
+  useEffect(() => {
+    const destination = LEGACY_INSIGHT_DESTINATIONS[requestedTab];
+    if (destination) navigate(destination, { replace: true });
+  }, [navigate, requestedTab]); // Legacy insight links now open their authoritative workspace.
 
   const selectTab = (nextTab) => {
     setTab(nextTab);
@@ -57,37 +72,21 @@ export default function InsightsHubPage() {
   return (
     <PageShell>
       <div className="space-y-5" data-testid="insights-hub-page">
-        <OperationalPageHeader
-          eyebrow="Operations intelligence"
-          title="Insights Hub"
-          description="Nexus operational memory, workload, security, fleet health, financial exposure, evidence readiness, and reusable runbooks. Every insight links back to live records."
-          icon={Sparkles}
-          tone="violet"
-        />
+        <section className="nx-ambient-surface relative overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(34,211,238,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:p-6" data-nx-signal="recommendation">
+          <div className="relative flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl"><div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-violet-400/25 bg-violet-400/[0.07] text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Nexus Intelligence</Badge><span className="text-xs text-muted-foreground">Tenant-private evidence · no autonomous action</span></div><h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-[2rem]">Operational memory, made useful</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Find repeat demand, knowledge gaps, reusable outcomes and documented operational decisions—always linked back to the Nexus records that support them.</p></div>
+            <div className="flex flex-wrap gap-2"><Button asChild variant="outline" size="sm"><Link to="/documentation-hub?tab=library"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Knowledge library</Link></Button><Button variant="outline" size="sm" onClick={() => selectTab("runbooks")}><BookOpen className="mr-1.5 h-3.5 w-3.5" />Runbooks</Button><Button size="sm" onClick={() => selectTab("brain")}><BrainCircuit className="mr-1.5 h-3.5 w-3.5" />Ask Nexus Memory</Button></div>
+          </div>
+          <div className="relative mt-5 flex flex-wrap gap-x-4 gap-y-1 border-t border-white/[0.08] pt-4 text-xs text-muted-foreground"><span>Patterns are evidence-backed, not inferred causes.</span><span>Suggestions never change systems, tickets or client records automatically.</span></div>
+        </section>
 
         <Tabs value={tab} onValueChange={selectTab} className="w-full">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-10" data-testid="insights-tabs">
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="brain" data-testid="tab-brain"><BrainCircuit className="w-3.5 h-3.5" />Second Brain</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="overload" data-testid="tab-overload"><Brain className="w-3.5 h-3.5" />Tech Load</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="patches" data-testid="tab-patches"><AlertOctagon className="w-3.5 h-3.5" />Patch Anomalies</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="trajectory" data-testid="tab-trajectory"><Server className="w-3.5 h-3.5" />Device Trajectory</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="battery" data-testid="tab-battery"><Battery className="w-3.5 h-3.5" />Battery Wall</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="ar" data-testid="tab-ar"><DollarSign className="w-3.5 h-3.5" />Aged AR</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="xp" data-testid="tab-xp"><Award className="w-3.5 h-3.5" />Skills XP</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="vault" data-testid="tab-vault"><ShieldCheck className="w-3.5 h-3.5" />Insurance Vault</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="brief" data-testid="tab-brief"><Mic className="w-3.5 h-3.5" />Voice Brief</TabsTrigger>
-            <TabsTrigger className="justify-start gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="runbooks" data-testid="tab-runbooks"><BookOpen className="w-3.5 h-3.5" />Runbooks</TabsTrigger>
+          <TabsList className="grid h-auto w-full max-w-xl grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5" data-testid="insights-tabs">
+            <TabsTrigger className="justify-center gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="brain" data-testid="tab-brain"><BrainCircuit className="w-3.5 h-3.5" />Second Brain</TabsTrigger>
+            <TabsTrigger className="justify-center gap-1.5 rounded-xl px-3 py-2 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm" value="runbooks" data-testid="tab-runbooks"><BookOpen className="w-3.5 h-3.5" />Runbooks</TabsTrigger>
           </TabsList>
 
           <TabsContent value="brain"><SecondBrainView api={api} /></TabsContent>
-          <TabsContent value="overload"><CognitiveLoadView api={api} /></TabsContent>
-          <TabsContent value="patches"><PatchAnomaliesView api={api} /></TabsContent>
-          <TabsContent value="trajectory"><HealthTrajectoryView api={api} /></TabsContent>
-          <TabsContent value="battery"><BatteryWallView api={api} /></TabsContent>
-          <TabsContent value="ar"><AgedARView api={api} /></TabsContent>
-          <TabsContent value="xp"><SkillsXPView api={api} /></TabsContent>
-          <TabsContent value="vault"><InsuranceVaultView api={api} /></TabsContent>
-          <TabsContent value="brief"><VoiceBriefView api={api} /></TabsContent>
           <TabsContent value="runbooks"><RunbooksView api={api} /></TabsContent>
         </Tabs>
       </div>
@@ -129,7 +128,7 @@ function useFetch(api, path, deps = []) {
 }
 
 /* ─────────── 1. Cognitive Load ─────────── */
-function CognitiveLoadView({ api }) {
+function _CognitiveLoadView({ api }) {
   const { data, loading, error, reload } = useFetch(api, "/team/cognitive-load");
   if (loading) return <Loader label="Scoring tech load…" />;
   if (error) return <InsightFetchError error={error} onRetry={reload} title="Technician load is unavailable" />;
@@ -186,7 +185,7 @@ function CognitiveLoadView({ api }) {
 }
 
 /* ─────────── 2. Patch Anomalies ─────────── */
-function PatchAnomaliesView({ api }) {
+function _PatchAnomaliesView({ api }) {
   const { data, loading, error, reload } = useFetch(api, "/patches/anomalies");
   const [broadcasting, setBroadcasting] = useState(false);
   const broadcast = async () => {
@@ -240,7 +239,7 @@ const TRAJ_STYLE = {
   replace_90_365: { card: "border-sky-500/30", title: "text-sky-400", score: "text-sky-400", label: "Replace 90-365d" },
   healthy: { card: "border-emerald-500/30", title: "text-emerald-400", score: "text-emerald-400", label: "Healthy" },
 };
-function HealthTrajectoryView({ api }) {
+function _HealthTrajectoryView({ api }) {
   const { data, loading, error, reload } = useFetch(api, "/device-health-trajectory");
   if (loading) return <Loader label="Calculating device replacement timelines…" />;
   if (error) return <InsightFetchError error={error} onRetry={reload} title="Device trajectory is unavailable" />;
@@ -291,7 +290,7 @@ function HealthTrajectoryView({ api }) {
 }
 
 /* ─────────── 4. Battery Wall ─────────── */
-function BatteryWallView({ api }) {
+function _BatteryWallView({ api }) {
   const { data, loading, error, reload } = useFetch(api, "/device-battery-wall");
   if (loading) return <Loader label="Inspecting laptop batteries…" />;
   if (error) return <InsightFetchError error={error} onRetry={reload} title="Battery health is unavailable" />;
@@ -351,7 +350,7 @@ const AR_STYLE = {
   "61_90": { box: "border-orange-500/30 bg-orange-500/5", title: "text-orange-400", num: "text-orange-400", label: "61-90d" },
   over_90: { box: "border-rose-500/30 bg-rose-500/5", title: "text-rose-400", num: "text-rose-400", label: "Over 90d" },
 };
-function AgedARView({ api }) {
+function _AgedARView({ api }) {
   const { data, loading, error, reload } = useFetch(api, "/aged-ar-heatmap");
   if (loading) return <Loader label="Bucketing AR…" />;
   if (error) return <InsightFetchError error={error} onRetry={reload} title="Receivables evidence is unavailable" />;
@@ -405,7 +404,7 @@ function AgedARView({ api }) {
 }
 
 /* ─────────── 6. Skills XP ─────────── */
-function SkillsXPView({ api }) {
+function _SkillsXPView({ api }) {
   const { data, loading, error, reload } = useFetch(api, "/team/xp");
   if (loading) return <Loader label="Calculating XP from closed tickets…" />;
   if (error) return <InsightFetchError error={error} onRetry={reload} title="Skills evidence is unavailable" />;
@@ -445,7 +444,7 @@ const TONE_CLASS = {
   amber: { bdr: "border-amber-500/40", txt: "text-amber-400", bg: "bg-amber-500/10" },
   rose: { bdr: "border-rose-500/40", txt: "text-rose-400", bg: "bg-rose-500/10" },
 };
-function InsuranceVaultView({ api }) {
+function _InsuranceVaultView({ api }) {
   const { token } = useAuth();
   const { data, loading, error, reload } = useFetch(api, "/security/insurance-vault");
   const [downloading, setDownloading] = useState(false);
@@ -519,7 +518,7 @@ function InsuranceVaultView({ api }) {
 }
 
 /* ─────────── 8. Voice Brief ─────────── */
-function VoiceBriefView({ api }) {
+function _VoiceBriefView({ api }) {
   const [text, setText] = useState(null);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
