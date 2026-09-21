@@ -602,7 +602,7 @@ export default function TeamChatPage() {
     try {
       const response = await axios.post(`${API}/chat/messages/${messageId}/reactions`, { emoji }, { headers });
       setMessages(current => current.map(message => message.id === messageId ? { ...message, reactions: response.data.reactions } : message));
-      setThread(current => current && current.parent.id === messageId ? { ...current, parent: { ...current.parent, reactions: response.data.reactions } } : current);
+      setThread(current => current && ({ ...current, parent: current.parent.id === messageId ? { ...current.parent, reactions: response.data.reactions } : current.parent, replies: current.replies.map(reply => reply.id === messageId ? { ...reply, reactions: response.data.reactions } : reply) }));
       setEmojiTarget(null);
     } catch {
       toast.error("Reaction could not be saved");
@@ -666,6 +666,7 @@ export default function TeamChatPage() {
       await axios.put(`${API}/chat/messages/${editingId}`, { body }, { headers });
       setEditingId(null);
       refreshChannel({ quiet: true });
+      if (thread?.parent?.id) openThread({ id: thread.parent.id });
     } catch {
       toast.error("Message could not be edited");
     }
@@ -676,6 +677,7 @@ export default function TeamChatPage() {
     try {
       await axios.delete(`${API}/chat/messages/${messageId}`, { headers });
       refreshChannel({ quiet: true });
+      if (thread?.parent?.id) openThread({ id: thread.parent.id });
     } catch {
       toast.error("Message could not be deleted");
     }
@@ -1204,6 +1206,14 @@ export default function TeamChatPage() {
           onInput={setThreadInput}
           onSend={sendThread}
           onClose={() => setThread(null)}
+          editingId={editingId}
+          editingText={editingText}
+          onEditingText={setEditingText}
+          onStartEdit={message => { setEditingId(message.id); setEditingText(message.body); }}
+          onCancelEdit={() => setEditingId(null)}
+          onSaveEdit={saveEdit}
+          onDelete={message => deleteMessage(message.id)}
+          onReact={toggleReaction}
         />
       )}
 
@@ -1911,11 +1921,11 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpda
   );
 }
 
-function ThreadPanel({ thread, currentUserId, headers, input, onInput, onSend, onClose }) {
+function ThreadPanel({ thread, currentUserId, headers, input, onInput, onSend, onClose, editingId, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onReact }) {
   return (
     <aside className="fixed inset-y-0 right-0 z-40 flex w-full max-w-md flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="thread-panel">
       <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><div><h3 className="font-semibold">Thread</h3><p className="text-xs text-zinc-600">{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</p></div><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close thread"><X className="h-4 w-4" /></Button></div>
-      <div className="flex-1 overflow-y-auto p-3"><MessageRow message={thread.parent} own={thread.parent.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />{thread.replies.length > 0 && <div className="my-3 border-t border-white/5" />}{thread.replies.map(reply => <MessageRow key={reply.id} message={reply} own={reply.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} />)}</div>
+      <div className="flex-1 overflow-y-auto p-3"><MessageRow message={thread.parent} own={thread.parent.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} editing={editingId === thread.parent.id} editingText={editingText} onEditingText={onEditingText} onStartEdit={() => onStartEdit(thread.parent)} onCancelEdit={onCancelEdit} onSaveEdit={onSaveEdit} onDelete={() => onDelete(thread.parent)} onReact={emoji => onReact(thread.parent.id, emoji)} />{thread.replies.length > 0 && <div className="my-3 border-t border-white/5" />}{thread.replies.map(reply => <MessageRow key={reply.id} message={reply} own={reply.user_id === currentUserId} currentUserId={currentUserId} headers={headers} compact={false} onDownload={() => {}} editing={editingId === reply.id} editingText={editingText} onEditingText={onEditingText} onStartEdit={() => onStartEdit(reply)} onCancelEdit={onCancelEdit} onSaveEdit={onSaveEdit} onDelete={() => onDelete(reply)} onReact={emoji => onReact(reply.id, emoji)} />)}</div>
       <div className="border-t border-white/5 p-3"><div className="flex gap-2 rounded-lg border border-white/10 bg-black/20 p-2"><Input value={input} onChange={event => onInput(event.target.value)} onKeyDown={event => event.key === "Enter" && onSend()} placeholder="Reply to thread" className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" data-testid="thread-input" /><Button size="sm" onClick={onSend} disabled={!input.trim()} className="h-8 w-8 bg-emerald-600 p-0 hover:bg-emerald-500"><Send className="h-3.5 w-3.5" /></Button></div></div>
     </aside>
   );
