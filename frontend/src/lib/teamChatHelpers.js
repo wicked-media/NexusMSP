@@ -90,6 +90,7 @@ export function filterChatChannels(channels, mode, query = "") {
   const term = query.trim().toLowerCase();
   return channels.filter(channel => {
     if (mode === "activity" && !(channel.unread_count > 0)) return false;
+    if (mode === "saved" && !channel.is_saved) return false;
     if (mode === "chat" && !["dm", "group_dm", "client_direct"].includes(channel.kind)) return false;
     if (mode === "teams" && channel.kind !== "team") return false;
     if (mode === "work" && channel.kind !== "object") return false;

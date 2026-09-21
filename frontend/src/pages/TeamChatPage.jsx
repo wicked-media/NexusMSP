@@ -28,6 +28,7 @@ import {
   ArrowLeft,
   AtSign,
   Bell,
+  Bookmark,
   Building2,
   Check,
   CheckCircle2,
@@ -58,6 +59,8 @@ import {
   Trash2,
   UserRoundCheck,
   Users,
+  Volume2,
+  VolumeX,
   Wrench,
   X,
   XCircle,
@@ -422,6 +425,18 @@ export default function TeamChatPage() {
     setShowInfo(false);
   };
 
+  const updateConversationPreference = async (field, value) => {
+    if (!activeChannel) return;
+    const previous = Boolean(activeChannel[field]);
+    setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, [field]: value } : channel));
+    try {
+      await axios.put(`${API}/chat/channels/${activeChannel.id}/preference`, { [field]: value }, { headers });
+    } catch (requestError) {
+      setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, [field]: previous } : channel));
+      toast.error(requestError?.response?.data?.detail || "Conversation preference could not be saved.");
+    }
+  };
+
   const openDirectRequestDialog = request => {
     setDirectRequestDialog(normaliseDirectChatRequest(request));
     setDirectRequestResponse("");
@@ -717,9 +732,12 @@ export default function TeamChatPage() {
           <div className="mb-3 flex items-center justify-between">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Messages</p>
-              <h2 className="text-xl font-semibold text-white">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct chats"}</h2>
+              <h2 className="text-xl font-semibold text-white">{mode === "activity" ? "Inbox" : mode === "saved" ? "Saved" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct chats"}</h2>
             </div>
             <div className="flex items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setMode("saved")} aria-pressed={mode === "saved"} aria-label="Saved conversations" className={`h-9 w-9 rounded-lg p-0 ${mode === "saved" ? "bg-amber-500/10 text-amber-200" : "text-zinc-400 hover:bg-white/[0.08] hover:text-white"}`}>
+                <Bookmark className="h-4 w-4" />
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.08] hover:text-white" data-testid="collaboration-workspace-tools" aria-label="Chat workspace tools">
@@ -868,6 +886,21 @@ export default function TeamChatPage() {
                   </p>
                 </div>
                 {typingUsers.length > 0 && <span className="hidden text-xs text-cyan-200 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" aria-label="Conversation options"><MoreHorizontal className="h-4 w-4" /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuLabel>Conversation</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => updateConversationPreference("is_saved", !activeChannel.is_saved)}>
+                      <Bookmark className="mr-2 h-4 w-4" />{activeChannel.is_saved ? "Remove from saved" : "Save conversation"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateConversationPreference("is_muted", !activeChannel.is_muted)}>
+                      {activeChannel.is_muted ? <Volume2 className="mr-2 h-4 w-4" /> : <VolumeX className="mr-2 h-4 w-4" />}{activeChannel.is_muted ? "Turn notifications on" : "Mute notifications"}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
               </div>
               <div className="flex h-10 items-end gap-5 text-sm">
@@ -1312,6 +1345,8 @@ function ConversationRow({ channel, active, presence, onClick }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <p className={`truncate text-sm ${channel.unread_count ? "font-semibold text-white" : "font-medium text-zinc-300"}`}>{name}</p>
+          {channel.is_saved && <Bookmark className="h-3 w-3 shrink-0 text-amber-300" aria-label="Saved conversation" />}
+          {channel.is_muted && <VolumeX className="h-3 w-3 shrink-0 text-zinc-600" aria-label="Muted conversation" />}
           <span className="ml-auto shrink-0 text-[10px] text-zinc-500">{formatRelative(channel.last_message?.ts || channel.updated_at || channel.created_at)}</span>
         </div>
         <div className="mt-0.5 flex items-center gap-2">

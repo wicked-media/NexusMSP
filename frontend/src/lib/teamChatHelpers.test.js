@@ -22,6 +22,7 @@ describe("team chat helpers", () => {
     expect(filterChatChannels(channels, "chat").map(channel => channel.id)).toEqual(["dm-1", "group-1"]);
     expect(filterChatChannels(channels, "work").map(channel => channel.id)).toEqual(["object-1"]);
     expect(filterChatChannels(channels, "activity").map(channel => channel.id)).toEqual(["team-1", "group-1", "object-1"]);
+    expect(filterChatChannels([...channels, { id: "saved-1", kind: "team", is_saved: true }], "saved").map(channel => channel.id)).toEqual(["saved-1"]);
   });
 
   test("uses safe display names for legacy direct messages", () => {

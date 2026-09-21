@@ -12,9 +12,11 @@ from app.services.chat_access import (
     enrich_channels,
     ensure_default_channels,
     is_chat_admin,
+    live_update_recipients,
     require_channel_access,
     require_message_access,
 )
+from app.services.chat_live import publish_channel_update
 from app.services.scope_permissions import assert_client_scope, scoped_query
 from app.services.avatar_enrichment import attach_user_avatars
 
@@ -34,7 +36,7 @@ async def toggle_reaction(msg_id: str, payload: dict = Body(...), current_user: 
     emoji = (payload.get("emoji") or "").strip()
     if not emoji or len(emoji) > 16 or "." in emoji or "$" in emoji:
         raise HTTPException(400, "emoji required")
-    msg, _ = await require_message_access(msg_id, current_user)
+    msg, channel = await require_message_access(msg_id, current_user)
     reactions = msg.get("reactions") or {}
     users = list(reactions.get(emoji) or [])
     uid = current_user.get("id")
@@ -47,6 +49,7 @@ async def toggle_reaction(msg_id: str, payload: dict = Body(...), current_user: 
     else:
         reactions.pop(emoji, None)
     await db.chat_messages.update_one({"id": msg_id}, {"$set": {"reactions": reactions}})
+    publish_channel_update(channel["id"], "message.reaction", live_update_recipients(channel))
     return {"reactions": reactions}
 
 
@@ -55,7 +58,7 @@ async def toggle_reaction(msg_id: str, payload: dict = Body(...), current_user: 
 # ============================================================================
 @router.post("/chat/messages/{msg_id}/reply")
 async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    parent, _ = await require_message_access(msg_id, current_user)
+    parent, channel = await require_message_access(msg_id, current_user)
     body = (payload.get("body") or "").strip()
     if not body:
         raise HTTPException(400, "body required")
@@ -82,6 +85,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
         {"id": parent["channel_id"]},
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
+    publish_channel_update(channel["id"], "thread.reply", live_update_recipients(channel))
     # A thread is deliberately excluded from the channel's unread counter to
     # keep the conversation list quiet.  Alert the original poster directly
     # instead, so a follow-up cannot be lost in a high-volume channel.
@@ -115,7 +119,7 @@ async def get_thread(msg_id: str, current_user: dict = Depends(get_current_user)
 # ============================================================================
 @router.put("/chat/messages/{msg_id}")
 async def edit_message(msg_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    msg, _ = await require_message_access(msg_id, current_user)
+    msg, channel = await require_message_access(msg_id, current_user)
     if msg.get("user_id") != current_user.get("id"):
         raise HTTPException(403, "Cannot edit others' messages")
     body = (payload.get("body") or "").strip()
@@ -125,15 +129,17 @@ async def edit_message(msg_id: str, payload: dict = Body(...), current_user: dic
         {"id": msg_id},
         {"$set": {"body": body[:5000], "edited": True, "edited_at": _now()}}
     )
+    publish_channel_update(channel["id"], "message.edited", live_update_recipients(channel))
     return {"ok": True}
 
 
 @router.delete("/chat/messages/{msg_id}")
 async def delete_message(msg_id: str, current_user: dict = Depends(get_current_user)):
-    msg, _ = await require_message_access(msg_id, current_user)
+    msg, channel = await require_message_access(msg_id, current_user)
     if msg.get("user_id") != current_user.get("id") and not is_chat_admin(current_user):
         raise HTTPException(403, "Cannot delete")
     await db.chat_messages.update_one({"id": msg_id}, {"$set": {"deleted": True, "body": "[message deleted]", "deleted_at": _now()}})
+    publish_channel_update(channel["id"], "message.deleted", live_update_recipients(channel))
     return {"ok": True}
 
 
@@ -142,21 +148,23 @@ async def delete_message(msg_id: str, current_user: dict = Depends(get_current_u
 # ============================================================================
 @router.post("/chat/messages/{msg_id}/pin")
 async def pin_message(msg_id: str, current_user: dict = Depends(get_current_user)):
-    await require_message_access(msg_id, current_user)
+    _, channel = await require_message_access(msg_id, current_user)
     await db.chat_messages.update_one({"id": msg_id}, {"$set": {"pinned": True, "pinned_by": current_user.get("name"), "pinned_at": _now()}})
+    publish_channel_update(channel["id"], "message.pinned", live_update_recipients(channel))
     return {"ok": True}
 
 
 @router.post("/chat/messages/{msg_id}/unpin")
 async def unpin_message(msg_id: str, current_user: dict = Depends(get_current_user)):
-    await require_message_access(msg_id, current_user)
+    _, channel = await require_message_access(msg_id, current_user)
     await db.chat_messages.update_one({"id": msg_id}, {"$set": {"pinned": False}})
+    publish_channel_update(channel["id"], "message.unpinned", live_update_recipients(channel))
     return {"ok": True}
 
 
 @router.get("/chat/channels/{channel_id}/pinned")
 async def list_pinned(channel_id: str, current_user: dict = Depends(get_current_user)):
-    await require_channel_access(channel_id, current_user)
+    channel = await require_channel_access(channel_id, current_user)
     rows = await db.chat_messages.find({"channel_id": channel_id, "pinned": True}, {"_id": 0}).sort("ts", -1).to_list(50)
     return await attach_user_avatars(rows)
 
@@ -259,6 +267,7 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
         {"id": channel_id},
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
+    publish_channel_update(channel_id, "attachment.created", live_update_recipients(channel))
     msg.pop("_id", None)
     return msg
 
@@ -310,6 +319,7 @@ async def update_members(channel_id: str, payload: dict = Body(...), current_use
     if current_user.get("id") not in members:
         members.append(current_user.get("id"))
     await db.chat_channels.update_one({"id": channel_id}, {"$set": {"member_ids": members, "updated_at": _now()}})
+    publish_channel_update(channel_id, "channel.members.updated", members)
     return {"ok": True, "member_ids": members}
 
 
@@ -392,6 +402,15 @@ async def channels_preview(current_user: dict = Depends(get_current_user)):
         {"_id": 0, "channel_id": 1, "last_read_at": 1},
     ).to_list(200)
     read_by_channel = {row["channel_id"]: row.get("last_read_at") for row in read_rows}
+    preference_rows = await db.chat_user_preferences.find(
+        {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "user_id": uid,
+            "channel_id": {"$in": channel_ids},
+        },
+        {"_id": 0, "channel_id": 1, "is_saved": 1, "is_muted": 1},
+    ).to_list(200)
+    preferences_by_channel = {row["channel_id"]: row for row in preference_rows}
 
     last_by_channel: dict[str, dict] = {}
     pipeline = [
@@ -422,6 +441,8 @@ async def channels_preview(current_user: dict = Depends(get_current_user)):
         last_msg = last_by_channel.get(ch["id"])
         results.append({
             **ch,
+            "is_saved": bool((preferences_by_channel.get(ch["id"]) or {}).get("is_saved")),
+            "is_muted": bool((preferences_by_channel.get(ch["id"]) or {}).get("is_muted")),
             "last_message": {
                 "body": (last_msg.get("body") or "")[:120] if last_msg else "",
                 "user_name": last_msg.get("user_name") if last_msg else "",
@@ -430,6 +451,31 @@ async def channels_preview(current_user: dict = Depends(get_current_user)):
             "unread_count": unread,
         })
     return results
+
+
+@router.put("/chat/channels/{channel_id}/preference")
+async def update_channel_preference(channel_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Set the caller's saved/muted view state for one accessible conversation."""
+    await require_channel_access(channel_id, current_user)
+    requested = {key: payload[key] for key in ("is_saved", "is_muted") if key in payload}
+    if not requested or any(not isinstance(value, bool) for value in requested.values()):
+        raise HTTPException(400, "Provide is_saved and/or is_muted as booleans")
+    now = _now()
+    await db.chat_user_preferences.update_one(
+        {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "user_id": current_user.get("id"),
+            "channel_id": channel_id,
+        },
+        {"$set": {**requested, "updated_at": now}, "$setOnInsert": {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "user_id": current_user.get("id"),
+            "channel_id": channel_id,
+            "created_at": now,
+        }},
+        upsert=True,
+    )
+    return {"channel_id": channel_id, **requested}
 
 
 # ============================================================================
@@ -529,7 +575,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
         if not ch:
             raise HTTPException(400, "No public channel available — create one first")
         channel_id = ch["id"]
-    await require_channel_access(channel_id, current_user)
+    channel = await require_channel_access(channel_id, current_user)
     body = f"💬 Let's discuss /ticket {t.get('ticket_number')} — *{t.get('title')}* ({t.get('priority')}, {t.get('client_name')})"
     msg = {
         "id": uuid.uuid4().hex,
@@ -548,6 +594,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
         {"id": channel_id},
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
+    publish_channel_update(channel_id, "message.created", live_update_recipients(channel))
     msg.pop("_id", None)
     return {"channel_id": channel_id, "message_id": msg["id"], "message": msg}
 

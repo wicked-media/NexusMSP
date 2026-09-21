@@ -163,3 +163,25 @@ def test_private_chat_live_updates_never_reach_non_members():
     finally:
         chat_live.unsubscribe(member_id)
         chat_live.unsubscribe(outsider_id)
+
+
+def test_conversation_preferences_are_actor_and_tenant_bound(monkeypatch):
+    channel = {"id": "team-1", "kind": "team", "is_private": False, "member_ids": []}
+    channels = ChannelCollection(existing=channel)
+    preferences = ReadStateCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, chat_user_preferences=preferences)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_preference(
+        "team-1",
+        {"is_saved": True, "is_muted": True},
+        current_user={"id": "tech-1", "tenant_id": "tenant-1"},
+    ))
+
+    query, update, upsert = preferences.update
+    assert result == {"channel_id": "team-1", "is_saved": True, "is_muted": True}
+    assert query == {"tenant_id": "tenant-1", "user_id": "tech-1", "channel_id": "team-1"}
+    assert update["$set"]["is_saved"] is True
+    assert update["$setOnInsert"]["channel_id"] == "team-1"
+    assert upsert is True

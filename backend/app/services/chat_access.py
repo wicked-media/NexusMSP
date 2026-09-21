@@ -41,6 +41,18 @@ def channel_is_accessible(channel: dict, user: dict) -> bool:
     return bool(uid and uid in members)
 
 
+def live_update_recipients(channel: dict) -> list[str] | None:
+    """Limit invalidation fan-out for conversations that are not team-wide.
+
+    Live events deliberately contain no message content, but even an event for a
+    private conversation leaks that a conversation changed.  Public team
+    channels may fan out broadly; every other channel stays member-only.
+    """
+    if channel.get("is_private") or (channel.get("kind") or "") in {"dm", "group_dm", "client_direct"}:
+        return list(channel.get("member_ids") or [])
+    return None
+
+
 def channel_visibility_query(user: dict) -> dict[str, Any]:
     uid = user.get("id")
     # Private customer conversations become unreachable as soon as the
@@ -130,6 +142,9 @@ async def initialize_chat_storage() -> None:
     await db.chat_messages.create_index([("channel_id", 1), ("ts", -1)])
     await db.chat_messages.create_index([("thread_id", 1), ("ts", 1)])
     await db.chat_read_state.create_index([("user_id", 1), ("channel_id", 1)])
+    # Conversation controls are an actor-owned view of an existing channel;
+    # they never change membership, messages, or the channel itself.
+    await db.chat_user_preferences.create_index([("tenant_id", 1), ("user_id", 1), ("channel_id", 1)], unique=True)
     await db.presence_state.create_index([("user_id", 1), ("last_heartbeat", -1)])
     await db.chat_typing.create_index([("channel_id", 1), ("ts", -1)])
     await db.ticket_handoffs.create_index([("to_user_id", 1), ("status", 1), ("created_at", -1)])

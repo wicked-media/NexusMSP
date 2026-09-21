@@ -40,6 +40,7 @@ from app.services.chat_access import (
     enrich_channels,
     ensure_default_channels,
     require_channel_access,
+    live_update_recipients,
 )
 from app.services.chat_live import publish_channel_update, stream_events
 from app.services.avatar_enrichment import attach_user_avatars
@@ -313,7 +314,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         {"id": channel_id},
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
-    publish_channel_update(channel_id, "message.created", channel_member_ids(ch))
+    publish_channel_update(channel_id, "message.created", live_update_recipients(ch))
     msg.pop("_id", None)
 
     notified_ids = set()
@@ -327,6 +328,21 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
             {"_id": 0, "id": 1},
         ).to_list(500)
         eligible_ids = {row.get("id") for row in active_users if row.get("id")}
+
+    # A mute is a recipient's preference for this conversation, not a message
+    # property. Apply it before creating mention or broadcast notifications;
+    # the message remains visible in the channel and live UI updates still
+    # reach the member who is already viewing it.
+    muted_rows = await db.chat_user_preferences.find(
+        {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "channel_id": channel_id,
+            "user_id": {"$in": list(eligible_ids)},
+            "is_muted": True,
+        },
+        {"_id": 0, "user_id": 1},
+    ).to_list(500)
+    eligible_ids.difference_update(row.get("user_id") for row in muted_rows if row.get("user_id"))
 
     # Push notifications for explicit @user mentions
     for m in mentions:
@@ -396,13 +412,6 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
                 "created_at": _now_iso(),
             })
     return msg
-
-
-def channel_member_ids(channel: dict) -> list[str] | None:
-    """Return a constrained recipient list for private chat fan-out only."""
-    if channel.get("is_private") or (channel.get("kind") or "") in {"dm", "group_dm", "client_direct"}:
-        return list(channel.get("member_ids") or [])
-    return None
 
 
 @router.get("/chat/events/stream")
