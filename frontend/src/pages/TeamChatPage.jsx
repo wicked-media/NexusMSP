@@ -712,7 +712,7 @@ export default function TeamChatPage() {
   };
 
   const deleteChannel = async () => {
-    if (!activeChannel || activeChannel.created_by !== user?.id) return;
+    if (!activeChannel) return;
     if (!window.confirm(`Delete #${channelDisplayName(activeChannel)}? This cannot be undone.`)) return;
     try {
       await axios.delete(`${API}/chat/channels/${activeChannel.id}`, { headers });
@@ -986,7 +986,7 @@ export default function TeamChatPage() {
                     <DropdownMenuItem onClick={markConversationUnread}>
                       <Mail className="mr-2 h-4 w-4" />Mark unread
                     </DropdownMenuItem>
-                    {activeChannel.kind === "team" && activeChannel.created_by === user?.id && <><DropdownMenuSeparator /><DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={deleteChannel}><Trash2 className="mr-2 h-4 w-4" />Delete channel</DropdownMenuItem></>}
+                    {activeChannel.kind === "team" && (activeChannel.created_by === user?.id || user?.is_admin || ["admin", "owner"].includes(String(user?.role || "").toLowerCase())) && <><DropdownMenuSeparator /><DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={deleteChannel}><Trash2 className="mr-2 h-4 w-4" />Delete channel</DropdownMenuItem></>}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
