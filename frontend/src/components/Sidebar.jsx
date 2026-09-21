@@ -542,12 +542,17 @@ function SidebarSearch({ onNavigate, token }) {
       ],
     },
     {
-      heading: "Collaboration & growth",
+      heading: "Chat",
       items: [
         ...(recordSearch.conversations || []).slice(0, 1).map(item => ({
           kind: "conversation", id: item.id, label: item.display_name || item.name || "Conversation",
           hint: item.description || (item.is_private ? "Private conversation" : "Team channel"),
         })),
+      ],
+    },
+    {
+      heading: "Growth",
+      items: [
         ...(recordSearch.leads || []).slice(0, 1).map(item => ({
           kind: "lead", id: item.id, label: item.company_name || item.contact_name || "Lead",
           hint: [item.contact_name, item.phone || item.email || item.status || "Lead"].filter(Boolean).join(" · "),

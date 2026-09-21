@@ -625,10 +625,6 @@ export default function TeamChatPage() {
   const activePresence = activeChannel?.other_user_id ? presenceFor(activeChannel.other_user_id) : null;
   const activeTeammates = users.filter(candidate => candidate.id !== user?.id && isLivePresence(presenceFor(candidate.id))).length;
   const activePeople = activeTeammates + (isLivePresence(myPresence) ? 1 : 0);
-  const activeChannelTechnicians = useMemo(() => {
-    const memberIds = activeChannel?.member_ids?.length ? new Set(activeChannel.member_ids) : null;
-    return users.filter(candidate => (!memberIds || memberIds.has(candidate.id)) && isLivePresence(presence[candidate.id]?.led || "offline"));
-  }, [activeChannel?.member_ids, presence, users]);
   const operationalContext = useMemo(() => extractOperationalContext(messages), [messages]);
   const draftOperationalCommand = command => {
     setInput(current => current.trim() ? `${current}\n${command}` : command);
@@ -637,15 +633,15 @@ export default function TeamChatPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="team-chat-page">
-      <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-cyan-500/15 bg-[#0d141b] text-zinc-100 shadow-2xl shadow-black/25">
-        <header className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-[82px] flex-wrap items-center justify-between gap-3 border-b border-cyan-500/10 bg-[radial-gradient(circle_at_15%_10%,rgba(34,211,238,0.10),transparent_28%),linear-gradient(110deg,rgba(13,24,31,0.98),rgba(13,20,27,0.94))] px-4 py-3 md:px-5`}>
+      <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d141b] text-zinc-100 shadow-[0_24px_70px_-40px_rgba(0,0,0,0.95)]">
+        <header className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-[72px] flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] bg-[linear-gradient(110deg,rgba(15,25,34,0.99),rgba(13,20,27,0.97))] px-4 py-3 md:px-5`}>
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Nexus Connect</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Nexus</p>
             <div className="mt-1 flex items-center gap-2.5">
-              <span className="grid h-8 w-8 place-items-center rounded-lg border border-emerald-400/25 bg-emerald-500/[0.10] text-emerald-300 shadow-lg shadow-emerald-950/30"><MessageCircle className="h-4 w-4" /></span>
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-500/[0.12] text-emerald-300"><MessageCircle className="h-4 w-4" /></span>
               <div>
-                <h1 className="text-lg font-semibold tracking-tight text-white md:text-xl">Conversations</h1>
-                <p className="hidden max-w-xl text-xs text-zinc-400 lg:block">Coordinate the next action, carry the right context, and keep the outcome auditable.</p>
+                <h1 className="text-lg font-semibold tracking-tight text-white md:text-xl">Chat</h1>
+                <p className="hidden max-w-xl text-xs text-zinc-400 lg:block">Secure team conversations, customer handovers, and operational context.</p>
               </div>
             </div>
           </div>
@@ -657,18 +653,18 @@ export default function TeamChatPage() {
           </div>
         </header>
 
-      <div className={`flex overflow-hidden ${mobileConversationOpen ? "h-full md:h-[calc(100%-82px)]" : "h-[calc(100%-82px)]"}`}>
-      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[288px] xl:w-[320px] shrink-0 flex-col border-r border-cyan-500/10 bg-[#141d26]`}>
-        <div className="border-b border-cyan-500/10 px-4 pb-3 pt-4">
+      <div className={`flex overflow-hidden ${mobileConversationOpen ? "h-full md:h-[calc(100%-72px)]" : "h-[calc(100%-72px)]"}`}>
+      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[288px] xl:w-[320px] shrink-0 flex-col border-r border-white/[0.07] bg-[#111a22]`}>
+        <div className="border-b border-white/[0.07] px-4 pb-3 pt-4">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Nexus collaboration</p>
-              <h1 className="text-xl font-semibold">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct connections"}</h1>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Messages</p>
+              <h2 className="text-xl font-semibold text-white">{mode === "activity" ? "Inbox" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : "Direct chats"}</h2>
             </div>
             <div className="flex items-center gap-1.5">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.08] hover:text-white" data-testid="collaboration-workspace-tools" aria-label="Collaboration workspace tools">
+                  <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.08] hover:text-white" data-testid="collaboration-workspace-tools" aria-label="Chat workspace tools">
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -680,7 +676,7 @@ export default function TeamChatPage() {
               </DropdownMenu>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.06] bg-black/15 p-1" aria-label="Nexus Chat sections">
+          <div className="grid grid-cols-2 gap-1 rounded-xl bg-black/20 p-1" aria-label="Chat sections">
             {[
               ["activity", "Inbox", Activity, unread],
               ["chat", "Direct", MessageCircle, pendingDirectRequests.length],
@@ -699,11 +695,7 @@ export default function TeamChatPage() {
               </button>
             ))}
           </div>
-          <div className="mt-3 flex items-center gap-2 text-[10px] text-zinc-500">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/15 bg-emerald-500/5 px-2 py-1 text-emerald-300"><span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" /></span>{activePeople} active now</span>
-            {unread > 0 && <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-cyan-200">{unread} need attention</span>}
-          </div>
-          <div className="relative">
+          <div className="relative mt-3">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <Input
               value={query}
@@ -795,12 +787,12 @@ export default function TeamChatPage() {
         </DropdownMenu>
       </aside>
 
-      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col bg-[#0e151c]`}>
+      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col bg-[#0d141b]`}>
         {!activeChannel ? (
           <EmptyWorkspace onNew={() => setShowNewDialog(true)} />
         ) : (
           <>
-            <header className="border-b border-cyan-500/10 bg-[#121b24] px-3 md:px-5">
+            <header className="border-b border-white/[0.07] bg-[#101922] px-3 md:px-5">
               <div className="flex h-16 items-center gap-3">
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 md:hidden" onClick={() => setMobileConversationOpen(false)} aria-label="Back to conversations"><ArrowLeft className="h-4 w-4" /></Button>
                 <ChannelAvatar channel={activeChannel} presence={activePresence} size="md" />
@@ -822,7 +814,7 @@ export default function TeamChatPage() {
               </div>
               <div className="flex h-10 items-end gap-5 text-sm">
                 {[
-                  ["posts", "Posts", MessageCircle, messages.filter(message => !message.thread_id).length],
+                  ["posts", "Messages", MessageCircle, messages.filter(message => !message.thread_id).length],
                   ["files", "Files", FileText, files.length],
                   ["pins", "Pinned", Pin, pinned.length],
                 ].map(([value, label, Icon, count]) => (
@@ -834,11 +826,7 @@ export default function TeamChatPage() {
             </header>
 
             {activeTab === "posts" && !searchResults && activeChannel.kind === "team" && (
-              <NexusOperationsPulse
-                activeTechnicians={activeChannelTechnicians}
-                context={operationalContext}
-                pinnedCount={pinned.length}
-              />
+              <NexusOperationsPulse context={operationalContext} pinnedCount={pinned.length} />
             )}
 
             {activeTab === "posts" && !searchResults && activeChannel.kind === "client_direct" && (
@@ -899,8 +887,8 @@ export default function TeamChatPage() {
                   )}
                 </div>
 
-                <div className="border-t border-cyan-500/10 bg-[#121b24] p-3 md:px-5 md:py-4">
-                  <div className="relative mx-auto max-w-4xl rounded-xl border border-cyan-500/10 bg-[#19232e] shadow-lg shadow-black/20 focus-within:border-emerald-500/50 focus-within:shadow-emerald-950/20">
+                <div className="border-t border-white/[0.07] bg-[#101922] p-3 md:px-5 md:py-4">
+                  <div className="relative mx-auto max-w-4xl rounded-xl border border-white/[0.09] bg-[#17212b] shadow-[0_16px_35px_-25px_rgba(0,0,0,0.95)] focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/15">
                     {referenceMatch && referenceMatches.length > 0 && (
                       <SuggestionPanel className="bottom-full" title={`Link ${referenceMatch[1].toLowerCase()}`}>
                         {referenceMatches.map((reference, index) => (
@@ -988,8 +976,8 @@ export default function TeamChatPage() {
                           <DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={() => draftOperationalCommand("/page ")}><Bell className="mr-2 h-3.5 w-3.5" />Page on-call</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                      <button type="button" onClick={() => draftOperationalCommand("/summarize")} className="rounded-md border border-emerald-500/20 bg-emerald-500/[0.08] px-2 py-1 font-medium text-emerald-100 transition hover:border-emerald-400/45 hover:bg-emerald-500/[0.16]">Summarise conversation</button>
-                      <span className="hidden text-zinc-600 md:inline">Actions add context without leaving the conversation.</span>
+                      <button type="button" onClick={() => draftOperationalCommand("/summarize")} className="rounded-md px-2 py-1 font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-100">Summarise</button>
+                      <span className="hidden text-zinc-600 md:inline">Use / for commands</span>
                     </div>
                     <div className="flex items-center gap-1 px-2 pb-2">
                       <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
@@ -1127,31 +1115,24 @@ export default function TeamChatPage() {
   );
 }
 
-function NexusOperationsPulse({ activeTechnicians, context, pinnedCount }) {
-  const liveLabel = activeTechnicians.length === 1 ? "1 technician active" : `${activeTechnicians.length} technicians active`;
+function NexusOperationsPulse({ context, pinnedCount }) {
   const contextMetrics = [
-    ["Tickets", context.tickets, "border-cyan-500/20 bg-cyan-500/[0.06] text-cyan-100"],
-    ["Invoices", context.invoices, "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-100"],
-    ["Purchase orders", context.purchaseOrders, "border-amber-500/20 bg-amber-500/[0.06] text-amber-100"],
-    ["Pinned", pinnedCount, "border-white/10 bg-white/[0.03] text-zinc-200"],
-  ];
+    ["Tickets", context.tickets],
+    ["Invoices", context.invoices],
+    ["Purchase orders", context.purchaseOrders],
+    ["Pinned", pinnedCount],
+  ].filter(([, value]) => value > 0);
+
+  if (contextMetrics.length === 0) return null;
 
   return (
-    <section className="border-b border-cyan-500/10 bg-gradient-to-r from-cyan-500/[0.06] via-emerald-500/[0.035] to-transparent px-3 py-2 md:px-5" aria-label="Nexus operations pulse">
-      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2 pr-1">
-          <span className="relative grid h-7 w-7 place-items-center rounded-md border border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">
-            <span className="absolute h-1.5 w-1.5 animate-ping rounded-full bg-emerald-400/70" /><Activity className="relative h-3.5 w-3.5" />
-          </span>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-emerald-300">Work context</p>
-            <p className="text-[11px] text-zinc-500">{liveLabel}</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1" aria-label="Linked work in this channel">
-          {contextMetrics.map(([label, value, className]) => (
-            <span key={label} className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] ${className}`}>
-              <strong className="text-[11px] leading-none">{value}</strong>{label}
+    <section className="border-b border-white/[0.07] bg-white/[0.015] px-3 py-2 md:px-5" aria-label="Linked work in this channel">
+      <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2.5">
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500"><Activity className="h-3.5 w-3.5 text-emerald-300" />Linked work</span>
+        <div className="flex flex-wrap gap-x-3 gap-y-1" aria-label="Linked work items">
+          {contextMetrics.map(([label, value]) => (
+            <span key={label} className="inline-flex items-center gap-1 text-[11px] text-zinc-400">
+              <strong className="font-medium text-zinc-100">{value}</strong>{label}
             </span>
           ))}
         </div>

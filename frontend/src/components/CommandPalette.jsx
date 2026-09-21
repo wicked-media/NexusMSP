@@ -375,7 +375,7 @@ export default function CommandPalette() {
         })),
       });
       if (search.conversations?.length) list.push({
-        heading: "Collaboration",
+        heading: "Chat",
         icon: MessagesSquare,
         items: search.conversations.map(channel => ({
           kind: "conversation",

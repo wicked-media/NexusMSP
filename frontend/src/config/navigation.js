@@ -52,7 +52,7 @@ export const navGroups = [
         ],
       },
       {
-        path: "/team-chat", icon: MessageSquare, label: "Collaboration",
+        path: "/team-chat", icon: MessageSquare, label: "Chat",
         workspacePaths: ["/live-chat", "/script-ticket"],
         children: [{ path: "/live-chat", label: "Client live chat" }, { path: "/script-ticket", label: "Ticket automations" }],
       },
