@@ -191,6 +191,10 @@ export default function TeamChatPage() {
   const [gifState, setGifState] = useState("idle");
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
+  const [channelEditorOpen, setChannelEditorOpen] = useState(false);
+  const [channelNameDraft, setChannelNameDraft] = useState("");
+  const [channelDescriptionDraft, setChannelDescriptionDraft] = useState("");
+  const [savingChannelDetails, setSavingChannelDetails] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [referenceMatches, setReferenceMatches] = useState([]);
@@ -216,6 +220,12 @@ export default function TeamChatPage() {
   const activeChannel = channels.find(channel => channel.id === activeId);
   const presenceFor = userId => presence[userId]?.led || "offline";
   const myPresence = presenceFor(user?.id);
+  const canEditActiveChannel = activeChannel?.kind === "team" && (
+    activeChannel.created_by === user?.id
+    || user?.is_admin
+    || ["admin", "owner"].includes(String(user?.role || "").toLowerCase())
+  );
+  const canRenameActiveChannel = canEditActiveChannel && activeChannel?.created_by !== "system";
 
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
@@ -331,6 +341,7 @@ export default function TeamChatPage() {
     setPinned([]);
     setFiles([]);
     setThread(null);
+    setChannelEditorOpen(false);
     setActiveTab("posts");
     nearBottomRef.current = true;
     if (!activeId) return undefined;
@@ -478,6 +489,32 @@ export default function TeamChatPage() {
     } catch (requestError) {
       setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, [field]: previous } : channel));
       toast.error(requestError?.response?.data?.detail || "Conversation preference could not be saved.");
+    }
+  };
+
+  const beginChannelEdit = () => {
+    if (!activeChannel || !canEditActiveChannel) return;
+    setChannelNameDraft(activeChannel.name || "");
+    setChannelDescriptionDraft(activeChannel.description || "");
+    setChannelEditorOpen(true);
+  };
+
+  const saveChannelDetails = async () => {
+    if (!activeChannel || !canEditActiveChannel || savingChannelDetails) return;
+    setSavingChannelDetails(true);
+    try {
+      const payload = { description: channelDescriptionDraft };
+      if (canRenameActiveChannel) payload.name = channelNameDraft;
+      const response = await axios.patch(`${API}/chat/channels/${activeChannel.id}`, payload, { headers });
+      const updated = response.data;
+      setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, ...updated } : channel));
+      setChannelEditorOpen(false);
+      toast.success("Channel details updated.");
+      loadWorkspace({ quiet: true });
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Channel details could not be saved.");
+    } finally {
+      setSavingChannelDetails(false);
     }
   };
 
@@ -965,22 +1002,46 @@ export default function TeamChatPage() {
         ) : (
           <>
             <header className="border-b border-white/[0.07] bg-[#101922] px-3 md:px-5">
-              <div className="flex h-16 items-center gap-3">
+              <div className={`flex items-center gap-3 ${channelEditorOpen ? "min-h-16 py-3" : "h-16"}`}>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 md:hidden" onClick={() => setMobileConversationOpen(false)} aria-label="Back to conversations"><ArrowLeft className="h-4 w-4" /></Button>
                 <ChannelAvatar channel={activeChannel} presence={activePresence} size="md" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h2 className="truncate text-base font-semibold">{channelDisplayName(activeChannel)}</h2>
-                    {activeChannel.is_private && <Lock className="h-3.5 w-3.5 text-zinc-500" />}
+                {channelEditorOpen ? (
+                  <div className="min-w-0 flex-1 space-y-2">
+                    {canRenameActiveChannel ? (
+                      <Input value={channelNameDraft} onChange={event => setChannelNameDraft(event.target.value)} maxLength={50} aria-label="Channel name" className="h-9 max-w-sm border-white/10 bg-black/20 text-sm font-semibold" />
+                    ) : (
+                      <p className="text-sm font-semibold text-zinc-100">{channelDisplayName(activeChannel)}</p>
+                    )}
+                    <div className="flex flex-wrap items-end gap-2">
+                      <Textarea value={channelDescriptionDraft} onChange={event => setChannelDescriptionDraft(event.target.value)} maxLength={240} aria-label="Channel purpose" placeholder="What is this channel for?" className="min-h-9 max-w-xl resize-none border-white/10 bg-black/20 py-2 text-xs" />
+                      <Button size="sm" className="h-9 bg-cyan-600 text-xs hover:bg-cyan-500" onClick={saveChannelDetails} disabled={savingChannelDetails}>{savingChannelDetails ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Check className="mr-1.5 h-3.5 w-3.5" />}Save</Button>
+                      <Button variant="ghost" size="sm" className="h-9 text-xs text-zinc-400 hover:text-white" onClick={() => setChannelEditorOpen(false)} disabled={savingChannelDetails}>Cancel</Button>
+                    </div>
                   </div>
-                  <p className="truncate text-xs text-zinc-500">
-                    {activeChannel.kind === "dm"
-                      ? PRESENCE_META[activePresence || "offline"].label
-                      : activeChannel.kind === "client_direct"
-                        ? activeChannel.client_name || activeChannel.description || "Approved customer connection"
-                      : activeChannel.description || `${activeChannel.member_count || 0} members`}
-                  </p>
-                </div>
+                ) : canEditActiveChannel ? (
+                  <button type="button" onClick={beginChannelEdit} className="group min-w-0 flex-1 rounded-md py-1 text-left outline-none transition hover:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-cyan-400/60" aria-label="Edit channel name and purpose">
+                    <div className="flex items-center gap-2">
+                      <h2 className="truncate text-base font-semibold">{channelDisplayName(activeChannel)}</h2>
+                      {activeChannel.is_private && <Lock className="h-3.5 w-3.5 text-zinc-500" />}
+                      <Edit3 className="h-3.5 w-3.5 text-zinc-600 opacity-0 transition group-hover:opacity-100" />
+                    </div>
+                    <p className="truncate text-xs text-zinc-500">{activeChannel.description || `${activeChannel.member_count || 0} members`}</p>
+                  </button>
+                ) : (
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="truncate text-base font-semibold">{channelDisplayName(activeChannel)}</h2>
+                      {activeChannel.is_private && <Lock className="h-3.5 w-3.5 text-zinc-500" />}
+                    </div>
+                    <p className="truncate text-xs text-zinc-500">
+                      {activeChannel.kind === "dm"
+                        ? PRESENCE_META[activePresence || "offline"].label
+                        : activeChannel.kind === "client_direct"
+                          ? activeChannel.client_name || activeChannel.description || "Approved customer connection"
+                          : activeChannel.description || `${activeChannel.member_count || 0} members`}
+                    </p>
+                  </div>
+                )}
                 {typingUsers.length > 0 && <span className="hidden text-xs text-cyan-200 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

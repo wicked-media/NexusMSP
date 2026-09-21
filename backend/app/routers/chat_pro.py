@@ -665,6 +665,37 @@ async def typing(channel_id: str, current_user: dict = Depends(get_current_user)
     return {"ok": True}
 
 
+@router.patch("/chat/channels/{channel_id}")
+async def update_channel_details(channel_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    """Rename a governed team channel or update its purpose statement."""
+    channel = await require_channel_access(channel_id, current_user)
+    if channel.get("kind") != "team":
+        raise HTTPException(400, "Only team channels have editable channel details")
+    if not (is_chat_admin(current_user) or channel.get("created_by") == current_user.get("id")):
+        raise HTTPException(403, "Only the channel owner or an admin can edit channel details")
+    changes = {}
+    if "description" in payload:
+        changes["description"] = str(payload.get("description") or "").strip()[:240]
+    if "name" in payload:
+        name = re.sub(r"-+", "-", str(payload.get("name") or "").strip().lower().replace(" ", "-"))
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,49}", name):
+            raise HTTPException(400, "Channel names must be 2-50 letters, numbers, dashes, or underscores")
+        if name != channel.get("name"):
+            if channel.get("created_by") == "system":
+                raise HTTPException(403, "Default channel names cannot be changed")
+            duplicate = await db.chat_channels.find_one({"name": name, "kind": "team", "id": {"$ne": channel_id}, "deleted": {"$ne": True}}, {"_id": 1})
+            if duplicate:
+                raise HTTPException(409, "A channel with that name already exists")
+            changes.update({"name": name, "display_name": name.replace("-", " ").title()})
+    if not changes:
+        raise HTTPException(400, "Provide a channel name and/or description")
+    changes["updated_at"] = _now()
+    await db.chat_channels.update_one({"id": channel_id}, {"$set": changes})
+    updated = {**channel, **changes}
+    publish_channel_update(channel_id, "channel.details.updated", live_update_recipients(updated))
+    return updated
+
+
 @router.get("/chat/channels/{channel_id}/typing")
 async def get_typing(channel_id: str, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)

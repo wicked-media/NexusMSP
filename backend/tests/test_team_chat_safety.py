@@ -81,6 +81,16 @@ class ReadStateCollection:
         return SimpleNamespace(modified_count=1)
 
 
+class MutableChannelCollection(ChannelCollection):
+    def __init__(self, existing=None):
+        super().__init__(existing)
+        self.update = None
+
+    async def update_one(self, query, update):
+        self.update = (query, update)
+        return SimpleNamespace(modified_count=1)
+
+
 class MessageCollection:
     async def find_one(self, *_args, **_kwargs):
         return {"ts": "2026-09-21T10:30:00+00:00"}
@@ -204,3 +214,23 @@ def test_conversation_preferences_are_actor_and_tenant_bound(monkeypatch):
     assert update["$set"]["is_saved"] is True
     assert update["$setOnInsert"]["channel_id"] == "team-1"
     assert upsert is True
+
+
+def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
+    channel = {
+        "id": "team-1", "kind": "team", "name": "service-desk",
+        "description": "Old purpose", "created_by": "owner-1",
+        "is_private": False, "member_ids": [],
+    }
+    channels = MutableChannelCollection(existing=channel)
+    fake_db = SimpleNamespace(chat_channels=channels)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_details(
+        "team-1", {"description": "Coordinate service desk work"}, current_user={"id": "owner-1"},
+    ))
+
+    assert result["description"] == "Coordinate service desk work"
+    assert channels.update[0] == {"id": "team-1"}
+    assert channels.update[1]["$set"]["description"] == "Coordinate service desk work"
