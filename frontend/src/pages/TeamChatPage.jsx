@@ -1583,9 +1583,10 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
 }
 
 function MessageReadReceipt({ message, currentUserId, receipts }) {
-  if (!message.ts || message.pending || message.deleted || message.user_id !== currentUserId) return null;
+  if (!message.ts || message.deleted || message.user_id !== currentUserId) return null;
+  if (message.pending) return <span className="flex items-center gap-1 text-[10px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" />Sending</span>;
   const readers = (receipts || []).filter(receipt => receipt.user_id !== message.user_id && receipt.user_id !== currentUserId && receipt.last_read_at >= message.ts);
-  if (!readers.length) return null;
+  if (!readers.length) return <span className="flex items-center gap-1 text-[10px] text-zinc-500"><Check className="h-3 w-3" />Sent</span>;
   return <span className="flex items-center gap-1.5 text-[10px] text-zinc-500" title={`Seen by ${readers.map(reader => reader.user_name).join(", ")}`}><span className="flex -space-x-1">{readers.slice(0, 3).map(reader => <TechnicianAvatar key={reader.user_id} name={reader.user_name} avatarUrl={reader.avatar_url || reader.avatar} className="h-4 w-4 border border-[#1d1f26]" fallbackClassName="text-[7px]" />)}</span><Check className="h-3 w-3 text-emerald-400" />Seen{readers.length > 1 ? ` by ${readers.length}` : ""}</span>;
 }
 
