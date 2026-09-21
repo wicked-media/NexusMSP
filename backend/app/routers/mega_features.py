@@ -1383,10 +1383,10 @@ async def runbook_from_ticket(ticket_id: str, payload: dict = Body(default={}), 
         description = (t.get("description") or "").strip()
         parsed = {
             "title": t.get("title") or "Resolved ticket runbook",
-            "summary": f"Draft procedure created from resolved ticket #{t.get('ticket_number') or ''}. Review and complete it before publishing.",
+            "summary": f"Starter procedure created from resolved ticket #{t.get('ticket_number') or ''}. Validate and refine the recorded steps before relying on it in a live incident.",
             "steps": [
                 {"step": "Review the reported issue", "detail": description or "Confirm the affected service, device, and user impact."},
-                {"step": "Apply the recorded resolution", "detail": resolution or "Add the remediation that resolved this ticket before publishing."},
+                {"step": "Apply the recorded resolution", "detail": resolution or "Add the remediation that resolved this ticket, then validate it before reuse."},
                 {"step": "Validate the outcome", "detail": "Confirm the service is restored and record the validation result."},
             ],
             "tags": [t.get("category") or "service-desk"],

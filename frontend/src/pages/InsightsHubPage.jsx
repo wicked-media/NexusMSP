@@ -568,7 +568,7 @@ function RunbooksView({ api }) {
   return (
     <Card className={`mt-3 ${INSIGHT_SURFACE}`} data-testid="runbooks-card">
       <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-gradient-to-r from-sky-400/[0.07] to-transparent pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">Reusable operational knowledge</p><CardTitle className="mt-1 text-sm">Runbook library · {rows.length} published</CardTitle><p className="mt-1 text-xs text-muted-foreground">Search the reviewed steps your team can reuse while working a ticket.</p></div>
+        <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">Reusable operational knowledge</p><CardTitle className="mt-1 text-sm">Runbook library · {rows.length} published</CardTitle><p className="mt-1 text-xs text-muted-foreground">Ticket-derived procedures that are published for technician reuse.</p></div>
         <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
           <Input aria-label="Search runbooks" placeholder="Search title, tag, or category…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 min-w-0 text-xs sm:w-64" data-testid="runbook-search" />
           <Button variant="outline" size="sm" onClick={reload} className="shrink-0 rounded-xl"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button>
@@ -580,8 +580,8 @@ function RunbooksView({ api }) {
             {rows.map((r) => (
               <Card key={r.id} className="rounded-2xl border-border/60 bg-muted/[0.12] transition-colors hover:border-sky-400/30" data-testid={`runbook-${r.id}`}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2 flex-wrap"><BookOpen className="w-3.5 h-3.5 text-violet-400" />{r.title}{r.category && <Badge variant="outline" className="text-[10px]">{r.category}</Badge>}</CardTitle>
-                  {r.summary && <p className="text-xs text-muted-foreground mt-1">{r.summary}</p>}
+                  <CardTitle className="text-sm flex items-center gap-2 flex-wrap"><BookOpen className="w-3.5 h-3.5 text-violet-400" />{r.title}<Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/10 text-[10px] text-emerald-300">Published</Badge>{r.category && <Badge variant="outline" className="text-[10px]">{r.category}</Badge>}</CardTitle>
+                  {r.summary && <p className="mt-1 text-xs text-muted-foreground">{r.summary.startsWith("Draft procedure created from resolved ticket") ? "Starter procedure from a resolved ticket. Validate and refine each step before relying on it in a live incident." : r.summary}</p>}
                 </CardHeader>
                 <CardContent className="space-y-1.5 text-xs">
                   {(r.steps || []).slice(0, 8).map((s, i) => (
@@ -589,7 +589,7 @@ function RunbooksView({ api }) {
                   ))}
                   <div className="flex gap-1 flex-wrap mt-2">
                     {(r.tags || []).map((t) => <Badge key={t} variant="outline" className="text-[10px]">#{t}</Badge>)}
-                    {r.source_ticket_number && <Link to={`/tickets?ticket=${r.source_ticket_id}`} className="text-[10px] text-violet-400 hover:underline ml-auto inline-flex items-center">from {r.source_ticket_number}<ChevronRight className="w-3 h-3" /></Link>}
+                    {r.source_ticket_number && <Link to={`/tickets?ticket=${r.source_ticket_id}`} className="ml-auto inline-flex items-center text-[10px] text-violet-400 hover:underline">Ticket-derived · {r.source_ticket_number}<ChevronRight className="w-3 h-3" /></Link>}
                   </div>
                 </CardContent>
               </Card>
