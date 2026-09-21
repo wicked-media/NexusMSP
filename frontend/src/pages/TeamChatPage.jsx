@@ -28,12 +28,14 @@ import {
   ArrowLeft,
   AtSign,
   Bell,
+  Bold,
   Bookmark,
   Building2,
   Check,
   CheckCircle2,
   ChevronDown,
   CornerDownRight,
+  Code2,
   Download,
   Edit3,
   FileText,
@@ -42,6 +44,7 @@ import {
   Loader2,
   Link as LinkIcon,
   Lock,
+  List,
   MessageCircle,
   MessageSquarePlus,
   MoreHorizontal,
@@ -56,6 +59,7 @@ import {
   Send,
   Smile,
   Sparkles,
+  Quote,
   Trash2,
   UserRoundCheck,
   Users,
@@ -84,6 +88,7 @@ import {
   normaliseDirectChatRequest,
 } from "@/lib/chatConnections";
 import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
+import { applyChatFormat, renderSafeChatMarkdown } from "@/lib/richChatMessage";
 
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "👀"];
 const EMOJI_GROUPS = [
@@ -494,6 +499,16 @@ export default function TeamChatPage() {
     if (!activeId || Date.now() - typingAtRef.current < 2000) return;
     typingAtRef.current = Date.now();
     axios.post(`${API}/chat/channels/${activeId}/typing`, {}, { headers }).catch(() => {});
+  };
+
+  const insertComposerFormat = format => {
+    const composer = composerRef.current;
+    const result = applyChatFormat(input, composer?.selectionStart, composer?.selectionEnd, format);
+    setInput(result.value);
+    window.requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      composerRef.current?.setSelectionRange(result.selectionStart, result.selectionEnd);
+    });
   };
 
   const send = async () => {
@@ -1077,11 +1092,22 @@ export default function TeamChatPage() {
                     <div className="flex items-center gap-1 px-2 pb-2">
                       <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
                       <input ref={gifRef} type="file" accept="image/gif" className="hidden" onChange={uploadFile} />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild><ComposerButton icon={Bold} label="Format message" /></DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-48">
+                          <DropdownMenuLabel>Formatting</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => insertComposerFormat("bold")}><Bold className="mr-2 h-3.5 w-3.5" />Bold <span className="ml-auto text-[10px] text-zinc-500">**text**</span></DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => insertComposerFormat("code")}><Code2 className="mr-2 h-3.5 w-3.5" />Inline code</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => insertComposerFormat("quote")}><Quote className="mr-2 h-3.5 w-3.5" />Quote</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => insertComposerFormat("list")}><List className="mr-2 h-3.5 w-3.5" />Bullet list</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                       <ComposerButton icon={Paperclip} label="Attach file" onClick={() => fileRef.current?.click()} />
                       <ComposerButton icon={Image} label="Share GIF" onClick={() => gifRef.current?.click()} />
                       <ComposerButton icon={Smile} label="Emoji" onClick={() => setComposerEmojiOpen(current => !current)} />
                       <ComposerButton icon={AtSign} label="Mention" onClick={() => setInput(current => `${current}@`)} />
-                      <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Shift+Enter for a new line</span>
+                      <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Markdown · Shift+Enter for a new line</span>
                       <span className="ml-auto hidden text-[10px] tabular-nums text-zinc-600 sm:inline">{input.length}/5000</span>
                       <Button onClick={send} disabled={!input.trim() || sending} className="h-8 rounded-lg bg-emerald-600 px-3 hover:bg-emerald-500" data-testid="chat-send">
                         {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -1485,7 +1511,7 @@ function MessageBody({ body, headers, presence, currentUserId, channelId }) {
 }
 
 function RichMessageText({ text }) {
-  return <span className="whitespace-pre-wrap break-words">{String(text || "").split(/(@[\w.-]+)/g).map((part, index) => part.startsWith("@") ? <span key={`${part}-${index}`} className={`rounded px-1 py-0.5 text-xs font-medium ${["@channel", "@here", "@everyone"].includes(part.toLowerCase()) ? "bg-amber-500/15 text-amber-200" : "bg-cyan-500/15 text-cyan-100"}`}>{part}</span> : part)}</span>;
+  return <div className="break-words [&_a]:font-medium [&_a]:text-cyan-200 [&_a]:underline [&_a]:underline-offset-2 [&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-cyan-400/50 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-black/25 [&_code]:px-1.5 [&_code]:py-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:whitespace-pre-wrap [&_p+p]:mt-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5" dangerouslySetInnerHTML={{ __html: renderSafeChatMarkdown(text) }} />;
 }
 
 function TicketCard({ ticketNumber, headers, presence, currentUserId, channelId }) {
