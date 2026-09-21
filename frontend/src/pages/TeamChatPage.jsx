@@ -69,6 +69,7 @@ import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   chatAuthorName,
   channelDisplayName,
+  conversationPreview,
   extractOperationalContext,
   filterChatChannels,
   groupChatMessages,
@@ -1351,7 +1352,7 @@ function ConversationRow({ channel, active, presence, onClick }) {
         </div>
         <div className="mt-0.5 flex items-center gap-2">
           <p className={`truncate text-xs ${channel.unread_count ? "text-zinc-300" : "text-zinc-600"}`}>
-            {channel.last_message ? `${channel.last_message.user_name ? `${chatAuthorName(channel.last_message.user_name, channel.last_message.is_system).split(" ")[0]}: ` : ""}${repairDisplayText(channel.last_message.body || "Attachment")}` : channel.kind === "team" ? channel.description || "Team channel" : "Start a conversation"}
+            {conversationPreview(channel)}
           </p>
           {channel.unread_count > 0 && <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-cyan-500 px-1.5 text-[10px] font-semibold text-white">{channel.unread_count > 99 ? "99+" : channel.unread_count}</span>}
         </div>

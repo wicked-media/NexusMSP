@@ -1,6 +1,7 @@
 import {
   chatAuthorName,
   channelDisplayName,
+  conversationPreview,
   extractOperationalContext,
   filterChatChannels,
   groupChatMessages,
@@ -28,6 +29,14 @@ describe("team chat helpers", () => {
   test("uses safe display names for legacy direct messages", () => {
     expect(channelDisplayName({ kind: "dm", name: "dm:user-1:user-2" })).toBe("Direct message");
     expect(channelDisplayName({ kind: "team", name: "service-desk" })).toBe("Service Desk");
+  });
+
+  test("does not let an old failed automation notice dominate a channel preview", () => {
+    expect(conversationPreview({
+      kind: "team",
+      description: "Daily handover and dispatch",
+      last_message: { is_system: true, user_name: "NexusOps", body: "Nexus AI could not create a summary right now.", ts: "2026-07-01T00:00:00Z" },
+    }, Date.parse("2026-07-03T00:00:01Z"))).toBe("Daily handover and dispatch");
   });
 
   test("groups consecutive posts while preserving day boundaries", () => {
