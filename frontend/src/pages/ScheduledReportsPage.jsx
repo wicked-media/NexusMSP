@@ -25,6 +25,10 @@ const REPORT_TYPES = [
   { id: "billing_summary", label: "Billing Summary", desc: "Revenue, outstanding invoices, collections" },
   { id: "security_report", label: "Security Report", desc: "Alerts, compliance scores, vulnerabilities" },
   { id: "client_health", label: "Client Health Report", desc: "Per-client health scores and trends" },
+  { id: "backup_assurance", label: "Backup & Recovery Assurance", desc: "Backup status, failures and recovery evidence" },
+  { id: "asset_lifecycle", label: "Asset Lifecycle", desc: "Managed assets, lifecycle state and warranty evidence" },
+  { id: "remote_session_audit", label: "Remote Access Audit", desc: "Remote support activity and session evidence" },
+  { id: "patch_compliance", label: "Patch Compliance", desc: "Patch posture, remediation requirements and device evidence" },
 ];
 
 const FREQUENCIES = [
