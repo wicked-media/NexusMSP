@@ -95,6 +95,15 @@ class MutableChannelCollection(ChannelCollection):
         return None if "name" in query else self.existing
 
 
+class ChannelEventCollection:
+    def __init__(self):
+        self.inserted = []
+
+    async def insert_one(self, document):
+        self.inserted.append(dict(document))
+        return SimpleNamespace(inserted_id=document.get("id"))
+
+
 class MessageCollection:
     async def find_one(self, *_args, **_kwargs):
         return {"ts": "2026-09-21T10:30:00+00:00"}
@@ -220,6 +229,34 @@ def test_conversation_preferences_are_actor_and_tenant_bound(monkeypatch):
     assert upsert is True
 
 
+def test_notification_preference_uses_a_valid_delivery_level(monkeypatch):
+    channel = {"id": "team-1", "kind": "team", "is_private": False, "member_ids": []}
+    preferences = ReadStateCollection()
+    fake_db = SimpleNamespace(chat_channels=ChannelCollection(existing=channel), chat_user_preferences=preferences)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_preference(
+        "team-1", {"notify_level": "mentions"}, current_user={"id": "tech-1", "tenant_id": "tenant-1"},
+    ))
+
+    assert result["notify_level"] == "mentions"
+    assert preferences.update[1]["$set"]["is_muted"] is False
+
+
+def test_system_channel_ownership_cannot_be_transferred(monkeypatch):
+    channel = {"id": "team-1", "kind": "team", "created_by": "system", "is_private": False, "member_ids": []}
+    fake_db = SimpleNamespace(chat_channels=ChannelCollection(existing=channel))
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(chat_pro.transfer_channel_ownership(
+            "team-1", {"owner_id": "tech-2"}, current_user={"id": "admin-1", "role": "admin"},
+        ))
+    assert denied.value.status_code == 400
+
+
 def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
     channel = {
         "id": "team-1", "kind": "team", "name": "service-desk",
@@ -227,7 +264,8 @@ def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
         "is_private": False, "member_ids": [],
     }
     channels = MutableChannelCollection(existing=channel)
-    fake_db = SimpleNamespace(chat_channels=channels)
+    events = ChannelEventCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, chat_channel_events=events)
     monkeypatch.setattr(chat_pro, "db", fake_db)
     monkeypatch.setattr(chat_access, "db", fake_db)
 
@@ -238,6 +276,7 @@ def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
     assert result["description"] == "Coordinate service desk work"
     assert channels.update[0] == {"id": "team-1"}
     assert channels.update[1]["$set"]["description"] == "Coordinate service desk work"
+    assert events.inserted[0]["event_type"] == "details.updated"
 
 
 def test_admin_can_rename_a_default_team_channel(monkeypatch):
@@ -246,7 +285,7 @@ def test_admin_can_rename_a_default_team_channel(monkeypatch):
         "created_by": "system", "is_private": False, "member_ids": [],
     }
     channels = MutableChannelCollection(existing=channel)
-    fake_db = SimpleNamespace(chat_channels=channels)
+    fake_db = SimpleNamespace(chat_channels=channels, chat_channel_events=ChannelEventCollection())
     monkeypatch.setattr(chat_pro, "db", fake_db)
     monkeypatch.setattr(chat_access, "db", fake_db)
 
@@ -256,3 +295,4 @@ def test_admin_can_rename_a_default_team_channel(monkeypatch):
 
     assert result["name"] == "company-announcements"
     assert result["display_name"] == "Company Announcements"
+    assert channels.update[1]["$set"]["default_key"] == "general"

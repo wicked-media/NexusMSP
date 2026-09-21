@@ -330,22 +330,44 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         ).to_list(500)
         eligible_ids = {row.get("id") for row in active_users if row.get("id")}
 
-    # A mute is a recipient's preference for this conversation, not a message
-    # property. Apply it before creating mention or broadcast notifications;
-    # the message remains visible in the channel and live UI updates still
-    # reach the member who is already viewing it.
-    muted_rows = await db.chat_user_preferences.find(
+    # Notification preferences are recipient-owned. They affect delivery only;
+    # they never change message visibility or channel membership.
+    preference_rows = await db.chat_user_preferences.find(
         {
             "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
             "channel_id": channel_id,
             "user_id": {"$in": list(eligible_ids)},
-            "is_muted": True,
         },
-        {"_id": 0, "user_id": 1},
+        {"_id": 0, "user_id": 1, "is_muted": 1, "notify_level": 1, "mute_until": 1},
     ).to_list(500)
-    eligible_ids.difference_update(row.get("user_id") for row in muted_rows if row.get("user_id"))
+    preferences_by_user = {row.get("user_id"): row for row in preference_rows if row.get("user_id")}
+    now = datetime.now(timezone.utc)
+    def notifications_muted(preference: dict) -> bool:
+        if preference.get("notify_level") == "none":
+            return True
+        mute_until = preference.get("mute_until")
+        if mute_until:
+            try:
+                return datetime.fromisoformat(str(mute_until).replace("Z", "+00:00")) > now
+            except ValueError:
+                return True
+        return bool(preference.get("is_muted"))
+
+    eligible_ids = {uid for uid in eligible_ids if not notifications_muted(preferences_by_user.get(uid) or {})}
 
     # Push notifications for explicit @user mentions
+    all_message_ids = [uid for uid in eligible_ids if (preferences_by_user.get(uid) or {}).get("notify_level") == "all"]
+    for uid in all_message_ids:
+        if uid == current_user.get("id"):
+            continue
+        notified_ids.add(uid)
+        await db.notifications.insert_one({
+            "id": uuid.uuid4().hex,
+            "type": "chat_message",
+            "title": f"💬 {current_user.get('name')} posted in #{ch.get('name') or 'channel'}",
+            "body": body[:200], "message": body[:200], "ref_type": "chat_channel", "ref_id": channel_id,
+            "user_id": uid, "target_user_id": uid, "read": False, "created_at": _now_iso(),
+        })
     for m in mentions:
         handle = m.lower()
         candidates = await db.users.find(

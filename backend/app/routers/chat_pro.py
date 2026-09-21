@@ -29,6 +29,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def record_channel_event(channel: dict, actor: dict, event_type: str, details: dict | None = None) -> None:
+    """Append non-content channel governance evidence without changing chat truth."""
+    await db.chat_channel_events.insert_one({
+        "id": uuid.uuid4().hex,
+        "tenant_id": str(actor.get("tenant_id") or "nexus-local"),
+        "channel_id": channel["id"],
+        "event_type": event_type,
+        "actor_id": actor.get("id"),
+        "actor_name": actor.get("name") or "Nexus operator",
+        "details": details or {},
+        "created_at": _now(),
+    })
+
+
 def _tenor_asset_url(value: str) -> bool:
     parsed = urlparse(value)
     return parsed.scheme == "https" and parsed.hostname == "media.tenor.com"
@@ -360,7 +374,7 @@ async def update_members(channel_id: str, payload: dict = Body(...), current_use
     if channel.get("kind") in {"dm", "group_dm"}:
         raise HTTPException(400, "Direct-chat membership cannot be changed here")
     if not (is_chat_admin(current_user) or channel.get("created_by") == current_user.get("id")):
-        raise HTTPException(403, "Only the channel owner can manage members")
+        raise HTTPException(403, "Only the channel owner or an admin can manage members")
     if channel.get("is_private") is not True:
         raise HTTPException(400, "Public channels include all active staff")
     requested = payload.get("member_ids") or []
@@ -369,7 +383,11 @@ async def update_members(channel_id: str, payload: dict = Body(...), current_use
     members = list(dict.fromkeys(str(member) for member in requested if member))
     if current_user.get("id") not in members:
         members.append(current_user.get("id"))
+    active_members = await db.users.count_documents({"id": {"$in": members}, "is_active": {"$ne": False}})
+    if active_members != len(members):
+        raise HTTPException(400, "One or more selected technicians are unavailable")
     await db.chat_channels.update_one({"id": channel_id}, {"$set": {"member_ids": members, "updated_at": _now()}})
+    await record_channel_event(channel, current_user, "members.updated", {"member_count": len(members)})
     publish_channel_update(channel_id, "channel.members.updated", members)
     return {"ok": True, "member_ids": members}
 
@@ -387,9 +405,56 @@ async def delete_channel(channel_id: str, current_user: dict = Depends(get_curre
         {"id": channel_id},
         {"$set": {"deleted": True, "deleted_at": _now(), "deleted_by": current_user.get("id")}},
     )
+    await record_channel_event(ch, current_user, "channel.archived")
     # Keep posts and attachments intact for authorised audit/recovery; the
     # channel disappears from every normal visibility query immediately.
     return {"ok": True, "archived": True}
+
+
+@router.get("/chat/channels/archived")
+async def list_archived_channels(current_user: dict = Depends(get_current_user)):
+    """Show recoverable team-channel archives to their owner or a chat admin."""
+    query = {"deleted": True, "kind": "team"}
+    if not is_chat_admin(current_user):
+        query["created_by"] = current_user.get("id")
+    rows = await db.chat_channels.find(query, {"_id": 0}).sort("deleted_at", -1).to_list(100)
+    return await enrich_channels(rows, current_user)
+
+
+@router.post("/chat/channels/{channel_id}/restore")
+async def restore_channel(channel_id: str, current_user: dict = Depends(get_current_user)):
+    channel = await db.chat_channels.find_one({"id": channel_id, "deleted": True}, {"_id": 0})
+    if not channel or channel.get("kind") != "team":
+        raise HTTPException(404, "Archived channel not found")
+    if not (is_chat_admin(current_user) or channel.get("created_by") == current_user.get("id")):
+        raise HTTPException(403, "Only the channel owner or an admin can restore this channel")
+    now = _now()
+    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"deleted": False, "restored_at": now, "restored_by": current_user.get("id"), "updated_at": now}})
+    await record_channel_event(channel, current_user, "channel.restored")
+    restored = {**channel, "deleted": False, "updated_at": now}
+    publish_channel_update(channel_id, "channel.restored", live_update_recipients(restored))
+    return restored
+
+
+@router.post("/chat/channels/{channel_id}/ownership")
+async def transfer_channel_ownership(channel_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    channel = await require_channel_access(channel_id, current_user)
+    if channel.get("kind") != "team":
+        raise HTTPException(400, "Only team channels have transferable ownership")
+    if not (is_chat_admin(current_user) or channel.get("created_by") == current_user.get("id")):
+        raise HTTPException(403, "Only the channel owner or an admin can transfer ownership")
+    if channel.get("created_by") == "system":
+        raise HTTPException(400, "Default channel ownership cannot be transferred")
+    owner_id = str(payload.get("owner_id") or "").strip()
+    owner = await db.users.find_one({"id": owner_id, "is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1})
+    if not owner:
+        raise HTTPException(400, "Choose an active technician")
+    now = _now()
+    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}})
+    updated = {**channel, "created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}
+    await record_channel_event(channel, current_user, "ownership.transferred", {"new_owner_id": owner_id, "new_owner_name": owner.get("name")})
+    publish_channel_update(channel_id, "channel.ownership.updated", live_update_recipients(updated))
+    return updated
 
 
 @router.post("/chat/group-dm")
@@ -463,7 +528,7 @@ async def channels_preview(current_user: dict = Depends(get_current_user)):
             "user_id": uid,
             "channel_id": {"$in": channel_ids},
         },
-        {"_id": 0, "channel_id": 1, "is_saved": 1, "is_muted": 1},
+        {"_id": 0, "channel_id": 1, "is_saved": 1, "is_muted": 1, "notify_level": 1, "mute_until": 1},
     ).to_list(200)
     preferences_by_channel = {row["channel_id"]: row for row in preference_rows}
 
@@ -498,6 +563,8 @@ async def channels_preview(current_user: dict = Depends(get_current_user)):
             **ch,
             "is_saved": bool((preferences_by_channel.get(ch["id"]) or {}).get("is_saved")),
             "is_muted": bool((preferences_by_channel.get(ch["id"]) or {}).get("is_muted")),
+            "notify_level": (preferences_by_channel.get(ch["id"]) or {}).get("notify_level") or "mentions",
+            "mute_until": (preferences_by_channel.get(ch["id"]) or {}).get("mute_until"),
             "last_message": {
                 "body": (last_msg.get("body") or "")[:120] if last_msg else "",
                 "user_name": last_msg.get("user_name") if last_msg else "",
@@ -513,8 +580,28 @@ async def update_channel_preference(channel_id: str, payload: dict = Body(...), 
     """Set the caller's saved/muted view state for one accessible conversation."""
     await require_channel_access(channel_id, current_user)
     requested = {key: payload[key] for key in ("is_saved", "is_muted") if key in payload}
-    if not requested or any(not isinstance(value, bool) for value in requested.values()):
-        raise HTTPException(400, "Provide is_saved and/or is_muted as booleans")
+    if any(not isinstance(value, bool) for value in requested.values()):
+        raise HTTPException(400, "Saved and muted settings must be booleans")
+    if "notify_level" in payload:
+        notify_level = str(payload.get("notify_level") or "").lower()
+        if notify_level not in {"all", "mentions", "none"}:
+            raise HTTPException(400, "Notification level must be all, mentions, or none")
+        requested["notify_level"] = notify_level
+        requested["is_muted"] = notify_level == "none"
+    if "mute_until" in payload:
+        mute_until = payload.get("mute_until")
+        if mute_until is not None:
+            try:
+                mute_until = datetime.fromisoformat(str(mute_until).replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise HTTPException(400, "mute_until must be an ISO timestamp") from exc
+            if mute_until <= datetime.now(timezone.utc):
+                raise HTTPException(400, "mute_until must be in the future")
+            requested["mute_until"] = mute_until.isoformat()
+        else:
+            requested["mute_until"] = None
+    if not requested:
+        raise HTTPException(400, "Provide one or more conversation preferences")
     now = _now()
     await db.chat_user_preferences.update_one(
         {
@@ -685,13 +772,23 @@ async def update_channel_details(channel_id: str, payload: dict = Body(...), cur
             if duplicate:
                 raise HTTPException(409, "A channel with that name already exists")
             changes.update({"name": name, "display_name": name.replace("-", " ").title()})
+            if channel.get("created_by") == "system" and channel.get("name") in {"general", "ops", "service-desk", "alerts", "random"}:
+                changes["default_key"] = channel["name"]
     if not changes:
         raise HTTPException(400, "Provide a channel name and/or description")
     changes["updated_at"] = _now()
     await db.chat_channels.update_one({"id": channel_id}, {"$set": changes})
     updated = {**channel, **changes}
+    audit_details = {key: changes[key] for key in ("name", "display_name", "description") if key in changes}
+    await record_channel_event(channel, current_user, "details.updated", audit_details)
     publish_channel_update(channel_id, "channel.details.updated", live_update_recipients(updated))
     return updated
+
+
+@router.get("/chat/channels/{channel_id}/activity")
+async def channel_activity(channel_id: str, current_user: dict = Depends(get_current_user)):
+    await require_channel_access(channel_id, current_user)
+    return await db.chat_channel_events.find({"channel_id": channel_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
 
 
 @router.get("/chat/channels/{channel_id}/typing")

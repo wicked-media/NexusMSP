@@ -171,6 +171,7 @@ export default function TeamChatPage() {
   const [activeTab, setActiveTab] = useState("posts");
   const [query, setQuery] = useState("");
   const [messageSearchQuery, setMessageSearchQuery] = useState("");
+  const [messageSearchScope, setMessageSearchScope] = useState("all");
   const [searchResults, setSearchResults] = useState(null);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [input, setInput] = useState("");
@@ -181,6 +182,9 @@ export default function TeamChatPage() {
   const [error, setError] = useState("");
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedChannels, setArchivedChannels] = useState([]);
+  const [loadingArchived, setLoadingArchived] = useState(false);
   const [thread, setThread] = useState(null);
   const [threadInput, setThreadInput] = useState("");
   const [emojiTarget, setEmojiTarget] = useState(null);
@@ -482,13 +486,40 @@ export default function TeamChatPage() {
 
   const updateConversationPreference = async (field, value) => {
     if (!activeChannel) return;
-    const previous = Boolean(activeChannel[field]);
-    setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, [field]: value } : channel));
+    const previous = activeChannel;
+    const patch = field === "notify_level" ? { notify_level: value, is_muted: value === "none" } : { [field]: value };
+    setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, ...patch } : channel));
     try {
-      await axios.put(`${API}/chat/channels/${activeChannel.id}/preference`, { [field]: value }, { headers });
+      await axios.put(`${API}/chat/channels/${activeChannel.id}/preference`, patch, { headers });
     } catch (requestError) {
-      setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, [field]: previous } : channel));
+      setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, ...previous } : channel));
       toast.error(requestError?.response?.data?.detail || "Conversation preference could not be saved.");
+    }
+  };
+
+  const openArchivedChannels = async () => {
+    setShowArchived(true);
+    setLoadingArchived(true);
+    try {
+      const response = await axios.get(`${API}/chat/channels/archived`, { headers });
+      setArchivedChannels(response.data || []);
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Archived channels could not be loaded.");
+    } finally {
+      setLoadingArchived(false);
+    }
+  };
+
+  const restoreChannel = async channel => {
+    try {
+      await axios.post(`${API}/chat/channels/${channel.id}/restore`, {}, { headers });
+      setArchivedChannels(current => current.filter(item => item.id !== channel.id));
+      await loadWorkspace({ quiet: true });
+      selectChannel(channel.id);
+      setShowArchived(false);
+      toast.success("Channel restored.");
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Channel could not be restored.");
     }
   };
 
@@ -627,7 +658,7 @@ export default function TeamChatPage() {
     if (!term) { setSearchResults(null); return; }
     setSearching(true);
     try {
-      const response = await axios.get(`${API}/chat/search`, { headers, params: { q: term } });
+      const response = await axios.get(`${API}/chat/search`, { headers, params: { q: term, ...(messageSearchScope === "channel" && activeId ? { channel_id: activeId } : {}) } });
       setSearchResults(response.data || []);
       setShowMessageSearch(false);
     } catch (requestError) {
@@ -760,16 +791,26 @@ export default function TeamChatPage() {
     }
   };
 
+  const jumpToUnread = () => {
+    const nextUnread = channels.find(channel => channel.id !== activeId && Number(channel.unread_count || 0) > 0);
+    if (!nextUnread) {
+      toast.message("You are all caught up.");
+      return;
+    }
+    selectChannel(nextUnread.id);
+    toast.message(`Opened unread conversation: ${channelDisplayName(nextUnread)}.`);
+  };
+
   const deleteChannel = async () => {
     if (!activeChannel) return;
-    if (!window.confirm(`Delete #${channelDisplayName(activeChannel)}? This cannot be undone.`)) return;
+    if (!window.confirm(`Archive #${channelDisplayName(activeChannel)}? Posts stay preserved and an owner or admin can restore it.`)) return;
     try {
       await axios.delete(`${API}/chat/channels/${activeChannel.id}`, { headers });
       setShowInfo(false);
       setActiveId(null);
       setMode("teams");
       await loadWorkspace({ quiet: true });
-      toast.success("Channel deleted");
+      toast.success("Channel archived");
     } catch (requestError) {
       toast.error(requestError?.response?.data?.detail || "Channel could not be deleted");
     }
@@ -880,6 +921,8 @@ export default function TeamChatPage() {
                   <DropdownMenuItem asChild><Link to="/live-chat"><MessageCircle className="mr-2 h-4 w-4" />Client live chat</Link></DropdownMenuItem>
                   <DropdownMenuItem asChild><Link to="/script-ticket"><FileText className="mr-2 h-4 w-4" />Ticket automations</Link></DropdownMenuItem>
                   <DropdownMenuItem asChild><Link to="/voice"><Phone className="mr-2 h-4 w-4" />Voice services</Link></DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={openArchivedChannels}><RefreshCw className="mr-2 h-4 w-4" />Archived channels</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -1056,10 +1099,14 @@ export default function TeamChatPage() {
                     <DropdownMenuItem onClick={() => updateConversationPreference("is_muted", !activeChannel.is_muted)}>
                       {activeChannel.is_muted ? <Volume2 className="mr-2 h-4 w-4" /> : <VolumeX className="mr-2 h-4 w-4" />}{activeChannel.is_muted ? "Turn notifications on" : "Mute notifications"}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateConversationPreference("notify_level", "mentions")}><AtSign className="mr-2 h-4 w-4" />Notify for mentions only</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateConversationPreference("notify_level", "all")}><Bell className="mr-2 h-4 w-4" />Notify for every message</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateConversationPreference("mute_until", new Date(Date.now() + 60 * 60 * 1000).toISOString())}><VolumeX className="mr-2 h-4 w-4" />Mute for one hour</DropdownMenuItem>
+                    <DropdownMenuItem onClick={jumpToUnread}><ArrowRightLeft className="mr-2 h-4 w-4" />Jump to next unread</DropdownMenuItem>
                     <DropdownMenuItem onClick={markConversationUnread}>
                       <Mail className="mr-2 h-4 w-4" />Mark unread
                     </DropdownMenuItem>
-                    {activeChannel.kind === "team" && (activeChannel.created_by === user?.id || user?.is_admin || ["admin", "owner"].includes(String(user?.role || "").toLowerCase())) && <><DropdownMenuSeparator /><DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={deleteChannel}><Trash2 className="mr-2 h-4 w-4" />Delete channel</DropdownMenuItem></>}
+                    {activeChannel.kind === "team" && (activeChannel.created_by === user?.id || user?.is_admin || ["admin", "owner"].includes(String(user?.role || "").toLowerCase())) && <><DropdownMenuSeparator /><DropdownMenuItem className="text-amber-200 focus:text-amber-100" onClick={deleteChannel}><Trash2 className="mr-2 h-4 w-4" />Archive channel</DropdownMenuItem></>}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
@@ -1268,7 +1315,7 @@ export default function TeamChatPage() {
       </main>
 
       {showInfo && activeChannel && (
-        <InfoPanel channel={activeChannel} users={users} presenceFor={presenceFor} currentUserId={user?.id} headers={headers} onUpdated={() => loadWorkspace({ quiet: true })} onClose={() => setShowInfo(false)} />
+        <InfoPanel channel={activeChannel} users={users} presenceFor={presenceFor} currentUserId={user?.id} canManage={canEditActiveChannel} headers={headers} onUpdated={() => loadWorkspace({ quiet: true })} onClose={() => setShowInfo(false)} />
       )}
       {thread && (
         <ThreadPanel
@@ -1305,6 +1352,20 @@ export default function TeamChatPage() {
           setShowNewDialog(false);
         }}
       />
+      <Dialog open={showArchived} onOpenChange={setShowArchived}>
+        <NexusWorkflowDialog
+          eyebrow="Recoverable channel archive"
+          title="Archived channels"
+          description="Archived channels keep their posts, attachments, and governance history. Restore one when the work resumes."
+          icon={RefreshCw}
+          tone="amber"
+          footer={<Button variant="outline" onClick={() => setShowArchived(false)}>Close</Button>}
+        >
+          <div className="space-y-2">
+            {loadingArchived ? <div className="flex items-center gap-2 py-6 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />Loading archive…</div> : archivedChannels.length === 0 ? <p className="py-6 text-center text-sm text-zinc-500">No archived channels you can restore.</p> : archivedChannels.map(channel => <div key={channel.id} className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3"><ChannelAvatar channel={channel} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{channelDisplayName(channel)}</p><p className="truncate text-xs text-zinc-500">{channel.description || "No channel purpose"}</p></div><Button size="sm" variant="outline" onClick={() => restoreChannel(channel)}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Restore</Button></div>)}
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
       <Dialog open={showMessageSearch} onOpenChange={setShowMessageSearch}>
         <NexusWorkflowDialog
           eyebrow="Find operational context"
@@ -1324,6 +1385,10 @@ export default function TeamChatPage() {
               placeholder="e.g. INC-0015, backup, Alex"
               autoFocus
             />
+            <select value={messageSearchScope} onChange={event => setMessageSearchScope(event.target.value)} className="h-9 w-full rounded-lg border border-white/10 bg-black/20 px-3 text-sm text-zinc-300">
+              <option value="all">Search all accessible conversations</option>
+              <option value="channel" disabled={!activeId}>Search this conversation only</option>
+            </select>
           </div>
         </NexusWorkflowDialog>
       </Dialog>
@@ -1958,15 +2023,26 @@ function SearchResults({ results, onSelect, onClose }) {
   return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose} aria-label="Close search results"><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-cyan-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{chatAuthorName(result.user_name, result.is_system)}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{repairDisplayText(result.body)}</p></button>)}</div>}</div></div>;
 }
 
-function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpdated, onClose }) {
+function InfoPanel({ channel, users, presenceFor, currentUserId, canManage, headers, onUpdated, onClose }) {
   const memberIds = useMemo(
     () => channel.kind === "team" && !channel.is_private ? users.map(user => user.id) : channel.member_ids || [],
     [channel.is_private, channel.kind, channel.member_ids, users],
   );
   const [draftMemberIds, setDraftMemberIds] = useState(memberIds);
   const [savingMembers, setSavingMembers] = useState(false);
-  const canManageMembers = channel.kind === "team" && channel.is_private && channel.created_by === currentUserId;
+  const [activity, setActivity] = useState([]);
+  const [nextOwnerId, setNextOwnerId] = useState("");
+  const [transferringOwner, setTransferringOwner] = useState(false);
+  const canManageMembers = channel.kind === "team" && channel.is_private && canManage;
+  const canTransferOwnership = channel.kind === "team" && canManage && channel.created_by !== "system";
   useEffect(() => { setDraftMemberIds(memberIds); }, [channel.id, memberIds]);
+  useEffect(() => {
+    let active = true;
+    axios.get(`${API}/chat/channels/${channel.id}/activity`, { headers })
+      .then(response => active && setActivity(response.data || []))
+      .catch(() => active && setActivity([]));
+    return () => { active = false; };
+  }, [channel.id, headers]);
   const addMember = userId => {
     if (userId && !draftMemberIds.includes(userId)) setDraftMemberIds(current => [...current, userId]);
   };
@@ -1985,12 +2061,27 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, headers, onUpda
       setSavingMembers(false);
     }
   };
+  const transferOwnership = async () => {
+    if (!nextOwnerId || transferringOwner) return;
+    setTransferringOwner(true);
+    try {
+      await axios.post(`${API}/chat/channels/${channel.id}/ownership`, { owner_id: nextOwnerId }, { headers });
+      toast.success("Channel ownership transferred");
+      setNextOwnerId("");
+      onUpdated?.();
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Ownership could not be transferred");
+    } finally {
+      setTransferringOwner(false);
+    }
+  };
   return (
     <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
       <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close conversation details"><X className="h-4 w-4" /></Button></div>
       {canManageMembers && <div className="border-b border-white/5 bg-cyan-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-cyan-100">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
+      {canTransferOwnership && <div className="border-b border-white/5 bg-amber-500/[0.035] p-4"><p className="text-xs font-medium text-amber-100">Channel ownership</p><p className="mt-1 text-[11px] text-zinc-500">Transfer management responsibility to an active technician.</p><div className="mt-2 flex gap-2"><select value={nextOwnerId} onChange={event => setNextOwnerId(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Choose new owner…</option>{users.filter(candidate => candidate.id !== channel.created_by).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={transferOwnership} disabled={!nextOwnerId || transferringOwner} className="h-9 shrink-0 bg-amber-600 px-3 text-xs hover:bg-amber-500">{transferringOwner ? "Saving" : "Transfer"}</Button></div></div>}
       {channel.kind === "client_direct" && <div className="border-b border-cyan-500/15 bg-cyan-500/[0.045] p-4" data-testid="customer-connection-details"><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" /><div className="min-w-0"><p className="text-xs font-medium text-cyan-100">Approved customer connection</p><p className="mt-1 truncate text-sm text-zinc-100">{channel.customer_name || channelDisplayName(channel)}</p>{channel.customer_email && <p className="mt-0.5 truncate text-[11px] text-zinc-500">{channel.customer_email}</p>}<p className="mt-2 text-[10px] leading-4 text-zinc-500">Private customer access is limited to this technician and remains linked to the approval record.</p></div></div></div>}
-      <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div></ScrollArea>
+      <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Channel history</p>{activity.length === 0 ? <p className="text-xs text-zinc-600">No recorded channel changes yet.</p> : <div className="space-y-2">{activity.map(event => <div key={event.id} className="rounded-lg bg-white/[0.025] p-2.5 text-xs"><p className="text-zinc-300">{event.actor_name} · {String(event.event_type || "change").replaceAll(".", " ")}</p><p className="mt-0.5 text-[10px] text-zinc-600">{formatRelative(event.created_at)}</p></div>)}</div>}</div></ScrollArea>
     </aside>
   );
 }

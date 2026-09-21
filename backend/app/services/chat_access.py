@@ -118,8 +118,16 @@ async def require_message_access(message_id: str, user: dict) -> tuple[dict, dic
 
 async def ensure_default_channels() -> None:
     for name, description in DEFAULT_CHAT_CHANNELS:
-        existing = await db.chat_channels.find_one({"name": name, "kind": "team"}, {"_id": 0, "id": 1})
+        # ``default_key`` remains stable when an administrator renames a
+        # seeded channel. The legacy name match upgrades existing installs
+        # before any rename can occur, avoiding a duplicate default channel.
+        existing = await db.chat_channels.find_one(
+            {"kind": "team", "$or": [{"default_key": name}, {"name": name, "created_by": "system"}]},
+            {"_id": 0, "id": 1, "default_key": 1},
+        )
         if existing:
+            if not existing.get("default_key"):
+                await db.chat_channels.update_one({"id": existing["id"]}, {"$set": {"default_key": name}})
             continue
         now = _now_iso()
         await db.chat_channels.insert_one({
@@ -132,6 +140,7 @@ async def ensure_default_channels() -> None:
             "is_dm": False,
             "member_ids": [],
             "created_by": "system",
+            "default_key": name,
             "created_at": now,
             "updated_at": now,
         })
@@ -147,6 +156,10 @@ async def initialize_chat_storage() -> None:
     # Conversation controls are an actor-owned view of an existing channel;
     # they never change membership, messages, or the channel itself.
     await db.chat_user_preferences.create_index([("tenant_id", 1), ("user_id", 1), ("channel_id", 1)], unique=True)
+    # Channel configuration history is append-only audit evidence; the
+    # channel document remains the current-state authority.
+    await db.chat_channel_events.create_index([("channel_id", 1), ("created_at", -1)])
+    await db.chat_channel_events.create_index([("tenant_id", 1), ("created_at", -1)])
     await db.presence_state.create_index([("user_id", 1), ("last_heartbeat", -1)])
     await db.chat_typing.create_index([("channel_id", 1), ("ts", -1)])
     await db.ticket_handoffs.create_index([("to_user_id", 1), ("status", 1), ("created_at", -1)])
