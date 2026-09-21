@@ -383,9 +383,13 @@ async def delete_channel(channel_id: str, current_user: dict = Depends(get_curre
     # Only created_by or admin can delete
     if ch.get("created_by") != current_user.get("id") and not is_chat_admin(current_user):
         raise HTTPException(403, "Cannot delete this channel")
-    await db.chat_channels.delete_one({"id": channel_id})
-    await db.chat_messages.delete_many({"channel_id": channel_id})
-    return {"ok": True}
+    await db.chat_channels.update_one(
+        {"id": channel_id},
+        {"$set": {"deleted": True, "deleted_at": _now(), "deleted_by": current_user.get("id")}},
+    )
+    # Keep posts and attachments intact for authorised audit/recovery; the
+    # channel disappears from every normal visibility query immediately.
+    return {"ok": True, "archived": True}
 
 
 @router.post("/chat/group-dm")

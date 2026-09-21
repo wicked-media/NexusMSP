@@ -79,19 +79,21 @@ def channel_visibility_query(user: dict) -> dict[str, Any]:
         member_clause = {"$and": [{"member_ids": uid}, {"kind": {"$ne": "client_direct"}}]}
 
     if is_chat_admin(user):
-        return {"$or": [{"kind": "team"}, member_clause]}
-    return {
+        visibility = {"$or": [{"kind": "team"}, member_clause]}
+    else:
+        visibility = {
         "$or": [
             {"kind": "team", "is_private": False},
             {"kind": "team", "is_private": {"$exists": False}, "member_ids": {"$size": 0}},
             member_clause,
         ]
     }
+    return {"$and": [{"deleted": {"$ne": True}}, visibility]}
 
 
 async def require_channel_access(channel_id: str, user: dict) -> dict:
     channel = await db.chat_channels.find_one({"id": channel_id}, {"_id": 0})
-    if not channel:
+    if not channel or channel.get("deleted") is True:
         raise HTTPException(404, "Channel not found")
     if not channel_is_accessible(channel, user):
         raise HTTPException(403, "You do not have access to this conversation")
