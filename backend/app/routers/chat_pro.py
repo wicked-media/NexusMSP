@@ -681,8 +681,6 @@ async def update_channel_details(channel_id: str, payload: dict = Body(...), cur
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,49}", name):
             raise HTTPException(400, "Channel names must be 2-50 letters, numbers, dashes, or underscores")
         if name != channel.get("name"):
-            if channel.get("created_by") == "system":
-                raise HTTPException(403, "Default channel names cannot be changed")
             duplicate = await db.chat_channels.find_one({"name": name, "kind": "team", "id": {"$ne": channel_id}, "deleted": {"$ne": True}}, {"_id": 1})
             if duplicate:
                 raise HTTPException(409, "A channel with that name already exists")

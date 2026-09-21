@@ -225,7 +225,7 @@ export default function TeamChatPage() {
     || user?.is_admin
     || ["admin", "owner"].includes(String(user?.role || "").toLowerCase())
   );
-  const canRenameActiveChannel = canEditActiveChannel && activeChannel?.created_by !== "system";
+  const canRenameActiveChannel = canEditActiveChannel;
 
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 

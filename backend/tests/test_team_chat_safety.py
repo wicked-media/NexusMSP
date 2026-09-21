@@ -90,6 +90,10 @@ class MutableChannelCollection(ChannelCollection):
         self.update = (query, update)
         return SimpleNamespace(modified_count=1)
 
+    async def find_one(self, query, *_args, **_kwargs):
+        # The rename uniqueness lookup deliberately excludes this channel.
+        return None if "name" in query else self.existing
+
 
 class MessageCollection:
     async def find_one(self, *_args, **_kwargs):
@@ -234,3 +238,21 @@ def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
     assert result["description"] == "Coordinate service desk work"
     assert channels.update[0] == {"id": "team-1"}
     assert channels.update[1]["$set"]["description"] == "Coordinate service desk work"
+
+
+def test_admin_can_rename_a_default_team_channel(monkeypatch):
+    channel = {
+        "id": "team-1", "kind": "team", "name": "general",
+        "created_by": "system", "is_private": False, "member_ids": [],
+    }
+    channels = MutableChannelCollection(existing=channel)
+    fake_db = SimpleNamespace(chat_channels=channels)
+    monkeypatch.setattr(chat_pro, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_pro.update_channel_details(
+        "team-1", {"name": "Company Announcements"}, current_user={"id": "admin-1", "role": "admin"},
+    ))
+
+    assert result["name"] == "company-announcements"
+    assert result["display_name"] == "Company Announcements"
