@@ -89,15 +89,16 @@ export function channelDisplayName(channel) {
 export function conversationPreview(channel, now = Date.now()) {
   const message = channel?.last_message;
   const text = repairDisplayText(message?.body || "");
+  const isSystemMessage = Boolean(message?.is_system || /^(nexus|nexusops)$/i.test(String(message?.user_name || "").trim()));
   const isHistoricalFailure = Boolean(
-    message?.is_system
+    isSystemMessage
     && /unknown command|not found|could not|couldn't|invalid|failed|error/i.test(text)
     && Number.isFinite(Date.parse(message?.ts || ""))
     && now - Date.parse(message.ts) > 24 * 60 * 60 * 1000,
   );
   if (isHistoricalFailure) return channel?.description || "Historical system notice";
   if (message) {
-    const author = message.user_name ? `${chatAuthorName(message.user_name, message.is_system).split(" ")[0]}: ` : "";
+    const author = message.user_name ? `${chatAuthorName(message.user_name, isSystemMessage).split(" ")[0]}: ` : "";
     return `${author}${text || "Attachment"}`;
   }
   return channel?.kind === "team" ? channel.description || "Team channel" : "Start a conversation";

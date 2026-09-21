@@ -35,7 +35,7 @@ describe("team chat helpers", () => {
     expect(conversationPreview({
       kind: "team",
       description: "Daily handover and dispatch",
-      last_message: { is_system: true, user_name: "NexusOps", body: "Nexus AI could not create a summary right now.", ts: "2026-07-01T00:00:00Z" },
+      last_message: { user_name: "Nexus", body: "Nexus AI could not create a summary right now.", ts: "2026-07-01T00:00:00Z" },
     }, Date.parse("2026-07-03T00:00:01Z"))).toBe("Daily handover and dispatch");
   });
 
