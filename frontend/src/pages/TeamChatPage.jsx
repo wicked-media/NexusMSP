@@ -185,6 +185,10 @@ export default function TeamChatPage() {
   const [threadInput, setThreadInput] = useState("");
   const [emojiTarget, setEmojiTarget] = useState(null);
   const [composerEmojiOpen, setComposerEmojiOpen] = useState(false);
+  const [gifPickerOpen, setGifPickerOpen] = useState(false);
+  const [gifQuery, setGifQuery] = useState("");
+  const [gifResults, setGifResults] = useState([]);
+  const [gifState, setGifState] = useState("idle");
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState("");
   const [slashIndex, setSlashIndex] = useState(0);
@@ -705,6 +709,30 @@ export default function TeamChatPage() {
     }
   };
 
+  const loadGifs = async query => {
+    setGifState("loading");
+    try {
+      const response = await axios.get(`${API}/chat/gifs`, { headers, params: query ? { q: query } : {} });
+      setGifResults(response.data?.results || []);
+      setGifState("ready");
+    } catch (requestError) {
+      setGifResults([]);
+      setGifState(requestError?.response?.status === 503 ? "unconfigured" : "error");
+    }
+  };
+
+  const shareGif = async gif => {
+    if (!activeId) return;
+    try {
+      await axios.post(`${API}/chat/channels/${activeId}/gifs`, gif, { headers });
+      setGifPickerOpen(false);
+      toast.success("GIF shared");
+      refreshChannel({ quiet: true });
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "GIF could not be shared");
+    }
+  };
+
   const downloadFile = async attachment => {
     try {
       const response = await axios.get(`${API}/chat/files/${attachment.file_id}`, { headers, responseType: "blob" });
@@ -1130,7 +1158,7 @@ export default function TeamChatPage() {
                         </DropdownMenuContent>
                       </DropdownMenu>
                       <ComposerButton icon={Paperclip} label="Attach file" onClick={() => fileRef.current?.click()} />
-                      <ComposerButton icon={Image} label="Share GIF" onClick={() => gifRef.current?.click()} />
+                      <ComposerButton icon={Image} label="Share GIF" onClick={() => { setGifPickerOpen(true); if (gifState === "idle") loadGifs(""); }} />
                       <ComposerButton icon={Smile} label="Emoji" onClick={() => setComposerEmojiOpen(current => !current)} />
                       <ComposerButton icon={AtSign} label="Mention" onClick={() => setInput(current => `${current}@`)} />
                       <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Markdown · Shift+Enter for a new line</span>
@@ -1198,6 +1226,13 @@ export default function TeamChatPage() {
               autoFocus
             />
           </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+      <Dialog open={gifPickerOpen} onOpenChange={setGifPickerOpen}>
+        <NexusWorkflowDialog eyebrow="Media" title="Share a GIF" description="Search Tenor, or upload a GIF from your computer." icon={Image} tone="cyan" footer={<Button variant="outline" onClick={() => gifRef.current?.click()}>Upload GIF</Button>}>
+          <form className="flex gap-2" onSubmit={event => { event.preventDefault(); loadGifs(gifQuery); }}><Input value={gifQuery} onChange={event => setGifQuery(event.target.value)} placeholder="Search GIFs" autoFocus /><Button type="submit" disabled={gifState === "loading"}>{gifState === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}</Button></form>
+          {gifState === "unconfigured" ? <p className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] p-3 text-sm text-amber-100">GIF search is ready for a Tenor API key. You can still upload a GIF now.</p> : gifState === "error" ? <p className="mt-4 text-sm text-rose-200">GIF search is temporarily unavailable. Try again or upload a GIF.</p> : <div className="mt-4 grid grid-cols-3 gap-2">{gifResults.map(gif => <button key={gif.id} type="button" onClick={() => shareGif(gif)} className="overflow-hidden rounded-lg border border-white/10 bg-black/20 hover:border-cyan-400/50"><img src={gif.preview_url} alt={gif.title || "GIF"} className="aspect-video w-full object-cover" /></button>)}</div>}
+          {gifState === "ready" && <p className="mt-3 text-[10px] text-zinc-500">Powered by Tenor</p>}
         </NexusWorkflowDialog>
       </Dialog>
       <Dialog
@@ -1771,6 +1806,9 @@ function WorkPresence({ kind, reference, workItemId, presence, headers }) {
 }
 
 function AttachmentCard({ attachment, headers, onDownload }) {
+  if (attachment.is_external && attachment.provider === "tenor") {
+    return <a href={attachment.url} target="_blank" rel="noreferrer" className="mt-2 block max-w-md overflow-hidden rounded-lg border border-white/10 bg-black/20 hover:border-cyan-400/40"><img src={attachment.preview_url || attachment.url} alt={attachment.filename || "Shared GIF"} className="max-h-80 w-full object-contain" /><span className="block border-t border-white/10 px-3 py-1.5 text-[10px] text-zinc-500">GIF · Powered by Tenor</span></a>;
+  }
   return (
     <div className="mt-2 w-full max-w-md overflow-hidden rounded-lg border border-white/10 bg-black/20">
       {attachment.is_image && <ImageAttachmentPreview attachment={attachment} headers={headers} onDownload={onDownload} />}

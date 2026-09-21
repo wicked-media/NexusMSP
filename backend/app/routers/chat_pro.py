@@ -2,9 +2,11 @@
 from fastapi import APIRouter, HTTPException, Depends, Body
 from fastapi.responses import Response
 from datetime import datetime, timezone
-import asyncio, uuid, re, base64
+import asyncio, uuid, re, base64, os
 from pathlib import Path
 from urllib.parse import quote
+from urllib.parse import urlparse
+import httpx
 from app.database import db
 from app.auth import get_current_user
 from app.services.chat_access import (
@@ -25,6 +27,55 @@ router = APIRouter()
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _tenor_asset_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme == "https" and parsed.hostname == "media.tenor.com"
+
+
+@router.get("/chat/gifs")
+async def search_tenor_gifs(q: str = "", current_user: dict = Depends(get_current_user)):
+    """Return a safe, minimal Tenor result set without exposing the API key."""
+    api_key = os.environ.get("TENOR_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(503, "GIF search is not configured. Add TENOR_API_KEY to enable it.")
+    query = q.strip()
+    if len(query) > 100:
+        raise HTTPException(400, "GIF search is limited to 100 characters")
+    endpoint = "https://tenor.googleapis.com/v2/search" if query else "https://tenor.googleapis.com/v2/featured"
+    params = {"key": api_key, "client_key": os.environ.get("NEXUS_TENOR_CLIENT_KEY", "nexus_msp"), "limit": 24, "media_filter": "tinygif,gif"}
+    if query:
+        params["q"] = query
+    try:
+        async with httpx.AsyncClient(timeout=7.0, follow_redirects=False) as client:
+            response = await client.get(endpoint, params=params)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "GIF search is temporarily unavailable") from exc
+    results = []
+    for row in response.json().get("results") or []:
+        formats = row.get("media_formats") or {}
+        preview = (formats.get("tinygif") or {}).get("url")
+        original = (formats.get("gif") or {}).get("url")
+        if not (_tenor_asset_url(str(preview or "")) and _tenor_asset_url(str(original or ""))):
+            continue
+        results.append({"id": str(row.get("id") or ""), "title": str(row.get("content_description") or "GIF")[:160], "preview_url": preview, "url": original})
+    return {"provider": "tenor", "results": results}
+
+
+@router.post("/chat/channels/{channel_id}/gifs")
+async def share_tenor_gif(channel_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
+    channel = await require_channel_access(channel_id, current_user)
+    gif_id = str(payload.get("id") or "")
+    preview_url, url = str(payload.get("preview_url") or ""), str(payload.get("url") or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", gif_id) or not (_tenor_asset_url(preview_url) and _tenor_asset_url(url)):
+        raise HTTPException(400, "Invalid GIF asset")
+    msg = {"id": uuid.uuid4().hex, "channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "body": "", "ts": _now(), "edited": False, "reactions": {}, "attachment": {"provider": "tenor", "provider_id": gif_id, "filename": str(payload.get("title") or "GIF")[:160], "is_image": True, "is_external": True, "preview_url": preview_url, "url": url}}
+    await db.chat_messages.insert_one(dict(msg))
+    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}})
+    publish_channel_update(channel_id, "gif.shared", live_update_recipients(channel))
+    return msg
 
 
 # ============================================================================
