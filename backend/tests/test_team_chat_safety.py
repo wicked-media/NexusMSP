@@ -81,6 +81,11 @@ class ReadStateCollection:
         return SimpleNamespace(modified_count=1)
 
 
+class MessageCollection:
+    async def find_one(self, *_args, **_kwargs):
+        return {"ts": "2026-09-21T10:30:00+00:00"}
+
+
 def test_mark_read_uses_the_same_timestamp_field_as_previews(monkeypatch):
     channel = {"id": "channel-1", "kind": "team", "is_private": False, "member_ids": []}
     channels = ChannelCollection(existing=channel)
@@ -93,6 +98,20 @@ def test_mark_read_uses_the_same_timestamp_field_as_previews(monkeypatch):
 
     assert "last_read_at" in reads.update[1]["$set"]
     assert "last_read_ts" not in reads.update[1]["$set"]
+
+
+def test_mark_unread_rewinds_only_to_the_latest_received_message(monkeypatch):
+    channel = {"id": "channel-1", "kind": "team", "is_private": False, "member_ids": []}
+    channels = ChannelCollection(existing=channel)
+    reads = ReadStateCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, chat_read_state=reads, chat_messages=MessageCollection())
+    monkeypatch.setattr(chat_presence, "db", fake_db)
+    monkeypatch.setattr(chat_access, "db", fake_db)
+
+    result = asyncio.run(chat_presence.mark_unread("channel-1", current_user={"id": "user-1"}))
+
+    assert result["ok"] is True
+    assert reads.update[1]["$set"]["last_read_at"] == "2026-09-21T10:29:59.999999+00:00"
 
 
 class FileCollection:

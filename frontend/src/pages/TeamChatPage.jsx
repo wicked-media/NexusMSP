@@ -45,6 +45,7 @@ import {
   Link as LinkIcon,
   Lock,
   List,
+  Mail,
   MessageCircle,
   MessageSquarePlus,
   MoreHorizontal,
@@ -206,6 +207,7 @@ export default function TeamChatPage() {
   const gifRef = useRef(null);
   const composerRef = useRef(null);
   const openedThreadRef = useRef("");
+  const manuallyUnreadChannelIdsRef = useRef(new Set());
 
   const activeChannel = channels.find(channel => channel.id === activeId);
   const presenceFor = userId => presence[userId]?.led || "offline";
@@ -302,7 +304,9 @@ export default function TeamChatPage() {
       setReadReceipts(receiptResponse.data || []);
       setTypingUsers(typingResponse.data || []);
       setChannels(current => current.map(channel => channel.id === channelId ? { ...channel, unread_count: 0 } : channel));
-      axios.post(`${API}/chat/channels/${channelId}/read`, {}, { headers }).catch(() => {});
+      if (!manuallyUnreadChannelIdsRef.current.has(channelId)) {
+        axios.post(`${API}/chat/channels/${channelId}/read`, {}, { headers }).catch(() => {});
+      }
     } catch (requestError) {
       if (activeIdRef.current === channelId) setError(requestError?.response?.data?.detail || "This conversation could not be refreshed.");
     } finally {
@@ -423,12 +427,30 @@ export default function TeamChatPage() {
   const visibleChannels = useMemo(() => filterChatChannels(channels, mode, query), [channels, mode, query]);
 
   const selectChannel = channelId => {
+    manuallyUnreadChannelIdsRef.current.delete(channelId);
     setActiveId(channelId);
     setSearchParams({ channel: channelId }, { replace: true });
     setSearchResults(null);
     setQuery("");
     setMobileConversationOpen(true);
     setShowInfo(false);
+  };
+
+  const markConversationUnread = async () => {
+    if (!activeChannel) return;
+    try {
+      const response = await axios.post(`${API}/chat/channels/${activeChannel.id}/mark-unread`, {}, { headers });
+      if (!response.data?.ok) {
+        toast.message("There are no received messages to return to your inbox.");
+        return;
+      }
+      manuallyUnreadChannelIdsRef.current.add(activeChannel.id);
+      setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, unread_count: Math.max(1, Number(channel.unread_count || 0)) } : channel));
+      setMode("activity");
+      toast.success("Conversation returned to your inbox.");
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Conversation could not be marked unread.");
+    }
   };
 
   const updateConversationPreference = async (field, value) => {
@@ -914,6 +936,9 @@ export default function TeamChatPage() {
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => updateConversationPreference("is_muted", !activeChannel.is_muted)}>
                       {activeChannel.is_muted ? <Volume2 className="mr-2 h-4 w-4" /> : <VolumeX className="mr-2 h-4 w-4" />}{activeChannel.is_muted ? "Turn notifications on" : "Mute notifications"}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={markConversationUnread}>
+                      <Mail className="mr-2 h-4 w-4" />Mark unread
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

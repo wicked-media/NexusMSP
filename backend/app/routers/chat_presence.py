@@ -13,6 +13,7 @@ Endpoints:
     POST /api/chat/channels/{id}/messages â€” send message
     GET  /api/chat/channels/{id}/messages?since=iso â€” fetch recent
     POST /api/chat/channels/{id}/read   â€” mark all read for me
+    POST /api/chat/channels/{id}/mark-unread — restore the newest received post to my inbox
     GET  /api/chat/unread               â€” unread counts per channel
 
   Slash commands:
@@ -445,6 +446,35 @@ async def mark_read(channel_id: str, current_user: dict = Depends(get_current_us
         upsert=True,
     )
     return {"ok": True}
+
+
+@router.post("/chat/channels/{channel_id}/mark-unread")
+async def mark_unread(channel_id: str, current_user: dict = Depends(get_current_user)):
+    """Move the newest received top-level post back into the caller's inbox."""
+    await require_channel_access(channel_id, current_user)
+    newest_received = await db.chat_messages.find_one(
+        {
+            "channel_id": channel_id,
+            "thread_id": {"$exists": False},
+            "user_id": {"$ne": current_user.get("id")},
+            "deleted": {"$ne": True},
+        },
+        {"_id": 0, "ts": 1},
+        sort=[("ts", -1)],
+    )
+    if not newest_received or not newest_received.get("ts"):
+        return {"ok": False, "reason": "no_received_message"}
+    try:
+        marker = datetime.fromisoformat(str(newest_received["ts"]).replace("Z", "+00:00")) - timedelta(microseconds=1)
+        last_read_at = marker.isoformat()
+    except (TypeError, ValueError):
+        raise HTTPException(409, "The newest message does not have a valid timestamp")
+    await db.chat_read_state.update_one(
+        {"channel_id": channel_id, "user_id": current_user.get("id")},
+        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": last_read_at}},
+        upsert=True,
+    )
+    return {"ok": True, "last_read_at": last_read_at}
 
 
 @router.get("/chat/channels/{channel_id}/read-receipts")
