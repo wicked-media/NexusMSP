@@ -258,8 +258,6 @@ export default function TeamChatPage() {
 
   useEffect(() => {
     loadWorkspace();
-    const timer = setInterval(() => loadWorkspace({ quiet: true }), 8000);
-    return () => clearInterval(timer);
   }, [loadWorkspace]);
 
   useEffect(() => {
@@ -312,9 +310,60 @@ export default function TeamChatPage() {
     nearBottomRef.current = true;
     if (!activeId) return undefined;
     refreshChannel();
-    const timer = setInterval(() => refreshChannel({ quiet: true }), 3000);
-    return () => clearInterval(timer);
   }, [activeId, refreshChannel]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    const controller = new AbortController();
+    let reconnectTimer;
+    let fallbackTimer;
+
+    const refreshFromEvent = event => {
+      if (event?.type !== "chat.channel.updated") return;
+      loadWorkspace({ quiet: true });
+      if (event.channel_id === activeIdRef.current) refreshChannel({ quiet: true });
+    };
+
+    const connect = async () => {
+      try {
+        const response = await fetch(`${API}/chat/events/stream`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream" },
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) throw new Error("Chat live updates are unavailable");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() || "";
+          frames.forEach(frame => {
+            const data = frame.split("\n").find(line => line.startsWith("data:"));
+            if (!data) return;
+            try { refreshFromEvent(JSON.parse(data.slice(5).trim() || "{}")); } catch { /* ignore malformed transient frames */ }
+          });
+        }
+      } catch (streamError) {
+        if (streamError?.name !== "AbortError") reconnectTimer = window.setTimeout(connect, 1_500);
+      }
+    };
+
+    connect();
+    // A quiet recovery pass covers a server restart or a missed ephemeral
+    // invalidation without returning to the old high-frequency polling model.
+    fallbackTimer = window.setInterval(() => {
+      loadWorkspace({ quiet: true });
+      if (activeIdRef.current) refreshChannel({ quiet: true });
+    }, 45_000);
+    return () => {
+      controller.abort();
+      window.clearTimeout(reconnectTimer);
+      window.clearInterval(fallbackTimer);
+    };
+  }, [loadWorkspace, refreshChannel, token]);
 
   const lastMessageId = messages.filter(message => !message.thread_id).at(-1)?.id;
   useEffect(() => {

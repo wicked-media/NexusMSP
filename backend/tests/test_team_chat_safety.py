@@ -21,7 +21,7 @@ os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "nexusops-tests")
 
 from app.routers import chat_presence, chat_pro  # noqa: E402
-from app.services import chat_access  # noqa: E402
+from app.services import chat_access, chat_live  # noqa: E402
 
 
 def test_channel_access_preserves_dm_privacy_even_for_admins():
@@ -150,3 +150,16 @@ def test_presence_moves_to_away_before_offline(monkeypatch):
     by_id = {row["user_id"]: row["led"] for row in result["users"]}
 
     assert by_id == {"away": "away", "offline": "offline"}
+
+
+def test_private_chat_live_updates_never_reach_non_members():
+    member_id, member_queue = chat_live.subscribe("member-1")
+    outsider_id, outsider_queue = chat_live.subscribe("outsider")
+    try:
+        chat_live.publish_channel_update("private-channel", "message.created", ["member-1", "member-2"])
+        event = asyncio.run(member_queue.get())
+        assert event == {"type": "chat.channel.updated", "channel_id": "private-channel", "kind": "message.created"}
+        assert outsider_queue.empty()
+    finally:
+        chat_live.unsubscribe(member_id)
+        chat_live.unsubscribe(outsider_id)

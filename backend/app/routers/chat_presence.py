@@ -26,7 +26,8 @@ LED computation rule (frontend):
   - off_shift (white): out of tech_roster shift_start..shift_end
   - offline (grey): heartbeat > 60s ago
 """
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
+from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone, timedelta
 import asyncio, os, re, uuid
 from typing import Optional
@@ -40,6 +41,7 @@ from app.services.chat_access import (
     ensure_default_channels,
     require_channel_access,
 )
+from app.services.chat_live import publish_channel_update, stream_events
 from app.services.avatar_enrichment import attach_user_avatars
 from app.services.scope_permissions import assert_client_scope
 
@@ -311,6 +313,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         {"id": channel_id},
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
+    publish_channel_update(channel_id, "message.created", channel_member_ids(ch))
     msg.pop("_id", None)
 
     notified_ids = set()
@@ -393,6 +396,23 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
                 "created_at": _now_iso(),
             })
     return msg
+
+
+def channel_member_ids(channel: dict) -> list[str] | None:
+    """Return a constrained recipient list for private chat fan-out only."""
+    if channel.get("is_private") or (channel.get("kind") or "") in {"dm", "group_dm", "client_direct"}:
+        return list(channel.get("member_ids") or [])
+    return None
+
+
+@router.get("/chat/events/stream")
+async def chat_event_stream(request: Request, current_user: dict = Depends(get_current_user)):
+    """Authenticated SSE invalidations; message contents remain REST-only."""
+    return StreamingResponse(
+        stream_events(request, str(current_user.get("id") or "")),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/chat/channels/{channel_id}/messages")
