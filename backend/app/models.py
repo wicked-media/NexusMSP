@@ -627,6 +627,7 @@ class EmailMessage(BaseModel):
     cc_addresses: List[str] = []
     client_id: Optional[str] = None
     client_name: Optional[str] = None
+    tenant_id: Optional[str] = None
     ticket_id: Optional[str] = None
     direction: str = "outbound"  # inbound, outbound
     status: str = "draft"  # draft, sent, failed, received
@@ -641,8 +642,8 @@ class EmailMessageCreate(BaseModel):
     subject: str
     body: str
     body_type: str = "html"
-    to_addresses: List[str]
-    cc_addresses: List[str] = []
+    to_addresses: List[EmailStr]
+    cc_addresses: List[EmailStr] = []
     client_id: Optional[str] = None
     ticket_id: Optional[str] = None
 

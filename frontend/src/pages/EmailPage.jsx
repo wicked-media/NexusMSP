@@ -423,7 +423,7 @@ export default function EmailPage() {
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=mailbox")} className="shrink-0">
-            {status.configured ? "Review delivery audit" : "Connect mailbox"}
+            {status.configured ? "Mailbox settings" : "Connect mailbox"}
             <ExternalLink className="ml-1.5 h-3.5 w-3.5" />
           </Button>
         </CardContent>
@@ -463,6 +463,7 @@ export default function EmailPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
+                aria-label="Search communications"
                 placeholder="Search subject, client, or address…"
                 className="pl-9"
                 data-testid="email-search"

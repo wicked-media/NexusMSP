@@ -9,6 +9,13 @@ from app.models import *
 from app.services.integrations import domotz_service, office365_service, acronis_service
 from app.services.microsoft365_credentials import has_microsoft365_client_secret
 from app.services.secret_store import encrypt_secret
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -177,7 +184,7 @@ async def get_emails(
     limit: int = 50,
     current_user: dict = Depends(get_current_user)
 ):
-    query = {}
+    query: dict[str, Any] = {}
     if client_id:
         query["client_id"] = client_id
     if ticket_id:
@@ -185,7 +192,11 @@ async def get_emails(
     if direction:
         query["direction"] = direction
     
-    emails = await db.emails.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    safe_limit = max(1, min(int(limit), 200))
+    emails = await db.emails.find(
+        scoped_query(current_user, tenant_scoped_query(current_user, query)),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(safe_limit)
     for e in emails:
         if isinstance(e.get('created_at'), str):
             e['created_at'] = datetime.fromisoformat(e['created_at'])
@@ -193,10 +204,33 @@ async def get_emails(
 
 @router.post("/emails")
 async def create_email(email_data: EmailMessageCreate, current_user: dict = Depends(get_current_user)):
+    effective_client_id = email_data.client_id
     client_name = None
-    if email_data.client_id:
-        client = await db.clients.find_one({"id": email_data.client_id}, {"_id": 0})
-        client_name = client['name'] if client else None
+    ticket = None
+    if email_data.ticket_id:
+        ticket = await assert_tenant_record_scope(
+            current_user,
+            db.tickets,
+            email_data.ticket_id,
+            operation="communications.email.create",
+            resource_name="Ticket",
+        )
+        ticket_client_id = ticket.get("client_id")
+        if effective_client_id and ticket_client_id and str(effective_client_id) != str(ticket_client_id):
+            raise HTTPException(status_code=422, detail="The selected client does not match the linked ticket")
+        effective_client_id = effective_client_id or ticket_client_id
+    if effective_client_id:
+        client = await assert_tenant_record_scope(
+            current_user,
+            db.clients,
+            effective_client_id,
+            client_field="id",
+            operation="communications.email.create",
+            resource_name="Client",
+        )
+        client_name = client.get("name")
+    else:
+        await assert_client_scope(current_user, None, operation="communications.email.create")
     
     from app.routers.email_signatures import append_default_signature
     body, body_type, _signature_id = await append_default_signature(
@@ -215,8 +249,9 @@ async def create_email(email_data: EmailMessageCreate, current_user: dict = Depe
         from_name=current_user.get('name'),
         to_addresses=email_data.to_addresses,
         cc_addresses=email_data.cc_addresses,
-        client_id=email_data.client_id,
+        client_id=effective_client_id,
         client_name=client_name,
+        tenant_id=platform_tenant_id(current_user),
         ticket_id=email_data.ticket_id,
         direction="outbound",
         status="draft"
@@ -228,9 +263,15 @@ async def create_email(email_data: EmailMessageCreate, current_user: dict = Depe
 
 @router.post("/emails/{email_id}/send")
 async def send_email(email_id: str, current_user: dict = Depends(get_current_user)):
-    email = await db.emails.find_one({"id": email_id}, {"_id": 0})
-    if not email:
-        raise HTTPException(status_code=404, detail="Email not found")
+    email = await assert_tenant_record_scope(
+        current_user,
+        db.emails,
+        email_id,
+        operation="communications.email.send",
+        resource_name="Email",
+    )
+    if email.get("status") != "draft":
+        raise HTTPException(status_code=409, detail="Only a saved draft can be sent")
     
     try:
         # Drafts created before signature support (or imported drafts) receive
