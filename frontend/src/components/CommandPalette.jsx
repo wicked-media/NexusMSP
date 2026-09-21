@@ -6,7 +6,6 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { API, useAuth } from "@/App";
-import { useClientContext } from "@/contexts/ClientContext";
 import { getAllNavItems } from "@/config/navigation";
 import { toast } from "sonner";
 import {
@@ -125,7 +124,6 @@ function paletteIcon(item) {
 
 export default function CommandPalette() {
   const { token } = useAuth();
-  const { activeClient, activeClientId } = useClientContext() || {};
   const navigate = useNavigate();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [open, setOpen] = useState(false);
@@ -192,7 +190,9 @@ export default function CommandPalette() {
       try {
         const response = await axios.get(`${API}/command-palette/search`, {
           headers,
-          params: { q: q.trim(), ...(activeClientId ? { client_id: activeClientId } : {}) },
+          // The palette is global by design. Client-specific workspaces expose
+          // their own visible filters rather than applying a hidden scope here.
+          params: { q: q.trim() },
         });
         setSearch({ ...EMPTY_SEARCH, ...(response.data || {}) });
       } catch {
@@ -202,7 +202,7 @@ export default function CommandPalette() {
       }
     }, 180);
     return () => clearTimeout(debounceRef.current);
-  }, [q, token, open, headers, activeClientId]);
+  }, [q, token, open, headers]);
 
   const sections = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -550,7 +550,7 @@ export default function CommandPalette() {
               </span>
               <div>
                 <p className="text-xs font-semibold text-foreground">Nexus Command</p>
-                <p className="text-[10px] text-muted-foreground">{activeClient ? `Prioritising ${activeClient.name}` : "Search every connected Nexus record or describe an operational outcome"}</p>
+                <p className="text-[10px] text-muted-foreground">Search every connected Nexus record or describe an operational outcome</p>
               </div>
             </div>
             <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/[0.07] text-[9px] text-emerald-700 dark:text-emerald-200">
