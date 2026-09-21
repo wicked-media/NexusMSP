@@ -651,12 +651,13 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
 
 @router.post("/chat/channels/{channel_id}/typing")
 async def typing(channel_id: str, current_user: dict = Depends(get_current_user)):
-    await require_channel_access(channel_id, current_user)
+    channel = await require_channel_access(channel_id, current_user)
     await db.chat_typing.update_one(
         {"channel_id": channel_id, "user_id": current_user.get("id")},
         {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "ts": _now()}},
         upsert=True,
     )
+    publish_channel_update(channel_id, "typing.updated", live_update_recipients(channel))
     return {"ok": True}
 
 

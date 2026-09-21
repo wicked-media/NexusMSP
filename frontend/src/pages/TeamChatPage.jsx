@@ -318,6 +318,14 @@ export default function TeamChatPage() {
     }
   }, [headers]);
 
+  const refreshTyping = useCallback(async channelId => {
+    if (!channelId || channelId !== activeIdRef.current) return;
+    try {
+      const response = await axios.get(`${API}/chat/channels/${channelId}/typing`, { headers });
+      if (channelId === activeIdRef.current) setTypingUsers(response.data || []);
+    } catch { /* Typing is ephemeral; preserve the last known state until the next update. */ }
+  }, [headers]);
+
   useEffect(() => {
     setMessages([]);
     setPinned([]);
@@ -337,6 +345,10 @@ export default function TeamChatPage() {
 
     const refreshFromEvent = event => {
       if (event?.type !== "chat.channel.updated") return;
+      if (event.kind === "typing.updated") {
+        refreshTyping(event.channel_id);
+        return;
+      }
       loadWorkspace({ quiet: true });
       if (event.channel_id === activeIdRef.current) refreshChannel({ quiet: true });
     };
@@ -380,7 +392,7 @@ export default function TeamChatPage() {
       window.clearTimeout(reconnectTimer);
       window.clearInterval(fallbackTimer);
     };
-  }, [loadWorkspace, refreshChannel, token]);
+  }, [loadWorkspace, refreshChannel, refreshTyping, token]);
 
   const lastMessageId = messages.filter(message => !message.thread_id).at(-1)?.id;
   useEffect(() => {
