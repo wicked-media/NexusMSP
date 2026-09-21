@@ -116,6 +116,7 @@ function MemorySearch({ api }) {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 className="h-11 border-violet-500/20 bg-background/70 pl-10"
+                aria-label="Search Nexus memory"
                 placeholder='Try "the broken printer from last week" or "when did we stop using Veeam?"'
                 data-testid="second-brain-search-input"
               />
@@ -180,7 +181,7 @@ function MemorySearch({ api }) {
   );
 }
 
-function RecommendationCard({ item, onDecision }) {
+function RecommendationCard({ item, onDecision, saving }) {
   const decision = item.decision;
   return (
     <div className={`rounded-2xl border p-4 ${PRIORITY[item.priority] || PRIORITY.low}`} data-testid={`second-brain-recommendation-${item.id}`}>
@@ -209,14 +210,14 @@ function RecommendationCard({ item, onDecision }) {
         </Button>
         {!decision ? (
           <>
-            <Button size="sm" variant="outline" onClick={() => onDecision(item, "accepted")}><Check className="mr-1.5 h-3.5 w-3.5" />Useful</Button>
-            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "snoozed")}><History className="mr-1.5 h-3.5 w-3.5" />Snooze</Button>
-            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "dismissed")}><X className="mr-1.5 h-3.5 w-3.5" />Dismiss</Button>
+            <Button size="sm" variant="outline" onClick={() => onDecision(item, "accepted")} disabled={saving}><Check className="mr-1.5 h-3.5 w-3.5" />Useful</Button>
+            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "snoozed")} disabled={saving}><History className="mr-1.5 h-3.5 w-3.5" />Snooze</Button>
+            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "dismissed")} disabled={saving}><X className="mr-1.5 h-3.5 w-3.5" />Dismiss</Button>
           </>
         ) : (
           <>
             <Badge className="capitalize" variant="secondary">{decision.status} by {decision.user_name || "technician"}</Badge>
-            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "reset")}>Reset review</Button>
+            <Button size="sm" variant="ghost" onClick={() => onDecision(item, "reset")} disabled={saving}>Reset review</Button>
           </>
         )}
         <span className="ml-auto text-[10px] text-muted-foreground">{item.evidence_ids?.length || 0} linked evidence records · no automatic action</span>
@@ -470,7 +471,7 @@ export default function SecondBrainView({ api }) {
           </CardHeader>
           <CardContent className="space-y-3">
             {recommendations.length ? recommendations.slice(0, 8).map((item) => (
-              <RecommendationCard key={item.id} item={item} onDecision={chooseDecision} />
+              <RecommendationCard key={item.id} item={item} onDecision={chooseDecision} saving={saving} />
             )) : (
               <EmptyState icon={Check} title="No open recommendations" body="Either the current evidence does not support a recommendation or this technician has reviewed the available items." />
             )}

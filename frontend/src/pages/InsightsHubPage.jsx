@@ -570,7 +570,7 @@ function RunbooksView({ api }) {
       <CardHeader className="flex flex-col gap-3 border-b border-border/60 bg-gradient-to-r from-sky-400/[0.07] to-transparent pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-300">Reusable operational knowledge</p><CardTitle className="mt-1 text-sm">Runbook library · {rows.length} published</CardTitle><p className="mt-1 text-xs text-muted-foreground">Search the reviewed steps your team can reuse while working a ticket.</p></div>
         <div className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
-          <Input placeholder="Search title, tag, or category…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 min-w-0 text-xs sm:w-64" data-testid="runbook-search" />
+          <Input aria-label="Search runbooks" placeholder="Search title, tag, or category…" value={q} onChange={(e) => setQ(e.target.value)} className="h-9 min-w-0 text-xs sm:w-64" data-testid="runbook-search" />
           <Button variant="outline" size="sm" onClick={reload} className="shrink-0 rounded-xl"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button>
         </div>
       </CardHeader>
