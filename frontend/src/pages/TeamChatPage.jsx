@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
 import { toast } from "sonner";
 import {
   Activity,
@@ -36,6 +37,7 @@ import {
   Edit3,
   FileText,
   Hash,
+  Image,
   Loader2,
   Link as LinkIcon,
   Lock,
@@ -80,6 +82,12 @@ import {
 import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "👀"];
+const EMOJI_GROUPS = [
+  { label: "Frequently used", emojis: ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "👀"] },
+  { label: "People", emojis: ["😀", "😁", "😂", "🥹", "😍", "😎", "🤔", "🙌", "👏", "🙏", "💪", "👋"] },
+  { label: "Work", emojis: ["✅", "❗", "⚠️", "🔒", "🛠️", "💻", "📎", "📌", "📣", "🟢", "🔴", "⏳"] },
+  { label: "Objects", emojis: ["🚀", "💡", "🎯", "📈", "🧠", "🔍", "🧩", "☕", "🎉", "✨", "💬", "🤝"] },
+];
 const TICKET_REGEX = /\/ticket\s+([\w-]+)/gi;
 const INVOICE_REGEX = /\/invoice\s+([\w-]+)/gi;
 const PO_REGEX = /\/po\s+([\w-]+)/gi;
@@ -186,6 +194,7 @@ export default function TeamChatPage() {
   const nearBottomRef = useRef(true);
   const typingAtRef = useRef(0);
   const fileRef = useRef(null);
+  const gifRef = useRef(null);
   const composerRef = useRef(null);
   const openedThreadRef = useRef("");
 
@@ -633,27 +642,27 @@ export default function TeamChatPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="team-chat-page">
-      <section className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d141b] text-zinc-100 shadow-[0_24px_70px_-40px_rgba(0,0,0,0.95)]">
-        <header className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-[72px] flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] bg-[linear-gradient(110deg,rgba(15,25,34,0.99),rgba(13,20,27,0.97))] px-4 py-3 md:px-5`}>
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Nexus</p>
-            <div className="mt-1 flex items-center gap-2.5">
-              <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-500/[0.12] text-emerald-300"><MessageCircle className="h-4 w-4" /></span>
-              <div>
-                <h1 className="text-lg font-semibold tracking-tight text-white md:text-xl">Chat</h1>
-                <p className="hidden max-w-xl text-xs text-zinc-400 lg:block">Secure team conversations, customer handovers, and operational context.</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] px-2.5 text-xs text-emerald-200"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" /></span>{activePeople} active</span>
-            <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={() => setShowMessageSearch(true)} aria-label="Search messages"><Search className="h-3.5 w-3.5" /></Button>
-            <Button variant="outline" size="sm" className="h-8 px-2.5" onClick={() => { loadWorkspace({ quiet: true }); refreshChannel({ quiet: true }); }} disabled={loading || channelLoading} data-testid="refresh-team-chat-btn"><RefreshCw className={`h-3.5 w-3.5 ${(loading || channelLoading) ? "animate-spin" : ""}`} /><span className="ml-1.5 hidden sm:inline">Refresh</span></Button>
-            <Button size="sm" className="h-8 px-3" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn"><MessageSquarePlus className="mr-1.5 h-3.5 w-3.5" />New conversation</Button>
-          </div>
-        </header>
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d141b] text-zinc-100 shadow-[0_24px_70px_-40px_rgba(0,0,0,0.95)]">
+        <NexusWorkspaceHeader
+          eyebrow="Service desk"
+          title="Chat"
+          description="Secure team conversations, customer handovers, and operational context."
+          icon={MessageCircle}
+          tone="emerald"
+          signal={activePeople > 0 ? "working" : "neutral"}
+          signalLabel={`${activePeople} active now`}
+          signalDescription="Presence is refreshed while this workspace is open."
+          actionsLabel="Chat controls"
+          actionsDescription="Find, refresh, or start a conversation."
+          showBack={false}
+          actions={<>
+            <Button variant="outline" size="sm" onClick={() => setShowMessageSearch(true)} aria-label="Search messages"><Search className="mr-1.5 h-3.5 w-3.5" />Search</Button>
+            <Button variant="outline" size="sm" onClick={() => { loadWorkspace({ quiet: true }); refreshChannel({ quiet: true }); }} disabled={loading || channelLoading} data-testid="refresh-team-chat-btn"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${(loading || channelLoading) ? "animate-spin" : ""}`} />Refresh</Button>
+            <Button size="sm" onClick={() => setShowNewDialog(true)} data-testid="new-chat-btn"><MessageSquarePlus className="mr-1.5 h-3.5 w-3.5" />New conversation</Button>
+          </>}
+        />
 
-      <div className={`flex overflow-hidden ${mobileConversationOpen ? "h-full md:h-[calc(100%-72px)]" : "h-[calc(100%-72px)]"}`}>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[288px] xl:w-[320px] shrink-0 flex-col border-r border-white/[0.07] bg-[#111a22]`}>
         <div className="border-b border-white/[0.07] px-4 pb-3 pt-4">
           <div className="mb-3 flex items-center justify-between">
@@ -921,8 +930,11 @@ export default function TeamChatPage() {
                       </SuggestionPanel>
                     )}
                     {composerEmojiOpen && (
-                      <div className="absolute bottom-full left-10 z-30 mb-2 flex gap-1 rounded-xl border border-white/10 bg-[#252832] p-2 shadow-2xl">
-                        {COMMON_EMOJIS.map(emoji => <button key={emoji} onClick={() => { setInput(current => `${current}${emoji}`); setComposerEmojiOpen(false); }} className="rounded-lg p-1.5 text-lg hover:bg-white/10">{emoji}</button>)}
+                      <div className="absolute bottom-full left-2 z-30 mb-2 w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-white/10 bg-[#202b36] p-3 shadow-2xl shadow-black/45" role="dialog" aria-label="Choose an emoji">
+                        <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-zinc-100">Emoji</p><button type="button" onClick={() => setComposerEmojiOpen(false)} className="rounded-md p-1 text-zinc-500 hover:bg-white/[0.06] hover:text-zinc-100" aria-label="Close emoji picker"><X className="h-3.5 w-3.5" /></button></div>
+                        <div className="max-h-60 space-y-3 overflow-y-auto pr-1">
+                          {EMOJI_GROUPS.map(group => <div key={group.label}><p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">{group.label}</p><div className="grid grid-cols-8 gap-1">{group.emojis.map((emoji, index) => <button key={`${group.label}-${emoji}-${index}`} type="button" onClick={() => { setInput(current => `${current}${emoji}`); setComposerEmojiOpen(false); composerRef.current?.focus(); }} className="grid h-8 w-8 place-items-center rounded-md text-base transition hover:bg-emerald-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60" aria-label={`Add ${emoji}`}>{emoji}</button>)}</div></div>)}
+                        </div>
                       </div>
                     )}
                     <Textarea
@@ -981,7 +993,9 @@ export default function TeamChatPage() {
                     </div>
                     <div className="flex items-center gap-1 px-2 pb-2">
                       <input ref={fileRef} type="file" className="hidden" onChange={uploadFile} />
+                      <input ref={gifRef} type="file" accept="image/gif" className="hidden" onChange={uploadFile} />
                       <ComposerButton icon={Paperclip} label="Attach file" onClick={() => fileRef.current?.click()} />
+                      <ComposerButton icon={Image} label="Share GIF" onClick={() => gifRef.current?.click()} />
                       <ComposerButton icon={Smile} label="Emoji" onClick={() => setComposerEmojiOpen(current => !current)} />
                       <ComposerButton icon={AtSign} label="Mention" onClick={() => setInput(current => `${current}@`)} />
                       <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Shift+Enter for a new line</span>
