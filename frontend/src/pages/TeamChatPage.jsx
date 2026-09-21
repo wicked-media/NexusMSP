@@ -672,7 +672,7 @@ export default function TeamChatPage() {
   };
 
   const deleteMessage = async messageId => {
-    if (!window.confirm("Delete this message?")) return;
+    if (!window.confirm("Unsend this message? A deletion notice remains in the conversation.")) return;
     try {
       await axios.delete(`${API}/chat/messages/${messageId}`, { headers });
       refreshChannel({ quiet: true });
@@ -706,6 +706,21 @@ export default function TeamChatPage() {
       refreshChannel({ quiet: true });
     } catch (requestError) {
       toast.error(requestError?.response?.data?.detail || "File could not be shared");
+    }
+  };
+
+  const deleteChannel = async () => {
+    if (!activeChannel || activeChannel.created_by !== user?.id) return;
+    if (!window.confirm(`Delete #${channelDisplayName(activeChannel)}? This cannot be undone.`)) return;
+    try {
+      await axios.delete(`${API}/chat/channels/${activeChannel.id}`, { headers });
+      setShowInfo(false);
+      setActiveId(null);
+      setMode("teams");
+      await loadWorkspace({ quiet: true });
+      toast.success("Channel deleted");
+    } catch (requestError) {
+      toast.error(requestError?.response?.data?.detail || "Channel could not be deleted");
     }
   };
 
@@ -969,6 +984,7 @@ export default function TeamChatPage() {
                     <DropdownMenuItem onClick={markConversationUnread}>
                       <Mail className="mr-2 h-4 w-4" />Mark unread
                     </DropdownMenuItem>
+                    {activeChannel.kind === "team" && activeChannel.created_by === user?.id && <><DropdownMenuSeparator /><DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={deleteChannel}><Trash2 className="mr-2 h-4 w-4" />Delete channel</DropdownMenuItem></>}
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
@@ -1531,7 +1547,7 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
           {onCopyMessageLink && <MessageAction icon={LinkIcon} label="Copy message link" onClick={onCopyMessageLink} />}
           {onPin && <MessageAction icon={Pin} label={message.pinned ? "Unpin" : "Pin"} onClick={onPin} />}
           {own && onStartEdit && <MessageAction icon={Edit3} label="Edit" onClick={onStartEdit} />}
-          {own && onDelete && <MessageAction icon={Trash2} label="Delete" onClick={onDelete} destructive />}
+          {own && onDelete && <MessageAction icon={Trash2} label="Unsend" onClick={onDelete} destructive />}
         </div>
       )}
       {emojiOpen && (
