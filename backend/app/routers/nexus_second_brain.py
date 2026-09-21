@@ -469,7 +469,10 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
         (
             "audit",
             audit,
-            ("action", "target_name", "details", "actor_name", "user_name"),
+            # Audit ``details`` can contain provider diagnostics or command
+            # metadata.  Memory search surfaces the event identity and actor,
+            # but never turns arbitrary audit payloads into a broad text index.
+            ("action", "target_name", "actor_name", "user_name"),
             lambda item: item.get("action") or "Audit event",
             lambda item: "/audit-trail",
         ),
@@ -499,7 +502,11 @@ async def second_brain_search(payload: dict = Body(...), current_user: dict = De
                 "route": route_fn(item),
                 "timestamp": item.get("updated_at") or item.get("created_at") or item.get("timestamp"),
             })
-    results.sort(key=lambda item: (-item["score"], str(item.get("timestamp") or ""), item["title"]))
+    # Keep the strongest evidence first, then favour the most recently updated
+    # record when scores are tied.  The second stable sort avoids presenting a
+    # stale historical fix ahead of current operational evidence.
+    results.sort(key=lambda item: (str(item.get("timestamp") or ""), item["title"]), reverse=True)
+    results.sort(key=lambda item: item["score"], reverse=True)
     return {
         "query": query,
         "count": min(len(results), 40),

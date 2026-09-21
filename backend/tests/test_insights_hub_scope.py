@@ -232,6 +232,64 @@ def test_second_brain_overview_and_search_scope_every_client_owned_source(monkey
     assert decisions.queries[0] == {"user_id": "tech-1", "tenant_id": "tenant-a"}
 
 
+def test_second_brain_search_prefers_recent_evidence_when_match_scores_are_equal(monkeypatch):
+    tickets = _FindCollection([
+        {
+            "id": "ticket-old", "title": "Printer offline", "description": "Printer offline",
+            "client_id": "client-a", "updated_at": "2024-01-01T00:00:00+00:00",
+        },
+        {
+            "id": "ticket-new", "title": "Printer offline", "description": "Printer offline",
+            "client_id": "client-a", "updated_at": "2026-01-01T00:00:00+00:00",
+        },
+    ])
+    empty = _FindCollection()
+    monkeypatch.setattr(
+        nexus_second_brain,
+        "db",
+        SimpleNamespace(
+            tickets=tickets,
+            runbooks=empty,
+            kb_articles=empty,
+            clients=empty,
+            audit_logs=empty,
+            context_relationships=empty,
+        ),
+    )
+
+    result = asyncio.run(nexus_second_brain.second_brain_search({"query": "printer"}, _restricted_user()))
+
+    assert [item["id"] for item in result["results"]] == ["ticket-new", "ticket-old"]
+
+
+def test_second_brain_search_never_indexes_arbitrary_audit_details(monkeypatch):
+    empty = _FindCollection()
+    audit = _FindCollection([{
+        "id": "audit-1",
+        "action": "remote_session_started",
+        "target_name": "Reception PC",
+        "details": {"provider_diagnostic": "needle-value"},
+        "tenant_id": "tenant-a",
+        "client_id": "client-a",
+    }])
+    monkeypatch.setattr(
+        nexus_second_brain,
+        "db",
+        SimpleNamespace(
+            tickets=empty,
+            runbooks=empty,
+            kb_articles=empty,
+            clients=empty,
+            audit_logs=audit,
+            context_relationships=empty,
+        ),
+    )
+
+    result = asyncio.run(nexus_second_brain.second_brain_search({"query": "needle-value"}, _restricted_user()))
+
+    assert result["results"] == []
+
+
 def test_second_brain_decision_is_bound_to_visible_recommendation_and_tenant(monkeypatch):
     recommendation_id = "recommendation-123456abcdef"
     calls = {"updates": [], "audit": [], "events": []}
