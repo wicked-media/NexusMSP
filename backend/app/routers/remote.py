@@ -6,7 +6,6 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import (
-    assert_client_scope,
     assert_tenant_record_scope,
     platform_tenant_id,
     scope_query,
@@ -47,6 +46,25 @@ def _native_session_freshness(session: dict) -> dict:
         "capture_freshness": "fresh" if age <= NATIVE_REMOTE_HEARTBEAT_STALE_SECONDS else "stale",
         "capture_age_seconds": age,
     }
+
+
+async def _remote_device_in_scope(
+    device_id: str,
+    current_user: dict,
+    *,
+    operation: str,
+    request: Request | None = None,
+) -> dict:
+    """Load an endpoint only inside the caller's tenant and client scope."""
+    return await assert_tenant_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation=operation,
+        request=request,
+        resource_name="Device",
+    )
+
 
 async def _remote_policy():
     return await remote_policy()
@@ -99,13 +117,9 @@ async def save_remote_access_policy(data: dict, current_user: dict = Depends(get
 
 @router.get("/devices/{device_id}/remote-options")
 async def get_device_remote_options(device_id: str, request: Request, current_user: dict = Depends(get_current_user)):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.remote.view",
         request=request,
     )
@@ -132,13 +146,9 @@ async def get_device_remote_options(device_id: str, request: Request, current_us
 
 @router.put("/devices/{device_id}/remote-access", dependencies=[Depends(require_action("device.remote.configure"))])
 async def save_device_remote_access(device_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.remote.configure",
         request=request,
     )
@@ -176,13 +186,9 @@ async def save_device_remote_access(device_id: str, data: dict, request: Request
 
 @router.post("/devices/{device_id}/remote-sessions/start", dependencies=[Depends(require_action("device.remote.start"))])
 async def start_provider_remote_session(device_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.remote.start",
         request=request,
     )
@@ -343,13 +349,9 @@ async def end_remote_session(
 @router.get("/devices/{device_id}/remote-sessions")
 async def get_device_remote_sessions(device_id: str, request: Request, limit: int = 50, current_user: dict = Depends(get_current_user)):
     """Get remote session history for a specific device"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.remote.view",
         request=request,
     )
@@ -376,13 +378,9 @@ async def get_device_remote_health(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.remote.health",
         request=request,
     )
@@ -399,13 +397,9 @@ async def repair_device_remote_access(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.remote.repair",
         request=request,
     )
@@ -441,15 +435,10 @@ async def get_technician_remote_sessions(tech_id: str, limit: int = 100, current
 @router.get("/devices/{device_id}/chat")
 async def get_device_chat(device_id: str, limit: int = 100, current_user: dict = Depends(get_current_user)):
     """Get chat messages for a device"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.chat.read",
-        mask_not_found=True,
     )
     messages = await db.device_chat.find(
         {"device_id": device_id, "client_id": device.get("client_id")},
@@ -461,15 +450,10 @@ async def get_device_chat(device_id: str, limit: int = 100, current_user: dict =
 @router.post("/devices/{device_id}/chat")
 async def send_device_chat_message(device_id: str, message_data: DeviceChatMessageCreate, current_user: dict = Depends(get_current_user)):
     """Send a chat message to a device"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.chat.send",
-        mask_not_found=True,
     )
     chat_message = DeviceChatMessage(
         device_id=device_id,
@@ -494,15 +478,10 @@ async def send_device_chat_message(device_id: str, message_data: DeviceChatMessa
 )
 async def send_device_command(device_id: str, command: str, current_user: dict = Depends(get_current_user)):
     """Send a remote command to a device"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.command.execute",
-        mask_not_found=True,
     )
     # Create command message
     chat_message = DeviceChatMessage(
@@ -543,15 +522,10 @@ async def send_device_command(device_id: str, command: str, current_user: dict =
 @router.post("/devices/{device_id}/chat/file")
 async def send_device_file(device_id: str, filename: str, file_url: str, current_user: dict = Depends(get_current_user)):
     """Send a file to a device"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.chat.file.send",
-        mask_not_found=True,
     )
     chat_message = DeviceChatMessage(
         device_id=device_id,
@@ -574,15 +548,10 @@ async def send_device_file(device_id: str, filename: str, file_url: str, current
 @router.delete("/devices/{device_id}/chat")
 async def clear_device_chat(device_id: str, current_user: dict = Depends(get_current_user)):
     """Clear chat history for a device"""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    await assert_client_scope(
+    device = await _remote_device_in_scope(
+        device_id,
         current_user,
-        device.get("client_id"),
-        site_id=device.get("site_id"),
         operation="device.chat.clear",
-        mask_not_found=True,
     )
     result = await db.device_chat.delete_many(
         {"device_id": device_id, "client_id": device.get("client_id")}

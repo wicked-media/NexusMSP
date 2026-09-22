@@ -86,6 +86,15 @@ class _RemoteSessionQueries:
         return None
 
 
+class _RemoteDeviceQueries:
+    def __init__(self):
+        self.find_one_query = None
+
+    async def find_one(self, query, _projection=None):
+        self.find_one_query = deepcopy(query)
+        return None
+
+
 class _WorkSessionRuntimeDB:
     def __init__(self):
         self.tickets = _Rows([{
@@ -180,4 +189,21 @@ def test_remote_session_lifecycle_masks_foreign_tenant_before_action(monkeypatch
     assert denied.value.status_code == 404
     assert sessions.find_one_query == {
         "$and": [{"id": "session-from-another-tenant"}, {"tenant_id": "tenant-a"}]
+    }
+
+
+def test_remote_device_entry_points_are_partitioned_by_tenant(monkeypatch):
+    devices = _RemoteDeviceQueries()
+    monkeypatch.setattr(remote_routes, "db", SimpleNamespace(devices=devices))
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(remote_routes.get_device_remote_options(
+            "device-from-another-tenant",
+            request=None,
+            current_user={"id": "admin-1", "tenant_id": "tenant-a", "is_admin": True},
+        ))
+
+    assert denied.value.status_code == 404
+    assert devices.find_one_query == {
+        "$and": [{"id": "device-from-another-tenant"}, {"tenant_id": "tenant-a"}]
     }
