@@ -14,7 +14,7 @@ from app.auth import get_current_user
 from app.database import ROOT_DIR, db
 from app.routers.nexus_agent import _verify_agent_token, queue_command_for_device, require_agent_operator
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_record_scope, platform_tenant_id
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id
 from app.services.upload_quarantine import UploadQuarantineFailure, discard_upload, inspect_upload, release_upload
 from app.services.upload_security import ATTACHMENT_EXTENSIONS, safe_original_filename, safe_upload_extension, validate_upload_signature
 
@@ -36,7 +36,7 @@ def _safe_transfer(transfer: dict) -> dict:
 @router.get("/devices/{device_id}/file-transfers")
 async def list_file_transfers(device_id: str, current_user: dict = Depends(require_agent_operator)):
     """List bounded, scoped transfer evidence without exposing storage paths."""
-    await assert_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.list", resource_name="Managed asset")
+    await assert_tenant_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.list", resource_name="Managed asset")
     rows = await db.agent_file_transfers.find({"tenant_id": platform_tenant_id(current_user), "device_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(50)
     return [_safe_transfer(row) for row in rows]
 
@@ -48,7 +48,7 @@ async def request_directory_listing(
     current_user: dict = Depends(require_agent_operator),
 ):
     """Queue one read-only endpoint directory listing through the signed Agent."""
-    device = await assert_record_scope(current_user, db.devices, device_id, operation="device.file_browser.list", resource_name="Managed asset")
+    device = await assert_tenant_record_scope(current_user, db.devices, device_id, operation="device.file_browser.list", resource_name="Managed asset")
     directory = str(data.get("directory") or "").strip()
     if not directory:
         raise HTTPException(400, "An absolute endpoint directory is required")
@@ -66,7 +66,7 @@ async def stage_file_transfer(
     current_user: dict = Depends(require_agent_operator),
 ):
     """Stage a scanned file for one enrolled Agent to pull to an explicit path."""
-    device = await assert_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.stage", resource_name="Managed asset")
+    device = await assert_tenant_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.stage", resource_name="Managed asset")
     if not device.get("nexus_agent_id"):
         raise HTTPException(409, "Nexus Agent is not enrolled on this asset")
     target = str(destination or "").strip()
@@ -145,7 +145,7 @@ async def request_file_retrieval(
     current_user: dict = Depends(require_agent_operator),
 ):
     """Ask one bound Agent to stage one explicit endpoint file for retrieval."""
-    device = await assert_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.retrieve", resource_name="Managed asset")
+    device = await assert_tenant_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.retrieve", resource_name="Managed asset")
     source = str(source_path or "").strip()
     if not source or Path(source).name in {"", ".", ".."}:
         raise HTTPException(400, "An explicit endpoint source file is required")
@@ -206,7 +206,7 @@ async def stage_retrieved_transfer_content(
 @router.get("/devices/{device_id}/file-transfers/{transfer_id}/download")
 async def download_retrieved_transfer(device_id: str, transfer_id: str, current_user: dict = Depends(require_agent_operator)):
     """Serve a scanned endpoint retrieval only after technician device scope checks."""
-    await assert_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.download", resource_name="Managed asset")
+    await assert_tenant_record_scope(current_user, db.devices, device_id, operation="device.file_transfer.download", resource_name="Managed asset")
     transfer = await db.agent_file_transfers.find_one({"id": transfer_id, "tenant_id": platform_tenant_id(current_user), "device_id": device_id, "direction": "endpoint_to_technician", "status": "staged"}, {"_id": 0})
     if not transfer:
         raise HTTPException(404, "Retrieved file is unavailable")
