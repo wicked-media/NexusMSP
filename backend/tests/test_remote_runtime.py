@@ -64,6 +64,28 @@ class _Rows:
         return SimpleNamespace(matched_count=0, modified_count=0)
 
 
+class _RemoteSessionCursor:
+    def sort(self, *_args, **_kwargs):
+        return self
+
+    async def to_list(self, _limit):
+        return []
+
+
+class _RemoteSessionQueries:
+    def __init__(self):
+        self.find_query = None
+        self.find_one_query = None
+
+    def find(self, query, _projection=None):
+        self.find_query = deepcopy(query)
+        return _RemoteSessionCursor()
+
+    async def find_one(self, query, _projection=None):
+        self.find_one_query = deepcopy(query)
+        return None
+
+
 class _WorkSessionRuntimeDB:
     def __init__(self):
         self.tickets = _Rows([{
@@ -130,3 +152,32 @@ def test_native_session_rejects_control_mode_before_creating_any_record(monkeypa
 
     assert error.value.status_code == 422
     assert "view-only" in error.value.detail
+
+
+def test_remote_session_list_is_partitioned_by_tenant(monkeypatch):
+    sessions = _RemoteSessionQueries()
+    monkeypatch.setattr(remote_routes, "db", SimpleNamespace(remote_sessions=sessions))
+
+    result = asyncio.run(remote_routes.get_remote_sessions(
+        current_user={"id": "admin-1", "tenant_id": "tenant-a", "is_admin": True},
+    ))
+
+    assert result == []
+    assert sessions.find_query == {"tenant_id": "tenant-a"}
+
+
+def test_remote_session_lifecycle_masks_foreign_tenant_before_action(monkeypatch):
+    sessions = _RemoteSessionQueries()
+    monkeypatch.setattr(remote_routes, "db", SimpleNamespace(remote_sessions=sessions))
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(remote_routes.confirm_remote_session_opened(
+            "session-from-another-tenant",
+            request=None,
+            current_user={"id": "tech-1", "tenant_id": "tenant-a", "is_admin": True},
+        ))
+
+    assert denied.value.status_code == 404
+    assert sessions.find_one_query == {
+        "$and": [{"id": "session-from-another-tenant"}, {"tenant_id": "tenant-a"}]
+    }

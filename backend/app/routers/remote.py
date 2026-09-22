@@ -5,7 +5,13 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, platform_tenant_id, scope_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scope_query,
+    tenant_scoped_query,
+)
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import (
@@ -247,13 +253,18 @@ async def get_remote_sessions(
     if user_id:
         query["user_id"] = user_id
     
-    sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(200)
+    sessions = await db.remote_sessions.find(
+        tenant_scoped_query(current_user, query), {"_id": 0}
+    ).sort("started_at", -1).to_list(200)
     return [{**session, **_native_session_freshness(session)} for session in sessions]
 
 @router.get("/remote/active-sessions")
 async def get_active_remote_sessions(current_user: dict = Depends(get_current_user)):
     """Get all currently active remote sessions"""
-    query = {**scope_query(current_user), "status": {"$in": ["authorised", "active", "ending"]}}
+    query = tenant_scoped_query(
+        current_user,
+        {**scope_query(current_user), "status": {"$in": ["authorised", "active", "ending"]}},
+    )
     sessions = await db.remote_sessions.find(query, {"_id": 0}).sort("started_at", -1).to_list(100)
     # Calculate live duration for active sessions
     now = datetime.now(timezone.utc)
@@ -272,15 +283,13 @@ async def confirm_remote_session_opened(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    await assert_client_scope(
+    session = await assert_tenant_record_scope(
         current_user,
-        session.get("client_id"),
-        site_id=session.get("site_id"),
+        db.remote_sessions,
+        session_id,
         operation="device.remote.start",
         request=request,
+        resource_name="Remote session",
     )
     return await mark_remote_session_opened(
         session,
@@ -295,15 +304,13 @@ async def remote_session_heartbeat(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    await assert_client_scope(
+    session = await assert_tenant_record_scope(
         current_user,
-        session.get("client_id"),
-        site_id=session.get("site_id"),
+        db.remote_sessions,
+        session_id,
         operation="device.remote.start",
         request=request,
+        resource_name="Remote session",
     )
     return await heartbeat_remote_session(session, current_user)
 
@@ -318,15 +325,13 @@ async def end_remote_session(
     data: dict | None = None,
     current_user: dict = Depends(get_current_user),
 ):
-    session = await db.remote_sessions.find_one({"id": session_id}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    await assert_client_scope(
+    session = await assert_tenant_record_scope(
         current_user,
-        session.get("client_id"),
-        site_id=session.get("site_id"),
+        db.remote_sessions,
+        session_id,
         operation="device.remote.end",
         request=request,
+        resource_name="Remote session",
     )
     return await end_remote_session_record(
         session=session,
@@ -348,7 +353,13 @@ async def get_device_remote_sessions(device_id: str, request: Request, limit: in
         operation="device.remote.view",
         request=request,
     )
-    sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(limit)
+    sessions = await db.remote_sessions.find(
+        tenant_scoped_query(
+            current_user,
+            {"device_id": device_id, "client_id": device.get("client_id")},
+        ),
+        {"_id": 0},
+    ).sort("started_at", -1).to_list(limit)
     active_count = sum(1 for s in sessions if s.get("status") in {"authorised", "active", "ending"})
     total_minutes = sum(s.get("duration_minutes", 0) for s in sessions if s.get("status") == "ended")
     return {
@@ -411,7 +422,7 @@ async def get_technician_remote_sessions(tech_id: str, limit: int = 100, current
     if not caller or (caller.get("role") != "admin" and not caller.get("is_admin") and current_user["id"] != tech_id):
         raise HTTPException(status_code=403, detail="Admin access required")
     sessions = await db.remote_sessions.find(
-        {**scope_query(current_user), "user_id": tech_id},
+        tenant_scoped_query(current_user, {**scope_query(current_user), "user_id": tech_id}),
         {"_id": 0},
     ).sort("started_at", -1).to_list(limit)
     active_count = sum(1 for s in sessions if s.get("status") in {"authorised", "active", "ending"})
