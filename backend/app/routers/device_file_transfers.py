@@ -33,6 +33,18 @@ def _safe_transfer(transfer: dict) -> dict:
     return {key: value for key, value in transfer.items() if key not in {"_id", "stored_name", "security_scan"}}
 
 
+def _bound_retrieval_update_query(transfer_id: str, agent: dict) -> dict:
+    """Keep the retrieval state transition bound to the authenticated Agent."""
+    return {
+        "id": transfer_id,
+        "tenant_id": platform_tenant_id(agent),
+        "agent_id": agent["id"],
+        "client_id": agent.get("client_id"),
+        "direction": "endpoint_to_technician",
+        "status": {"$in": ["queued", "dispatched"]},
+    }
+
+
 @router.get("/devices/{device_id}/file-transfers")
 async def list_file_transfers(device_id: str, current_user: dict = Depends(require_agent_operator)):
     """List bounded, scoped transfer evidence without exposing storage paths."""
@@ -194,7 +206,10 @@ async def stage_retrieved_transfer_content(
     path = TRANSFER_DIR / stored_name
     try:
         path.write_bytes(content)
-        await db.agent_file_transfers.update_one({"id": transfer_id, "status": {"$in": ["queued", "dispatched"]}}, {"$set": {"status": "staged", "stored_name": stored_name, "size": len(content), "sha256": digest, "security_scan": clean_upload.metadata(), "staged_at": _now()}})
+        await db.agent_file_transfers.update_one(
+            _bound_retrieval_update_query(transfer_id, agent),
+            {"$set": {"status": "staged", "stored_name": stored_name, "size": len(content), "sha256": digest, "security_scan": clean_upload.metadata(), "staged_at": _now()}},
+        )
     except Exception:
         path.unlink(missing_ok=True)
         await discard_upload(db, clean_upload)

@@ -32,3 +32,19 @@ def test_file_transfer_list_masks_foreign_tenant_before_reading_transfers(monkey
     assert devices.query == {
         "$and": [{"id": "device-from-another-tenant"}, {"tenant_id": "tenant-a"}]
     }
+
+
+def test_agent_retrieval_completion_query_stays_bound_to_agent_and_tenant():
+    query = device_file_transfers._bound_retrieval_update_query(
+        "xfer-1",
+        {"id": "agent-1", "tenant_id": "tenant-a", "client_id": "client-a"},
+    )
+
+    assert query == {
+        "id": "xfer-1",
+        "tenant_id": "tenant-a",
+        "agent_id": "agent-1",
+        "client_id": "client-a",
+        "direction": "endpoint_to_technician",
+        "status": {"$in": ["queued", "dispatched"]},
+    }
