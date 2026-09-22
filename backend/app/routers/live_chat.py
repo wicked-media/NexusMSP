@@ -154,6 +154,9 @@ async def set_agent_visitor_typing(payload: dict = Body(...), x_agent_token: str
     return {"typing_users": _active_typers(session["id"], "visitor")}
 
 # ====== Default canned responses (seed if empty) ======
+LEGACY_REMOTE_CANNED_CONTENT = "I'd like to remote into your device to investigate. Please accept the RustDesk prompt when it appears."
+NEXUS_REMOTE_CANNED_CONTENT = "I'd like to start a Nexus Remote support session to investigate. Please accept the Nexus Remote request when it appears."
+
 DEFAULT_CANNED_RESPONSES = [
     {"shortcut": "/hello", "title": "Greeting", "content": "Hi {visitor}, thanks for reaching out. How can I help today?"},
     {"shortcut": "/check", "title": "Investigating", "content": "Let me check that for you — one moment, please."},
@@ -161,7 +164,7 @@ DEFAULT_CANNED_RESPONSES = [
     {"shortcut": "/ticket", "title": "Ticket created", "content": "I've created a ticket for this issue. You'll receive updates via email."},
     {"shortcut": "/pw-reset", "title": "Password reset", "content": "To reset your password, please visit the account page and click 'Forgot password'."},
     {"shortcut": "/thanks", "title": "Thanks/closing", "content": "Glad I could help! Is there anything else I can assist with today?"},
-    {"shortcut": "/remote", "title": "Remote session", "content": "I'd like to remote into your device to investigate. Please accept the RustDesk prompt when it appears."},
+    {"shortcut": "/remote", "title": "Remote session", "content": NEXUS_REMOTE_CANNED_CONTENT},
 ]
 
 
@@ -476,8 +479,17 @@ async def create_ticket_from_chat(session_id: str, user=Depends(get_current_user
 
 
 # ====== Canned Responses ======
+async def _upgrade_legacy_remote_canned_response(user: dict) -> None:
+    """Replace only Nexus's retired default; leave tenant customisations intact."""
+    await db.chat_canned_responses.update_many(
+        tenant_scoped_query(user, {"shortcut": "/remote", "content": LEGACY_REMOTE_CANNED_CONTENT}),
+        {"$set": {"content": NEXUS_REMOTE_CANNED_CONTENT, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+
+
 @router.get("/canned-responses")
 async def list_canned_responses(user=Depends(get_current_user)):
+    await _upgrade_legacy_remote_canned_response(user)
     scope = tenant_scoped_query(user)
     docs = await db.chat_canned_responses.find(scope, {"_id": 0}).sort("shortcut", 1).to_list(200)
     if not docs:
