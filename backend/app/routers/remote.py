@@ -481,49 +481,11 @@ async def send_device_chat_message(device_id: str, message_data: DeviceChatMessa
     dependencies=[Depends(require_action("device.command.execute"))],
 )
 async def send_device_command(device_id: str, command: str, current_user: dict = Depends(get_current_user)):
-    """Send a remote command to a device"""
-    device = await _remote_device_in_scope(
-        device_id,
-        current_user,
-        operation="device.command.execute",
+    """Retire the simulated command composer in favour of Nexus Terminal."""
+    raise HTTPException(
+        status_code=410,
+        detail="Device Chat commands are retired; use Nexus Terminal & Files for an audited Nexus Agent command session.",
     )
-    # Create command message
-    chat_message = DeviceChatMessage(
-        device_id=device_id,
-        device_name=device.get('name'),
-        client_id=device.get('client_id'),
-        client_name=device.get('client_name'),
-        user_id=current_user['id'],
-        user_name=current_user['name'],
-        message=command,
-        message_type="command",
-        direction="outbound",
-        metadata={"command": command, "executed": False}
-    )
-    doc = chat_message.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    doc["tenant_id"] = platform_tenant_id(current_user)
-    await db.device_chat.insert_one(doc)
-    
-    # Simulate command execution response (in real implementation, this would be handled by the agent)
-    response_message = DeviceChatMessage(
-        device_id=device_id,
-        device_name=device.get('name'),
-        client_id=device.get('client_id'),
-        client_name=device.get('client_name'),
-        user_id="system",
-        user_name="System",
-        message=f"Command '{command}' queued for execution. Awaiting agent response.",
-        message_type="system",
-        direction="inbound",
-        metadata={"command": command, "status": "queued"}
-    )
-    resp_doc = response_message.model_dump()
-    resp_doc['created_at'] = resp_doc['created_at'].isoformat()
-    resp_doc["tenant_id"] = platform_tenant_id(current_user)
-    await db.device_chat.insert_one(resp_doc)
-    
-    return {"message": "Command sent", "command_id": chat_message.id}
 
 @router.post("/devices/{device_id}/chat/file")
 async def send_device_file(device_id: str, filename: str, file_url: str, current_user: dict = Depends(get_current_user)):

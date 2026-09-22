@@ -256,3 +256,15 @@ def test_url_based_device_chat_transfer_is_retired_without_accessing_storage():
 
     assert retired.value.status_code == 410
     assert "governed nexus agent file-transfer" in retired.value.detail.lower()
+
+
+def test_simulated_device_chat_command_is_retired_without_queuing_work():
+    with pytest.raises(HTTPException) as retired:
+        asyncio.run(remote_routes.send_device_command(
+            "device-1",
+            command="systeminfo",
+            current_user={"id": "tech-1", "tenant_id": "tenant-a"},
+        ))
+
+    assert retired.value.status_code == 410
+    assert "nexus terminal & files" in retired.value.detail.lower()
