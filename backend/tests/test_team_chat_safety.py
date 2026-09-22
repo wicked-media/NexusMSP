@@ -56,7 +56,8 @@ class UserCollection:
 
 def test_public_channel_creation_stays_company_wide(monkeypatch):
     channels = ChannelCollection()
-    fake_db = SimpleNamespace(chat_channels=channels, users=UserCollection())
+    events = ChannelEventCollection()
+    fake_db = SimpleNamespace(chat_channels=channels, users=UserCollection(), chat_channel_events=events)
     monkeypatch.setattr(chat_presence, "db", fake_db)
     monkeypatch.setattr(chat_access, "db", fake_db)
 
@@ -70,6 +71,7 @@ def test_public_channel_creation_stays_company_wide(monkeypatch):
     assert result["member_ids"] == []
     assert result["member_count"] == 4
     assert channels.inserted[0]["created_by"] == "creator-1"
+    assert events.inserted[0]["event_type"] == "channel.created"
 
 
 class ReadStateCollection:

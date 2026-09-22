@@ -151,6 +151,12 @@ const formatDay = value => {
   if (value === yesterday.toISOString().slice(0, 10)) return "Yesterday";
   return date.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
 };
+const notificationSummary = channel => {
+  if (channel?.mute_until && new Date(channel.mute_until).getTime() > Date.now()) return `Muted until ${new Date(channel.mute_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  if (channel?.notify_level === "all") return "Every message";
+  if (channel?.notify_level === "none" || channel?.is_muted) return "Notifications off";
+  return "Mentions only";
+};
 
 export default function TeamChatPage() {
   const { token, user } = useAuth();
@@ -487,7 +493,13 @@ export default function TeamChatPage() {
   const updateConversationPreference = async (field, value) => {
     if (!activeChannel) return;
     const previous = activeChannel;
-    const patch = field === "notify_level" ? { notify_level: value, is_muted: value === "none" } : { [field]: value };
+    const patch = field === "notify_level"
+      ? { notify_level: value, is_muted: value === "none", mute_until: null }
+      : field === "mute_until"
+        ? { mute_until: value, is_muted: Boolean(value) }
+        : field === "is_muted" && !value
+          ? { is_muted: false, mute_until: null, notify_level: "mentions" }
+          : { [field]: value };
     setChannels(current => current.map(channel => channel.id === activeChannel.id ? { ...channel, ...patch } : channel));
     try {
       await axios.put(`${API}/chat/channels/${activeChannel.id}/preference`, patch, { headers });
@@ -1099,8 +1111,8 @@ export default function TeamChatPage() {
                     <DropdownMenuItem onClick={() => updateConversationPreference("is_muted", !activeChannel.is_muted)}>
                       {activeChannel.is_muted ? <Volume2 className="mr-2 h-4 w-4" /> : <VolumeX className="mr-2 h-4 w-4" />}{activeChannel.is_muted ? "Turn notifications on" : "Mute notifications"}
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateConversationPreference("notify_level", "mentions")}><AtSign className="mr-2 h-4 w-4" />Notify for mentions only</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => updateConversationPreference("notify_level", "all")}><Bell className="mr-2 h-4 w-4" />Notify for every message</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateConversationPreference("notify_level", "mentions")}><AtSign className="mr-2 h-4 w-4" />Notify for mentions only{activeChannel.notify_level === "mentions" && <Check className="ml-auto h-3.5 w-3.5" />}</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => updateConversationPreference("notify_level", "all")}><Bell className="mr-2 h-4 w-4" />Notify for every message{activeChannel.notify_level === "all" && <Check className="ml-auto h-3.5 w-3.5" />}</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => updateConversationPreference("mute_until", new Date(Date.now() + 60 * 60 * 1000).toISOString())}><VolumeX className="mr-2 h-4 w-4" />Mute for one hour</DropdownMenuItem>
                     <DropdownMenuItem onClick={jumpToUnread}><ArrowRightLeft className="mr-2 h-4 w-4" />Jump to next unread</DropdownMenuItem>
                     <DropdownMenuItem onClick={markConversationUnread}>
@@ -1599,6 +1611,7 @@ function ConversationRow({ channel, active, presence, onClick }) {
           <p className={`truncate text-sm ${channel.unread_count ? "font-semibold text-white" : "font-medium text-zinc-300"}`}>{name}</p>
           {channel.is_saved && <Bookmark className="h-3 w-3 shrink-0 text-amber-300" aria-label="Saved conversation" />}
           {channel.is_muted && <VolumeX className="h-3 w-3 shrink-0 text-zinc-600" aria-label="Muted conversation" />}
+          {(channel.notify_level === "all" || channel.notify_level === "mentions") && <Bell className="h-3 w-3 shrink-0 text-zinc-600" aria-label={`Notifications: ${notificationSummary(channel)}`} />}
           <span className="ml-auto shrink-0 text-[10px] text-zinc-500">{formatRelative(channel.last_message?.ts || channel.updated_at || channel.created_at)}</span>
         </div>
         <div className="mt-0.5 flex items-center gap-2">
@@ -2080,6 +2093,7 @@ function InfoPanel({ channel, users, presenceFor, currentUserId, canManage, head
       <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close conversation details"><X className="h-4 w-4" /></Button></div>
       {canManageMembers && <div className="border-b border-white/5 bg-cyan-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-cyan-100">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
       {canTransferOwnership && <div className="border-b border-white/5 bg-amber-500/[0.035] p-4"><p className="text-xs font-medium text-amber-100">Channel ownership</p><p className="mt-1 text-[11px] text-zinc-500">Transfer management responsibility to an active technician.</p><div className="mt-2 flex gap-2"><select value={nextOwnerId} onChange={event => setNextOwnerId(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Choose new owner…</option>{users.filter(candidate => candidate.id !== channel.created_by).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={transferOwnership} disabled={!nextOwnerId || transferringOwner} className="h-9 shrink-0 bg-amber-600 px-3 text-xs hover:bg-amber-500">{transferringOwner ? "Saving" : "Transfer"}</Button></div></div>}
+      <div className="border-b border-white/5 bg-white/[0.015] px-4 py-3"><div className="flex items-center gap-2 text-xs text-zinc-400"><Bell className="h-3.5 w-3.5 text-cyan-300" /><span>Notifications: {notificationSummary(channel)}</span></div></div>
       {channel.kind === "client_direct" && <div className="border-b border-cyan-500/15 bg-cyan-500/[0.045] p-4" data-testid="customer-connection-details"><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" /><div className="min-w-0"><p className="text-xs font-medium text-cyan-100">Approved customer connection</p><p className="mt-1 truncate text-sm text-zinc-100">{channel.customer_name || channelDisplayName(channel)}</p>{channel.customer_email && <p className="mt-0.5 truncate text-[11px] text-zinc-500">{channel.customer_email}</p>}<p className="mt-2 text-[10px] leading-4 text-zinc-500">Private customer access is limited to this technician and remains linked to the approval record.</p></div></div></div>}
       <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Channel history</p>{activity.length === 0 ? <p className="text-xs text-zinc-600">No recorded channel changes yet.</p> : <div className="space-y-2">{activity.map(event => <div key={event.id} className="rounded-lg bg-white/[0.025] p-2.5 text-xs"><p className="text-zinc-300">{event.actor_name} · {String(event.event_type || "change").replaceAll(".", " ")}</p><p className="mt-0.5 text-[10px] text-zinc-600">{formatRelative(event.created_at)}</p></div>)}</div>}</div></ScrollArea>
     </aside>

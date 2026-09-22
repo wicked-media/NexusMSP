@@ -61,6 +61,19 @@ def _now_iso() -> str:
     return _now().isoformat()
 
 
+async def _record_channel_created(channel: dict, actor: dict) -> None:
+    await db.chat_channel_events.insert_one({
+        "id": uuid.uuid4().hex,
+        "tenant_id": str(actor.get("tenant_id") or "nexus-local"),
+        "channel_id": channel["id"],
+        "event_type": "channel.created",
+        "actor_id": actor.get("id"),
+        "actor_name": actor.get("name") or "Nexus operator",
+        "details": {"is_private": bool(channel.get("is_private"))},
+        "created_at": _now_iso(),
+    })
+
+
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• PRESENCE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 @router.post("/presence/heartbeat")
@@ -260,6 +273,7 @@ async def create_channel(payload: dict = Body(...), current_user: dict = Depends
         "updated_at": now,
     }
     await db.chat_channels.insert_one(dict(doc))
+    await _record_channel_created(doc, current_user)
     return (await enrich_channels([doc], current_user))[0]
 
 

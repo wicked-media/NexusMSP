@@ -788,7 +788,10 @@ async def update_channel_details(channel_id: str, payload: dict = Body(...), cur
 @router.get("/chat/channels/{channel_id}/activity")
 async def channel_activity(channel_id: str, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
-    return await db.chat_channel_events.find({"channel_id": channel_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return await db.chat_channel_events.find({
+        "channel_id": channel_id,
+        "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
 
 
 @router.get("/chat/channels/{channel_id}/typing")
