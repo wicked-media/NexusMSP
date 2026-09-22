@@ -159,6 +159,18 @@ def test_ticket_linked_commands_mask_foreign_ticket_and_never_queue(monkeypatch)
     assert database.scope_denials.rows[-1]["client_id"] == "client-b"
 
 
+def test_legacy_ticket_remote_launch_is_retired_without_touching_data():
+    with pytest.raises(HTTPException) as retired:
+        asyncio.run(ticket_device_actions.ticket_device_remote_connect(
+            "ticket-a",
+            "device-a",
+            current_user=_global_operator(),
+        ))
+
+    assert retired.value.status_code == 410
+    assert retired.value.detail == "Legacy remote launch is retired; use the governed Remote action"
+
+
 def test_ticket_linked_commands_keep_same_client_operator_flow(monkeypatch):
     database = _Database()
     _install_database(monkeypatch, database)
