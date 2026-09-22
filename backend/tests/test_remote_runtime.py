@@ -243,3 +243,16 @@ def test_remote_device_chat_deletion_is_partitioned_by_tenant(monkeypatch):
             {"tenant_id": "tenant-a"},
         ]
     }
+
+
+def test_url_based_device_chat_transfer_is_retired_without_accessing_storage():
+    with pytest.raises(HTTPException) as retired:
+        asyncio.run(remote_routes.send_device_file(
+            "device-1",
+            filename="support-tool.exe",
+            file_url="https://untrusted.example/support-tool.exe",
+            current_user={"id": "tech-1", "tenant_id": "tenant-a"},
+        ))
+
+    assert retired.value.status_code == 410
+    assert "governed nexus agent file-transfer" in retired.value.detail.lower()

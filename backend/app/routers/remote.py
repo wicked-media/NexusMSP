@@ -527,30 +527,15 @@ async def send_device_command(device_id: str, command: str, current_user: dict =
 
 @router.post("/devices/{device_id}/chat/file")
 async def send_device_file(device_id: str, filename: str, file_url: str, current_user: dict = Depends(get_current_user)):
-    """Send a file to a device"""
-    device = await _remote_device_in_scope(
-        device_id,
-        current_user,
-        operation="device.chat.file.send",
+    """Retire the ungoverned URL-based transfer shim.
+
+    Files must be staged through the enrolled Nexus Agent so the server can
+    scan, bind and audit the artifact before an endpoint can retrieve it.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail="URL-based device chat transfers are retired; use the governed Nexus Agent file-transfer workflow.",
     )
-    chat_message = DeviceChatMessage(
-        device_id=device_id,
-        device_name=device.get('name'),
-        client_id=device.get('client_id'),
-        client_name=device.get('client_name'),
-        user_id=current_user['id'],
-        user_name=current_user['name'],
-        message=f"File sent: {filename}",
-        message_type="file",
-        direction="outbound",
-        metadata={"filename": filename, "file_url": file_url}
-    )
-    doc = chat_message.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    doc["tenant_id"] = platform_tenant_id(current_user)
-    await db.device_chat.insert_one(doc)
-    
-    return chat_message
 
 @router.delete("/devices/{device_id}/chat")
 async def clear_device_chat(device_id: str, current_user: dict = Depends(get_current_user)):
