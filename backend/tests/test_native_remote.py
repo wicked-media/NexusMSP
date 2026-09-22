@@ -187,7 +187,7 @@ def test_third_party_remote_launches_are_retired(monkeypatch):
     async def no_indexes():
         return None
 
-    async def native_policy():
+    async def native_policy(*_args):
         return dict(remote_runtime.REMOTE_POLICY_DEFAULTS)
 
     monkeypatch.setattr(remote_runtime, "ensure_remote_runtime_indexes", no_indexes)

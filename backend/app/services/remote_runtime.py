@@ -130,8 +130,16 @@ async def ensure_remote_runtime_indexes() -> None:
     )
 
 
-async def remote_policy() -> dict[str, Any]:
-    stored = await db.settings.find_one({"type": "remote_access_policy"}, {"_id": 0}) or {}
+async def remote_policy(tenant_id: str | None = None) -> dict[str, Any]:
+    """Load the governed remote policy inside one Nexus platform partition."""
+    tenant_id = str(tenant_id or "nexus-local").strip() or "nexus-local"
+    stored = await db.settings.find_one(
+        {"type": "remote_access_policy", "tenant_id": tenant_id}, {"_id": 0}
+    ) or {}
+    if not stored and tenant_id == "nexus-local":
+        stored = await db.settings.find_one(
+            {"type": "remote_access_policy", "tenant_id": {"$exists": False}}, {"_id": 0}
+        ) or {}
     return {
         **REMOTE_POLICY_DEFAULTS,
         **stored,
@@ -264,7 +272,7 @@ async def start_remote_session(
     correlation_id: str | None = None,
 ) -> dict[str, Any]:
     await ensure_remote_runtime_indexes()
-    policy = await remote_policy()
+    policy = await remote_policy(platform_tenant_id(user))
     provider = str(
         data.get("provider")
         or device.get("remote_provider")
@@ -643,7 +651,7 @@ async def end_remote_session_record(
         "ended_by_name": user.get("name") or user.get("email"),
     }
 
-    policy = await remote_policy()
+    policy = await remote_policy(platform_tenant_id(user))
     ticket = None
     time_entry_doc = None
     if session.get("ticket_id"):
@@ -802,7 +810,7 @@ async def end_remote_session_record(
 
 
 async def remote_health_for_device(device: dict) -> dict[str, Any]:
-    policy = await remote_policy()
+    policy = await remote_policy(str(device.get("tenant_id") or "nexus-local"))
     provider = "nexus"
     remote_id = await provider_device_id(device, provider)
     readiness = await native_device_readiness(device)
@@ -891,7 +899,7 @@ async def queue_remote_repair(
             status_code=409,
             detail="Nexus Agent is offline; remote repair cannot be safely queued",
         )
-    policy = await remote_policy()
+    policy = await remote_policy(str(device.get("tenant_id") or "nexus-local"))
     cooldown = max(5, int(policy["repair_cooldown_minutes"]))
     recent = await db.remote_repairs.find_one(
         {"device_id": device.get("id"), "status": {"$in": ["queued", "running"]}},

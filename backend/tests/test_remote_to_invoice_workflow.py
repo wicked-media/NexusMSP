@@ -99,7 +99,7 @@ def test_remote_session_creates_priced_auditable_time(monkeypatch):
 async def _test_remote_session_creates_priced_auditable_time(monkeypatch):
     fake_db = FakeDb()
     monkeypatch.setattr(remote_runtime, "db", fake_db)
-    monkeypatch.setattr(remote_runtime, "remote_policy", lambda: _async_value({
+    monkeypatch.setattr(remote_runtime, "remote_policy", lambda *_args: _async_value({
         "auto_create_time_entry": True,
         "auto_ticket_note": True,
     }))
@@ -147,7 +147,7 @@ async def _test_work_session_remote_handoff_has_one_canonical_time_owner(monkeyp
     fake_db = FakeDb()
     monkeypatch.setattr(remote_runtime, "db", fake_db)
     monkeypatch.setattr(remote_runtime, "ensure_remote_runtime_indexes", lambda: _async_value(None))
-    monkeypatch.setattr(remote_runtime, "remote_policy", lambda: _async_value({
+    monkeypatch.setattr(remote_runtime, "remote_policy", lambda *_args: _async_value({
         "require_ticket_reference": False,
         "require_consent": True,
         "auto_create_time_entry": True,
@@ -214,7 +214,7 @@ async def _test_work_session_remote_handoff_rejects_another_technician(monkeypat
     fake_db = FakeDb()
     monkeypatch.setattr(remote_runtime, "db", fake_db)
     monkeypatch.setattr(remote_runtime, "ensure_remote_runtime_indexes", lambda: _async_value(None))
-    monkeypatch.setattr(remote_runtime, "remote_policy", lambda: _async_value({
+    monkeypatch.setattr(remote_runtime, "remote_policy", lambda *_args: _async_value({
         "require_ticket_reference": False,
         "require_consent": True,
         "auto_create_time_entry": True,
@@ -246,7 +246,7 @@ def test_remote_authorisation_does_not_create_time_until_connection_is_confirmed
 async def _test_remote_authorisation_does_not_create_time_until_connection_is_confirmed(monkeypatch):
     fake_db = FakeDb()
     monkeypatch.setattr(remote_runtime, "db", fake_db)
-    monkeypatch.setattr(remote_runtime, "remote_policy", lambda: _async_value({
+    monkeypatch.setattr(remote_runtime, "remote_policy", lambda *_args: _async_value({
         "auto_create_time_entry": True,
         "auto_ticket_note": True,
     }))

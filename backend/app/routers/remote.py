@@ -66,8 +66,8 @@ async def _remote_device_in_scope(
     )
 
 
-async def _remote_policy():
-    return await remote_policy()
+async def _remote_policy(current_user: dict):
+    return await remote_policy(platform_tenant_id(current_user))
 
 
 def _device_provider_id(device: dict, provider_id: str) -> Optional[str]:
@@ -79,7 +79,7 @@ def _device_provider_id(device: dict, provider_id: str) -> Optional[str]:
 
 @router.get("/remote-access/policy")
 async def get_remote_access_policy(current_user: dict = Depends(get_current_user)):
-    return await _remote_policy()
+    return await _remote_policy(current_user)
 
 
 @router.put("/remote-access/policy", dependencies=[Depends(require_action("device.remote.configure"))])
@@ -101,8 +101,16 @@ async def save_remote_access_policy(data: dict, current_user: dict = Depends(get
     updates = {key: value for key, value in data.items() if key in allowed}
     if updates.get("default_provider") not in (None, "nexus"):
         raise HTTPException(status_code=422, detail="Nexus Native is the only supported remote provider")
-    updates.update({"type": "remote_access_policy", "updated_at": datetime.now(timezone.utc).isoformat()})
-    await db.settings.update_one({"type": "remote_access_policy"}, {"$set": updates}, upsert=True)
+    updates.update({
+        "type": "remote_access_policy",
+        "tenant_id": platform_tenant_id(current_user),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    await db.settings.update_one(
+        {"type": "remote_access_policy", "tenant_id": platform_tenant_id(current_user)},
+        {"$set": updates},
+        upsert=True,
+    )
     await log_activity(
         current_user,
         "remote_policy_updated",
@@ -112,7 +120,7 @@ async def save_remote_access_policy(data: dict, current_user: dict = Depends(get
         "Updated governed remote-access policy",
         metadata={"updated_fields": sorted(key for key in updates if key not in {"type", "updated_at"})},
     )
-    return await _remote_policy()
+    return await _remote_policy(current_user)
 
 
 @router.get("/devices/{device_id}/remote-options")
@@ -123,7 +131,7 @@ async def get_device_remote_options(device_id: str, request: Request, current_us
         operation="device.remote.view",
         request=request,
     )
-    policy = await _remote_policy()
+    policy = await _remote_policy(current_user)
     assigned = "nexus"
     provider_device_identifier = await provider_device_id(device, "nexus")
     from app.services.native_remote import device_readiness

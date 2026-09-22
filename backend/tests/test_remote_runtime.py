@@ -160,7 +160,7 @@ def test_native_session_rejects_control_mode_before_creating_any_record(monkeypa
     async def no_indexes():
         return None
 
-    async def native_policy():
+    async def native_policy(*_args):
         return dict(remote_runtime.REMOTE_POLICY_DEFAULTS)
 
     monkeypatch.setattr(remote_runtime, "ensure_remote_runtime_indexes", no_indexes)
