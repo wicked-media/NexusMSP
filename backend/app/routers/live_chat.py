@@ -400,7 +400,10 @@ async def transfer_session(session_id: str, payload: dict = Body(...), user=Depe
     target_user_id = payload.get("agent_id")
     if not target_user_id:
         raise HTTPException(status_code=400, detail="agent_id required")
-    target = await db.users.find_one({"id": target_user_id}, {"_id": 0, "id": 1, "name": 1})
+    target = await db.users.find_one(
+        tenant_scoped_query(user, {"id": target_user_id, "is_active": {"$ne": False}, "archived": {"$ne": True}}),
+        {"_id": 0, "id": 1, "name": 1},
+    )
     if not target:
         raise HTTPException(status_code=404, detail="Target agent not found")
 
@@ -475,22 +478,30 @@ async def create_ticket_from_chat(session_id: str, user=Depends(get_current_user
 # ====== Canned Responses ======
 @router.get("/canned-responses")
 async def list_canned_responses(user=Depends(get_current_user)):
-    docs = await db.chat_canned_responses.find({}, {"_id": 0}).sort("shortcut", 1).to_list(200)
+    scope = tenant_scoped_query(user)
+    docs = await db.chat_canned_responses.find(scope, {"_id": 0}).sort("shortcut", 1).to_list(200)
     if not docs:
         # seed defaults
         for r in DEFAULT_CANNED_RESPONSES:
-            await db.chat_canned_responses.insert_one({"id": str(uuid.uuid4())[:8], **r, "created_at": datetime.now(timezone.utc).isoformat()})
-        docs = await db.chat_canned_responses.find({}, {"_id": 0}).sort("shortcut", 1).to_list(200)
+            await db.chat_canned_responses.insert_one({"id": str(uuid.uuid4())[:8], "tenant_id": user.get("tenant_id") or "nexus-local", **r, "created_at": datetime.now(timezone.utc).isoformat()})
+        docs = await db.chat_canned_responses.find(scope, {"_id": 0}).sort("shortcut", 1).to_list(200)
     return docs
 
 
 @router.post("/canned-responses")
 async def create_canned_response(payload: dict = Body(...), user=Depends(get_current_user)):
+    shortcut = str(payload.get("shortcut") or "").strip().lower()
+    content = str(payload.get("content") or "").strip()
+    if not shortcut.startswith("/") or len(shortcut) > 50 or not content or len(content) > 5000:
+        raise HTTPException(status_code=400, detail="Provide a slash shortcut and a response up to 5,000 characters")
+    if await db.chat_canned_responses.find_one(tenant_scoped_query(user, {"shortcut": shortcut}), {"_id": 1}):
+        raise HTTPException(status_code=409, detail="That canned-response shortcut already exists")
     doc = {
         "id": str(uuid.uuid4())[:8],
-        "shortcut": payload.get("shortcut", ""),
-        "title": payload.get("title", ""),
-        "content": payload.get("content", ""),
+        "tenant_id": user.get("tenant_id") or "nexus-local",
+        "shortcut": shortcut,
+        "title": str(payload.get("title") or "").strip()[:160],
+        "content": content,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user.get("name", ""),
     }
@@ -500,7 +511,7 @@ async def create_canned_response(payload: dict = Body(...), user=Depends(get_cur
 
 @router.delete("/canned-responses/{cid}")
 async def delete_canned_response(cid: str, user=Depends(get_current_user)):
-    res = await db.chat_canned_responses.delete_one({"id": cid})
+    res = await db.chat_canned_responses.delete_one(tenant_scoped_query(user, {"id": cid}))
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Deleted"}
@@ -510,7 +521,7 @@ async def delete_canned_response(cid: str, user=Depends(get_current_user)):
 async def list_available_agents(user=Depends(get_current_user)):
     """List users available to receive transfers."""
     users = await db.users.find(
-        {"$or": [{"role": "admin"}, {"role": "tech"}, {"is_admin": True}]},
+        tenant_scoped_query(user, {"$or": [{"role": "admin"}, {"role": "tech"}, {"is_admin": True}], "is_active": {"$ne": False}, "archived": {"$ne": True}}),
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
     ).to_list(200)
     return users

@@ -38,6 +38,15 @@ class ScopeDenials:
         self.rows.append(dict(row))
 
 
+class CannedCollection:
+    def __init__(self):
+        self.delete_query = None
+
+    async def delete_one(self, query):
+        self.delete_query = query
+        return SimpleNamespace(deleted_count=1)
+
+
 def test_direct_live_chat_session_read_is_denied_outside_client_scope(monkeypatch):
     sessions = SessionCollection({"id": "chat-1", "client_id": "client-outside", "status": "active"})
     denials = ScopeDenials()
@@ -53,3 +62,13 @@ def test_direct_live_chat_session_read_is_denied_outside_client_scope(monkeypatc
 
     assert denied.value.status_code == 404
     assert denials.rows[0]["operation"] == "live_chat.session"
+
+
+def test_canned_response_delete_is_tenant_bound(monkeypatch):
+    canned = CannedCollection()
+    monkeypatch.setattr(live_chat, "db", SimpleNamespace(chat_canned_responses=canned))
+
+    result = asyncio.run(live_chat.delete_canned_response("template-1", user={"id": "tech-1", "tenant_id": "tenant-a"}))
+
+    assert result == {"message": "Deleted"}
+    assert canned.delete_query == {"$and": [{"id": "template-1"}, {"tenant_id": "tenant-a"}]}
