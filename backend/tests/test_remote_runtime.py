@@ -95,6 +95,20 @@ class _RemoteDeviceQueries:
         return None
 
 
+class _ScopedRemoteDevice:
+    async def find_one(self, _query, _projection=None):
+        return {"id": "device-1", "tenant_id": "tenant-a", "client_id": "client-a"}
+
+
+class _DeviceChatDeletes:
+    def __init__(self):
+        self.delete_query = None
+
+    async def delete_many(self, query):
+        self.delete_query = deepcopy(query)
+        return SimpleNamespace(deleted_count=0)
+
+
 class _WorkSessionRuntimeDB:
     def __init__(self):
         self.tickets = _Rows([{
@@ -206,4 +220,26 @@ def test_remote_device_entry_points_are_partitioned_by_tenant(monkeypatch):
     assert denied.value.status_code == 404
     assert devices.find_one_query == {
         "$and": [{"id": "device-from-another-tenant"}, {"tenant_id": "tenant-a"}]
+    }
+
+
+def test_remote_device_chat_deletion_is_partitioned_by_tenant(monkeypatch):
+    chat = _DeviceChatDeletes()
+    monkeypatch.setattr(
+        remote_routes,
+        "db",
+        SimpleNamespace(devices=_ScopedRemoteDevice(), device_chat=chat),
+    )
+
+    result = asyncio.run(remote_routes.clear_device_chat(
+        "device-1",
+        current_user={"id": "admin-1", "tenant_id": "tenant-a", "is_admin": True},
+    ))
+
+    assert result == {"message": "Cleared 0 messages"}
+    assert chat.delete_query == {
+        "$and": [
+            {"device_id": "device-1", "client_id": "client-a"},
+            {"tenant_id": "tenant-a"},
+        ]
     }

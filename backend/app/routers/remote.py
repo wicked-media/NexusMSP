@@ -441,7 +441,10 @@ async def get_device_chat(device_id: str, limit: int = 100, current_user: dict =
         operation="device.chat.read",
     )
     messages = await db.device_chat.find(
-        {"device_id": device_id, "client_id": device.get("client_id")},
+        tenant_scoped_query(
+            current_user,
+            {"device_id": device_id, "client_id": device.get("client_id")},
+        ),
         {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
     
@@ -468,6 +471,7 @@ async def send_device_chat_message(device_id: str, message_data: DeviceChatMessa
     )
     doc = chat_message.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc["tenant_id"] = platform_tenant_id(current_user)
     await db.device_chat.insert_one(doc)
     
     return chat_message
@@ -498,6 +502,7 @@ async def send_device_command(device_id: str, command: str, current_user: dict =
     )
     doc = chat_message.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc["tenant_id"] = platform_tenant_id(current_user)
     await db.device_chat.insert_one(doc)
     
     # Simulate command execution response (in real implementation, this would be handled by the agent)
@@ -515,6 +520,7 @@ async def send_device_command(device_id: str, command: str, current_user: dict =
     )
     resp_doc = response_message.model_dump()
     resp_doc['created_at'] = resp_doc['created_at'].isoformat()
+    resp_doc["tenant_id"] = platform_tenant_id(current_user)
     await db.device_chat.insert_one(resp_doc)
     
     return {"message": "Command sent", "command_id": chat_message.id}
@@ -541,6 +547,7 @@ async def send_device_file(device_id: str, filename: str, file_url: str, current
     )
     doc = chat_message.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc["tenant_id"] = platform_tenant_id(current_user)
     await db.device_chat.insert_one(doc)
     
     return chat_message
@@ -554,7 +561,10 @@ async def clear_device_chat(device_id: str, current_user: dict = Depends(get_cur
         operation="device.chat.clear",
     )
     result = await db.device_chat.delete_many(
-        {"device_id": device_id, "client_id": device.get("client_id")}
+        tenant_scoped_query(
+            current_user,
+            {"device_id": device_id, "client_id": device.get("client_id")},
+        )
     )
     return {"message": f"Cleared {result.deleted_count} messages"}
 
