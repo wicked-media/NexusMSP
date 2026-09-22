@@ -207,7 +207,9 @@ class ScopedDeviceRecords:
         }
 
     async def find_one(self, query, *_args, **_kwargs):
-        record = self.records.get(query.get("id"))
+        clauses = query.get("$and", [query])
+        record_id = next((clause.get("id") for clause in clauses if "id" in clause), None)
+        record = self.records.get(record_id)
         return dict(record) if record else None
 
 
@@ -1030,7 +1032,9 @@ def test_maintenance_window_waits_for_agent_results(monkeypatch):
 
 class CommandConsoleDevices:
     async def find_one(self, query, *_args, **_kwargs):
-        if query.get("id") == "device-1":
+        clauses = query.get("$and", [query])
+        record_id = next((clause.get("id") for clause in clauses if "id" in clause), None)
+        if record_id == "device-1":
             return {
                 "id": "device-1",
                 "name": "WORKSTATION-1",
