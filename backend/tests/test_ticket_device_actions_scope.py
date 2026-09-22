@@ -171,6 +171,33 @@ def test_legacy_ticket_remote_launch_is_retired_without_touching_data():
     assert retired.value.detail == "Legacy remote launch is retired; use the governed Remote action"
 
 
+def test_governed_ticket_remote_masks_foreign_ticket_before_start(monkeypatch):
+    database = _Database()
+    _install_database(monkeypatch, database)
+    started: list[dict] = []
+
+    async def start_remote_session(**kwargs):
+        started.append(kwargs)
+        return {"session": {"id": "should-not-start"}}
+
+    monkeypatch.setattr(ticket_device_actions, "start_remote_session", start_remote_session)
+
+    async def scenario():
+        with pytest.raises(HTTPException) as denied:
+            await ticket_device_actions.governed_ticket_device_remote_connect(
+                "ticket-b",
+                "device-b",
+                request=None,
+                payload={},
+                current_user=_restricted_client_a_operator(),
+            )
+        assert denied.value.status_code == 404
+        assert denied.value.detail == "Resource not found"
+
+    asyncio.run(scenario())
+    assert started == []
+
+
 def test_ticket_linked_commands_keep_same_client_operator_flow(monkeypatch):
     database = _Database()
     _install_database(monkeypatch, database)

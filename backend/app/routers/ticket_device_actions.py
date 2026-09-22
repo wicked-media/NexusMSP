@@ -267,21 +267,10 @@ async def governed_ticket_device_remote_connect(
     payload: dict | None = Body(default=None),
     current_user: dict = Depends(get_current_user),
 ):
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
-    linked = {str(item) for item in (ticket.get("device_ids") or []) if item}
-    if ticket.get("device_id"):
-        linked.add(str(ticket["device_id"]))
-    if device_id not in linked:
-        raise HTTPException(400, "Device is not linked to this ticket")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(404, "Linked device not found")
-    await assert_client_scope(
+    ticket, device = await _ticket_with_linked_device(
+        ticket_id,
         current_user,
-        device.get("client_id") or ticket.get("client_id"),
-        site_id=device.get("site_id"),
+        device_id,
         operation="device.remote.start",
         request=request,
     )
