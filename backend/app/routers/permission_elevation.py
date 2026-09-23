@@ -1443,23 +1443,24 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
     await _escalate_overdue_native_reviews(scoped_query(caller, {}, site_field=None))
     now = datetime.now(timezone.utc)
     settings = await _native_settings(caller)
+    request_scope = tenant_scoped_query(caller, scoped_query(caller, {}, site_field=None))
     requests = await db.nexus_elevate_requests.find(
-        scoped_query(caller, {}, site_field=None), {"_id": 0}
+        request_scope, {"_id": 0}
     ).sort("requested_at", -1).to_list(250)
-    active_agents = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True}, site_field=None))
+    active_agents = await db.nexus_agents.count_documents(tenant_scoped_query(caller, scoped_query(caller, {"is_active": True}, site_field=None)))
     online_cutoff = (now - timedelta(minutes=3)).isoformat()
-    online_agents = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "last_seen": {"$gte": online_cutoff}}, site_field=None))
-    companion_agents = await db.nexus_agents.count_documents(scoped_query(caller, {
+    online_agents = await db.nexus_agents.count_documents(tenant_scoped_query(caller, scoped_query(caller, {"is_active": True, "last_seen": {"$gte": online_cutoff}}, site_field=None)))
+    companion_agents = await db.nexus_agents.count_documents(tenant_scoped_query(caller, scoped_query(caller, {
         "is_active": True,
         "client_companion_installed_at": {"$exists": True, "$ne": None},
-    }, site_field=None))
-    companion_agents_online = await db.nexus_agents.count_documents(scoped_query(caller, {
+    }, site_field=None)))
+    companion_agents_online = await db.nexus_agents.count_documents(tenant_scoped_query(caller, scoped_query(caller, {
         "is_active": True,
         "last_seen": {"$gte": online_cutoff},
         "client_companion_installed_at": {"$exists": True, "$ne": None},
-    }, site_field=None))
-    elevate_active = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "nexus_elevate.state": "active"}, site_field=None))
-    elevate_deploying = await db.nexus_agents.count_documents(scoped_query(caller, {"is_active": True, "nexus_elevate.state": "deploying"}, site_field=None))
+    }, site_field=None)))
+    elevate_active = await db.nexus_agents.count_documents(tenant_scoped_query(caller, scoped_query(caller, {"is_active": True, "nexus_elevate.state": "active"}, site_field=None)))
+    elevate_deploying = await db.nexus_agents.count_documents(tenant_scoped_query(caller, scoped_query(caller, {"is_active": True, "nexus_elevate.state": "deploying"}, site_field=None)))
     pending = [row for row in requests if row.get("status") == "pending"]
     overdue_reviews = [row for row in pending if row.get("approval_due_at") and row["approval_due_at"] <= now.isoformat()]
     expiring = [row for row in requests if row.get("status") == "approved" and row.get("approved_until") and row["approved_until"] <= (now + timedelta(minutes=10)).isoformat()]
@@ -1519,7 +1520,7 @@ async def list_nexus_elevate_requests(
             raise HTTPException(status_code=404, detail="Ticket not found")
         await assert_client_scope(caller, ticket.get("client_id"), operation="nexus_elevate.request.read", mask_not_found=True)
         query["ticket_id"] = ticket["id"]
-    scoped_request_query = scoped_query(caller, query, site_field=None)
+    scoped_request_query = tenant_scoped_query(caller, scoped_query(caller, query, site_field=None))
     await _escalate_overdue_native_reviews(scoped_request_query)
     rows = await db.nexus_elevate_requests.find(
         scoped_request_query, {"_id": 0}

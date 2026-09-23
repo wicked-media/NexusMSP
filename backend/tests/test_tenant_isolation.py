@@ -1165,7 +1165,17 @@ def test_nexus_elevate_list_is_limited_to_the_technicians_clients(monkeypatch):
     )
 
     assert result == {"requests": []}
-    assert captured[-1] == {"client_id": {"$in": ["client-a"]}}
+    assert captured[-1] == {
+        "$and": [
+            {"client_id": {"$in": ["client-a"]}},
+            {"$or": [
+                {"tenant_id": "nexus-local"},
+                {"tenant_id": {"$exists": False}},
+                {"tenant_id": None},
+                {"tenant_id": ""},
+            ]},
+        ],
+    }
 
 
 def test_nexus_elevate_ticket_filter_requires_a_ticket_in_the_technicians_scope(monkeypatch):
