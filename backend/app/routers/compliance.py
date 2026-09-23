@@ -4,6 +4,7 @@ from pathlib import Path
 import uuid
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
+from app.services.scope_permissions import platform_tenant_id, scoped_query, tenant_scoped_query
 
 router = APIRouter()
 
@@ -860,7 +861,10 @@ async def get_framework_detail(framework_id: str, current_user: dict = Depends(g
     definition = await _framework_definition(framework_id)
     if not definition:
         raise HTTPException(status_code=404, detail="Compliance framework not found")
-    scans = await db.compliance_reports.find({"framework": framework_id}, {"_id": 0}).sort("scanned_at", -1).to_list(500)
+    scans = await db.compliance_reports.find(
+        tenant_scoped_query(current_user, scoped_query(current_user, {"framework": framework_id})),
+        {"_id": 0},
+    ).sort("scanned_at", -1).to_list(500)
     latest_by_client: dict[str, dict] = {}
     for scan in scans:
         client_id = str(scan.get("client_id") or "")
@@ -893,7 +897,7 @@ async def get_generator_frameworks(current_user: dict = Depends(get_current_user
 @router.get("/compliance-generator/reports")
 async def get_generated_reports(current_user: dict = Depends(get_current_user)):
     return await db.compliance_generated_reports.find(
-        {"source": "evidence_scan"}, {"_id": 0}
+        tenant_scoped_query(current_user, scoped_query(current_user, {"source": "evidence_scan"})), {"_id": 0}
     ).sort("generated_at", -1).to_list(50)
 
 
@@ -902,7 +906,10 @@ async def generate_compliance_report(data: dict, current_user: dict = Depends(ge
     scan_id = str(data.get("scan_id") or "").strip()
     if not scan_id:
         raise HTTPException(status_code=400, detail="Run an evidence scan before generating a compliance report")
-    scan = await db.compliance_reports.find_one({"id": scan_id}, {"_id": 0})
+    scan = await db.compliance_reports.find_one(
+        tenant_scoped_query(current_user, scoped_query(current_user, {"id": scan_id})),
+        {"_id": 0},
+    )
     if not scan:
         raise HTTPException(status_code=404, detail="Compliance evidence scan not found")
     controls = scan.get("controls") or []
@@ -911,6 +918,7 @@ async def generate_compliance_report(data: dict, current_user: dict = Depends(ge
         "source": "evidence_scan",
         "scan_id": scan["id"],
         "client_id": scan.get("client_id"),
+        "tenant_id": platform_tenant_id(current_user),
         "client_name": scan.get("client_name"),
         "framework": scan.get("framework_name") or scan.get("framework"),
         "framework_id": scan.get("framework"),
