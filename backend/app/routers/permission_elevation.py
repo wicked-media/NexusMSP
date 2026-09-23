@@ -102,8 +102,12 @@ def _normalise_argv(arguments: Any) -> list[str]:
     return [item.strip() for item in arguments]
 
 
-async def _native_settings() -> dict:
-    stored = await db.nexus_elevate_settings.find_one({"_id": ELEVATE_SETTINGS_ID}, {"_id": 0}) or {}
+async def _native_settings(owner: dict | None = None) -> dict:
+    """Load configuration from the caller's Nexus platform partition only."""
+    stored = await db.nexus_elevate_settings.find_one(
+        tenant_scoped_query(owner or {}, {"_id": ELEVATE_SETTINGS_ID}),
+        {"_id": 0},
+    ) or {}
     return {
         "native_enabled": bool(stored.get("native_enabled", True)),
         "auto_deploy_companion": bool(stored.get("auto_deploy_companion", True)),
@@ -718,7 +722,7 @@ def _policy_view(policy: dict) -> dict:
 
 async def _queue_policy_auto_approval(request: dict, policy_match: dict) -> str:
     """Queue an exact, hash-pinned launch granted by an enforced policy."""
-    settings = await _native_settings()
+    settings = await _native_settings({"tenant_id": request.get("tenant_id")})
     constraints = (policy_match or {}).get("constraints") or {}
     duration = min(
         int(request.get("requested_duration_minutes") or settings["max_duration_minutes"]),
@@ -1387,7 +1391,7 @@ async def get_secure_access_request(request_id: str, current_user: dict = Depend
 async def get_nexus_elevate_settings(current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    return await _native_settings()
+    return await _native_settings(caller)
 
 
 @router.put("/nexus-elevate/settings")
@@ -1418,12 +1422,17 @@ async def put_nexus_elevate_settings(data: dict, current_user: dict = Depends(ge
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": caller.get("email") or caller.get("id"),
     }
-    await db.nexus_elevate_settings.update_one({"_id": ELEVATE_SETTINGS_ID}, {"$set": settings}, upsert=True)
+    settings["tenant_id"] = platform_tenant_id(caller)
+    await db.nexus_elevate_settings.update_one(
+        tenant_scoped_query(caller, {"_id": ELEVATE_SETTINGS_ID}),
+        {"$set": settings},
+        upsert=True,
+    )
     await _write_native_audit("nexus_elevate_settings_updated", {"id": ELEVATE_SETTINGS_ID}, caller, {
         "native_enabled": settings["native_enabled"],
         "keeper_bridge_enabled": settings["keeper_bridge_enabled"],
     })
-    return await _native_settings()
+    return await _native_settings(caller)
 
 
 @router.get("/nexus-elevate/overview")
@@ -1433,7 +1442,7 @@ async def nexus_elevate_overview(current_user: dict = Depends(get_current_user))
     await _expire_stale_native_approvals()
     await _escalate_overdue_native_reviews(scoped_query(caller, {}, site_field=None))
     now = datetime.now(timezone.utc)
-    settings = await _native_settings()
+    settings = await _native_settings(caller)
     requests = await db.nexus_elevate_requests.find(
         scoped_query(caller, {}, site_field=None), {"_id": 0}
     ).sort("requested_at", -1).to_list(250)
@@ -1541,7 +1550,7 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
     await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.approve", mask_not_found=True)
     if request.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Only pending elevation requests can be approved")
-    settings = await _native_settings()
+    settings = await _native_settings(caller)
     if not settings["native_enabled"]:
         raise HTTPException(status_code=409, detail="Native Nexus Elevate is disabled in Settings")
 
@@ -1763,7 +1772,7 @@ async def create_native_elevation_request(
     agent = await db.nexus_agents.find_one({"agent_token": x_agent_token, "is_active": True}, {"_id": 0})
     if not agent:
         raise HTTPException(status_code=401, detail="Invalid agent token")
-    settings = await _native_settings()
+    settings = await _native_settings(agent)
     if not settings["native_enabled"]:
         raise HTTPException(status_code=409, detail="Native Nexus Elevate is disabled by the organisation")
 
