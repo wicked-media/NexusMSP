@@ -64,6 +64,25 @@ class _Rows:
         return SimpleNamespace(matched_count=0, modified_count=0)
 
 
+class _PolicySettings:
+    def __init__(self, rows):
+        self.rows = deepcopy(rows)
+        self.queries = []
+
+    async def find_one(self, query, _projection=None):
+        self.queries.append(deepcopy(query))
+        for row in self.rows:
+            if row.get("type") != query.get("type"):
+                continue
+            requested_tenant = query.get("tenant_id")
+            if isinstance(requested_tenant, dict) and "$exists" in requested_tenant:
+                if ("tenant_id" in row) == requested_tenant["$exists"]:
+                    return deepcopy(row)
+            elif row.get("tenant_id") == requested_tenant:
+                return deepcopy(row)
+        return None
+
+
 class _RemoteSessionCursor:
     def sort(self, *_args, **_kwargs):
         return self
@@ -138,6 +157,26 @@ def test_remote_session_types_are_an_explicit_allow_list():
         assert exc.status_code == 422
     else:
         raise AssertionError("unsupported session type should be rejected")
+
+
+def test_remote_policy_is_tenant_partitioned_with_local_legacy_fallback(monkeypatch):
+    settings = _PolicySettings([
+        {"type": "remote_access_policy", "tenant_id": "tenant-a", "require_ticket_reference": True},
+        {"type": "remote_access_policy", "allow_standing_authorisation": True},
+    ])
+    monkeypatch.setattr(remote_runtime, "db", SimpleNamespace(settings=settings))
+
+    tenant_policy = asyncio.run(remote_runtime.remote_policy("tenant-a"))
+    local_policy = asyncio.run(remote_runtime.remote_policy("nexus-local"))
+
+    assert tenant_policy["require_ticket_reference"] is True
+    assert tenant_policy["allow_standing_authorisation"] is False
+    assert local_policy["allow_standing_authorisation"] is True
+    assert settings.queries == [
+        {"type": "remote_access_policy", "tenant_id": "tenant-a"},
+        {"type": "remote_access_policy", "tenant_id": "nexus-local"},
+        {"type": "remote_access_policy", "tenant_id": {"$exists": False}},
+    ]
 
 
 def test_ticket_device_link_supports_primary_and_multiple_assets():
