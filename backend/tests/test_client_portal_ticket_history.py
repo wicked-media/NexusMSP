@@ -14,6 +14,10 @@ from app.routers import client_portal
 
 
 def _matches(row: dict[str, Any], query: dict[str, Any]) -> bool:
+    if "$and" in query:
+        return all(_matches(row, clause) for clause in query["$and"])
+    if "$or" in query:
+        return any(_matches(row, clause) for clause in query["$or"])
     for key, value in query.items():
         if isinstance(value, dict) and "$ne" in value:
             if row.get(key) == value["$ne"]:
@@ -57,7 +61,7 @@ class _Collection:
 
 
 async def _active_config(_token: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    return {"client_id": "client-a"}, {"id": "link-a"}
+    return {"client_id": "client-a", "tenant_id": "nexus-local"}, {"id": "link-a"}
 
 
 def test_secure_link_returns_only_public_history_for_its_client(monkeypatch: pytest.MonkeyPatch):
@@ -126,10 +130,15 @@ async def _test_secure_link_returns_only_public_history_for_its_client(monkeypat
     assert response["comments"][0]["content"] == "Client-visible update"
     assert not {"client_id", "to_addresses", "delivery_id"}.intersection(response["comments"][0])
     assert comments.last_find_query == {
-        "ticket_id": "ticket-a",
-        "client_id": "client-a",
-        "portal_visible": True,
-        "is_internal": {"$ne": True},
+        "$and": [
+            {
+                "ticket_id": "ticket-a",
+                "client_id": "client-a",
+                "portal_visible": True,
+                "is_internal": {"$ne": True},
+            },
+            {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}, {"tenant_id": ""}]},
+        ]
     }
 
 

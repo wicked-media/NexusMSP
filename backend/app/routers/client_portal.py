@@ -7,7 +7,13 @@ from app.auth import get_current_user
 from app.routers.email_utils import send_email, is_microsoft365_configured
 from app.services.action_permissions import require_action
 from app.services.portal_audit import record_portal_event
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -32,7 +38,25 @@ def _portal_ticket_history_comment(comment: dict) -> dict:
     }
 
 
-async def _client_identity(client_id: str) -> dict:
+def _tenant_partition_query(tenant_id: str, query: dict) -> dict:
+    """Constrain public portal reads to the tenant that issued its bearer link."""
+    if tenant_id == "nexus-local":
+        partition = {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}, {"tenant_id": ""}]}
+    else:
+        partition = {"tenant_id": tenant_id}
+    return {"$and": [query, partition]}
+
+
+def _portal_record_query(config: dict, query: dict) -> dict:
+    return _tenant_partition_query(str(config.get("tenant_id") or "nexus-local"), query)
+
+
+async def _client_identity(client_id: str, current_user: dict | None = None) -> dict:
+    if current_user:
+        return await assert_tenant_record_scope(
+            current_user, db.clients, client_id,
+            operation="portal.client.read", resource_name="Client",
+        ) or {"id": client_id, "name": "Unknown client"}
     return await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1}) or {
         "id": client_id,
         "name": "Unknown client",
@@ -70,6 +94,9 @@ async def _active_portal_config_for_token(token: str) -> tuple[dict, dict]:
     if not config or not _portal_token_is_active(token_entry):
         # Keep invalid, revoked and expired link responses indistinguishable.
         raise HTTPException(status_code=404, detail="Portal not found")
+    # Old unmarked portal rows are intentionally part of the documented local
+    # partition only. New configs always persist their platform tenant.
+    config.setdefault("tenant_id", "nexus-local")
     return config, token_entry
 
 
@@ -157,15 +184,15 @@ async def get_portal_access_logs(
         query["client_id"] = client_id
     if outcome in {"success", "failed", "blocked", "warning"}:
         query["outcome"] = outcome
-    return await db.portal_access_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    return await db.portal_access_logs.find(tenant_scoped_query(current_user, query), {"_id": 0}).sort("timestamp", -1).to_list(limit)
 
 
 @router.get("/client-portal/config/{client_id}")
 async def get_portal_config(client_id: str, current_user: dict = Depends(get_current_user)):
     await assert_client_scope(current_user, client_id, operation="portal.configuration.read", mask_not_found=True)
-    config = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0})
+    config = await db.portal_configs.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0})
     if not config:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+        client = await assert_tenant_record_scope(current_user, db.clients, client_id, operation="portal.configuration.read", resource_name="Client")
         config = {
             "client_id": client_id, "client_name": client["name"] if client else "Unknown",
             "enabled": False, "branding": {"primary_color": "#3b82f6", "logo_url": None, "company_name": client["name"] if client else ""},
@@ -177,11 +204,12 @@ async def get_portal_config(client_id: str, current_user: dict = Depends(get_cur
 @router.put("/client-portal/config/{client_id}")
 async def update_portal_config(client_id: str, data: dict, current_user: dict = Depends(require_action("portal.configuration.manage"))):
     await assert_client_scope(current_user, client_id, operation="portal.configuration.update", mask_not_found=True)
-    client = await _client_identity(client_id)
-    previous = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0}) or {}
+    client = await _client_identity(client_id, current_user)
+    previous = await db.portal_configs.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}) or {}
     data["client_id"] = client_id
+    data["tenant_id"] = platform_tenant_id(current_user)
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.portal_configs.update_one({"client_id": client_id}, {"$set": data}, upsert=True)
+    await db.portal_configs.update_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"$set": data}, upsert=True)
     changed_features = sorted(
         key for key in set((previous.get("features") or {})) | set((data.get("features") or {}))
         if (previous.get("features") or {}).get(key) != (data.get("features") or {}).get(key)
@@ -203,8 +231,8 @@ async def update_portal_config(client_id: str, data: dict, current_user: dict = 
 @router.post("/client-portal/generate-token/{client_id}")
 async def generate_portal_token(client_id: str, data: dict, current_user: dict = Depends(require_action("portal.link.manage"))):
     await assert_client_scope(current_user, client_id, operation="portal.link.create", mask_not_found=True)
-    client = await _client_identity(client_id)
-    existing_config = await db.portal_configs.find_one({"client_id": client_id}, {"_id": 0, "features": 1, "client_name": 1}) or {}
+    client = await _client_identity(client_id, current_user)
+    existing_config = await db.portal_configs.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "features": 1, "client_name": 1}) or {}
     token_value = secrets.token_urlsafe(32)
     token_entry = {
         "id": str(uuid.uuid4()), "token": token_value,
@@ -214,7 +242,7 @@ async def generate_portal_token(client_id: str, data: dict, current_user: dict =
         "expires_at": (datetime.now(timezone.utc) + timedelta(days=_portal_link_expiry_days(data.get("expiry_days")))).isoformat(),
         "last_used": None, "active": True
     }
-    config_fields = {"client_id": client_id, "enabled": True}
+    config_fields = {"client_id": client_id, "tenant_id": platform_tenant_id(current_user), "enabled": True}
     # A link can be the first portal action for a client. Initialise feature
     # defaults only when no feature policy exists; preserve every explicitly
     # configured setting for established portals.
@@ -223,7 +251,7 @@ async def generate_portal_token(client_id: str, data: dict, current_user: dict =
     if not existing_config.get("client_name"):
         config_fields["client_name"] = client["name"]
     await db.portal_configs.update_one(
-        {"client_id": client_id},
+        tenant_scoped_query(current_user, {"client_id": client_id}),
         {"$push": {"access_tokens": token_entry}, "$set": config_fields},
         upsert=True
     )
@@ -244,14 +272,14 @@ async def generate_portal_token(client_id: str, data: dict, current_user: dict =
 @router.delete("/client-portal/tokens/{client_id}/{token_id}")
 async def revoke_portal_token(client_id: str, token_id: str, current_user: dict = Depends(require_action("portal.link.manage"))):
     await assert_client_scope(current_user, client_id, operation="portal.link.revoke", mask_not_found=True)
-    client = await _client_identity(client_id)
+    client = await _client_identity(client_id, current_user)
     config = await db.portal_configs.find_one(
-        {"client_id": client_id, "access_tokens.id": token_id},
+        tenant_scoped_query(current_user, {"client_id": client_id, "access_tokens.id": token_id}),
         {"_id": 0, "access_tokens.$": 1},
     ) or {}
     token_entry = (config.get("access_tokens") or [{}])[0]
     await db.portal_configs.update_one(
-        {"client_id": client_id},
+        tenant_scoped_query(current_user, {"client_id": client_id}),
         {"$pull": {"access_tokens": {"id": token_id}}}
     )
     await record_portal_event(
@@ -271,11 +299,11 @@ async def portal_get_info(token: str):
     config, token_entry = await _active_portal_config_for_token(token)
     
     await db.portal_configs.update_one(
-        {"client_id": config["client_id"], "access_tokens.token": token},
+        _portal_record_query(config, {"client_id": config["client_id"], "access_tokens.token": token}),
         {"$set": {"access_tokens.$.last_used": datetime.now(timezone.utc).isoformat()}}
     )
     
-    client = await db.clients.find_one({"id": config["client_id"]}, {"_id": 0, "name": 1, "email": 1, "industry": 1})
+    client = await db.clients.find_one(_portal_record_query(config, {"id": config["client_id"]}), {"_id": 0, "name": 1, "email": 1, "industry": 1})
     return {
         "client": client, "branding": config.get("branding", {}),
         "features": config.get("features", {}),
@@ -287,7 +315,7 @@ async def portal_get_tickets(token: str):
     config, _ = await _active_portal_config_for_token(token)
     
     tickets = await db.tickets.find(
-        {"client_id": config["client_id"]},
+        _portal_record_query(config, {"client_id": config["client_id"]}),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1, "priority": 1, "category": 1, "created_at": 1, "updated_at": 1}
     ).sort("created_at", -1).to_list(100)
     return tickets
@@ -304,7 +332,7 @@ async def portal_get_ticket_history(token: str, ticket_id: str):
     config, _ = await _active_portal_config_for_token(token)
     client_id = config["client_id"]
     ticket = await db.tickets.find_one(
-        {"id": ticket_id, "client_id": client_id},
+        _portal_record_query(config, {"id": ticket_id, "client_id": client_id}),
         {
             "_id": 0,
             "id": 1,
@@ -325,12 +353,12 @@ async def portal_get_ticket_history(token: str, ticket_id: str):
         raise HTTPException(status_code=404, detail="Ticket not found")
 
     comments = await db.ticket_comments.find(
-        {
+        _portal_record_query(config, {
             "ticket_id": ticket_id,
             "client_id": client_id,
             "portal_visible": True,
             "is_internal": {"$ne": True},
-        },
+        }),
         {
             "_id": 0,
             "id": 1,
@@ -363,6 +391,7 @@ async def portal_create_ticket(token: str, data: dict):
         "priority": "medium", "category": data.get("category", "support"),
         "status": "open", "source": "client_portal",
         "client_id": config["client_id"],
+        "tenant_id": config["tenant_id"],
         "client_name": config.get("client_name", ""),
         "contact_name": token_entry.get("contact_name") if token_entry else None,
         "contact_email": token_entry.get("contact_email") if token_entry else None,
@@ -381,14 +410,14 @@ async def portal_get_devices(token: str):
         raise HTTPException(status_code=403, detail="Device view disabled")
     
     devices = await db.devices.find(
-        {"client_id": config["client_id"]},
+        _portal_record_query(config, {"client_id": config["client_id"]}),
         {"_id": 0, "id": 1, "name": 1, "device_type": 1, "os": 1, "status": 1, "ip_address": 1}
     ).to_list(200)
     return devices
 
 @router.get("/client-portal/all")
 async def get_all_portal_configs(current_user: dict = Depends(get_current_user)):
-    configs = await db.portal_configs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(100)
+    configs = await db.portal_configs.find(tenant_scoped_query(current_user, scoped_query(current_user, {}, site_field=None)), {"_id": 0}).to_list(100)
     return configs
 
 
@@ -399,7 +428,7 @@ async def get_all_portal_configs(current_user: dict = Depends(get_current_user))
 async def get_portal_users(client_id: str, current_user: dict = Depends(get_current_user)):
     """Get all portal users for a client."""
     await assert_client_scope(current_user, client_id, operation="portal.user.read", mask_not_found=True)
-    users = await db.portal_users.find({"client_id": client_id}, {"_id": 0, "password_hash": 0, "totp_secret": 0}).sort("created_at", -1).to_list(100)
+    users = await db.portal_users.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "password_hash": 0, "totp_secret": 0}).sort("created_at", -1).to_list(100)
     return users
 
 
@@ -416,16 +445,17 @@ async def create_portal_user(client_id: str, data: dict, current_user: dict = De
         raise HTTPException(status_code=400, detail="Email is required")
 
     # Check if user already exists
-    existing = await db.portal_users.find_one({"email": email}, {"_id": 0, "id": 1})
+    existing = await db.portal_users.find_one(tenant_scoped_query(current_user, {"email": email}), {"_id": 0, "id": 1})
     if existing:
         raise HTTPException(status_code=409, detail="A portal user with this email already exists")
 
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    client = await assert_tenant_record_scope(current_user, db.clients, client_id, operation="portal.user.create", resource_name="Client")
     password = data.get("password") or secrets.token_urlsafe(10)
 
     user = {
         "id": str(uuid.uuid4()),
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "client_name": client["name"] if client else "",
         "email": email,
         "name": name,
@@ -451,7 +481,7 @@ async def create_portal_user(client_id: str, data: dict, current_user: dict = De
     # Send welcome email
     send_welcome = data.get("send_welcome_email", True)
     if send_welcome and await is_microsoft365_configured():
-        branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+        branding = await db.settings.find_one(tenant_scoped_query(current_user, {"type": "branding"}), {"_id": 0}) or {}
         msp_name = branding.get("company_name", "NexusOps")
         primary_color = branding.get("primary_color", "#10b981")
         portal_url = data.get("portal_url", "")
@@ -490,7 +520,7 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
 
     await assert_client_scope(current_user, client_id, operation="portal.user.update", mask_not_found=True)
 
-    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0})
+    user = await db.portal_users.find_one(tenant_scoped_query(current_user, {"id": user_id, "client_id": client_id}), {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Portal user not found")
 
@@ -501,7 +531,7 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
         updates["password_hash"] = hash_password(data["password"])
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-        await db.portal_users.update_one({"id": user_id}, {"$set": updates})
+        await db.portal_users.update_one(tenant_scoped_query(current_user, {"id": user_id, "client_id": client_id}), {"$set": updates})
         await record_portal_event(
             action="portal_user_access_updated",
             client_id=client_id,
@@ -523,8 +553,8 @@ async def update_portal_user(client_id: str, user_id: str, data: dict, current_u
 async def delete_portal_user(client_id: str, user_id: str, current_user: dict = Depends(require_action("portal.user.manage"))):
     """Delete a portal user."""
     await assert_client_scope(current_user, client_id, operation="portal.user.delete", mask_not_found=True)
-    user = await db.portal_users.find_one({"id": user_id, "client_id": client_id}, {"_id": 0})
-    result = await db.portal_users.delete_one({"id": user_id, "client_id": client_id})
+    user = await db.portal_users.find_one(tenant_scoped_query(current_user, {"id": user_id, "client_id": client_id}), {"_id": 0})
+    result = await db.portal_users.delete_one(tenant_scoped_query(current_user, {"id": user_id, "client_id": client_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Portal user not found")
     await record_portal_event(
@@ -547,20 +577,20 @@ async def reset_portal_user_password(client_id: str, user_id: str, data: dict = 
     await assert_client_scope(current_user, client_id, operation="portal.user.password_reset", mask_not_found=True)
 
     user = await db.portal_users.find_one(
-        {"id": user_id, "client_id": client_id},
+        tenant_scoped_query(current_user, {"id": user_id, "client_id": client_id}),
         {"_id": 0, "id": 1, "client_id": 1, "client_name": 1, "email": 1, "name": 1},
     )
     if not user:
         raise HTTPException(status_code=404, detail="Portal user not found")
 
     new_password = secrets.token_urlsafe(10)
-    await db.portal_users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(new_password), "totp_enabled": False}})
+    await db.portal_users.update_one(tenant_scoped_query(current_user, {"id": user_id, "client_id": client_id}), {"$set": {"password_hash": hash_password(new_password), "totp_enabled": False}})
 
     result = {"message": "Password reset", "temp_password": new_password, "email": user["email"]}
 
     # Send reset email
     if await is_microsoft365_configured():
-        branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+        branding = await db.settings.find_one(tenant_scoped_query(current_user, {"type": "branding"}), {"_id": 0}) or {}
         msp_name = branding.get("company_name", "NexusOps")
         primary_color = branding.get("primary_color", "#10b981")
         portal_url = data.get("portal_url", "")
@@ -588,7 +618,7 @@ async def portal_get_invoices(token: str):
     """Client portal: View invoices for this client."""
     config, _ = await _active_portal_config_for_token(token)
     invoices = await db.invoices.find(
-        {"client_id": config["client_id"]},
+        _portal_record_query(config, {"client_id": config["client_id"]}),
         {"_id": 0, "id": 1, "invoice_number": 1, "description": 1, "total": 1, "amount_due": 1,
          "amount_paid": 1, "status": 1, "payment_status": 1, "due_date": 1, "created_at": 1, "currency": 1}
     ).sort("created_at", -1).to_list(200)
@@ -600,7 +630,7 @@ async def portal_get_invoice_detail(token: str, invoice_id: str):
     """Client portal: View invoice detail."""
     config, _ = await _active_portal_config_for_token(token)
     invoice = await db.invoices.find_one(
-        {"id": invoice_id, "client_id": config["client_id"]}, {"_id": 0}
+        _portal_record_query(config, {"id": invoice_id, "client_id": config["client_id"]}), {"_id": 0}
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -612,7 +642,7 @@ async def portal_get_device_health(token: str):
     """Client portal: View device health summary."""
     config, _ = await _active_portal_config_for_token(token)
     devices = await db.devices.find(
-        {"client_id": config["client_id"]},
+        _portal_record_query(config, {"client_id": config["client_id"]}),
         {"_id": 0, "id": 1, "name": 1, "device_type": 1, "os": 1, "status": 1,
          "cpu_usage": 1, "memory_usage": 1, "disk_usage": 1, "last_seen": 1, "ip_address": 1}
     ).to_list(200)
@@ -628,10 +658,10 @@ async def portal_get_summary(token: str):
     """Client portal: Get full client summary (devices, tickets, invoices, health)."""
     config, _ = await _active_portal_config_for_token(token)
     cid = config["client_id"]
-    client = await db.clients.find_one({"id": cid}, {"_id": 0, "id": 1, "name": 1, "email": 1, "mrr": 1})
-    devices = await db.devices.find({"client_id": cid}, {"_id": 0, "status": 1}).to_list(500)
-    tickets = await db.tickets.find({"client_id": cid}, {"_id": 0, "status": 1, "priority": 1}).to_list(500)
-    invoices = await db.invoices.find({"client_id": cid}, {"_id": 0, "payment_status": 1, "amount_due": 1, "total": 1}).to_list(500)
+    client = await db.clients.find_one(_portal_record_query(config, {"id": cid}), {"_id": 0, "id": 1, "name": 1, "email": 1, "mrr": 1})
+    devices = await db.devices.find(_portal_record_query(config, {"client_id": cid}), {"_id": 0, "status": 1}).to_list(500)
+    tickets = await db.tickets.find(_portal_record_query(config, {"client_id": cid}), {"_id": 0, "status": 1, "priority": 1}).to_list(500)
+    invoices = await db.invoices.find(_portal_record_query(config, {"client_id": cid}), {"_id": 0, "payment_status": 1, "amount_due": 1, "total": 1}).to_list(500)
 
     return {
         "client": client,
