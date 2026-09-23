@@ -241,16 +241,24 @@ def test_presence_moves_to_away_before_offline(monkeypatch):
 
 
 def test_private_chat_live_updates_never_reach_non_members():
-    member_id, member_queue = chat_live.subscribe("member-1")
-    outsider_id, outsider_queue = chat_live.subscribe("outsider")
+    member_id, member_queue = chat_live.subscribe("member-1", "tenant-a")
+    outsider_id, outsider_queue = chat_live.subscribe("outsider", "tenant-a")
+    same_user_other_tenant_id, same_user_other_tenant_queue = chat_live.subscribe("member-1", "tenant-b")
     try:
-        chat_live.publish_channel_update("private-channel", "message.created", ["member-1", "member-2"])
+        chat_live.publish_channel_update(
+            "private-channel",
+            "message.created",
+            ["member-1", "member-2"],
+            tenant_id="tenant-a",
+        )
         event = asyncio.run(member_queue.get())
         assert event == {"type": "chat.channel.updated", "channel_id": "private-channel", "kind": "message.created"}
         assert outsider_queue.empty()
+        assert same_user_other_tenant_queue.empty()
     finally:
         chat_live.unsubscribe(member_id)
         chat_live.unsubscribe(outsider_id)
+        chat_live.unsubscribe(same_user_other_tenant_id)
 
 
 def test_conversation_preferences_are_actor_and_tenant_bound(monkeypatch):

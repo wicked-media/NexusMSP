@@ -88,7 +88,7 @@ async def share_tenor_gif(channel_id: str, payload: dict = Body(...), current_us
     msg = {"id": uuid.uuid4().hex, "tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "body": "", "ts": _now(), "edited": False, "reactions": {}, "attachment": {"provider": "tenor", "provider_id": gif_id, "filename": str(payload.get("title") or "GIF")[:160], "is_image": True, "is_external": True, "preview_url": preview_url, "url": url}}
     await db.chat_messages.insert_one(dict(msg))
     await db.chat_channels.update_one(tenant_scoped_query(current_user, {"id": channel_id}), {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}})
-    publish_channel_update(channel_id, "gif.shared", live_update_recipients(channel))
+    publish_channel_update(channel_id, "gif.shared", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return msg
 
 
@@ -114,7 +114,7 @@ async def toggle_reaction(msg_id: str, payload: dict = Body(...), current_user: 
     else:
         reactions.pop(emoji, None)
     await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"reactions": reactions}})
-    publish_channel_update(channel["id"], "message.reaction", live_update_recipients(channel))
+    publish_channel_update(channel["id"], "message.reaction", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return {"reactions": reactions}
 
 
@@ -151,7 +151,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
         tenant_scoped_query(current_user, {"id": parent["channel_id"]}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
-    publish_channel_update(channel["id"], "thread.reply", live_update_recipients(channel))
+    publish_channel_update(channel["id"], "thread.reply", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     # A thread is deliberately excluded from the channel's unread counter to
     # keep the conversation list quiet.  Alert the original poster directly
     # instead, so a follow-up cannot be lost in a high-volume channel.
@@ -195,7 +195,7 @@ async def edit_message(msg_id: str, payload: dict = Body(...), current_user: dic
         tenant_scoped_query(current_user, {"id": msg_id}),
         {"$set": {"body": body[:5000], "edited": True, "edited_at": _now()}}
     )
-    publish_channel_update(channel["id"], "message.edited", live_update_recipients(channel))
+    publish_channel_update(channel["id"], "message.edited", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return {"ok": True}
 
 
@@ -205,7 +205,7 @@ async def delete_message(msg_id: str, current_user: dict = Depends(get_current_u
     if msg.get("user_id") != current_user.get("id") and not is_chat_admin(current_user):
         raise HTTPException(403, "Cannot delete")
     await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"deleted": True, "body": "[message deleted]", "deleted_at": _now()}})
-    publish_channel_update(channel["id"], "message.deleted", live_update_recipients(channel))
+    publish_channel_update(channel["id"], "message.deleted", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return {"ok": True}
 
 
@@ -216,7 +216,7 @@ async def delete_message(msg_id: str, current_user: dict = Depends(get_current_u
 async def pin_message(msg_id: str, current_user: dict = Depends(get_current_user)):
     _, channel = await require_message_access(msg_id, current_user)
     await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"pinned": True, "pinned_by": current_user.get("name"), "pinned_at": _now()}})
-    publish_channel_update(channel["id"], "message.pinned", live_update_recipients(channel))
+    publish_channel_update(channel["id"], "message.pinned", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return {"ok": True}
 
 
@@ -224,7 +224,7 @@ async def pin_message(msg_id: str, current_user: dict = Depends(get_current_user
 async def unpin_message(msg_id: str, current_user: dict = Depends(get_current_user)):
     _, channel = await require_message_access(msg_id, current_user)
     await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"pinned": False}})
-    publish_channel_update(channel["id"], "message.unpinned", live_update_recipients(channel))
+    publish_channel_update(channel["id"], "message.unpinned", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return {"ok": True}
 
 
@@ -335,7 +335,7 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
         tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
-    publish_channel_update(channel_id, "attachment.created", live_update_recipients(channel))
+    publish_channel_update(channel_id, "attachment.created", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     msg.pop("_id", None)
     return msg
 
@@ -391,7 +391,7 @@ async def update_members(channel_id: str, payload: dict = Body(...), current_use
         raise HTTPException(400, "One or more selected technicians are unavailable")
     await db.chat_channels.update_one({"id": channel_id}, {"$set": {"member_ids": members, "updated_at": _now()}})
     await record_channel_event(channel, current_user, "members.updated", {"member_count": len(members)})
-    publish_channel_update(channel_id, "channel.members.updated", members)
+    publish_channel_update(channel_id, "channel.members.updated", members, tenant_id=platform_tenant_id(current_user))
     return {"ok": True, "member_ids": members}
 
 
@@ -435,7 +435,7 @@ async def restore_channel(channel_id: str, current_user: dict = Depends(get_curr
     await db.chat_channels.update_one({"id": channel_id}, {"$set": {"deleted": False, "restored_at": now, "restored_by": current_user.get("id"), "updated_at": now}})
     await record_channel_event(channel, current_user, "channel.restored")
     restored = {**channel, "deleted": False, "updated_at": now}
-    publish_channel_update(channel_id, "channel.restored", live_update_recipients(restored))
+    publish_channel_update(channel_id, "channel.restored", live_update_recipients(restored), tenant_id=platform_tenant_id(current_user))
     return restored
 
 
@@ -456,7 +456,7 @@ async def transfer_channel_ownership(channel_id: str, payload: dict = Body(...),
     await db.chat_channels.update_one({"id": channel_id}, {"$set": {"created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}})
     updated = {**channel, "created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}
     await record_channel_event(channel, current_user, "ownership.transferred", {"new_owner_id": owner_id, "new_owner_name": owner.get("name")})
-    publish_channel_update(channel_id, "channel.ownership.updated", live_update_recipients(updated))
+    publish_channel_update(channel_id, "channel.ownership.updated", live_update_recipients(updated), tenant_id=platform_tenant_id(current_user))
     return updated
 
 
@@ -741,7 +741,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
         tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
-    publish_channel_update(channel_id, "message.created", live_update_recipients(channel))
+    publish_channel_update(channel_id, "message.created", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     msg.pop("_id", None)
     return {"channel_id": channel_id, "message_id": msg["id"], "message": msg}
 
@@ -753,7 +753,7 @@ async def typing(channel_id: str, current_user: dict = Depends(get_current_user)
         {"$set": {"tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "ts": _now()}},
         upsert=True,
     )
-    publish_channel_update(channel_id, "typing.updated", live_update_recipients(channel))
+    publish_channel_update(channel_id, "typing.updated", live_update_recipients(channel), tenant_id=platform_tenant_id(current_user))
     return {"ok": True}
 
 
@@ -786,7 +786,7 @@ async def update_channel_details(channel_id: str, payload: dict = Body(...), cur
     updated = {**channel, **changes}
     audit_details = {key: changes[key] for key in ("name", "display_name", "description") if key in changes}
     await record_channel_event(channel, current_user, "details.updated", audit_details)
-    publish_channel_update(channel_id, "channel.details.updated", live_update_recipients(updated))
+    publish_channel_update(channel_id, "channel.details.updated", live_update_recipients(updated), tenant_id=platform_tenant_id(current_user))
     return updated
 
 

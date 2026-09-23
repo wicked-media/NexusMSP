@@ -336,7 +336,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
-    publish_channel_update(channel_id, "message.created", live_update_recipients(ch))
+    publish_channel_update(channel_id, "message.created", live_update_recipients(ch), tenant_id=platform_tenant_id(current_user))
     msg.pop("_id", None)
 
     notified_ids = set()
@@ -462,7 +462,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
 async def chat_event_stream(request: Request, current_user: dict = Depends(get_current_user)):
     """Authenticated SSE invalidations; message contents remain REST-only."""
     return StreamingResponse(
-        stream_events(request, str(current_user.get("id") or "")),
+        stream_events(request, str(current_user.get("id") or ""), platform_tenant_id(current_user)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
