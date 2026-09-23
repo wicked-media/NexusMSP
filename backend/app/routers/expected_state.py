@@ -7,9 +7,17 @@ from fastapi import APIRouter, Depends
 
 from app.auth import get_current_user
 from app.database import db
-from app.services.scope_permissions import scoped_query
+from app.services.scope_permissions import scoped_query, tenant_scoped_query
 
 router = APIRouter(tags=["Nexus Expected State"])
+
+
+def _evidence_query(current_user: dict, query: dict, *, field: str = "client_id") -> dict:
+    """Apply both Nexus platform ownership and technician client scope."""
+    return tenant_scoped_query(
+        current_user,
+        scoped_query(current_user, query, field=field, site_field=None),
+    )
 
 
 @router.get("/assurance/overview")
@@ -23,7 +31,7 @@ async def expected_state_overview(current_user: dict = Depends(get_current_user)
     # `clients.id` is the stable client boundary; do not query a non-existent
     # `clients.client_id` field for restricted technicians.
     clients = await db.clients.find(
-        scoped_query(current_user, {}, field="id", site_field=None),
+        _evidence_query(current_user, {}, field="id"),
         {"_id": 0},
     ).to_list(2000)
     client_ids = [item.get("id") for item in clients if item.get("id")]
@@ -32,24 +40,28 @@ async def expected_state_overview(current_user: dict = Depends(get_current_user)
     # stable agent link and that exact active agent has checked in recently.
     # Counting every agent record owned by the client would allow an unrelated
     # or duplicate agent to make another endpoint appear covered.
-    devices = await db.devices.find(scoped_query(current_user, {
+    devices = await db.devices.find(_evidence_query(current_user, {
         "client_id": {"$in": client_ids},
         "archived": {"$ne": True},
-    }, site_field=None), {"_id": 0}).to_list(10000)
+    }), {"_id": 0}).to_list(10000)
     agents = await db.nexus_agents.find(
-        scoped_query(current_user, {"client_id": {"$in": client_ids}, "is_active": True}, site_field=None),
+        _evidence_query(current_user, {"client_id": {"$in": client_ids}, "is_active": True}),
         {"_id": 0, "id": 1, "client_id": 1, "is_active": 1, "last_seen": 1},
     ).to_list(10000)
-    subscriptions = await db.subscriptions.find(scoped_query(current_user, {"client_id": {"$in": client_ids}}, site_field=None), {"_id": 0}).to_list(10000)
-    backup_jobs = await db.backup_jobs.find(scoped_query(current_user, {"client_id": {"$in": client_ids}}, site_field=None), {"_id": 0}).to_list(10000)
-    recovery_tests = await db.backup_verifications.find(scoped_query(current_user, {"client_id": {"$in": client_ids}}, site_field=None), {"_id": 0}).to_list(10000)
+    subscriptions = await db.subscriptions.find(_evidence_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0}).to_list(10000)
+    backup_jobs = await db.backup_jobs.find(_evidence_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0}).to_list(10000)
+    recovery_tests = await db.backup_verifications.find(_evidence_query(current_user, {"client_id": {"$in": client_ids}}), {"_id": 0}).to_list(10000)
     tenant_ids = [str(item.get("cipp_tenant_id") or "").strip() for item in clients if item.get("cipp_tenant_id")]
     # CIPP hygiene records are keyed only by tenant_id. Tenant IDs are derived
     # from the already client-scoped `clients` list above, so applying the
     # generic client_id scope here would hide all legitimate cache records for
     # restricted technicians (the cache has no client_id field).
     hygiene_rows = await db.cipp_hygiene_cache.find(
-        {"tenant_id": {"$in": tenant_ids}},
+        tenant_scoped_query(
+            current_user,
+            {"tenant_id": {"$in": tenant_ids}},
+            tenant_field="platform_tenant_id",
+        ),
         {"_id": 0, "tenant_id": 1, "hygiene": 1},
     ).to_list(2000) if tenant_ids else []
     hygiene_by_tenant = {str(row.get("tenant_id")): row.get("hygiene") or {} for row in hygiene_rows}

@@ -99,7 +99,8 @@ def test_assurance_applies_restricted_client_scope_to_all_evidence_sources(monke
     }))
 
     assert result["summary"]["clients"] == 1
-    assert database.clients.queries == [{"id": {"$in": ["client-a"]}}]
+    assert "client-a" in str(database.clients.queries[0])
+    assert "tenant_id" in str(database.clients.queries[0])
     for collection in (
         database.devices,
         database.nexus_agents,
@@ -153,4 +154,24 @@ def test_assurance_reads_mapped_hygiene_for_restricted_scope(monkeypatch):
     posture = _control(result, "microsoft-posture")
 
     assert posture["status"] == "covered"
-    assert database.cipp_hygiene_cache.queries == [{"tenant_id": {"$in": ["tenant-a"]}}]
+    assert "tenant-a" in str(database.cipp_hygiene_cache.queries[0])
+    assert "platform_tenant_id" in str(database.cipp_hygiene_cache.queries[0])
+
+
+def test_assurance_keeps_every_evidence_read_inside_an_explicit_platform_tenant(monkeypatch):
+    database = FakeDb(clients=[{"id": "client-a", "name": "Alpha", "tenant_id": "tenant-a"}])
+    monkeypatch.setattr(expected_state, "db", database)
+
+    asyncio.run(expected_state.expected_state_overview({
+        "id": "admin-a", "role": "admin", "tenant_id": "tenant-a",
+    }))
+
+    for collection in (
+        database.clients,
+        database.devices,
+        database.nexus_agents,
+        database.subscriptions,
+        database.backup_jobs,
+        database.backup_verifications,
+    ):
+        assert "tenant-a" in str(collection.queries[0])
