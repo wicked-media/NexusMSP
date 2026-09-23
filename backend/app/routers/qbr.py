@@ -28,7 +28,13 @@ import jwt
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.services.nexus_document_pdf import render_nexus_document_pdf
-from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -123,42 +129,45 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime, curre
     }), {"_id": 0, "total": 1, "status": 1}).to_list(500)
     spend_total = sum(float(i.get("total") or 0) for i in invoices)
 
-    # Cross-client patterns that touched this client this quarter
+    # Cross-client patterns are MSP-level intelligence.  A technician with a
+    # restricted client scope must not infer another customer's ticket volume
+    # or incident patterns from a client-facing QBR.
     pattern_hits = []
-    try:
-        from app.routers.blueprints import _bigrams, _tokens
-        cross_tix = await db.tickets.find({
-            "status": {"$in": ["resolved", "closed"]},
-            "$or": [
-                {"resolved_at": {"$gte": s_iso, "$lt": e_iso}},
-                {"updated_at": {"$gte": s_iso, "$lt": e_iso}},
-            ],
-        }, {"_id": 0, "id": 1, "title": 1, "client_id": 1}).limit(2000).to_list(2000)
-        pool = {}
-        for t in cross_tix:
-            seen = set()
-            for bg in _bigrams(_tokens(t.get("title", ""))):
-                if bg in seen:
+    if effective_scope(current_user)["mode"] == "all":
+        try:
+            from app.routers.blueprints import _bigrams, _tokens
+            cross_tix = await db.tickets.find(tenant_scoped_query(current_user, {
+                "status": {"$in": ["resolved", "closed"]},
+                "$or": [
+                    {"resolved_at": {"$gte": s_iso, "$lt": e_iso}},
+                    {"updated_at": {"$gte": s_iso, "$lt": e_iso}},
+                ],
+            }), {"_id": 0, "id": 1, "title": 1, "client_id": 1}).limit(2000).to_list(2000)
+            pool = {}
+            for t in cross_tix:
+                seen = set()
+                for bg in _bigrams(_tokens(t.get("title", ""))):
+                    if bg in seen:
+                        continue
+                    seen.add(bg)
+                    pool.setdefault(bg, []).append(t)
+            # Find patterns where multiple clients are affected AND THIS client is one of them.
+            for bg, tickets in pool.items():
+                clients = {x.get("client_id") for x in tickets if x.get("client_id")}
+                if client_id not in clients or len(clients) < 2 or len(tickets) < 3:
                     continue
-                seen.add(bg)
-                pool.setdefault(bg, []).append(t)
-        # Find patterns where multiple clients are affected AND THIS client is one of them
-        for bg, tickets in pool.items():
-            clients = {x.get("client_id") for x in tickets if x.get("client_id")}
-            if client_id not in clients or len(clients) < 2 or len(tickets) < 3:
-                continue
-            mine = sum(1 for x in tickets if x.get("client_id") == client_id)
-            pattern_hits.append({
-                "name": f"{bg[0].title()} {bg[1].title()}",
-                "tokens": list(bg),
-                "client_tickets": mine,
-                "msp_tickets": len(tickets),
-                "msp_clients": len(clients),
-            })
-        pattern_hits.sort(key=lambda p: -p["client_tickets"])
-        pattern_hits = pattern_hits[:3]
-    except Exception:
-        pattern_hits = []
+                mine = sum(1 for x in tickets if x.get("client_id") == client_id)
+                pattern_hits.append({
+                    "name": f"{bg[0].title()} {bg[1].title()}",
+                    "tokens": list(bg),
+                    "client_tickets": mine,
+                    "msp_tickets": len(tickets),
+                    "msp_clients": len(clients),
+                })
+            pattern_hits.sort(key=lambda p: -p["client_tickets"])
+            pattern_hits = pattern_hits[:3]
+        except Exception:
+            pattern_hits = []
 
     return {
         "client_name": client.get("name"),
@@ -178,7 +187,7 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime, curre
 def _format_qbr_prompt(quarter: str, snap: dict) -> str:
     pat_lines = "\n".join([
         f"  - '{p['name']}': {p['client_tickets']} tickets at this client (this issue affected "
-        f"{p['msp_clients']} other MSP clients Â· {p['msp_tickets']} total) â€” recommend rolling out a Blueprint."
+        f"{max(0, int(p['msp_clients']) - 1)} other managed clients Â· {p['msp_tickets']} total) â€” recommend rolling out a Blueprint."
         for p in snap.get("pattern_hits", [])
     ]) or "  - none significant"
     top = "\n".join([f"  - {t['category']}: {t['count']}" for t in snap.get("top_issues", [])]) or "  - none"
@@ -304,6 +313,7 @@ async def get_qbr(qbr_id: str, current_user: dict = Depends(get_current_user)):
     doc = await db.qbrs.find_one(tenant_scoped_query(current_user, {"id": qbr_id}), {"_id": 0})
     if not doc:
         raise HTTPException(404, "QBR not found")
+    await assert_client_scope(current_user, doc.get("client_id"), operation="qbr.read", mask_not_found=True)
     return doc
 
 
@@ -366,7 +376,7 @@ def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
         {
             "Pattern": item.get("name") or "Pattern",
             "This client": f"{item.get('client_tickets', 0)} tickets",
-            "MSP impact": f"{item.get('msp_clients', 0)} other clients",
+            "MSP impact": f"{max(0, int(item.get('msp_clients') or 0) - 1)} other clients",
         }
         for item in stats.get("pattern_hits") or []
     ]
@@ -522,12 +532,13 @@ def _render_qbr_pdf(qbr: dict, branding: dict | None = None) -> bytes:
 
 @router.get("/qbrs/{qbr_id}/pdf")
 async def qbr_pdf(qbr_id: str, user: dict = Depends(_qbr_user_from_token)):
-    qbr = await db.qbrs.find_one({"id": qbr_id}, {"_id": 0})
+    qbr = await db.qbrs.find_one(tenant_scoped_query(user, {"id": qbr_id}), {"_id": 0})
     if not qbr:
         raise HTTPException(404, "QBR not found")
+    await assert_client_scope(user, qbr.get("client_id"), operation="qbr.export", mask_not_found=True)
     branding_document = (
-        await db.settings.find_one({"type": "branding"}, {"_id": 0})
-        or await db.settings.find_one({"key": "branding"}, {"_id": 0})
+        await db.settings.find_one(tenant_scoped_query(user, {"type": "branding"}), {"_id": 0})
+        or await db.settings.find_one(tenant_scoped_query(user, {"key": "branding"}), {"_id": 0})
         or {}
     )
     pdf_bytes = _render_qbr_pdf(qbr, (branding_document.get("value") or branding_document))
