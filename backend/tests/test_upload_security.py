@@ -154,7 +154,10 @@ def test_client_document_legacy_filename_requires_the_expected_static_prefix():
 
 def test_client_document_download_rejects_non_clean_scan_state(monkeypatch):
     class _Documents:
+        query = None
+
         async def find_one(self, *_args, **_kwargs):
+            self.query = _args[0]
             return {
                 "id": "document-1",
                 "client_id": "client-1",
@@ -162,12 +165,19 @@ def test_client_document_download_rejects_non_clean_scan_state(monkeypatch):
                 "security_scan": {"status": "error"},
             }
 
-    monkeypatch.setattr(client_profile, "db", SimpleNamespace(client_documents=_Documents()))
+    documents = _Documents()
+    monkeypatch.setattr(client_profile, "db", SimpleNamespace(client_documents=documents))
 
     with pytest.raises(HTTPException) as exc:
         asyncio.run(client_profile.download_client_document("client-1", "document-1", {"id": "tech-1"}))
 
     assert exc.value.status_code == 423
+    assert documents.query == {
+        "$and": [
+            {"id": "document-1", "client_id": "client-1", "kind": "file"},
+            {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}, {"tenant_id": ""}]},
+        ]
+    }
 
 
 @pytest.mark.parametrize(("rejected", "status_code"), [(False, 503), (True, 422)])

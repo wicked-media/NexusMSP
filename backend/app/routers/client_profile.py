@@ -21,7 +21,7 @@ import re
 import uuid
 from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_record_scope
+from app.services.scope_permissions import assert_record_scope, platform_tenant_id, tenant_scoped_query
 from app.services.upload_quarantine import (
     UploadQuarantineFailure,
     discard_upload,
@@ -272,7 +272,7 @@ async def update_client_profile(client_id: str, data: dict, current_user: dict =
 @router.get("/clients/{client_id}/documents")
 async def list_client_documents(client_id: str, current_user: dict = Depends(get_current_user)):
     await _ensure_client(client_id)
-    docs = await db.client_documents.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    docs = await db.client_documents.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(500)
     return [_client_document_response(document) for document in docs]
 
 
@@ -314,6 +314,7 @@ async def upload_client_document(
     doc = {
         "id": doc_id,
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "kind": "file",
         "title": title or file.filename,
         "original_filename": file.filename,
@@ -355,7 +356,7 @@ async def upload_client_document(
         if artifact_path:
             await delete_artifact(artifact_path)
         if inserted:
-            await db.client_documents.delete_one({"id": doc_id})
+            await db.client_documents.delete_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}))
         await discard_upload(db, clean_upload)
         raise
     await release_upload(db, clean_upload)
@@ -365,8 +366,7 @@ async def upload_client_document(
 @router.get("/clients/{client_id}/documents/{doc_id}/download")
 async def download_client_document(client_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
     """Return a retained client document only after client scope has been enforced."""
-    del current_user
-    doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id, "kind": "file"}, {"_id": 0})
+    doc = await db.client_documents.find_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id, "kind": "file"}), {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Client document not found")
     if not upload_is_releasable(doc):
@@ -398,10 +398,11 @@ async def upsert_client_runbook(client_id: str, data: dict, current_user: dict =
     """Create or update a runbook / SOP for a client (Hudu-style rich-text doc)."""
     await _ensure_client(client_id)
     doc_id = data.get("id") or str(uuid.uuid4())
-    existing = await db.client_documents.find_one({"id": doc_id, "client_id": client_id}, {"_id": 0})
+    existing = await db.client_documents.find_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}), {"_id": 0})
     base = {
         "id": doc_id,
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "kind": "runbook",
         "title": data.get("title", "Untitled Runbook"),
         "category": data.get("category", "runbook"),
@@ -413,7 +414,7 @@ async def upsert_client_runbook(client_id: str, data: dict, current_user: dict =
         "updated_by_name": current_user.get("name"),
     }
     if existing:
-        await db.client_documents.update_one({"id": doc_id}, {"$set": base})
+        await db.client_documents.update_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}), {"$set": base})
         return {**existing, **base}
     base["created_at"] = base["updated_at"]
     base["created_by"] = current_user.get("id")
@@ -424,7 +425,7 @@ async def upsert_client_runbook(client_id: str, data: dict, current_user: dict =
 
 @router.delete("/clients/{client_id}/documents/{doc_id}")
 async def delete_client_document(client_id: str, doc_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.client_documents.find_one({"id": doc_id, "client_id": client_id}, {"_id": 0})
+    doc = await db.client_documents.find_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}), {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     # Remove both the current private local copy and a legacy local copy. The
@@ -439,7 +440,7 @@ async def delete_client_document(client_id: str, doc_id: str, current_user: dict
     artifact_path = (doc.get("artifact_storage") or {}).get("object_path")
     if artifact_path:
         await delete_artifact(artifact_path)
-    await db.client_documents.delete_one({"id": doc_id})
+    await db.client_documents.delete_one(tenant_scoped_query(current_user, {"id": doc_id, "client_id": client_id}))
     return {"message": "Document deleted"}
 
 
