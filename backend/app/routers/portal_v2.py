@@ -14,12 +14,17 @@ from app.services.nexus_document_pdf import render_nexus_document_pdf
 from app.services.portal_audit import record_portal_event
 from app.services.public_url import configured_public_base_url
 
-from app.services.scope_permissions import platform_tenant_id
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from app.services.ticket_conversation import sanitise_ticket_rich_text
 from app.services.ticket_subscriptions import notify_ticket_subscribers
 
 router = APIRouter(prefix="/portal/v2", tags=["Portal V2"])
 portal_security = HTTPBearer(auto_error=False)
+
+
+def _portal_query(user: dict, query: dict) -> dict:
+    """Constrain a customer session to its signed-in platform tenant."""
+    return tenant_scoped_query(user, query)
 
 
 def _portal_ticket_comment(comment: dict) -> dict:
@@ -107,7 +112,7 @@ _PORTAL_CHECKOUT_LINK_TTL = timedelta(hours=24)
 _MAX_PORTAL_INVOICE_ID_LENGTH = 200
 
 
-async def _load_portal_checkout_invoice(invoice_id: str, client_id: str) -> tuple[dict, str]:
+async def _load_portal_checkout_invoice(invoice_id: str, client_id: str, portal_user: dict) -> tuple[dict, str]:
     """Resolve exactly one client-owned invoice for a portal payment.
 
     Invoice IDs historically occur in both the native and Xero collections.
@@ -123,11 +128,11 @@ async def _load_portal_checkout_invoice(invoice_id: str, client_id: str) -> tupl
         raise HTTPException(status_code=403, detail="Invoice access not permitted")
 
     native = await db.invoices.find_one(
-        {"id": clean_invoice_id, "client_id": clean_client_id},
+        _portal_query(portal_user, {"id": clean_invoice_id, "client_id": clean_client_id}),
         {"_id": 0},
     )
     xero = await db.xero_invoices.find_one(
-        {"id": clean_invoice_id, "client_id": clean_client_id},
+        _portal_query(portal_user, {"id": clean_invoice_id, "client_id": clean_client_id}),
         {"_id": 0},
     )
     matches = [(invoice, collection) for invoice, collection in ((native, "invoices"), (xero, "xero_invoices")) if invoice]
@@ -145,6 +150,7 @@ def _portal_checkout_link_id(
     invoice: dict,
     invoice_id: str,
     client_id: str,
+    tenant_id: str,
     collection: str,
     balance: float,
     currency: str,
@@ -161,6 +167,7 @@ def _portal_checkout_link_id(
             collection,
             invoice_id,
             client_id,
+            tenant_id,
             str(invoice.get("version", 0)),
             str(int(round(balance * 100))),
             currency,
@@ -190,6 +197,7 @@ async def _get_or_create_portal_checkout_link(
         invoice=invoice,
         invoice_id=invoice_id,
         client_id=client_id,
+        tenant_id=platform_tenant_id(portal_user),
         collection=collection,
         balance=balance,
         currency=currency,
@@ -203,6 +211,7 @@ async def _get_or_create_portal_checkout_link(
         "invoice_collection": collection,
         "invoice_number": str(invoice.get("invoice_number") or ""),
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(portal_user),
         "client_name": str(invoice.get("client_name") or portal_user.get("client_name") or ""),
         "currency": currency,
         "total": invoice.get("total", 0),
@@ -219,11 +228,11 @@ async def _get_or_create_portal_checkout_link(
         "payments": [],
     }
     await db.payment_links.update_one(
-        {"_id": link_id},
+        _portal_query(portal_user, {"_id": link_id}),
         {"$setOnInsert": link},
         upsert=True,
     )
-    stored = await db.payment_links.find_one({"_id": link_id}, {"_id": 0})
+    stored = await db.payment_links.find_one(_portal_query(portal_user, {"_id": link_id}), {"_id": 0})
     if not stored:
         raise HTTPException(status_code=503, detail="Unable to initialise online payment")
 
@@ -252,7 +261,14 @@ async def get_portal_user(credentials: HTTPAuthorizationCredentials = Depends(po
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         if payload.get("type") != "portal":
             raise HTTPException(status_code=401, detail="Invalid portal token")
-        user = await db.portal_users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+        token_client_id = str(payload.get("client_id") or "").strip()
+        if not token_client_id:
+            raise HTTPException(status_code=401, detail="Invalid portal token")
+        token_scope = {"tenant_id": str(payload.get("tenant_id") or "nexus-local")}
+        user = await db.portal_users.find_one(
+            _portal_query(token_scope, {"id": payload["sub"], "client_id": token_client_id}),
+            {"_id": 0, "password_hash": 0},
+        )
         if not user or not user.get("is_active", True):
             raise HTTPException(status_code=401, detail="User not found or inactive")
         return user
@@ -262,9 +278,10 @@ async def get_portal_user(credentials: HTTPAuthorizationCredentials = Depends(po
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def create_portal_token(user_id: str, client_id: str, email: str):
+def create_portal_token(user_id: str, client_id: str, email: str, tenant_id: str | None = None):
     payload = {
         "sub": user_id, "client_id": client_id, "email": email,
+        "tenant_id": str(tenant_id or "nexus-local"),
         "type": "portal",
         "exp": datetime.now(timezone.utc) + timedelta(hours=12),
     }
@@ -285,6 +302,7 @@ async def portal_token_auth(data: dict, request: Request):
         raise HTTPException(status_code=404, detail="Portal link expired or invalid")
 
     cid = config["client_id"]
+    config.setdefault("tenant_id", "nexus-local")
     # Find or create a portal user for this token's contact
     access_token = next((t for t in config.get("access_tokens", []) if t.get("token") == token), None)
     if not access_token or not access_token.get("active", True) or _link_is_expired(access_token):
@@ -301,15 +319,15 @@ async def portal_token_auth(data: dict, request: Request):
     contact_email = (access_token.get("contact_email", "") if access_token else "").lower().strip()
 
     if contact_email:
-        portal_user = await db.portal_users.find_one({"email": contact_email, "client_id": cid}, {"_id": 0})
+        portal_user = await db.portal_users.find_one(_portal_query(config, {"email": contact_email, "client_id": cid}), {"_id": 0})
     else:
-        portal_user = await db.portal_users.find_one({"client_id": cid, "is_primary_contact": True}, {"_id": 0})
+        portal_user = await db.portal_users.find_one(_portal_query(config, {"client_id": cid, "is_primary_contact": True}), {"_id": 0})
         if not portal_user:
-            portal_user = await db.portal_users.find_one({"client_id": cid}, {"_id": 0})
+            portal_user = await db.portal_users.find_one(_portal_query(config, {"client_id": cid}), {"_id": 0})
 
     if not portal_user:
         # No portal user exists â€” return info to show limited view
-        client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
+        client = await db.clients.find_one(_portal_query(config, {"id": cid}), {"_id": 0, "name": 1})
         await record_portal_event(
             action="secure_link_opened",
             client_id=cid,
@@ -336,13 +354,13 @@ async def portal_token_auth(data: dict, request: Request):
 
     # Mark token as used
     await db.portal_configs.update_one(
-        {"client_id": cid, "access_tokens.token": token},
+        _portal_query(config, {"client_id": cid, "access_tokens.token": token}),
         {"$set": {"access_tokens.$.last_used": datetime.now(timezone.utc).isoformat()}}
     )
 
-    jwt_token = create_portal_token(portal_user["id"], cid, portal_user["email"])
+    jwt_token = create_portal_token(portal_user["id"], cid, portal_user["email"], portal_user.get("tenant_id") or config.get("tenant_id"))
     await db.portal_users.update_one(
-        {"id": portal_user["id"]},
+        _portal_query(config, {"id": portal_user["id"], "client_id": cid}),
         {"$set": {"last_login": datetime.now(timezone.utc).isoformat(), "last_login_method": "secure_link"}},
     )
     await record_portal_event(
@@ -366,7 +384,11 @@ async def portal_login(data: dict, request: Request):
     if not email or not password:
         raise HTTPException(status_code=400, detail="Email and password required")
 
-    user = await db.portal_users.find_one({"email": email}, {"_id": 0})
+    # Email alone is not a tenant boundary.  A duplicate portal email must
+    # fail closed rather than letting Mongo select an arbitrary customer
+    # account; the customer can use their tenant-bound secure portal link.
+    matching_users = await db.portal_users.find({"email": email}, {"_id": 0}).limit(2).to_list(2)
+    user = matching_users[0] if len(matching_users) == 1 else None
     if not user or not verify_password(password, user["password_hash"]):
         await record_portal_event(
             action="portal_login",
@@ -403,11 +425,11 @@ async def portal_login(data: dict, request: Request):
             metadata={"authentication_method": "password_mfa"},
             **_request_context(request),
         )
-        return {"requires_2fa": True, "temp_token": create_portal_token(user["id"], user.get("client_id", ""), email) + ":2fa_pending"}
+        return {"requires_2fa": True, "temp_token": create_portal_token(user["id"], user.get("client_id", ""), email, user.get("tenant_id")) + ":2fa_pending"}
 
-    token = create_portal_token(user["id"], user.get("client_id", ""), email)
+    token = create_portal_token(user["id"], user.get("client_id", ""), email, user.get("tenant_id"))
     await db.portal_users.update_one(
-        {"id": user["id"]},
+        _portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}),
         {"$set": {"last_login": datetime.now(timezone.utc).isoformat(), "last_login_method": "password"}},
     )
     await record_portal_event(
@@ -436,7 +458,11 @@ async def portal_verify_2fa(data: dict, request: Request):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = await db.portal_users.find_one({"id": payload["sub"]}, {"_id": 0})
+    token_scope = {"tenant_id": str(payload.get("tenant_id") or "nexus-local")}
+    user = await db.portal_users.find_one(
+        _portal_query(token_scope, {"id": payload["sub"], "client_id": payload.get("client_id")}),
+        {"_id": 0},
+    )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -454,9 +480,9 @@ async def portal_verify_2fa(data: dict, request: Request):
         )
         raise HTTPException(status_code=401, detail="Invalid 2FA code")
 
-    token = create_portal_token(user["id"], user.get("client_id", ""), user["email"])
+    token = create_portal_token(user["id"], user.get("client_id", ""), user["email"], user.get("tenant_id"))
     await db.portal_users.update_one(
-        {"id": user["id"]},
+        _portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}),
         {"$set": {"last_login": datetime.now(timezone.utc).isoformat(), "last_login_method": "password_mfa"}},
     )
     await record_portal_event(
@@ -477,7 +503,7 @@ async def portal_setup_2fa(user: dict = Depends(get_portal_user)):
     secret = user.get("totp_secret")
     if not secret:
         secret = pyotp.random_base32()
-        await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_secret": secret}})
+        await db.portal_users.update_one(_portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}), {"$set": {"totp_secret": secret}})
 
     totp = pyotp.TOTP(secret)
     uri = totp.provisioning_uri(name=user["email"], issuer_name="NexusMSP Client Portal")
@@ -487,7 +513,7 @@ async def portal_setup_2fa(user: dict = Depends(get_portal_user)):
 @router.post("/enable-2fa")
 async def portal_enable_2fa(data: dict, request: Request, user: dict = Depends(get_portal_user)):
     code = data.get("code", "")
-    u = await db.portal_users.find_one({"id": user["id"]}, {"_id": 0})
+    u = await db.portal_users.find_one(_portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}), {"_id": 0})
     secret = u.get("totp_secret")
     if not secret:
         raise HTTPException(status_code=400, detail="Run setup-2fa first")
@@ -505,7 +531,7 @@ async def portal_enable_2fa(data: dict, request: Request, user: dict = Depends(g
         )
         raise HTTPException(status_code=400, detail="Invalid code â€” try again")
 
-    await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_enabled": True}})
+    await db.portal_users.update_one(_portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}), {"$set": {"totp_enabled": True}})
     await record_portal_event(
         action="portal_mfa_enabled",
         client_id=user.get("client_id", ""),
@@ -520,7 +546,7 @@ async def portal_enable_2fa(data: dict, request: Request, user: dict = Depends(g
 @router.post("/disable-2fa")
 async def portal_disable_2fa(data: dict, request: Request, user: dict = Depends(get_portal_user)):
     code = data.get("code", "")
-    u = await db.portal_users.find_one({"id": user["id"]}, {"_id": 0})
+    u = await db.portal_users.find_one(_portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}), {"_id": 0})
     secret = u.get("totp_secret")
     if secret:
         totp = pyotp.TOTP(secret)
@@ -535,7 +561,7 @@ async def portal_disable_2fa(data: dict, request: Request, user: dict = Depends(
                 **_request_context(request),
             )
             raise HTTPException(status_code=400, detail="Invalid code")
-    await db.portal_users.update_one({"id": user["id"]}, {"$set": {"totp_enabled": False}})
+    await db.portal_users.update_one(_portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}), {"$set": {"totp_enabled": False}})
     await record_portal_event(
         action="portal_mfa_disabled",
         client_id=user.get("client_id", ""),
@@ -566,11 +592,11 @@ async def portal_logout(request: Request, user: dict = Depends(get_portal_user))
 @router.get("/me")
 async def portal_me(user: dict = Depends(get_portal_user)):
     # Get client + branding
-    client = await db.clients.find_one({"id": user.get("client_id")}, {"_id": 0})
-    config = await db.portal_configs.find_one({"client_id": user.get("client_id")}, {"_id": 0})
+    client = await db.clients.find_one(_portal_query(user, {"id": user.get("client_id")}), {"_id": 0})
+    config = await db.portal_configs.find_one(_portal_query(user, {"client_id": user.get("client_id")}), {"_id": 0})
     branding = config.get("branding", {}) if config else {}
     # Get MSP branding for logo
-    msp_branding = await db.settings.find_one({"key": "branding"}, {"_id": 0})
+    msp_branding = await db.settings.find_one(_portal_query(user, {"key": "branding"}), {"_id": 0})
     return {
         "user": {k: v for k, v in user.items() if k not in ("password_hash", "totp_secret")},
         "client": client,
@@ -594,7 +620,7 @@ async def portal_update_profile(data: dict, request: Request, user: dict = Depen
     if "password" in data and data["password"]:
         updates["password_hash"] = hash_password(data["password"])
     if updates:
-        await db.portal_users.update_one({"id": user["id"]}, {"$set": updates})
+        await db.portal_users.update_one(_portal_query(user, {"id": user["id"], "client_id": user.get("client_id")}), {"$set": updates})
         await record_portal_event(
             action="portal_profile_updated",
             client_id=user.get("client_id", ""),
@@ -615,33 +641,33 @@ async def portal_update_profile(data: dict, request: Request, user: dict = Depen
 @router.get("/dashboard")
 async def portal_dashboard(user: dict = Depends(get_portal_user)):
     cid = user.get("client_id")
-    client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1}) or {}
-    config = await db.portal_configs.find_one({"client_id": cid}, {"_id": 0, "features": 1}) or {}
+    client = await db.clients.find_one(_portal_query(user, {"id": cid}), {"_id": 0, "name": 1}) or {}
+    config = await db.portal_configs.find_one(_portal_query(user, {"client_id": cid}), {"_id": 0, "features": 1}) or {}
     features = config.get("features") or {}
     tickets = await db.tickets.find(
-        {"client_id": cid},
+        _portal_query(user, {"client_id": cid}),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1, "updated_at": 1},
     ).sort("updated_at", -1).to_list(500)
     devices = []
     if user.get("can_view_assets", True) and features.get("can_view_devices", True):
         devices = await db.devices.find(
-            {"client_id": cid},
+            _portal_query(user, {"client_id": cid}),
             {"_id": 0, "id": 1, "name": 1, "hostname": 1, "status": 1, "last_heartbeat": 1},
         ).to_list(500)
     invoices = []
     if user.get("can_view_invoices", False):
         invoices = await db.invoices.find(
-            {"client_id": cid},
+            _portal_query(user, {"client_id": cid}),
             {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "payment_status": 1, "total": 1, "amount_paid": 1, "due_date": 1, "created_at": 1},
         ).sort("created_at", -1).to_list(200)
     contracts = []
     if features.get("can_view_contracts", True):
         contracts = await db.contracts.find(
-            {"client_id": cid, "status": "active"},
+            _portal_query(user, {"client_id": cid, "status": "active"}),
             {"_id": 0, "id": 1, "name": 1, "type": 1, "status": 1, "end_date": 1, "sla_tier": 1},
         ).to_list(100)
     backup_jobs = await db.backup_jobs.find(
-        {"$or": [{"client_id": cid}, {"client_name": client.get("name", "")}]},
+        _portal_query(user, {"$or": [{"client_id": cid}, {"client_name": client.get("name", "")}]}),
         {"_id": 0, "id": 1, "job_name": 1, "device_name": 1, "status": 1, "last_run": 1},
     ).sort("last_run", -1).to_list(100)
 
@@ -716,7 +742,7 @@ async def portal_tickets(user: dict = Depends(get_portal_user)):
     query = {"client_id": cid}
     if not user.get("can_view_all_tickets"):
         query["$or"] = [{"contact_email": user.get("email")}, {"created_by": user.get("name")}, {"contact_email": {"$exists": False}}]
-    tickets = await db.tickets.find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    tickets = await db.tickets.find(_portal_query(user, query), {"_id": 0}).sort("created_at", -1).to_list(200)
     return tickets
 
 
@@ -725,7 +751,7 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
     if not user.get("can_create_tickets", True):
         raise HTTPException(status_code=403, detail="Ticket creation not permitted")
     client = await db.clients.find_one(
-        {"id": user.get("client_id")},
+        _portal_query(user, {"id": user.get("client_id")}),
         {"_id": 0, "name": 1, "tenant_id": 1},
     )
     ticket_scope = _portal_ticket_comment_scope(
@@ -784,17 +810,17 @@ async def portal_create_ticket(data: dict, user: dict = Depends(get_portal_user)
 @router.get("/tickets/{ticket_id}")
 async def portal_ticket_detail(ticket_id: str, user: dict = Depends(get_portal_user)):
     """Get full ticket detail with messages/conversation."""
-    ticket = await db.tickets.find_one({"id": ticket_id, "client_id": user.get("client_id")}, {"_id": 0})
+    ticket = await db.tickets.find_one(_portal_query(user, {"id": ticket_id, "client_id": user.get("client_id")}), {"_id": 0})
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     # Present one client-safe thread. Historical portal messages are retained,
     # while new public technician updates and client replies live in the same
     # audited ticket-comments collection used by the service desk.
     legacy_messages = await db.ticket_messages.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        _portal_query(user, {"ticket_id": ticket_id, "client_id": user.get("client_id")}), {"_id": 0}
     ).sort("created_at", 1).to_list(200)
     public_comments = await db.ticket_comments.find(
-        {"ticket_id": ticket_id, "is_internal": {"$ne": True}},
+        _portal_query(user, {"ticket_id": ticket_id, "client_id": user.get("client_id"), "is_internal": {"$ne": True}}),
         {"_id": 0},
     ).sort("created_at", 1).to_list(500)
     messages = [
@@ -812,7 +838,7 @@ async def portal_ticket_detail(ticket_id: str, user: dict = Depends(get_portal_u
 async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Depends(get_portal_user)):
     """Add a message to a ticket conversation from the portal."""
     ticket = await db.tickets.find_one(
-        {"id": ticket_id, "client_id": user.get("client_id")},
+        _portal_query(user, {"id": ticket_id, "client_id": user.get("client_id")}),
         {"_id": 0, "id": 1, "status": 1, "tenant_id": 1, "client_id": 1, "site_id": 1},
     )
     if not ticket:
@@ -853,7 +879,7 @@ async def portal_add_ticket_message(ticket_id: str, data: dict, user: dict = Dep
         update["status"] = "open"
         update["reopened_at"] = update["updated_at"]
         update["reopened_reason"] = "Client replied through the portal"
-    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await db.tickets.update_one(_portal_query(user, {"id": ticket_id, "client_id": user.get("client_id")}), {"$set": update})
     return _portal_ticket_comment(message)
 
 
@@ -866,7 +892,7 @@ async def portal_devices(user: dict = Depends(get_portal_user)):
     if not user.get("can_view_assets", True):
         raise HTTPException(status_code=403, detail="Device access not permitted")
     devices = await db.devices.find(
-        {"client_id": user.get("client_id")},
+        _portal_query(user, {"client_id": user.get("client_id")}),
         {
             "_id": 0,
             "id": 1,
@@ -920,7 +946,7 @@ async def portal_end_remote_session(
     """Mark a remote session as ended, compute duration."""
     data = data or {}
     rec = await db.remote_session_records.find_one(
-        {"id": session_id, "client_id": user.get("client_id"), "portal_user_id": user.get("id")},
+        _portal_query(user, {"id": session_id, "client_id": user.get("client_id"), "portal_user_id": user.get("id")}),
         {"_id": 0}
     )
     if not rec:
@@ -936,7 +962,7 @@ async def portal_end_remote_session(
     duration = int((now - started).total_seconds())
 
     await db.remote_session_records.update_one(
-        {"id": session_id},
+        _portal_query(user, {"id": session_id, "client_id": user.get("client_id"), "portal_user_id": user.get("id")}),
         {"$set": {
             "ended_at": now.isoformat(),
             "duration_seconds": duration,
@@ -945,7 +971,7 @@ async def portal_end_remote_session(
         }}
     )
     await db.rustdesk_sessions.update_one(
-        {"id": session_id},
+        _portal_query(user, {"id": session_id, "client_id": user.get("client_id")}),
         {"$set": {"ended_at": now.isoformat(), "status": "completed"}}
     )
     await record_portal_event(
@@ -972,7 +998,7 @@ async def portal_end_remote_session(
 async def portal_list_remote_sessions(user: dict = Depends(get_portal_user)):
     """Portal user sees only their own remote sessions."""
     recs = await db.remote_session_records.find(
-        {"client_id": user.get("client_id"), "portal_user_id": user.get("id")},
+        _portal_query(user, {"client_id": user.get("client_id"), "portal_user_id": user.get("id")}),
         {"_id": 0}
     ).sort("started_at", -1).to_list(200)
     return recs
@@ -985,7 +1011,7 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
     from fastapi.responses import Response
 
     rec = await db.remote_session_records.find_one(
-        {"id": session_id, "client_id": user.get("client_id"), "portal_user_id": user.get("id")},
+        _portal_query(user, {"id": session_id, "client_id": user.get("client_id"), "portal_user_id": user.get("id")}),
         {"_id": 0}
     )
     if not rec:
@@ -994,9 +1020,9 @@ async def portal_remote_session_pdf(session_id: str, user: dict = Depends(get_po
     # All portal evidence uses the same renderer as reports and procurement
     # records.  This prevents a client download from looking like a separate,
     # generic product surface.
-    branding_record = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding_record = await db.settings.find_one(_portal_query(user, {"type": "branding"}), {"_id": 0})
     if not branding_record:
-        branding_record = await db.settings.find_one({"key": "branding"}, {"_id": 0})
+        branding_record = await db.settings.find_one(_portal_query(user, {"key": "branding"}), {"_id": 0})
     branding = (branding_record or {}).get("value", branding_record or {}) or {}
 
     def duration_label(raw_seconds):
@@ -1178,14 +1204,14 @@ async def portal_invoices(user: dict = Depends(get_portal_user)):
     if not user.get("can_view_invoices", False):
         return []
     invoices = await db.invoices.find(
-        {"client_id": user.get("client_id")},
+        _portal_query(user, {"client_id": user.get("client_id")} ),
         {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "payment_status": 1, "total": 1,
          "amount_due": 1, "amount_paid": 1, "due_date": 1, "issued_date": 1, "created_at": 1,
          "paid_date": 1, "currency": 1}
     ).sort("created_at", -1).to_list(200)
     # Also check xero_invoices
     xero_invoices = await db.xero_invoices.find(
-        {"client_id": user.get("client_id")},
+        _portal_query(user, {"client_id": user.get("client_id")} ),
         {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "payment_status": 1, "total": 1,
          "amount_due": 1, "amount_paid": 1, "due_date": 1, "issued_date": 1, "created_at": 1,
          "paid_date": 1, "currency": 1}
@@ -1203,9 +1229,9 @@ async def portal_invoice_detail(invoice_id: str, user: dict = Depends(get_portal
     if not user.get("can_view_invoices", False):
         raise HTTPException(status_code=403, detail="Invoice access not permitted")
     cid = user.get("client_id")
-    invoice = await db.invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    invoice = await db.invoices.find_one(_portal_query(user, {"id": invoice_id, "client_id": cid}), {"_id": 0})
     if not invoice:
-        invoice = await db.xero_invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+        invoice = await db.xero_invoices.find_one(_portal_query(user, {"id": invoice_id, "client_id": cid}), {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
@@ -1244,7 +1270,7 @@ async def portal_pay_invoice(
         from app.routers import payment_links
         from app.services.stripe_checkout import StripeCheckout, CheckoutSessionRequest
 
-        invoice, collection = await _load_portal_checkout_invoice(invoice_id, client_id)
+        invoice, collection = await _load_portal_checkout_invoice(invoice_id, client_id, user)
         if str(invoice.get("status") or "").strip().lower() in payment_links._CANCELLED_INVOICE_STATUSES:
             raise HTTPException(status_code=409, detail="Cannot collect payment for a voided invoice")
         balance = payment_links._invoice_balance(invoice)
@@ -1435,9 +1461,9 @@ async def portal_invoice_pdf(invoice_id: str, user: dict = Depends(get_portal_us
     if not user.get("can_view_invoices", False):
         raise HTTPException(status_code=403, detail="Invoice access not permitted")
     cid = user.get("client_id")
-    invoice = await db.invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+    invoice = await db.invoices.find_one(_portal_query(user, {"id": invoice_id, "client_id": cid}), {"_id": 0})
     if not invoice:
-        invoice = await db.xero_invoices.find_one({"id": invoice_id, "client_id": cid}, {"_id": 0})
+        invoice = await db.xero_invoices.find_one(_portal_query(user, {"id": invoice_id, "client_id": cid}), {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
@@ -1464,11 +1490,11 @@ async def portal_invoice_pdf(invoice_id: str, user: dict = Depends(get_portal_us
 async def portal_services(user: dict = Depends(get_portal_user)):
     """Client-scoped agreements and live subscription quantities."""
     cid = user.get("client_id")
-    config = await db.portal_configs.find_one({"client_id": cid}, {"_id": 0, "features": 1}) or {}
+    config = await db.portal_configs.find_one(_portal_query(user, {"client_id": cid}), {"_id": 0, "features": 1}) or {}
     if (config.get("features") or {}).get("can_view_contracts", True) is False:
         raise HTTPException(status_code=403, detail="Service agreement access not permitted")
     contracts = await db.contracts.find(
-        {"client_id": cid},
+        _portal_query(user, {"client_id": cid}),
         {
             "_id": 0, "id": 1, "name": 1, "type": 1, "status": 1, "start_date": 1,
             "end_date": 1, "renewal_date": 1, "sla_tier": 1, "billing_frequency": 1,
@@ -1476,7 +1502,7 @@ async def portal_services(user: dict = Depends(get_portal_user)):
         },
     ).sort("status", 1).to_list(100)
     subscriptions = await db.subscriptions.find(
-        {"client_id": cid},
+        _portal_query(user, {"client_id": cid}),
         {
             "_id": 0, "id": 1, "product_name": 1, "name": 1, "vendor": 1,
             "provider": 1, "quantity": 1, "used": 1, "status": 1, "billing_cycle": 1,
@@ -1508,14 +1534,14 @@ async def portal_documents(user: dict = Depends(get_portal_user)):
     """Only expose documents explicitly marked for the client portal."""
     cid = user.get("client_id")
     docs = await db.client_documents.find(
-        {
+        _portal_query(user, {
             "client_id": cid,
             "$or": [
                 {"portal_visible": True},
                 {"visibility": {"$in": ["public", "client"]}},
                 {"is_public": True},
             ],
-        },
+        }),
         {
             "_id": 0, "id": 1, "kind": 1, "title": 1, "category": 1, "url": 1,
             "extension": 1, "size_bytes": 1, "body": 1, "updated_at": 1,
@@ -1530,11 +1556,11 @@ async def portal_documents(user: dict = Depends(get_portal_user)):
 @router.get("/backups")
 async def portal_backups(user: dict = Depends(get_portal_user)):
     cid = user.get("client_id")
-    client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
+    client = await db.clients.find_one(_portal_query(user, {"id": cid}), {"_id": 0, "name": 1})
     cn = client["name"] if client else ""
-    jobs = await db.backup_jobs.find({"client_name": cn}, {"_id": 0}).sort("last_run", -1).to_list(100)
+    jobs = await db.backup_jobs.find(_portal_query(user, {"client_name": cn}), {"_id": 0}).sort("last_run", -1).to_list(100)
     if not jobs:
-        jobs = await db.backup_jobs.find({"client_id": cid}, {"_id": 0}).sort("last_run", -1).to_list(100)
+        jobs = await db.backup_jobs.find(_portal_query(user, {"client_id": cid}), {"_id": 0}).sort("last_run", -1).to_list(100)
     ok = sum(1 for j in jobs if j.get("status") == "success")
     fail = sum(1 for j in jobs if j.get("status") == "failed")
     return {"jobs": jobs, "summary": {"total": len(jobs), "successful": ok, "failed": fail, "success_rate": round(ok / max(len(jobs), 1) * 100, 1)}}
@@ -1546,7 +1572,7 @@ async def portal_backups(user: dict = Depends(get_portal_user)):
 async def portal_compliance(user: dict = Depends(get_portal_user)):
     cid = user.get("client_id")
     scans = await db.compliance_reports.find(
-        {"client_id": cid},
+        _portal_query(user, {"client_id": cid}),
         {
             "_id": 0, "id": 1, "framework": 1, "framework_name": 1, "score": 1,
             "passed": 1, "total": 1, "scanned_at": 1, "controls": 1,
@@ -1575,11 +1601,11 @@ async def portal_compliance(user: dict = Depends(get_portal_user)):
 @router.get("/qbr")
 async def portal_qbr(user: dict = Depends(get_portal_user)):
     cid = user.get("client_id")
-    client = await db.clients.find_one({"id": cid}, {"_id": 0, "name": 1})
+    client = await db.clients.find_one(_portal_query(user, {"id": cid}), {"_id": 0, "name": 1})
     cn = client["name"] if client else ""
-    qbrs = await db.qbr_reports.find({"client_name": cn}, {"_id": 0}).sort("generated_at", -1).to_list(10)
+    qbrs = await db.qbr_reports.find(_portal_query(user, {"client_name": cn}), {"_id": 0}).sort("generated_at", -1).to_list(10)
     if not qbrs:
-        qbrs = await db.qbr_reports.find({"client_id": cid}, {"_id": 0}).sort("generated_at", -1).to_list(10)
+        qbrs = await db.qbr_reports.find(_portal_query(user, {"client_id": cid}), {"_id": 0}).sort("generated_at", -1).to_list(10)
     return qbrs
 
 
@@ -1590,7 +1616,7 @@ async def portal_qbr(user: dict = Depends(get_portal_user)):
 async def portal_knowledge_base(user: dict = Depends(get_portal_user)):
     """Get published knowledge base articles for clients."""
     config = await db.portal_configs.find_one(
-        {"client_id": user.get("client_id")}, {"_id": 0, "features": 1}
+        _portal_query(user, {"client_id": user.get("client_id")}), {"_id": 0, "features": 1}
     ) or {}
     if (config.get("features") or {}).get("can_view_kb", True) is False:
         return []

@@ -28,6 +28,10 @@ def _value(row: dict[str, Any], key: str) -> Any:
 
 def _matches(row: dict[str, Any], query: dict[str, Any] | None) -> bool:
     for key, expected in (query or {}).items():
+        if key == "$and":
+            if not all(_matches(row, clause) for clause in expected):
+                return False
+            continue
         if key == "$or":
             if not any(_matches(row, clause) for clause in expected):
                 return False
@@ -114,6 +118,7 @@ def _portal_user(*, client_id: str = "client-a") -> dict[str, Any]:
         "email": "portal.user@example.test",
         "client_id": client_id,
         "client_name": "Client A",
+        "tenant_id": "nexus-local",
         "can_view_invoices": True,
     }
 

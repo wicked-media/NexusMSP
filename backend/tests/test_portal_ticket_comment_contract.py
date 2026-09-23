@@ -13,7 +13,17 @@ from app.routers import portal_v2
 
 
 def _matches(row: dict[str, Any], query: dict[str, Any]) -> bool:
-    return all(row.get(key) == value for key, value in query.items())
+    if "$and" in query:
+        return all(_matches(row, clause) for clause in query["$and"])
+    if "$or" in query:
+        return any(_matches(row, clause) for clause in query["$or"])
+    for key, expected in query.items():
+        if isinstance(expected, dict) and "$exists" in expected:
+            if (key in row) != bool(expected["$exists"]):
+                return False
+        elif row.get(key) != expected:
+            return False
+    return True
 
 
 class _Collection:
@@ -55,6 +65,7 @@ def _portal_user(**overrides: Any) -> dict[str, Any]:
         "name": "Portal User",
         "email": "portal.user@example.test",
         "client_id": "client-a",
+        "tenant_id": "tenant-a",
         **overrides,
     }
 
@@ -107,7 +118,7 @@ async def _test_portal_reply_uses_parent_scope_and_only_returns_safe_projection(
     response = await portal_v2.portal_add_ticket_message(
         "ticket-a",
         {"content": "<p>It is working again.</p><script>not executable</script>"},
-        _portal_user(tenant_id="wrong-tenant"),
+        _portal_user(tenant_id="tenant-a"),
     )
 
     comment = database.ticket_comments.rows[0]
