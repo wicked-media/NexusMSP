@@ -54,13 +54,13 @@ def _what_changed_impact(category: str, severity: Optional[str]) -> str:
     return category_impacts.get(category, "New operational evidence was recorded for this client.")
 
 
-async def _build_what_changed_brief(client_id: str, days: int) -> dict:
+async def _build_what_changed_brief(client_id: str, days: int, actor: dict | None = None) -> dict:
     """Build an explainable comparison from the canonical client timeline.
 
     This is intentionally an event-evidence comparison, not a causal engine. A
     source record must exist before Nexus can describe it as a recorded change.
     """
-    timeline = await build_client_timeline(client_id, limit=500)
+    timeline = await build_client_timeline(client_id, actor=actor, limit=500)
     now = datetime.now(timezone.utc)
     current_start = now - timedelta(days=days)
     baseline_start = current_start - timedelta(days=days)
@@ -418,6 +418,7 @@ async def get_client_nexus_timeline(
     ]
     return await build_client_timeline(
         client_id,
+        actor=current_user,
         categories=selected,
         before=before,
         search=q,
@@ -440,7 +441,7 @@ async def get_client_what_changed(
         operation="client.timeline.read",
         resource_name="Client",
     )
-    return await _build_what_changed_brief(client_id, days)
+    return await _build_what_changed_brief(client_id, days, current_user)
 
 
 @router.get("/clients/{client_id}/activity-timeline")

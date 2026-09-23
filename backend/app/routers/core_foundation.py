@@ -258,7 +258,7 @@ async def get_core_object_profile(object_ref: str, request: Request, current_use
     for relationship in relationships:
         related_ref = relationship.get("to_ref") if relationship.get("from_ref") == object_ref else relationship.get("from_ref")
         relationship["related"] = related_by_ref.get(related_ref) or {"id": related_ref}
-    timeline = await build_client_timeline(client_id, limit=500)
+    timeline = await build_client_timeline(client_id, actor=current_user, limit=500)
     return build_object_story(entity, relationships, timeline.get("events") or [])
 
 

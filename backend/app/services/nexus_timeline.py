@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from app.database import db
+from app.services.scope_permissions import tenant_scoped_query
 
 
 TIMELINE_CATEGORIES = (
@@ -157,12 +158,19 @@ def _platform_route(subject: str, payload: dict) -> str | None:
 async def build_client_timeline(
     client_id: str,
     *,
+    actor: dict | None = None,
     categories: Iterable[str] | None = None,
     before: str | datetime | None = None,
     search: str | None = None,
     limit: int = 200,
 ) -> dict:
     """Join persisted client evidence into one canonical chronology."""
+    # The timeline is a derived view, so every source join must retain the
+    # caller's platform partition.  The routes separately establish client
+    # access; this protects service reuse from becoming a tenant-wide join.
+    def scoped(query: dict) -> dict:
+        return tenant_scoped_query(actor or {}, query)
+
     (
         client,
         tickets,
@@ -178,22 +186,22 @@ async def build_client_timeline(
         documents,
         platform_events,
     ) = await asyncio.gather(
-        db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1, "name": 1}),
-        db.tickets.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500),
-        db.invoices.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(300),
-        db.client_communication_events.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500),
-        db.activity_logs.find({"entity_type": "client", "entity_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(300),
+        db.clients.find_one(scoped({"id": client_id}), {"_id": 0, "id": 1, "name": 1}),
+        db.tickets.find(scoped({"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(500),
+        db.invoices.find(scoped({"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(300),
+        db.client_communication_events.find(scoped({"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(500),
+        db.activity_logs.find(scoped({"entity_type": "client", "entity_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(300),
         db.audit_logs.find(
-            {"$or": [{"entity_type": "client", "entity_id": client_id}, {"metadata.client_id": client_id}]},
+            scoped({"$or": [{"entity_type": "client", "entity_id": client_id}, {"metadata.client_id": client_id}]}),
             {"_id": 0},
         ).sort("created_at", -1).to_list(500),
-        db.change_requests.find({"client_id": client_id}, {"_id": 0}).sort("updated_at", -1).to_list(300),
-        db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(1000),
-        db.remote_sessions.find({"client_id": client_id}, {"_id": 0}).sort("started_at", -1).to_list(300),
-        db.workflow_runs.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(300),
-        db.backup_jobs.find({"client_id": client_id}, {"_id": 0}).sort("last_run", -1).to_list(300),
-        db.documentation.find({"client_id": client_id, "is_template": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(300),
-        db.platform_events.find({"client_id": client_id}, {"_id": 0}).sort("occurred_at", -1).to_list(500),
+        db.change_requests.find(scoped({"client_id": client_id}), {"_id": 0}).sort("updated_at", -1).to_list(300),
+        db.devices.find(scoped({"client_id": client_id}), {"_id": 0}).to_list(1000),
+        db.remote_sessions.find(scoped({"client_id": client_id}), {"_id": 0}).sort("started_at", -1).to_list(300),
+        db.workflow_runs.find(scoped({"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(300),
+        db.backup_jobs.find(scoped({"client_id": client_id}), {"_id": 0}).sort("last_run", -1).to_list(300),
+        db.documentation.find(scoped({"client_id": client_id, "is_template": {"$ne": True}}), {"_id": 0}).sort("updated_at", -1).to_list(300),
+        db.platform_events.find(scoped({"client_id": client_id}), {"_id": 0}).sort("occurred_at", -1).to_list(500),
     )
 
     device_names = {
@@ -205,20 +213,20 @@ async def build_client_timeline(
     ticket_ids = [str(row.get("id")) for row in tickets if row.get("id")]
 
     device_events, device_activity, scripts, time_entries = await asyncio.gather(
-        db.device_events.find({"device_id": {"$in": device_ids}}, {"_id": 0}).sort("timestamp", -1).to_list(500)
+        db.device_events.find(scoped({"device_id": {"$in": device_ids}}), {"_id": 0}).sort("timestamp", -1).to_list(500)
         if device_ids else asyncio.sleep(0, result=[]),
         db.activity_logs.find(
-            {"entity_type": "device", "entity_id": {"$in": device_ids}}, {"_id": 0}
+            scoped({"entity_type": "device", "entity_id": {"$in": device_ids}}), {"_id": 0}
         ).sort("created_at", -1).to_list(500)
         if device_ids else asyncio.sleep(0, result=[]),
         db.script_executions.find(
-            {"$or": [{"client_id": client_id}, {"device_id": {"$in": device_ids}}]}, {"_id": 0}
+            scoped({"$or": [{"client_id": client_id}, {"device_id": {"$in": device_ids}}]}), {"_id": 0}
         ).sort("created_at", -1).to_list(500)
-        if device_ids else db.script_executions.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500),
+        if device_ids else db.script_executions.find(scoped({"client_id": client_id}), {"_id": 0}).sort("created_at", -1).to_list(500),
         db.time_entries.find(
-            {"$or": [{"client_id": client_id}, {"ticket_id": {"$in": ticket_ids}}]}, {"_id": 0}
+            scoped({"$or": [{"client_id": client_id}, {"ticket_id": {"$in": ticket_ids}}]}), {"_id": 0}
         ).sort("date", -1).to_list(500)
-        if ticket_ids else db.time_entries.find({"client_id": client_id}, {"_id": 0}).sort("date", -1).to_list(500),
+        if ticket_ids else db.time_entries.find(scoped({"client_id": client_id}), {"_id": 0}).sort("date", -1).to_list(500),
     )
 
     events: list[dict] = []
