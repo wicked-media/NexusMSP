@@ -332,7 +332,7 @@ async def _resolve_native_elevation_review_notification(request_id: str, resolut
     )
 
 
-async def _expire_stale_native_approvals() -> int:
+async def _expire_stale_native_approvals(scope: dict | None = None) -> int:
     """Close approvals that cannot safely be honoured any longer.
 
     The agent independently refuses an expired command, but keeping an expired
@@ -342,10 +342,12 @@ async def _expire_stale_native_approvals() -> int:
     """
     now = datetime.now(timezone.utc)
     cutoff = now.isoformat()
-    candidates = await db.nexus_elevate_requests.find({
+    query = dict(scope or {})
+    query.update({
         "status": "approved",
         "approved_until": {"$lte": cutoff},
-    }, {"_id": 0}).to_list(500)
+    })
+    candidates = await db.nexus_elevate_requests.find(query, {"_id": 0}).to_list(500)
     expired = 0
     for request in candidates:
         result = await db.nexus_elevate_requests.update_one(
@@ -353,6 +355,7 @@ async def _expire_stale_native_approvals() -> int:
                 "id": request.get("id"),
                 "status": "approved",
                 "approved_until": request.get("approved_until"),
+                "tenant_id": request.get("tenant_id") or "nexus-local",
             },
             {"$set": {
                 "status": "expired",
@@ -1439,11 +1442,11 @@ async def put_nexus_elevate_settings(data: dict, current_user: dict = Depends(ge
 async def nexus_elevate_overview(current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    await _expire_stale_native_approvals()
-    await _escalate_overdue_native_reviews(scoped_query(caller, {}, site_field=None))
+    request_scope = tenant_scoped_query(caller, scoped_query(caller, {}, site_field=None))
+    await _expire_stale_native_approvals(request_scope)
+    await _escalate_overdue_native_reviews(request_scope)
     now = datetime.now(timezone.utc)
     settings = await _native_settings(caller)
-    request_scope = tenant_scoped_query(caller, scoped_query(caller, {}, site_field=None))
     requests = await db.nexus_elevate_requests.find(
         request_scope, {"_id": 0}
     ).sort("requested_at", -1).to_list(250)
@@ -1505,7 +1508,7 @@ async def list_nexus_elevate_requests(
 ):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    await _expire_stale_native_approvals()
+    await _expire_stale_native_approvals(tenant_scoped_query(caller, scoped_query(caller, {}, site_field=None)))
     query: dict[str, Any] = {}
     if status and status != "all":
         query["status"] = status
@@ -1532,7 +1535,7 @@ async def list_nexus_elevate_requests(
 async def get_nexus_elevate_request(request_id: str, current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    await _expire_stale_native_approvals()
+    await _expire_stale_native_approvals(tenant_scoped_query(caller, {"id": request_id}))
     request = await db.nexus_elevate_requests.find_one(tenant_scoped_query(caller, {"id": request_id}), {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
@@ -1872,7 +1875,7 @@ async def list_native_elevation_agent_requests(x_agent_token: str | None = Heade
     agent = await db.nexus_agents.find_one({"agent_token": x_agent_token, "is_active": True}, {"_id": 0})
     if not agent:
         raise HTTPException(status_code=401, detail="Invalid agent token")
-    await _expire_stale_native_approvals()
+    await _expire_stale_native_approvals(tenant_scoped_query({"tenant_id": agent.get("tenant_id")}, {"device_id": agent["id"]}))
     rows = await db.nexus_elevate_requests.find(
         {"device_id": agent["id"]},
         {"_id": 0, "id": 1, "status": 1, "program_name": 1, "requested_at": 1, "approved_until": 1, "denial_reason": 1, "executed_at": 1},
@@ -1889,7 +1892,7 @@ async def get_native_elevation_agent_status(request_id: str, x_agent_token: str 
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
     if request.get("status") == "approved" and str(request.get("approved_until") or "") <= datetime.now(timezone.utc).isoformat():
-        await _expire_stale_native_approvals()
+        await _expire_stale_native_approvals(tenant_scoped_query({"tenant_id": agent.get("tenant_id")}, {"device_id": agent["id"]}))
         request = await db.nexus_elevate_requests.find_one({"id": request_id, "device_id": agent["id"]}, {"_id": 0}) or request
     return {
         "id": request["id"],
