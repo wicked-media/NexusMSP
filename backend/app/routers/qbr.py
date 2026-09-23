@@ -28,6 +28,7 @@ import jwt
 from app.database import db, JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.services.nexus_document_pdf import render_nexus_document_pdf
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -62,9 +63,12 @@ def _quarter_window(label: str | None):
     return f"{year}-Q{q}", start, end
 
 
-async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
+async def _gather_qbr_data(client_id: str, start: datetime, end: datetime, current_user: dict):
     """Aggregate raw operational data for the client across the quarter."""
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    client = await assert_tenant_record_scope(
+        current_user, db.clients, client_id,
+        operation="qbr.generate", resource_name="Client",
+    )
     if not client:
         raise HTTPException(404, "Client not found")
 
@@ -72,14 +76,14 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
     e_iso = end.isoformat()
 
     # Tickets opened in the quarter
-    tix = await db.tickets.find({
+    tix = await db.tickets.find(tenant_scoped_query(current_user, {
         "client_id": client_id,
         "$or": [
             {"created_at": {"$gte": s_iso, "$lt": e_iso}},
             {"resolved_at": {"$gte": s_iso, "$lt": e_iso}},
             {"updated_at": {"$gte": s_iso, "$lt": e_iso}},
         ],
-    }, {"_id": 0, "id": 1, "title": 1, "priority": 1, "category": 1, "status": 1,
+    }), {"_id": 0, "id": 1, "title": 1, "priority": 1, "category": 1, "status": 1,
         "created_at": 1, "resolved_at": 1, "sla_breached": 1, "ticket_number": 1}).limit(2000).to_list(2000)
 
     by_priority = {"critical": 0, "high": 0, "medium": 0, "low": 0}
@@ -100,23 +104,23 @@ async def _gather_qbr_data(client_id: str, start: datetime, end: datetime):
     top_issues = sorted(by_category.items(), key=lambda kv: -kv[1])[:5]
 
     # Device health snapshot (live)
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "id": 1, "status": 1, "device_type": 1}).to_list(500)
+    devices = await db.devices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "id": 1, "status": 1, "device_type": 1}).to_list(500)
     dev_online = sum(1 for d in devices if d.get("status") == "online")
     dev_warning = sum(1 for d in devices if d.get("status") == "warning")
     dev_offline = sum(1 for d in devices if d.get("status") == "offline")
 
     # Backup health
-    bk_failed = await db.backup_status.count_documents({"client_id": client_id, "backup_health": "failed"}) if "backup_status" in await db.list_collection_names() else 0
-    bk_ok = await db.backup_status.count_documents({"client_id": client_id, "backup_health": {"$in": ["healthy", "ok"]}}) if "backup_status" in await db.list_collection_names() else 0
+    bk_failed = await db.backup_status.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "backup_health": "failed"})) if "backup_status" in await db.list_collection_names() else 0
+    bk_ok = await db.backup_status.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "backup_health": {"$in": ["healthy", "ok"]}})) if "backup_status" in await db.list_collection_names() else 0
 
     # Active critical alerts
-    alerts = await db.alerts.count_documents({"client_id": client_id, "severity": "critical"}) if "alerts" in await db.list_collection_names() else 0
+    alerts = await db.alerts.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "severity": "critical"})) if "alerts" in await db.list_collection_names() else 0
 
     # Spend
-    invoices = await db.invoices.find({
+    invoices = await db.invoices.find(tenant_scoped_query(current_user, {
         "client_id": client_id,
         "issue_date": {"$gte": s_iso[:10], "$lt": e_iso[:10]},
-    }, {"_id": 0, "total": 1, "status": 1}).to_list(500)
+    }), {"_id": 0, "total": 1, "status": 1}).to_list(500)
     spend_total = sum(float(i.get("total") or 0) for i in invoices)
 
     # Cross-client patterns that touched this client this quarter
@@ -202,7 +206,7 @@ def _format_qbr_prompt(quarter: str, snap: dict) -> str:
 async def generate_qbr(client_id: str, quarter: str | None = None, current_user: dict = Depends(get_current_user)):
     """Draft a QBR for the client + quarter. Returns AI prose + structured snapshot."""
     quarter_label, start, end = _quarter_window(quarter)
-    snap = await _gather_qbr_data(client_id, start, end)
+    snap = await _gather_qbr_data(client_id, start, end, current_user)
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -271,10 +275,11 @@ async def save_qbr(client_id: str, data: dict, current_user: dict = Depends(get_
     if not quarter or not sections:
         raise HTTPException(400, "quarter and sections required")
 
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+    client = await assert_tenant_record_scope(current_user, db.clients, client_id, operation="qbr.save", resource_name="Client")
     doc = {
         "id": f"qbr-{uuid.uuid4().hex[:12]}",
         "client_id": client_id,
+        "tenant_id": platform_tenant_id(current_user),
         "client_name": (client or {}).get("name"),
         "quarter": quarter,
         "stats": stats,
@@ -289,13 +294,14 @@ async def save_qbr(client_id: str, data: dict, current_user: dict = Depends(get_
 
 @router.get("/qbr/{client_id}/list")
 async def list_qbrs(client_id: str, current_user: dict = Depends(get_current_user)):
-    items = await db.qbrs.find({"client_id": client_id}, {"_id": 0, "sections": 0, "stats": 0}).sort("saved_at", -1).to_list(50)
+    await assert_tenant_record_scope(current_user, db.clients, client_id, operation="qbr.read", resource_name="Client")
+    items = await db.qbrs.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "sections": 0, "stats": 0}).sort("saved_at", -1).to_list(50)
     return items
 
 
 @router.get("/qbrs/{qbr_id}")
 async def get_qbr(qbr_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.qbrs.find_one({"id": qbr_id}, {"_id": 0})
+    doc = await db.qbrs.find_one(tenant_scoped_query(current_user, {"id": qbr_id}), {"_id": 0})
     if not doc:
         raise HTTPException(404, "QBR not found")
     return doc
