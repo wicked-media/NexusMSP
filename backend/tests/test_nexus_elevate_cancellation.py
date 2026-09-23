@@ -20,7 +20,17 @@ class _Rows:
 
     @staticmethod
     def _matches(row, query):
-        return all(row.get(key) == value for key, value in query.items())
+        if "$and" in query:
+            return all(_Rows._matches(row, clause) for clause in query["$and"])
+        if "$or" in query:
+            return any(_Rows._matches(row, clause) for clause in query["$or"])
+        for key, value in query.items():
+            if isinstance(value, dict) and "$exists" in value:
+                if (key in row) != value["$exists"]:
+                    return False
+            elif row.get(key) != value:
+                return False
+        return True
 
     async def find_one(self, query, _projection=None):
         return next((dict(row) for row in self.rows if self._matches(row, query)), None)

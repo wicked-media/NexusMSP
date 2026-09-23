@@ -1533,11 +1533,11 @@ async def get_nexus_elevate_request(request_id: str, current_user: dict = Depend
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
     await _expire_stale_native_approvals()
-    request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
+    request = await db.nexus_elevate_requests.find_one(tenant_scoped_query(caller, {"id": request_id}), {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
     await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.read", mask_not_found=True)
-    events = await db.nexus_elevate_audit.find({"request_id": request_id}, {"_id": 0}).sort("at", -1).to_list(100)
+    events = await db.nexus_elevate_audit.find(tenant_scoped_query(caller, {"request_id": request_id}), {"_id": 0}).sort("at", -1).to_list(100)
     return {"request": await _request_view(request), "audit": events}
 
 
@@ -1545,7 +1545,7 @@ async def get_nexus_elevate_request(request_id: str, current_user: dict = Depend
 async def approve_nexus_elevate_request(request_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
+    request = await db.nexus_elevate_requests.find_one(tenant_scoped_query(caller, {"id": request_id}), {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
     await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.approve", mask_not_found=True)
@@ -1597,7 +1597,7 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
     # the same executable.  ``find_one_and_update`` gives exactly one caller
     # ownership of the state transition.
     claimed = await db.nexus_elevate_requests.find_one_and_update(
-        {"id": request_id, "status": "pending"},
+        tenant_scoped_query(caller, {"id": request_id, "status": "pending"}),
         {"$set": update},
     )
     if not claimed:
@@ -1609,7 +1609,7 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
         # never committed.  The conditional rollback cannot overwrite a later
         # state transition.
         await db.nexus_elevate_requests.update_one(
-            {"id": request_id, "status": "approved", "agent_command_id": command_id},
+            tenant_scoped_query(caller, {"id": request_id, "status": "approved", "agent_command_id": command_id}),
             {"$set": {"status": "pending"}, "$unset": {
                 "approved_at": "", "approved_until": "", "approved_by_id": "",
                 "approved_by_name": "", "approval_reason": "", "agent_command_id": "",
@@ -1635,7 +1635,7 @@ async def approve_nexus_elevate_request(request_id: str, data: dict, current_use
 async def deny_nexus_elevate_request(request_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
+    request = await db.nexus_elevate_requests.find_one(tenant_scoped_query(caller, {"id": request_id}), {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
     await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.deny", mask_not_found=True)
@@ -1652,7 +1652,7 @@ async def deny_nexus_elevate_request(request_id: str, data: dict, current_user: 
         "denial_reason": reason,
     }
     result = await db.nexus_elevate_requests.update_one(
-        {"id": request_id, "status": "pending"},
+        tenant_scoped_query(caller, {"id": request_id, "status": "pending"}),
         {"$set": update},
     )
     if not getattr(result, "matched_count", 0):
@@ -1676,7 +1676,7 @@ async def cancel_nexus_elevate_request(request_id: str, data: dict, current_user
     """
     caller = await _get_caller(current_user)
     _ensure_native_elevation_operator(caller)
-    request = await db.nexus_elevate_requests.find_one({"id": request_id}, {"_id": 0})
+    request = await db.nexus_elevate_requests.find_one(tenant_scoped_query(caller, {"id": request_id}), {"_id": 0})
     if not request:
         raise HTTPException(status_code=404, detail="Elevation request not found")
     await assert_client_scope(caller, request.get("client_id"), operation="nexus_elevate.request.cancel", mask_not_found=True)
@@ -1694,7 +1694,7 @@ async def cancel_nexus_elevate_request(request_id: str, data: dict, current_user
             "cancellation_reason": reason,
         }
         result = await db.nexus_elevate_requests.update_one(
-            {"id": request_id, "status": "pending"}, {"$set": update}
+            tenant_scoped_query(caller, {"id": request_id, "status": "pending"}), {"$set": update}
         )
         if not getattr(result, "matched_count", 0):
             raise HTTPException(status_code=409, detail="This elevation request was already decided by another technician")
@@ -1713,7 +1713,7 @@ async def cancel_nexus_elevate_request(request_id: str, data: dict, current_user
     # two reviewers from both reporting a revocation and gives the agent a
     # stable, deny-by-default request state during the cancellation attempt.
     reserved = await db.nexus_elevate_requests.find_one_and_update(
-        {"id": request_id, "status": "approved", "agent_command_id": request["agent_command_id"]},
+        tenant_scoped_query(caller, {"id": request_id, "status": "approved", "agent_command_id": request["agent_command_id"]}),
         {"$set": {"status": "revoking", "revocation_requested_at": now, "revocation_requested_by_id": caller.get("id")}},
     )
     if not reserved:
@@ -1728,7 +1728,7 @@ async def cancel_nexus_elevate_request(request_id: str, data: dict, current_user
         # cancellation attempt. Restore the truthful approved state; never
         # represent a dispatched or executed launch as revoked.
         await db.nexus_elevate_requests.update_one(
-            {"id": request_id, "status": "revoking"},
+            tenant_scoped_query(caller, {"id": request_id, "status": "revoking"}),
             {"$set": {"status": "approved"}, "$unset": {"revocation_requested_at": "", "revocation_requested_by_id": ""}},
         )
         raise HTTPException(status_code=409, detail="The agent already received this launch; Nexus cannot claim it was cancelled")
@@ -1741,7 +1741,7 @@ async def cancel_nexus_elevate_request(request_id: str, data: dict, current_user
         "revocation_reason": reason,
     }
     result = await db.nexus_elevate_requests.update_one(
-        {"id": request_id, "status": "revoking"},
+        tenant_scoped_query(caller, {"id": request_id, "status": "revoking"}),
         {"$set": update},
     )
     if not getattr(result, "matched_count", 0):
