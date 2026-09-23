@@ -81,6 +81,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
     """Client calls this every 15s. Optionally include a busy_state hint
     e.g. {"busy_state": "ticket:TKT-001"} when on a ticket detail page."""
     doc = {
+        "tenant_id": platform_tenant_id(current_user),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
         "user_email": current_user.get("email"),
@@ -109,7 +110,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
                 )
                 if item:
                     next_busy_state = f"{kind}:{item.get(reference_field) or item.get('id')}"
-        previous = await db.presence_state.find_one({"user_id": doc["user_id"]}, {"_id": 0, "busy_state": 1})
+        previous = await db.presence_state.find_one(tenant_scoped_query(current_user, {"user_id": doc["user_id"]}), {"_id": 0, "busy_state": 1})
         previous_busy_state = (previous or {}).get("busy_state")
         doc["busy_state"] = next_busy_state
         # Record only transitions, not every heartbeat. This is the audit trail
@@ -117,6 +118,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
         if previous_busy_state != next_busy_state:
             await db.work_activity_audit.insert_one({
                 "id": uuid.uuid4().hex,
+                "tenant_id": platform_tenant_id(current_user),
                 "user_id": doc["user_id"],
                 "user_name": doc["user_name"],
                 "avatar_url": doc["avatar_url"],
@@ -125,7 +127,7 @@ async def heartbeat(payload: dict = Body(default={}), current_user: dict = Depen
                 "previous_work_item": previous_busy_state,
                 "created_at": doc["last_heartbeat"],
             })
-    await db.presence_state.update_one({"user_id": doc["user_id"]}, {"$set": doc}, upsert=True)
+    await db.presence_state.update_one(tenant_scoped_query(current_user, {"user_id": doc["user_id"]}), {"$set": doc}, upsert=True)
     return {"ok": True, "ts": doc["last_heartbeat"]}
 
 
@@ -137,8 +139,8 @@ async def set_status(payload: dict = Body(...), current_user: dict = Depends(get
         raise HTTPException(400, "invalid manual_state")
     patch = {"manual_state": state or None, "manual_state_set_at": _now_iso()}
     await db.presence_state.update_one(
-        {"user_id": current_user.get("id")},
-        {"$set": patch},
+        tenant_scoped_query(current_user, {"user_id": current_user.get("id")}),
+        {"$set": patch, "$setOnInsert": {"tenant_id": platform_tenant_id(current_user), "user_id": current_user.get("id")}},
         upsert=True,
     )
     return {"ok": True}
@@ -146,7 +148,7 @@ async def set_status(payload: dict = Body(...), current_user: dict = Depends(get
 
 @router.get("/presence")
 async def list_presence(current_user: dict = Depends(get_current_user)):
-    rows = await db.presence_state.find({}, {"_id": 0}).to_list(500)
+    rows = await db.presence_state.find(tenant_scoped_query(current_user), {"_id": 0}).to_list(500)
     now = _now()
     enriched = []
     for r in rows:
@@ -195,7 +197,7 @@ async def work_activity(
     enough to show in context on a chat-linked ticket, invoice, or PO.
     """
     rows = await db.work_activity_audit.find(
-        {"work_item": work_item}, {"_id": 0}
+        tenant_scoped_query(current_user, {"work_item": work_item}), {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
     return {"work_item": work_item, "events": await attach_user_avatars(rows)}
 
@@ -422,7 +424,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
         # explicit channel-wide mention wins.
         if "here" in broadcast_tokens and not ({"channel", "everyone"} & broadcast_tokens):
             presence_rows = await db.presence_state.find(
-                {"user_id": {"$in": member_ids}},
+                tenant_scoped_query(current_user, {"user_id": {"$in": member_ids}}),
                 {"_id": 0, "user_id": 1, "last_heartbeat": 1, "manual_state": 1},
             ).to_list(500)
             active_ids = set()
@@ -482,8 +484,8 @@ async def mark_read(channel_id: str, current_user: dict = Depends(get_current_us
     await require_channel_access(channel_id, current_user)
     read_at = _now_iso()
     await db.chat_read_state.update_one(
-        {"channel_id": channel_id, "user_id": current_user.get("id")},
-        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": read_at}},
+        tenant_scoped_query(current_user, {"channel_id": channel_id, "user_id": current_user.get("id")}),
+        {"$set": {"tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": read_at}},
         upsert=True,
     )
     return {"ok": True}
@@ -511,8 +513,8 @@ async def mark_unread(channel_id: str, current_user: dict = Depends(get_current_
     except (TypeError, ValueError):
         raise HTTPException(409, "The newest message does not have a valid timestamp")
     await db.chat_read_state.update_one(
-        {"channel_id": channel_id, "user_id": current_user.get("id")},
-        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": last_read_at}},
+        tenant_scoped_query(current_user, {"channel_id": channel_id, "user_id": current_user.get("id")}),
+        {"$set": {"tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "last_read_at": last_read_at}},
         upsert=True,
     )
     return {"ok": True, "last_read_at": last_read_at}
@@ -523,7 +525,7 @@ async def channel_read_receipts(channel_id: str, current_user: dict = Depends(ge
     """Read cursors for a conversation, used to render per-message receipts."""
     await require_channel_access(channel_id, current_user)
     rows = await db.chat_read_state.find(
-        {"channel_id": channel_id}, {"_id": 0, "user_id": 1, "last_read_at": 1}
+        tenant_scoped_query(current_user, {"channel_id": channel_id}), {"_id": 0, "user_id": 1, "last_read_at": 1}
     ).to_list(200)
     user_ids = [row.get("user_id") for row in rows if row.get("user_id")]
     users = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "id": 1, "name": 1, "avatar": 1}).to_list(200)
@@ -542,7 +544,7 @@ async def channel_read_receipts(channel_id: str, current_user: dict = Depends(ge
 async def unread_counts(current_user: dict = Depends(get_current_user)):
     await ensure_default_channels(current_user)
     uid = current_user.get("id")
-    reads = await db.chat_read_state.find({"user_id": uid}, {"_id": 0}).to_list(200)
+    reads = await db.chat_read_state.find(tenant_scoped_query(current_user, {"user_id": uid}), {"_id": 0}).to_list(200)
     last_read_by_ch = {r["channel_id"]: r.get("last_read_at") for r in reads}
     channels = await db.chat_channels.find(
         channel_visibility_query(current_user),
@@ -551,12 +553,12 @@ async def unread_counts(current_user: dict = Depends(get_current_user)):
     async def _count(ch: dict) -> tuple[str, int]:
         cid = ch["id"]
         last = last_read_by_ch.get(cid)
-        q = {
+        q = tenant_scoped_query(current_user, {
             "channel_id": cid,
             "user_id": {"$ne": uid},
             "thread_id": {"$exists": False},
             "deleted": {"$ne": True},
-        }
+        })
         if last:
             q["ts"] = {"$gt": last}
         return cid, await db.chat_messages.count_documents(q)

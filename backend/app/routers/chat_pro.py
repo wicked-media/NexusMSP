@@ -522,7 +522,7 @@ async def channels_preview(current_user: dict = Depends(get_current_user)):
         return []
 
     read_rows = await db.chat_read_state.find(
-        {"user_id": uid, "channel_id": {"$in": channel_ids}},
+        tenant_scoped_query(current_user, {"user_id": uid, "channel_id": {"$in": channel_ids}}),
         {"_id": 0, "channel_id": 1, "last_read_at": 1},
     ).to_list(200)
     read_by_channel = {row["channel_id"]: row.get("last_read_at") for row in read_rows}
@@ -749,8 +749,8 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
 async def typing(channel_id: str, current_user: dict = Depends(get_current_user)):
     channel = await require_channel_access(channel_id, current_user)
     await db.chat_typing.update_one(
-        {"channel_id": channel_id, "user_id": current_user.get("id")},
-        {"$set": {"channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "ts": _now()}},
+        tenant_scoped_query(current_user, {"channel_id": channel_id, "user_id": current_user.get("id")}),
+        {"$set": {"tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "ts": _now()}},
         upsert=True,
     )
     publish_channel_update(channel_id, "typing.updated", live_update_recipients(channel))
@@ -803,7 +803,7 @@ async def channel_activity(channel_id: str, current_user: dict = Depends(get_cur
 async def get_typing(channel_id: str, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
     cutoff = (datetime.now(timezone.utc).timestamp() - 5)  # within last 5 seconds
-    rows = await db.chat_typing.find({"channel_id": channel_id}, {"_id": 0}).to_list(50)
+    rows = await db.chat_typing.find(tenant_scoped_query(current_user, {"channel_id": channel_id}), {"_id": 0}).to_list(50)
     active = []
     for r in rows:
         if r.get("user_id") == current_user.get("id"):

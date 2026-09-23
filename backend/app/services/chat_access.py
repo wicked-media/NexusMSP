@@ -156,7 +156,7 @@ async def initialize_chat_storage() -> None:
     await db.chat_messages.create_index([("tenant_id", 1), ("channel_id", 1), ("ts", -1)])
     await db.chat_messages.create_index([("tenant_id", 1), ("thread_id", 1), ("ts", 1)])
     await db.chat_files.create_index([("tenant_id", 1), ("channel_id", 1), ("uploaded_at", -1)])
-    await db.chat_read_state.create_index([("user_id", 1), ("channel_id", 1)])
+    await db.chat_read_state.create_index([("tenant_id", 1), ("user_id", 1), ("channel_id", 1)])
     # Conversation controls are an actor-owned view of an existing channel;
     # they never change membership, messages, or the channel itself.
     await db.chat_user_preferences.create_index([("tenant_id", 1), ("user_id", 1), ("channel_id", 1)], unique=True)
@@ -164,8 +164,8 @@ async def initialize_chat_storage() -> None:
     # channel document remains the current-state authority.
     await db.chat_channel_events.create_index([("channel_id", 1), ("created_at", -1)])
     await db.chat_channel_events.create_index([("tenant_id", 1), ("created_at", -1)])
-    await db.presence_state.create_index([("user_id", 1), ("last_heartbeat", -1)])
-    await db.chat_typing.create_index([("channel_id", 1), ("ts", -1)])
+    await db.presence_state.create_index([("tenant_id", 1), ("user_id", 1), ("last_heartbeat", -1)])
+    await db.chat_typing.create_index([("tenant_id", 1), ("channel_id", 1), ("ts", -1)])
     await db.ticket_handoffs.create_index([("to_user_id", 1), ("status", 1), ("created_at", -1)])
     await db.ticket_handoffs.create_index([("ticket_id", 1), ("created_at", -1)])
     # Customer chat is deliberately a private extension of Team Chat.  Keep

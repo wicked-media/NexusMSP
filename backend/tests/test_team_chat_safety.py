@@ -216,8 +216,10 @@ class PresenceCursor:
 class PresenceCollection:
     def __init__(self, rows):
         self.rows = rows
+        self.query = None
 
-    def find(self, *_args, **_kwargs):
+    def find(self, query, *_args, **_kwargs):
+        self.query = query
         return PresenceCursor(self.rows)
 
 
@@ -227,13 +229,15 @@ def test_presence_moves_to_away_before_offline(monkeypatch):
         {"user_id": "away", "last_heartbeat": (now - timedelta(seconds=60)).isoformat()},
         {"user_id": "offline", "last_heartbeat": (now - timedelta(seconds=301)).isoformat()},
     ]
-    monkeypatch.setattr(chat_presence, "db", SimpleNamespace(presence_state=PresenceCollection(rows)))
+    presence = PresenceCollection(rows)
+    monkeypatch.setattr(chat_presence, "db", SimpleNamespace(presence_state=presence))
     monkeypatch.setattr(chat_presence, "_now", lambda: now)
 
-    result = asyncio.run(chat_presence.list_presence(current_user={"id": "viewer"}))
+    result = asyncio.run(chat_presence.list_presence(current_user={"id": "viewer", "tenant_id": "tenant-a"}))
     by_id = {row["user_id"]: row["led"] for row in result["users"]}
 
     assert by_id == {"away": "away", "offline": "offline"}
+    assert presence.query == {"tenant_id": "tenant-a"}
 
 
 def test_private_chat_live_updates_never_reach_non_members():
