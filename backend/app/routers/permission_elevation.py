@@ -379,11 +379,18 @@ async def _expire_stale_native_approvals(scope: dict | None = None) -> int:
 async def _request_view(request: dict) -> dict:
     """Remove internal fields and enrich a request with human-facing names."""
     item = {key: value for key, value in request.items() if key != "_id"}
+    request_owner = {"tenant_id": item.get("tenant_id") or "nexus-local"}
     client_id = item.get("client_id")
     if client_id and not item.get("client_name"):
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
+        client = await db.clients.find_one(
+            tenant_scoped_query(request_owner, {"id": client_id}),
+            {"_id": 0, "name": 1},
+        )
         item["client_name"] = (client or {}).get("name") or "Unassigned client"
-    device = await db.devices.find_one({"nexus_agent_id": item.get("device_id")}, {"_id": 0, "id": 1, "name": 1})
+    device = await db.devices.find_one(
+        tenant_scoped_query(request_owner, {"nexus_agent_id": item.get("device_id")}),
+        {"_id": 0, "id": 1, "name": 1},
+    )
     if device:
         item["asset_id"] = device.get("id")
         item["asset_name"] = device.get("name") or item.get("hostname") or "Managed asset"
