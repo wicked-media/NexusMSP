@@ -159,6 +159,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
     if parent_user_id and parent_user_id != current_user.get("id"):
         await db.notifications.insert_one({
             "id": uuid.uuid4().hex,
+            "tenant_id": platform_tenant_id(current_user),
             "user_id": parent_user_id,
             "type": "thread_reply",
             "title": f"💬 {current_user.get('name')} replied in your thread",
@@ -386,10 +387,10 @@ async def update_members(channel_id: str, payload: dict = Body(...), current_use
     members = list(dict.fromkeys(str(member) for member in requested if member))
     if current_user.get("id") not in members:
         members.append(current_user.get("id"))
-    active_members = await db.users.count_documents({"id": {"$in": members}, "is_active": {"$ne": False}})
+    active_members = await db.users.count_documents(tenant_scoped_query(current_user, {"id": {"$in": members}, "is_active": {"$ne": False}}))
     if active_members != len(members):
         raise HTTPException(400, "One or more selected technicians are unavailable")
-    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"member_ids": members, "updated_at": _now()}})
+    await db.chat_channels.update_one(tenant_scoped_query(current_user, {"id": channel_id}), {"$set": {"member_ids": members, "updated_at": _now()}})
     await record_channel_event(channel, current_user, "members.updated", {"member_count": len(members)})
     publish_channel_update(channel_id, "channel.members.updated", members, tenant_id=platform_tenant_id(current_user))
     return {"ok": True, "member_ids": members}
@@ -420,19 +421,19 @@ async def list_archived_channels(current_user: dict = Depends(get_current_user))
     query = {"deleted": True, "kind": "team"}
     if not is_chat_admin(current_user):
         query["created_by"] = current_user.get("id")
-    rows = await db.chat_channels.find(query, {"_id": 0}).sort("deleted_at", -1).to_list(100)
+    rows = await db.chat_channels.find(tenant_scoped_query(current_user, query), {"_id": 0}).sort("deleted_at", -1).to_list(100)
     return await enrich_channels(rows, current_user)
 
 
 @router.post("/chat/channels/{channel_id}/restore")
 async def restore_channel(channel_id: str, current_user: dict = Depends(get_current_user)):
-    channel = await db.chat_channels.find_one({"id": channel_id, "deleted": True}, {"_id": 0})
+    channel = await db.chat_channels.find_one(tenant_scoped_query(current_user, {"id": channel_id, "deleted": True}), {"_id": 0})
     if not channel or channel.get("kind") != "team":
         raise HTTPException(404, "Archived channel not found")
     if not (is_chat_admin(current_user) or channel.get("created_by") == current_user.get("id")):
         raise HTTPException(403, "Only the channel owner or an admin can restore this channel")
     now = _now()
-    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"deleted": False, "restored_at": now, "restored_by": current_user.get("id"), "updated_at": now}})
+    await db.chat_channels.update_one(tenant_scoped_query(current_user, {"id": channel_id}), {"$set": {"deleted": False, "restored_at": now, "restored_by": current_user.get("id"), "updated_at": now}})
     await record_channel_event(channel, current_user, "channel.restored")
     restored = {**channel, "deleted": False, "updated_at": now}
     publish_channel_update(channel_id, "channel.restored", live_update_recipients(restored), tenant_id=platform_tenant_id(current_user))
@@ -449,11 +450,11 @@ async def transfer_channel_ownership(channel_id: str, payload: dict = Body(...),
     if channel.get("created_by") == "system":
         raise HTTPException(400, "Default channel ownership cannot be transferred")
     owner_id = str(payload.get("owner_id") or "").strip()
-    owner = await db.users.find_one({"id": owner_id, "is_active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1})
+    owner = await db.users.find_one(tenant_scoped_query(current_user, {"id": owner_id, "is_active": {"$ne": False}}), {"_id": 0, "id": 1, "name": 1})
     if not owner:
         raise HTTPException(400, "Choose an active technician")
     now = _now()
-    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}})
+    await db.chat_channels.update_one(tenant_scoped_query(current_user, {"id": channel_id}), {"$set": {"created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}})
     updated = {**channel, "created_by": owner_id, "owner_name": owner.get("name"), "updated_at": now}
     await record_channel_event(channel, current_user, "ownership.transferred", {"new_owner_id": owner_id, "new_owner_name": owner.get("name")})
     publish_channel_update(channel_id, "channel.ownership.updated", live_update_recipients(updated), tenant_id=platform_tenant_id(current_user))
@@ -471,10 +472,10 @@ async def create_group_dm(payload: dict = Body(...), current_user: dict = Depend
         members.append(current_user.get("id"))
     if len(members) < 2:
         raise HTTPException(400, "Need at least 2 members for a group chat")
-    valid_members = await db.users.count_documents({
+    valid_members = await db.users.count_documents(tenant_scoped_query(current_user, {
         "id": {"$in": members},
         "is_active": {"$ne": False},
-    })
+    }))
     if valid_members != len(members):
         raise HTTPException(400, "One or more selected teammates are unavailable")
     # Build deterministic ID from sorted members so same group resolves to same channel
@@ -485,7 +486,7 @@ async def create_group_dm(payload: dict = Body(...), current_user: dict = Depend
     name = (payload.get("name") or "").strip()
     if not name:
         # Build name from member names
-        users = await db.users.find({"id": {"$in": members}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+        users = await db.users.find(tenant_scoped_query(current_user, {"id": {"$in": members}}), {"_id": 0, "id": 1, "name": 1}).to_list(50)
         names = [u["name"].split()[0] for u in users if u.get("id") != current_user.get("id")]
         name = ", ".join(names[:3]) + (f" +{len(names) - 3}" if len(names) > 3 else "")
     doc = {
