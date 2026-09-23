@@ -36,6 +36,46 @@ def test_channel_access_preserves_dm_privacy_even_for_admins():
     assert chat_access.channel_is_accessible(dm, {"id": "member-2", "role": "admin"})
 
 
+class QueryCaptureChannels:
+    def __init__(self):
+        self.queries = []
+        self.inserted = []
+
+    async def find_one(self, query, *_args, **_kwargs):
+        self.queries.append(query)
+        return None
+
+    async def insert_one(self, document):
+        self.inserted.append(dict(document))
+
+    async def update_one(self, *_args, **_kwargs):
+        return SimpleNamespace(modified_count=0)
+
+
+def test_explicit_tenant_cannot_load_another_tenants_channel(monkeypatch):
+    channels = QueryCaptureChannels()
+    monkeypatch.setattr(chat_access, "db", SimpleNamespace(chat_channels=channels))
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(chat_access.require_channel_access(
+            "channel-from-tenant-b",
+            {"id": "admin-a", "role": "admin", "tenant_id": "tenant-a"},
+        ))
+
+    assert denied.value.status_code == 404
+    assert channels.queries == [{"$and": [{"id": "channel-from-tenant-b"}, {"tenant_id": "tenant-a"}]}]
+
+
+def test_explicit_tenant_gets_separate_default_channels(monkeypatch):
+    channels = QueryCaptureChannels()
+    monkeypatch.setattr(chat_access, "db", SimpleNamespace(chat_channels=channels))
+
+    asyncio.run(chat_access.ensure_default_channels({"tenant_id": "tenant-a"}))
+
+    assert len(channels.inserted) == len(chat_access.DEFAULT_CHAT_CHANNELS)
+    assert {row["tenant_id"] for row in channels.inserted} == {"tenant-a"}
+
+
 class ChannelCollection:
     def __init__(self, existing=None):
         self.existing = existing
@@ -94,7 +134,7 @@ class MutableChannelCollection(ChannelCollection):
 
     async def find_one(self, query, *_args, **_kwargs):
         # The rename uniqueness lookup deliberately excludes this channel.
-        return None if "name" in query else self.existing
+        return None if "name" in str(query) else self.existing
 
 
 class ChannelEventCollection:
@@ -276,7 +316,7 @@ def test_channel_owner_can_update_a_team_channel_purpose(monkeypatch):
     ))
 
     assert result["description"] == "Coordinate service desk work"
-    assert channels.update[0] == {"id": "team-1"}
+    assert channels.update[0]["$and"][0] == {"id": "team-1"}
     assert channels.update[1]["$set"]["description"] == "Coordinate service desk work"
     assert events.inserted[0]["event_type"] == "details.updated"
 

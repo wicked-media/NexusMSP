@@ -45,7 +45,7 @@ from app.services.chat_access import (
 )
 from app.services.chat_live import publish_channel_update, stream_events
 from app.services.avatar_enrichment import attach_user_avatars
-from app.services.scope_permissions import assert_client_scope
+from app.services.scope_permissions import assert_client_scope, platform_tenant_id, tenant_scoped_query
 
 router = APIRouter()
 
@@ -206,13 +206,15 @@ async def _ensure_channel(
     name: str,
     kind: str = "team",
     member_ids: Optional[list] = None,
+    user: dict | None = None,
     **extra,
 ) -> dict:
-    existing = await db.chat_channels.find_one({"name": name, "kind": kind}, {"_id": 0})
+    existing = await db.chat_channels.find_one(tenant_scoped_query(user or {}, {"name": name, "kind": kind}), {"_id": 0})
     if existing:
         return existing
     doc = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(user or {}),
         "name": name,
         "kind": kind,
         "member_ids": member_ids or [],  # empty list = open to all staff
@@ -227,7 +229,7 @@ async def _ensure_channel(
 
 @router.get("/chat/channels")
 async def list_channels(current_user: dict = Depends(get_current_user)):
-    await ensure_default_channels()
+    await ensure_default_channels(current_user)
     rows = await db.chat_channels.find(
         channel_visibility_query(current_user),
         {"_id": 0},
@@ -240,7 +242,7 @@ async def create_channel(payload: dict = Body(...), current_user: dict = Depends
     name = re.sub(r"-+", "-", (payload.get("name") or "").strip().lower().replace(" ", "-"))
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,49}", name):
         raise HTTPException(400, "Channel names must be 2-50 letters, numbers, dashes, or underscores")
-    if await db.chat_channels.find_one({"name": name, "kind": "team"}, {"_id": 1}):
+    if await db.chat_channels.find_one(tenant_scoped_query(current_user, {"name": name, "kind": "team"}), {"_id": 1}):
         raise HTTPException(409, "A channel with that name already exists")
 
     is_private = bool(payload.get("is_private"))
@@ -261,6 +263,7 @@ async def create_channel(payload: dict = Body(...), current_user: dict = Depends
     now = _now_iso()
     doc = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "name": name,
         "display_name": name.replace("-", " ").title(),
         "description": str(payload.get("description") or "").strip()[:240],
@@ -291,6 +294,7 @@ async def get_or_create_dm(user_id: str, current_user: dict = Depends(get_curren
         name,
         "dm",
         pair,
+        current_user,
         is_private=True,
         is_dm=True,
         created_by=me,
@@ -313,6 +317,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
 
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "channel_id": channel_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
@@ -326,7 +331,7 @@ async def send_message(channel_id: str, payload: dict = Body(...), current_user:
     }
     await db.chat_messages.insert_one(dict(msg))
     await db.chat_channels.update_one(
-        {"id": channel_id},
+        tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
     publish_channel_update(channel_id, "message.created", live_update_recipients(ch))
@@ -464,7 +469,7 @@ async def chat_event_stream(request: Request, current_user: dict = Depends(get_c
 @router.get("/chat/channels/{channel_id}/messages")
 async def list_messages(channel_id: str, since: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
-    q = {"channel_id": channel_id}
+    q = tenant_scoped_query(current_user, {"channel_id": channel_id})
     if since:
         q["ts"] = {"$gt": since}
     rows = await db.chat_messages.find(q, {"_id": 0}).sort("ts", -1).limit(200).to_list(200)
@@ -489,12 +494,12 @@ async def mark_unread(channel_id: str, current_user: dict = Depends(get_current_
     """Move the newest received top-level post back into the caller's inbox."""
     await require_channel_access(channel_id, current_user)
     newest_received = await db.chat_messages.find_one(
-        {
+        tenant_scoped_query(current_user, {
             "channel_id": channel_id,
             "thread_id": {"$exists": False},
             "user_id": {"$ne": current_user.get("id")},
             "deleted": {"$ne": True},
-        },
+        }),
         {"_id": 0, "ts": 1},
         sort=[("ts", -1)],
     )
@@ -535,7 +540,7 @@ async def channel_read_receipts(channel_id: str, current_user: dict = Depends(ge
 
 @router.get("/chat/unread")
 async def unread_counts(current_user: dict = Depends(get_current_user)):
-    await ensure_default_channels()
+    await ensure_default_channels(current_user)
     uid = current_user.get("id")
     reads = await db.chat_read_state.find({"user_id": uid}, {"_id": 0}).to_list(200)
     last_read_by_ch = {r["channel_id"]: r.get("last_read_at") for r in reads}
@@ -720,7 +725,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
 
     if cmd == "summarize":
         # AI summary of recent channel messages
-        msgs = await db.chat_messages.find({"channel_id": channel_id}, {"_id": 0}).sort("ts", -1).limit(40).to_list(40)
+        msgs = await db.chat_messages.find(tenant_scoped_query(current_user, {"channel_id": channel_id}), {"_id": 0}).sort("ts", -1).limit(40).to_list(40)
         if not msgs:
             return await _post_system_msg(channel_id, "Nothing to summarize.")
         msgs.reverse()
@@ -773,8 +778,13 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
 
 
 async def _post_system_msg(channel_id: str, body: str) -> dict:
+    # Slash commands are only reached after channel access has been checked.
+    # Derive the partition from that durable parent so system posts stay with
+    # the initiating conversation instead of falling into another tenant.
+    channel = await db.chat_channels.find_one({"id": channel_id}, {"_id": 0, "tenant_id": 1}) or {}
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": str(channel.get("tenant_id") or "nexus-local"),
         "channel_id": channel_id,
         "user_id": "system",
         "user_name": "Nexus Automation",

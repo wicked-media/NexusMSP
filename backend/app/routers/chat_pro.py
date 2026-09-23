@@ -19,7 +19,7 @@ from app.services.chat_access import (
     require_message_access,
 )
 from app.services.chat_live import publish_channel_update
-from app.services.scope_permissions import assert_client_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 from app.services.avatar_enrichment import attach_user_avatars
 
 router = APIRouter()
@@ -85,9 +85,9 @@ async def share_tenor_gif(channel_id: str, payload: dict = Body(...), current_us
     preview_url, url = str(payload.get("preview_url") or ""), str(payload.get("url") or "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", gif_id) or not (_tenor_asset_url(preview_url) and _tenor_asset_url(url)):
         raise HTTPException(400, "Invalid GIF asset")
-    msg = {"id": uuid.uuid4().hex, "channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "body": "", "ts": _now(), "edited": False, "reactions": {}, "attachment": {"provider": "tenor", "provider_id": gif_id, "filename": str(payload.get("title") or "GIF")[:160], "is_image": True, "is_external": True, "preview_url": preview_url, "url": url}}
+    msg = {"id": uuid.uuid4().hex, "tenant_id": platform_tenant_id(current_user), "channel_id": channel_id, "user_id": current_user.get("id"), "user_name": current_user.get("name"), "avatar_url": current_user.get("avatar"), "body": "", "ts": _now(), "edited": False, "reactions": {}, "attachment": {"provider": "tenor", "provider_id": gif_id, "filename": str(payload.get("title") or "GIF")[:160], "is_image": True, "is_external": True, "preview_url": preview_url, "url": url}}
     await db.chat_messages.insert_one(dict(msg))
-    await db.chat_channels.update_one({"id": channel_id}, {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}})
+    await db.chat_channels.update_one(tenant_scoped_query(current_user, {"id": channel_id}), {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}})
     publish_channel_update(channel_id, "gif.shared", live_update_recipients(channel))
     return msg
 
@@ -113,7 +113,7 @@ async def toggle_reaction(msg_id: str, payload: dict = Body(...), current_user: 
         reactions[emoji] = users
     else:
         reactions.pop(emoji, None)
-    await db.chat_messages.update_one({"id": msg_id}, {"$set": {"reactions": reactions}})
+    await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"reactions": reactions}})
     publish_channel_update(channel["id"], "message.reaction", live_update_recipients(channel))
     return {"reactions": reactions}
 
@@ -129,6 +129,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
         raise HTTPException(400, "body required")
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "channel_id": parent["channel_id"],
         "thread_id": msg_id,
         "user_id": current_user.get("id"),
@@ -143,11 +144,11 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
     await db.chat_messages.insert_one(dict(msg))
     # Increment thread reply count on parent
     await db.chat_messages.update_one(
-        {"id": msg_id},
+        tenant_scoped_query(current_user, {"id": msg_id}),
         {"$inc": {"thread_count": 1}, "$set": {"last_thread_reply_ts": msg["ts"]}}
     )
     await db.chat_channels.update_one(
-        {"id": parent["channel_id"]},
+        tenant_scoped_query(current_user, {"id": parent["channel_id"]}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
     publish_channel_update(channel["id"], "thread.reply", live_update_recipients(channel))
@@ -175,7 +176,7 @@ async def reply_in_thread(msg_id: str, payload: dict = Body(...), current_user: 
 @router.get("/chat/messages/{msg_id}/thread")
 async def get_thread(msg_id: str, current_user: dict = Depends(get_current_user)):
     parent, _ = await require_message_access(msg_id, current_user)
-    replies = await db.chat_messages.find({"thread_id": msg_id}, {"_id": 0}).sort("ts", 1).to_list(500)
+    replies = await db.chat_messages.find(tenant_scoped_query(current_user, {"thread_id": msg_id}), {"_id": 0}).sort("ts", 1).to_list(500)
     return {"parent": (await attach_user_avatars([parent]))[0], "replies": await attach_user_avatars(replies)}
 
 
@@ -191,7 +192,7 @@ async def edit_message(msg_id: str, payload: dict = Body(...), current_user: dic
     if not body:
         raise HTTPException(400, "body required")
     await db.chat_messages.update_one(
-        {"id": msg_id},
+        tenant_scoped_query(current_user, {"id": msg_id}),
         {"$set": {"body": body[:5000], "edited": True, "edited_at": _now()}}
     )
     publish_channel_update(channel["id"], "message.edited", live_update_recipients(channel))
@@ -203,7 +204,7 @@ async def delete_message(msg_id: str, current_user: dict = Depends(get_current_u
     msg, channel = await require_message_access(msg_id, current_user)
     if msg.get("user_id") != current_user.get("id") and not is_chat_admin(current_user):
         raise HTTPException(403, "Cannot delete")
-    await db.chat_messages.update_one({"id": msg_id}, {"$set": {"deleted": True, "body": "[message deleted]", "deleted_at": _now()}})
+    await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"deleted": True, "body": "[message deleted]", "deleted_at": _now()}})
     publish_channel_update(channel["id"], "message.deleted", live_update_recipients(channel))
     return {"ok": True}
 
@@ -214,7 +215,7 @@ async def delete_message(msg_id: str, current_user: dict = Depends(get_current_u
 @router.post("/chat/messages/{msg_id}/pin")
 async def pin_message(msg_id: str, current_user: dict = Depends(get_current_user)):
     _, channel = await require_message_access(msg_id, current_user)
-    await db.chat_messages.update_one({"id": msg_id}, {"$set": {"pinned": True, "pinned_by": current_user.get("name"), "pinned_at": _now()}})
+    await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"pinned": True, "pinned_by": current_user.get("name"), "pinned_at": _now()}})
     publish_channel_update(channel["id"], "message.pinned", live_update_recipients(channel))
     return {"ok": True}
 
@@ -222,7 +223,7 @@ async def pin_message(msg_id: str, current_user: dict = Depends(get_current_user
 @router.post("/chat/messages/{msg_id}/unpin")
 async def unpin_message(msg_id: str, current_user: dict = Depends(get_current_user)):
     _, channel = await require_message_access(msg_id, current_user)
-    await db.chat_messages.update_one({"id": msg_id}, {"$set": {"pinned": False}})
+    await db.chat_messages.update_one(tenant_scoped_query(current_user, {"id": msg_id}), {"$set": {"pinned": False}})
     publish_channel_update(channel["id"], "message.unpinned", live_update_recipients(channel))
     return {"ok": True}
 
@@ -230,7 +231,7 @@ async def unpin_message(msg_id: str, current_user: dict = Depends(get_current_us
 @router.get("/chat/channels/{channel_id}/pinned")
 async def list_pinned(channel_id: str, current_user: dict = Depends(get_current_user)):
     channel = await require_channel_access(channel_id, current_user)
-    rows = await db.chat_messages.find({"channel_id": channel_id, "pinned": True}, {"_id": 0}).sort("ts", -1).to_list(50)
+    rows = await db.chat_messages.find(tenant_scoped_query(current_user, {"channel_id": channel_id, "pinned": True}), {"_id": 0}).sort("ts", -1).to_list(50)
     return await attach_user_avatars(rows)
 
 
@@ -238,11 +239,11 @@ async def list_pinned(channel_id: str, current_user: dict = Depends(get_current_
 async def list_channel_files(channel_id: str, current_user: dict = Depends(get_current_user)):
     await require_channel_access(channel_id, current_user)
     rows = await db.chat_messages.find(
-        {
+        tenant_scoped_query(current_user, {
             "channel_id": channel_id,
             "attachment.file_id": {"$exists": True},
             "deleted": {"$ne": True},
-        },
+        }),
         {"_id": 0},
     ).sort("ts", -1).limit(100).to_list(100)
     return await attach_user_avatars(rows)
@@ -259,7 +260,7 @@ async def search_messages(q: str, channel_id: str = None, current_user: dict = D
     if len(term) > 100:
         raise HTTPException(400, "Search is limited to 100 characters")
 
-    await ensure_default_channels()
+    await ensure_default_channels(current_user)
 
     visible_channels: list[dict]
     if channel_id:
@@ -271,11 +272,11 @@ async def search_messages(q: str, channel_id: str = None, current_user: dict = D
         ).to_list(200)
     visible_channels = await enrich_channels(visible_channels, current_user)
     channel_map = {channel["id"]: channel for channel in visible_channels}
-    query = {
+    query = tenant_scoped_query(current_user, {
         "channel_id": {"$in": list(channel_map)},
         "body": {"$regex": re.escape(term), "$options": "i"},
         "deleted": {"$ne": True},
-    }
+    })
     rows = await db.chat_messages.find(query, {"_id": 0}).sort("ts", -1).limit(100).to_list(100)
     for row in rows:
         channel = channel_map.get(row.get("channel_id")) or {}
@@ -306,6 +307,7 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
     file_id = uuid.uuid4().hex
     await db.chat_files.insert_one({
         "id": file_id,
+        "tenant_id": platform_tenant_id(current_user),
         "filename": fname,
         "content_type": ctype,
         "size": size,
@@ -317,6 +319,7 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
     body = f"📎 [{fname}]({fname}) · {round(size/1024)} KB"
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "channel_id": channel_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
@@ -329,7 +332,7 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
     }
     await db.chat_messages.insert_one(dict(msg))
     await db.chat_channels.update_one(
-        {"id": channel_id},
+        tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
     publish_channel_update(channel_id, "attachment.created", live_update_recipients(channel))
@@ -339,16 +342,16 @@ async def upload_file(channel_id: str, payload: dict = Body(...), current_user: 
 
 @router.get("/chat/files/{file_id}")
 async def download_file(file_id: str, current_user: dict = Depends(get_current_user)):
-    f = await db.chat_files.find_one({"id": file_id}, {"_id": 0})
+    f = await db.chat_files.find_one(tenant_scoped_query(current_user, {"id": file_id}), {"_id": 0})
     if not f:
         raise HTTPException(404, "Not found")
     channel_id = f.get("channel_id")
     if not channel_id:
-        legacy_message = await db.chat_messages.find_one({"attachment.file_id": file_id}, {"_id": 0, "channel_id": 1})
+        legacy_message = await db.chat_messages.find_one(tenant_scoped_query(current_user, {"attachment.file_id": file_id}), {"_id": 0, "channel_id": 1})
         channel_id = (legacy_message or {}).get("channel_id")
         if not channel_id:
             raise HTTPException(403, "Attachment is missing channel access metadata")
-        await db.chat_files.update_one({"id": file_id}, {"$set": {"channel_id": channel_id}})
+        await db.chat_files.update_one(tenant_scoped_query(current_user, {"id": file_id}), {"$set": {"channel_id": channel_id}})
     await require_channel_access(channel_id, current_user)
     try:
         content = base64.b64decode(f.get("data_b64") or "", validate=True)
@@ -402,7 +405,7 @@ async def delete_channel(channel_id: str, current_user: dict = Depends(get_curre
     if ch.get("created_by") != current_user.get("id") and not is_chat_admin(current_user):
         raise HTTPException(403, "Cannot delete this channel")
     await db.chat_channels.update_one(
-        {"id": channel_id},
+        tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"deleted": True, "deleted_at": _now(), "deleted_by": current_user.get("id")}},
     )
     await record_channel_event(ch, current_user, "channel.archived")
@@ -476,7 +479,7 @@ async def create_group_dm(payload: dict = Body(...), current_user: dict = Depend
         raise HTTPException(400, "One or more selected teammates are unavailable")
     # Build deterministic ID from sorted members so same group resolves to same channel
     sig = "-".join(sorted(members))
-    existing = await db.chat_channels.find_one({"group_signature": sig}, {"_id": 0})
+    existing = await db.chat_channels.find_one(tenant_scoped_query(current_user, {"group_signature": sig}), {"_id": 0})
     if existing:
         return (await enrich_channels([existing], current_user))[0]
     name = (payload.get("name") or "").strip()
@@ -487,6 +490,7 @@ async def create_group_dm(payload: dict = Body(...), current_user: dict = Depend
         name = ", ".join(names[:3]) + (f" +{len(names) - 3}" if len(names) > 3 else "")
     doc = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "name": name,
         "kind": "group_dm",
         "is_private": True,
@@ -507,7 +511,7 @@ async def create_group_dm(payload: dict = Body(...), current_user: dict = Depend
 async def channels_preview(current_user: dict = Depends(get_current_user)):
     """Returns channels with last-message preview + unread count for sidebar rich rendering."""
     uid = current_user.get("id")
-    await ensure_default_channels()
+    await ensure_default_channels(current_user)
     channels = await db.chat_channels.find(
         channel_visibility_query(current_user),
         {"_id": 0}
@@ -711,9 +715,9 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
     await assert_client_scope(current_user, t.get("client_id"), operation="chat:discuss_ticket", mask_not_found=True)
     channel_id = payload.get("channel_id")
     if not channel_id:
-        ch = await db.chat_channels.find_one({"$or": [{"name": "ops"}, {"name": "general"}], "is_private": {"$ne": True}}, {"_id": 0})
+        ch = await db.chat_channels.find_one(tenant_scoped_query(current_user, {"$or": [{"name": "ops"}, {"name": "general"}], "is_private": {"$ne": True}}), {"_id": 0})
         if not ch:
-            ch = await db.chat_channels.find_one({"is_private": {"$ne": True}, "is_dm": {"$ne": True}}, {"_id": 0})
+            ch = await db.chat_channels.find_one(tenant_scoped_query(current_user, {"is_private": {"$ne": True}, "is_dm": {"$ne": True}}), {"_id": 0})
         if not ch:
             raise HTTPException(400, "No public channel available — create one first")
         channel_id = ch["id"]
@@ -721,6 +725,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
     body = f"💬 Let's discuss /ticket {t.get('ticket_number')} — *{t.get('title')}* ({t.get('priority')}, {t.get('client_name')})"
     msg = {
         "id": uuid.uuid4().hex,
+        "tenant_id": platform_tenant_id(current_user),
         "channel_id": channel_id,
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name"),
@@ -733,7 +738,7 @@ async def discuss_ticket(ticket_number: str, payload: dict = Body(...), current_
     }
     await db.chat_messages.insert_one(dict(msg))
     await db.chat_channels.update_one(
-        {"id": channel_id},
+        tenant_scoped_query(current_user, {"id": channel_id}),
         {"$set": {"updated_at": msg["ts"], "last_message_at": msg["ts"]}},
     )
     publish_channel_update(channel_id, "message.created", live_update_recipients(channel))
@@ -768,7 +773,7 @@ async def update_channel_details(channel_id: str, payload: dict = Body(...), cur
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,49}", name):
             raise HTTPException(400, "Channel names must be 2-50 letters, numbers, dashes, or underscores")
         if name != channel.get("name"):
-            duplicate = await db.chat_channels.find_one({"name": name, "kind": "team", "id": {"$ne": channel_id}, "deleted": {"$ne": True}}, {"_id": 1})
+            duplicate = await db.chat_channels.find_one(tenant_scoped_query(current_user, {"name": name, "kind": "team", "id": {"$ne": channel_id}, "deleted": {"$ne": True}}), {"_id": 1})
             if duplicate:
                 raise HTTPException(409, "A channel with that name already exists")
             changes.update({"name": name, "display_name": name.replace("-", " ").title()})
@@ -777,7 +782,7 @@ async def update_channel_details(channel_id: str, payload: dict = Body(...), cur
     if not changes:
         raise HTTPException(400, "Provide a channel name and/or description")
     changes["updated_at"] = _now()
-    await db.chat_channels.update_one({"id": channel_id}, {"$set": changes})
+    await db.chat_channels.update_one(tenant_scoped_query(current_user, {"id": channel_id}), {"$set": changes})
     updated = {**channel, **changes}
     audit_details = {key: changes[key] for key in ("name", "display_name", "description") if key in changes}
     await record_channel_event(channel, current_user, "details.updated", audit_details)

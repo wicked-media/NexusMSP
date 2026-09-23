@@ -8,7 +8,7 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import db
-from app.services.scope_permissions import normalise_scope_ids
+from app.services.scope_permissions import normalise_scope_ids, platform_tenant_id, tenant_scoped_query
 
 
 DEFAULT_CHAT_CHANNELS = (
@@ -88,11 +88,11 @@ def channel_visibility_query(user: dict) -> dict[str, Any]:
             member_clause,
         ]
     }
-    return {"$and": [{"deleted": {"$ne": True}}, visibility]}
+    return tenant_scoped_query(user, {"$and": [{"deleted": {"$ne": True}}, visibility]})
 
 
 async def require_channel_access(channel_id: str, user: dict) -> dict:
-    channel = await db.chat_channels.find_one({"id": channel_id}, {"_id": 0})
+    channel = await db.chat_channels.find_one(tenant_scoped_query(user, {"id": channel_id}), {"_id": 0})
     if not channel or channel.get("deleted") is True:
         raise HTTPException(404, "Channel not found")
     if not channel_is_accessible(channel, user):
@@ -109,20 +109,22 @@ async def require_channel_access(channel_id: str, user: dict) -> dict:
 
 
 async def require_message_access(message_id: str, user: dict) -> tuple[dict, dict]:
-    message = await db.chat_messages.find_one({"id": message_id}, {"_id": 0})
+    message = await db.chat_messages.find_one(tenant_scoped_query(user, {"id": message_id}), {"_id": 0})
     if not message:
         raise HTTPException(404, "Message not found")
     channel = await require_channel_access(message.get("channel_id"), user)
     return message, channel
 
 
-async def ensure_default_channels() -> None:
+async def ensure_default_channels(user: dict | None = None) -> None:
+    """Seed defaults inside one platform tenant without exposing legacy rows."""
+    tenant_id = platform_tenant_id(user or {})
     for name, description in DEFAULT_CHAT_CHANNELS:
         # ``default_key`` remains stable when an administrator renames a
         # seeded channel. The legacy name match upgrades existing installs
         # before any rename can occur, avoiding a duplicate default channel.
         existing = await db.chat_channels.find_one(
-            {"kind": "team", "$or": [{"default_key": name}, {"name": name, "created_by": "system"}]},
+            tenant_scoped_query(user or {}, {"kind": "team", "$or": [{"default_key": name}, {"name": name, "created_by": "system"}]}),
             {"_id": 0, "id": 1, "default_key": 1},
         )
         if existing:
@@ -132,6 +134,7 @@ async def ensure_default_channels() -> None:
         now = _now_iso()
         await db.chat_channels.insert_one({
             "id": uuid.uuid4().hex,
+            "tenant_id": tenant_id,
             "name": name,
             "display_name": name.replace("-", " ").title(),
             "description": description,
@@ -148,10 +151,11 @@ async def ensure_default_channels() -> None:
 
 async def initialize_chat_storage() -> None:
     """Create the read-path indexes used by polling, previews, and search."""
-    await db.chat_channels.create_index([("kind", 1), ("is_private", 1), ("updated_at", -1)])
-    await db.chat_channels.create_index([("member_ids", 1), ("updated_at", -1)])
-    await db.chat_messages.create_index([("channel_id", 1), ("ts", -1)])
-    await db.chat_messages.create_index([("thread_id", 1), ("ts", 1)])
+    await db.chat_channels.create_index([("tenant_id", 1), ("kind", 1), ("is_private", 1), ("updated_at", -1)])
+    await db.chat_channels.create_index([("tenant_id", 1), ("member_ids", 1), ("updated_at", -1)])
+    await db.chat_messages.create_index([("tenant_id", 1), ("channel_id", 1), ("ts", -1)])
+    await db.chat_messages.create_index([("tenant_id", 1), ("thread_id", 1), ("ts", 1)])
+    await db.chat_files.create_index([("tenant_id", 1), ("channel_id", 1), ("uploaded_at", -1)])
     await db.chat_read_state.create_index([("user_id", 1), ("channel_id", 1)])
     # Conversation controls are an actor-owned view of an existing channel;
     # they never change membership, messages, or the channel itself.
