@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import get_current_user
 from app.database import db
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 
 
 router = APIRouter()
@@ -57,37 +58,41 @@ def _health_status(score: float | None) -> str:
     return "critical"
 
 
-async def _compute_health(client: dict) -> dict:
+async def _compute_health(client: dict, current_user: dict) -> dict:
     cid = client["id"]
     now = datetime.now(timezone.utc)
-    open_tickets = await db.tickets.count_documents({"client_id": cid, "status": {"$in": ["open", "in_progress"]}})
-    total_tickets = await db.tickets.count_documents({"client_id": cid})
-    critical_tickets = await db.tickets.count_documents({"client_id": cid, "priority": "critical", "status": {"$in": ["open", "in_progress"]}})
-    resolved_tickets = await db.tickets.count_documents({"client_id": cid, "status": {"$in": ["resolved", "closed"]}})
+    source = lambda query: tenant_scoped_query(current_user, query)
+    open_tickets = await db.tickets.count_documents(source({"client_id": cid, "status": {"$in": ["open", "in_progress"]}}))
+    total_tickets = await db.tickets.count_documents(source({"client_id": cid}))
+    critical_tickets = await db.tickets.count_documents(source({"client_id": cid, "priority": "critical", "status": {"$in": ["open", "in_progress"]}}))
+    resolved_tickets = await db.tickets.count_documents(source({"client_id": cid, "status": {"$in": ["resolved", "closed"]}}))
 
-    all_devices = await db.devices.find({"client_id": cid}, {"_id": 0}).to_list(5000)
+    all_devices = await db.devices.find(source({"client_id": cid}), {"_id": 0}).to_list(5000)
     devices = [device for device in all_devices if _device_source(device)]
     online_devices = sum(1 for device in devices if device.get("status") == "online")
 
-    invoices = await db.invoices.find({"client_id": cid}, {"_id": 0, "status": 1}).to_list(5000)
+    invoices = await db.invoices.find(source({"client_id": cid}), {"_id": 0, "status": 1}).to_list(5000)
     overdue_invoices = sum(1 for invoice in invoices if invoice.get("status") == "overdue")
     paid_invoices = sum(1 for invoice in invoices if invoice.get("status") == "paid")
-    contracts = await db.contracts.find({"client_id": cid, "status": "active"}, {"_id": 0, "value": 1, "monthly_value": 1, "mrr": 1, "end_date": 1}).to_list(100)
+    contracts = await db.contracts.find(source({"client_id": cid, "status": "active"}), {"_id": 0, "value": 1, "monthly_value": 1, "mrr": 1, "end_date": 1}).to_list(100)
     mrr = sum((_numeric(contract.get("monthly_value")) or _numeric(contract.get("mrr")) or _numeric(contract.get("value")) or 0) for contract in contracts)
     expiring_contracts = sum(1 for contract in contracts if contract.get("end_date") and str(contract["end_date"]) < (now + timedelta(days=60)).isoformat())
 
-    backup_rows = await db.backup_jobs.find({"client_id": cid}, {"_id": 0, "status": 1, "source": 1, "provider": 1}).to_list(5000)
+    backup_rows = await db.backup_jobs.find(source({"client_id": cid}), {"_id": 0, "status": 1, "source": 1, "provider": 1}).to_list(5000)
     verified_backups = [row for row in backup_rows if str(row.get("source") or row.get("provider") or "").strip()]
     backup_failures = sum(1 for row in verified_backups if str(row.get("status") or "").lower() == "failed")
 
-    security_rows = await db.security_alerts.find({"client_id": cid}, {"_id": 0, "status": 1, "source": 1, "provider": 1}).to_list(5000)
+    security_rows = await db.security_alerts.find(source({"client_id": cid}), {"_id": 0, "status": 1, "source": 1, "provider": 1}).to_list(5000)
     verified_security = [row for row in security_rows if str(row.get("source") or row.get("provider") or "").strip()]
     security_alerts = sum(1 for row in verified_security if str(row.get("status") or "").lower() in {"open", "active"})
 
     m365_score = None
     m365_top_risks: list[str] = []
     if client.get("cipp_tenant_id"):
-        cached = await db.cipp_hygiene_cache.find_one({"tenant_id": client["cipp_tenant_id"]}, {"_id": 0})
+        cached = await db.cipp_hygiene_cache.find_one(
+            tenant_scoped_query(current_user, {"tenant_id": client["cipp_tenant_id"]}, tenant_field="platform_tenant_id"),
+            {"_id": 0},
+        )
         hygiene = (cached or {}).get("hygiene") or {}
         candidate = hygiene.get("score")
         if isinstance(candidate, (int, float)) and hygiene.get("evidence_state") in {"evidence_available", "assessed", "complete"}:
@@ -98,7 +103,7 @@ async def _compute_health(client: dict) -> dict:
     network_stats = None
     if client.get("unifi_site_id"):
         uni = await db.unifi_site_cache.find_one(
-            {"site_id": client["unifi_site_id"], "client_id": client.get("id")},
+            source({"site_id": client["unifi_site_id"], "client_id": client.get("id")}),
             {"_id": 0},
         )
         total = _numeric((uni or {}).get("devices_total"))
@@ -115,7 +120,7 @@ async def _compute_health(client: dict) -> dict:
     payment_health = (100 if overdue_invoices == 0 else max(0, 100 - overdue_invoices * 25)) if invoices else None
     backup_health = round((len(verified_backups) - backup_failures) / len(verified_backups) * 100) if verified_backups else None
     security_health = max(0, 100 - security_alerts * 20) if verified_security else None
-    sentiment_row = await db.client_sentiments.find_one({"client_id": cid}, {"_id": 0, "score": 1, "source": 1})
+    sentiment_row = await db.client_sentiments.find_one(source({"client_id": cid}), {"_id": 0, "score": 1, "source": 1})
     sentiment = _numeric((sentiment_row or {}).get("score")) if sentiment_row and sentiment_row.get("source") else None
 
     dimensions = {
@@ -177,8 +182,8 @@ async def _compute_health(client: dict) -> dict:
 
 @router.get("/client-health/scores")
 async def get_all_health_scores(current_user: dict = Depends(get_current_user)):
-    clients = await db.clients.find({}, {"_id": 0}).to_list(500)
-    scores = [await _compute_health(client) for client in clients]
+    clients = await db.clients.find(tenant_scoped_query(current_user, scoped_query(current_user)), {"_id": 0}).to_list(500)
+    scores = [await _compute_health(client, current_user) for client in clients]
     return sorted(scores, key=lambda item: (item["health_score"] is None, item["health_score"] if item["health_score"] is not None else 101))
 
 
@@ -195,19 +200,19 @@ async def health_dashboard(current_user: dict = Depends(get_current_user)):
         for index, factor in enumerate(score.get("risk_factors") or []):
             if factor.get("severity") == "critical":
                 alerts.append({"id": f"health-{score['client_id']}-{index}", "client_name": score["client_name"], "client_id": score["client_id"], "health_score": score["health_score"], "message": factor["factor"], "severity": factor["severity"], "category": _detect_category(factor["factor"]), "source": "computed_from_recorded_evidence"})
-    trend = await db.health_snapshots.find({}, {"_id": 0}).sort("date", -1).to_list(30)
+    trend = await db.health_snapshots.find(tenant_scoped_query(current_user), {"_id": 0}).sort("date", -1).to_list(30)
     return {"total": len(scores), "assessed_clients": len(numeric_scores), "avg_health": round(sum(score["health_score"] for score in numeric_scores) / len(numeric_scores), 1) if numeric_scores else None, "distribution": distribution, "at_risk": at_risk[:10], "top_clients": sorted(numeric_scores, key=lambda item: item["health_score"], reverse=True)[:5], "total_monthly_revenue": sum(score.get("mrr", 0) for score in scores), "at_risk_revenue": sum(score.get("mrr", 0) for score in at_risk), "alerts": alerts[:20], "trend": trend[:14], "message": "Client health requires at least two independent evidence dimensions. Missing integrations are shown as unassessed."}
 
 
 @router.get("/client-health/{client_id}/detail")
 async def get_client_health_detail(client_id: str, current_user: dict = Depends(get_current_user)):
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    client = await assert_tenant_record_scope(current_user, db.clients, client_id, operation="client_health.read", resource_name="Client")
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    health = await _compute_health(client)
-    health["trend"] = await db.health_snapshots_client.find({"client_id": client_id}, {"_id": 0}).sort("date", -1).to_list(30)
-    health["recent_tickets"] = await db.tickets.find({"client_id": client_id}, {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1}).sort("created_at", -1).to_list(5)
-    health["recent_invoices"] = await db.invoices.find({"client_id": client_id}, {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "total": 1, "created_at": 1}).sort("created_at", -1).to_list(5)
+    health = await _compute_health(client, current_user)
+    health["trend"] = await db.health_snapshots_client.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0}).sort("date", -1).to_list(30)
+    health["recent_tickets"] = await db.tickets.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "id": 1, "title": 1, "status": 1, "priority": 1, "created_at": 1}).sort("created_at", -1).to_list(5)
+    health["recent_invoices"] = await db.invoices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "id": 1, "invoice_number": 1, "status": 1, "total": 1, "created_at": 1}).sort("created_at", -1).to_list(5)
     return health
 
 
@@ -219,10 +224,10 @@ async def take_health_snapshot(current_user: dict = Depends(get_current_user)):
     distribution: dict[str, int] = {}
     for score in scores:
         distribution[score["status"]] = distribution.get(score["status"], 0) + 1
-    snapshot = {"date": date, "avg_health": round(sum(score["health_score"] for score in numeric_scores) / len(numeric_scores), 1) if numeric_scores else None, "total_clients": len(scores), "assessed_clients": len(numeric_scores), "distribution": distribution, "at_risk_count": sum(1 for score in numeric_scores if score["health_score"] < 50), "taken_at": _now(), "taken_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
-    await db.health_snapshots.update_one({"date": date}, {"$set": snapshot}, upsert=True)
+    snapshot = {"date": date, "tenant_id": platform_tenant_id(current_user), "avg_health": round(sum(score["health_score"] for score in numeric_scores) / len(numeric_scores), 1) if numeric_scores else None, "total_clients": len(scores), "assessed_clients": len(numeric_scores), "distribution": distribution, "at_risk_count": sum(1 for score in numeric_scores if score["health_score"] < 50), "taken_at": _now(), "taken_by": current_user.get("name") or current_user.get("email") or current_user.get("id", "")}
+    await db.health_snapshots.update_one(tenant_scoped_query(current_user, {"date": date}), {"$set": snapshot}, upsert=True)
     for score in numeric_scores:
-        await db.health_snapshots_client.update_one({"client_id": score["client_id"], "date": date}, {"$set": {"client_id": score["client_id"], "date": date, "health_score": score["health_score"], "status": score["status"], "metrics": score["metrics"], "evidence_state": score["evidence_state"]}}, upsert=True)
+        await db.health_snapshots_client.update_one(tenant_scoped_query(current_user, {"client_id": score["client_id"], "date": date}), {"$set": {"tenant_id": platform_tenant_id(current_user), "client_id": score["client_id"], "date": date, "health_score": score["health_score"], "status": score["status"], "metrics": score["metrics"], "evidence_state": score["evidence_state"]}}, upsert=True)
     return {"message": f"Snapshot recorded for {len(numeric_scores)} assessed client(s)", "date": date, "avg_health": snapshot["avg_health"]}
 
 
