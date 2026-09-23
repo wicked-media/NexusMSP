@@ -436,7 +436,7 @@ def test_allowed_record_returns_owned_document(monkeypatch):
     assert record["name"] == "Reception"
 
 
-def test_core_client_graph_uses_masked_record_scope_before_loading_graph(monkeypatch):
+def test_core_client_graph_uses_tenant_record_scope_before_loading_graph(monkeypatch):
     """Core graph reads must not reveal a foreign client through response shape."""
     calls = {}
 
@@ -447,7 +447,7 @@ def test_core_client_graph_uses_masked_record_scope_before_loading_graph(monkeyp
     async def graph_should_not_run(_client_id):
         raise AssertionError("foreign client graph must not be loaded")
 
-    monkeypatch.setattr(core_foundation, "assert_record_scope", denied_scope)
+    monkeypatch.setattr(core_foundation, "assert_tenant_record_scope", denied_scope)
     monkeypatch.setattr(core_foundation, "client_core_graph", graph_should_not_run)
 
     with pytest.raises(HTTPException) as exc:
@@ -464,7 +464,7 @@ def test_core_client_graph_uses_masked_record_scope_before_loading_graph(monkeyp
     assert calls["operation"] == "platform.core.graph.read"
 
 
-def test_core_client_fabric_uses_masked_record_scope_before_loading_graph(monkeypatch):
+def test_core_client_fabric_uses_tenant_record_scope_before_loading_graph(monkeypatch):
     """Fabric follows the same non-enumerating ownership boundary as graph."""
     calls = {}
 
@@ -475,7 +475,7 @@ def test_core_client_fabric_uses_masked_record_scope_before_loading_graph(monkey
     async def graph_should_not_run(_client_id):
         raise AssertionError("foreign client fabric must not be loaded")
 
-    monkeypatch.setattr(core_foundation, "assert_record_scope", denied_scope)
+    monkeypatch.setattr(core_foundation, "assert_tenant_record_scope", denied_scope)
     monkeypatch.setattr(core_foundation, "client_core_graph", graph_should_not_run)
 
     with pytest.raises(HTTPException) as exc:
@@ -490,6 +490,26 @@ def test_core_client_fabric_uses_masked_record_scope_before_loading_graph(monkey
     assert calls["record_id"] == "client-b"
     assert calls["resource_name"] == "Client"
     assert calls["operation"] == "platform.core.fabric.read"
+
+
+def test_core_object_inspector_masks_a_foreign_tenant_object(monkeypatch):
+    """The portable inspector must not become a cross-tenant object lookup."""
+    entities = _RecordCollection({
+        "id": "nexus:device:foreign-device",
+        "tenant_id": "tenant-b",
+        "client_id": "client-b",
+        "active": True,
+    })
+    monkeypatch.setattr(core_foundation, "db", type("CoreDB", (), {"core_entities": entities})())
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(core_foundation.get_core_object_profile(
+            "nexus:device:foreign-device",
+            request=None,
+            current_user={"id": "admin-a", "role": "admin", "tenant_id": "tenant-a"},
+        ))
+
+    assert exc.value.status_code == 404
 
 
 def test_client_360_router_enforces_masked_client_scope(monkeypatch):
@@ -1287,7 +1307,7 @@ def test_restricted_technician_cannot_enumerate_foreign_nexus_verify_request(mon
     assert denials.rows[0]["operation"] == "nexus_verify"
 
 
-def test_restricted_technician_cannot_send_a_remote_command_to_foreign_device(monkeypatch):
+def test_retired_device_chat_command_path_does_not_execute_for_a_foreign_device(monkeypatch):
     denials = _InsertCollection()
     monkeypatch.setattr(scope_permissions.db, "scope_denials", denials)
     monkeypatch.setattr(
@@ -1314,8 +1334,9 @@ def test_restricted_technician_cannot_send_a_remote_command_to_foreign_device(mo
     with pytest.raises(HTTPException) as exc:
         asyncio.run(remote.send_device_command("device-b", "whoami", user))
 
-    assert exc.value.status_code == 404
-    assert denials.rows[0]["operation"] == "device.command.execute"
+    assert exc.value.status_code == 410
+    assert "retired" in str(exc.value.detail).lower()
+    assert denials.rows == []
 
 
 def test_change_management_list_is_limited_to_the_technicians_clients(monkeypatch):

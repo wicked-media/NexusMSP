@@ -20,7 +20,11 @@ from app.services.nexus_ideas import create_idea, ideas_snapshot, update_idea
 from app.services.nexus_objects import build_object_story
 from app.services.nexus_timeline import build_client_timeline
 from app.services.platform_foundation import emit_platform_event, request_correlation_id
-from app.services.scope_permissions import assert_client_scope, assert_record_scope
+from app.services.scope_permissions import (
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 
 
 router = APIRouter()
@@ -119,7 +123,7 @@ async def get_client_core_graph(client_id: str, request: Request, current_user: 
     # Use the record-aware guard so an out-of-scope client is indistinguishable
     # from a missing one. Checking existence first would let a restricted
     # technician enumerate customer IDs through 403 vs 404 responses.
-    client = await assert_record_scope(
+    client = await assert_tenant_record_scope(
         current_user,
         db.clients,
         client_id,
@@ -132,8 +136,18 @@ async def get_client_core_graph(client_id: str, request: Request, current_user: 
 
 @router.get("/core/clients/{client_id}/context-relationships")
 async def get_context_relationships(client_id: str, request: Request, current_user: dict = Depends(get_current_user)):
-    await assert_client_scope(current_user, client_id, operation="platform.core.context.read", request=request)
-    return await db.context_relationships.find({"client_id": client_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    await assert_tenant_record_scope(
+        current_user,
+        db.clients,
+        client_id,
+        resource_name="Client",
+        operation="platform.core.context.read",
+        request=request,
+    )
+    return await db.context_relationships.find(
+        tenant_scoped_query(current_user, {"client_id": client_id}),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
 
 
 @router.post(
@@ -142,11 +156,18 @@ async def get_context_relationships(client_id: str, request: Request, current_us
 )
 async def record_context_relationship(payload: ContextRelationshipCreate, request: Request, current_user: dict = Depends(get_current_user)):
     """Record an approved, human-attested reason between canonical objects."""
-    await assert_client_scope(current_user, payload.client_id, operation="platform.core.context.create", request=request)
+    await assert_tenant_record_scope(
+        current_user,
+        db.clients,
+        payload.client_id,
+        resource_name="Client",
+        operation="platform.core.context.create",
+        request=request,
+    )
     if payload.from_ref == payload.to_ref:
         raise HTTPException(status_code=422, detail="Context must connect two different canonical objects")
     nodes = await db.core_entities.find(
-        {"id": {"$in": [payload.from_ref, payload.to_ref]}, "active": True},
+        tenant_scoped_query(current_user, {"id": {"$in": [payload.from_ref, payload.to_ref]}, "active": True}),
         {"_id": 0, "id": 1, "client_id": 1, "name": 1, "entity_type": 1},
     ).to_list(2)
     by_ref = {node["id"]: node for node in nodes}
@@ -159,6 +180,7 @@ async def record_context_relationship(payload: ContextRelationshipCreate, reques
     actor_name = current_user.get("name") or current_user.get("email") or "Authorised administrator"
     record = {
         "id": f"context-{uuid.uuid4()}",
+        "tenant_id": platform_tenant_id(current_user),
         "client_id": payload.client_id,
         "from_ref": payload.from_ref,
         "to_ref": payload.to_ref,
@@ -196,7 +218,7 @@ async def get_client_fabric(client_id: str, request: Request, current_user: dict
     """Return the evidence-backed client relationship explorer read model."""
     # Keep the fabric explorer on the same non-enumerating client boundary as
     # the graph endpoint above.
-    client = await assert_record_scope(
+    client = await assert_tenant_record_scope(
         current_user,
         db.clients,
         client_id,
@@ -211,15 +233,17 @@ async def get_client_fabric(client_id: str, request: Request, current_user: dict
 @router.get("/core/objects/profile")
 async def get_core_object_profile(object_ref: str, request: Request, current_user: dict = Depends(get_current_user)):
     """Return the health, trust, impact, relationships, and story for one canonical object."""
-    entity = await db.core_entities.find_one({"id": object_ref, "active": True}, {"_id": 0})
+    entity = await db.core_entities.find_one(
+        tenant_scoped_query(current_user, {"id": object_ref, "active": True}),
+        {"_id": 0},
+    )
     if not entity:
         raise HTTPException(status_code=404, detail="Canonical object not found; refresh Nexus Fabric and try again")
     client_id = entity.get("client_id") or (entity.get("entity_id") if entity.get("entity_type") == "client" else None)
     if not client_id:
         raise HTTPException(status_code=409, detail="Canonical object is not assigned to a client boundary")
-    await assert_client_scope(current_user, client_id, operation="platform.core.object.read", request=request)
     relationships = await db.core_relationships.find(
-        {"active": True, "client_id": client_id, "$or": [{"from_ref": object_ref}, {"to_ref": object_ref}]},
+        tenant_scoped_query(current_user, {"active": True, "client_id": client_id, "$or": [{"from_ref": object_ref}, {"to_ref": object_ref}]}),
         {"_id": 0},
     ).limit(500).to_list(500)
     related_refs = {
@@ -228,7 +252,7 @@ async def get_core_object_profile(object_ref: str, request: Request, current_use
     }
     related_refs.discard(None)
     related_entities = await db.core_entities.find(
-        {"id": {"$in": list(related_refs)}, "active": True}, {"_id": 0}
+        tenant_scoped_query(current_user, {"id": {"$in": list(related_refs)}, "active": True}), {"_id": 0}
     ).limit(500).to_list(500) if related_refs else []
     related_by_ref = {item["id"]: item for item in related_entities}
     for relationship in relationships:
