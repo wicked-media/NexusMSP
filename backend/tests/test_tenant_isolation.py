@@ -1642,7 +1642,12 @@ def test_client_report_history_is_limited_to_the_technicians_clients(monkeypatch
     }
 
     assert asyncio.run(client_reports.get_report_history(user)) == []
-    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+    assert captured["query"] == {
+        "$and": [
+            {"client_id": {"$in": ["client-a"]}},
+            {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}, {"tenant_id": ""}]},
+        ]
+    }
 
 
 def test_profitability_heatmap_limits_clients_by_client_identity(monkeypatch):
