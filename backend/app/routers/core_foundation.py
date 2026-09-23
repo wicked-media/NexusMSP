@@ -67,7 +67,7 @@ async def get_core_schema(current_user: dict = Depends(get_current_user)):
 
 @router.get("/core/integrity")
 async def get_core_integrity(current_user: dict = Depends(get_current_user)):
-    return await core_integrity_snapshot()
+    return await core_integrity_snapshot(current_user)
 
 
 @router.get("/core/ideas")
@@ -131,7 +131,7 @@ async def get_client_core_graph(client_id: str, request: Request, current_user: 
         operation="platform.core.graph.read",
         request=request,
     )
-    return {"client": {"id": client["id"], "name": client.get("name")}, **(await client_core_graph(client_id))}
+    return {"client": {"id": client["id"], "name": client.get("name")}, **(await client_core_graph(client_id, current_user))}
 
 
 @router.get("/core/clients/{client_id}/context-relationships")
@@ -226,7 +226,7 @@ async def get_client_fabric(client_id: str, request: Request, current_user: dict
         operation="platform.core.fabric.read",
         request=request,
     )
-    graph = {"client": {"id": client["id"], "name": client.get("name")}, **(await client_core_graph(client_id))}
+    graph = {"client": {"id": client["id"], "name": client.get("name")}, **(await client_core_graph(client_id, current_user))}
     return build_client_fabric(graph)
 
 
