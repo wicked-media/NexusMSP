@@ -135,7 +135,7 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
         })),
         db.tickets.count_documents(_query(current_user, {
             "status": {"$in": active_ticket_statuses},
-            "updated_at": {"$lt": day_ago},
+            "updated_at": {"$exists": True, "$lt": day_ago},
         })),
         db.devices.count_documents(_query(current_user, {"status": "offline"})),
         db.devices.count_documents(_query(current_user, {
