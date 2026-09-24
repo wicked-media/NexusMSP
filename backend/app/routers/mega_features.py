@@ -26,6 +26,7 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import (
+    assert_client_scope,
     assert_global_scope,
     assert_record_scope,
     assert_tenant_record_scope,
@@ -38,6 +39,28 @@ router = APIRouter()
 
 MODEL_PROVIDER = "openai"
 MODEL_NAME = "gpt-5.6-terra"
+
+
+async def _client_in_tenant_scope(
+    client_id: str,
+    current_user: dict,
+    operation: str,
+    projection: dict | None = None,
+) -> dict:
+    """Load one client from the caller's tenant before exposing derived insight."""
+    client = await db.clients.find_one(
+        tenant_scoped_query(current_user, {"id": str(client_id)}),
+        projection or {"_id": 0},
+    )
+    if not client:
+        raise HTTPException(404, "Client not found")
+    await assert_client_scope(
+        current_user,
+        str(client.get("id") or client_id),
+        operation=operation,
+        mask_not_found=True,
+    )
+    return client
 
 
 async def _llm(system: str, user_msg: str, session_prefix: str = "mega") -> str:
@@ -461,13 +484,11 @@ async def cognitive_load(current_user: dict = Depends(get_current_user)):
 @router.get("/clients/{client_id}/dna")
 async def client_dna(client_id: str, current_user: dict = Depends(get_current_user)):
     """Behavioural profile aggregated from tickets, invoices, comms history."""
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not c:
-        raise HTTPException(404, "Client not found")
+    c = await _client_in_tenant_scope(client_id, current_user, "client.dna.read")
 
-    tx = await db.tickets.find({"client_id": client_id}, {"_id": 0, "priority": 1, "category": 1,
+    tx = await db.tickets.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "priority": 1, "category": 1,
                                                           "created_at": 1, "resolved_at": 1, "title": 1}).limit(500).to_list(500)
-    inv = await db.invoices.find({"client_id": client_id}, {"_id": 0, "issue_date": 1, "due_date": 1,
+    inv = await db.invoices.find(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "issue_date": 1, "due_date": 1,
                                                             "amount_paid": 1, "total": 1, "payments": 1, "status": 1}).limit(200).to_list(200)
 
     pay_days = []
@@ -535,20 +556,23 @@ def _dna_tags(crit_pct: int, avg_pay: Optional[float], tix: int) -> list:
 @router.get("/clients/{client_id}/ltv-forecast")
 async def ltv_forecast(client_id: str, current_user: dict = Depends(get_current_user)):
     """12-month MRR-driven LTV with churn risk weighting."""
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1, "mrr": 1})
-    if not c:
-        raise HTTPException(404, "Client not found")
+    c = await _client_in_tenant_scope(
+        client_id,
+        current_user,
+        "client.ltv_forecast.read",
+        {"_id": 0, "id": 1, "name": 1, "mrr": 1},
+    )
 
     mrr = float(c.get("mrr") or 0)
 
     last_year = (_now() - timedelta(days=365)).isoformat()
     inv = await db.invoices.find(
-        {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}},
+        tenant_scoped_query(current_user, {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}}),
         {"_id": 0, "total": 1}
     ).limit(200).to_list(200)
     annual_revenue_actual = round(sum(float(x.get("total") or 0) for x in inv), 2)
 
-    cr = await db.churn_risk.find_one({"client_id": client_id}, {"_id": 0, "score": 1}) or {}
+    cr = await db.churn_risk.find_one(tenant_scoped_query(current_user, {"client_id": client_id}), {"_id": 0, "score": 1}) or {}
     churn_score = float(cr.get("score") or 25)
     survival = max(0.0, 1 - churn_score / 100)
 
@@ -573,19 +597,17 @@ async def ltv_forecast(client_id: str, current_user: dict = Depends(get_current_
 
 @router.get("/clients/{client_id}/anniversary-draft")
 async def anniversary_draft(client_id: str, current_user: dict = Depends(get_current_user)):
-    c = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    if not c:
-        raise HTTPException(404, "Client not found")
+    c = await _client_in_tenant_scope(client_id, current_user, "client.anniversary_draft.read")
 
     onboarded = _parse_iso(c.get("onboarded_at") or c.get("created_at"))
     years = round((_now() - onboarded).days / 365, 1) if onboarded else 0
 
-    tickets_resolved = await db.tickets.count_documents({"client_id": client_id, "status": {"$in": ["resolved", "closed"]}})
-    devices = await db.devices.count_documents({"client_id": client_id})
+    tickets_resolved = await db.tickets.count_documents(tenant_scoped_query(current_user, {"client_id": client_id, "status": {"$in": ["resolved", "closed"]}}))
+    devices = await db.devices.count_documents(tenant_scoped_query(current_user, {"client_id": client_id}))
 
     last_year = (_now() - timedelta(days=365)).isoformat()
     inv = await db.invoices.find(
-        {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}},
+        tenant_scoped_query(current_user, {"client_id": client_id, "issue_date": {"$gte": last_year}, "status": {"$ne": "void"}}),
         {"_id": 0, "total": 1}
     ).limit(200).to_list(200)
     revenue_12m = round(sum(float(x.get("total") or 0) for x in inv), 2)

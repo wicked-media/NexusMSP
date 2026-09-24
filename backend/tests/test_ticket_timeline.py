@@ -54,6 +54,16 @@ class _Collection:
         return _Cursor(self.rows)
 
 
+class _SingleRecordCollection:
+    def __init__(self, row):
+        self.row = row
+        self.queries = []
+
+    async def find_one(self, query, _projection):
+        self.queries.append(query)
+        return self.row
+
+
 def test_apology_draft_uses_authorised_ticket_and_current_conversation(monkeypatch):
     comments = _Collection([{"id": "comment-1", "content": "We are investigating", "user_name": "Ava", "created_at": "2026-09-24T00:00:00+00:00"}])
     notes = _Collection([])
@@ -75,3 +85,21 @@ def test_apology_draft_uses_authorised_ticket_and_current_conversation(monkeypat
     assert result["ticket_id"] == "ticket-1"
     assert authorise.await_args.args[2] == "ticket-1"
     assert comments.queries == [{"scoped": {"ticket_id": "ticket-1"}}]
+
+
+def test_client_insight_loader_checks_tenant_and_client_scope(monkeypatch):
+    clients = _SingleRecordCollection({"id": "client-1", "name": "Acme"})
+    monkeypatch.setattr(mega_features, "db", SimpleNamespace(clients=clients))
+    scope_check = AsyncMock()
+    monkeypatch.setattr(mega_features, "assert_client_scope", scope_check)
+    monkeypatch.setattr(mega_features, "tenant_scoped_query", lambda _user, query: {"tenant": query})
+
+    client = asyncio.run(
+        mega_features._client_in_tenant_scope(
+            "client-1", {"id": "tech-1", "tenant_id": "tenant-1"}, "client.dna.read"
+        )
+    )
+
+    assert client["name"] == "Acme"
+    assert clients.queries == [{"tenant": {"id": "client-1"}}]
+    assert scope_check.await_args.args[1] == "client-1"
