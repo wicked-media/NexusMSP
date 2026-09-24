@@ -50,7 +50,7 @@ test("adding products rejects invalid quantities and prevents duplicate concurre
 function detailContext(get) {
   const state = {};
   const setters = {};
-  const names = ["ViewingTicket", "DetailTab", "ToolsOpen", "Suggestions", "AiAnalysis", "DeviceStatus", "Enrichment", "ClientContacts", "TicketParticipants", "TicketNotes", "TicketEmails", "ChildTickets", "TimeEntries", "AuditLog", "TicketAttachments", "TicketProducts", "TicketPurchaseOrders", "TicketSms", "WorksheetItems", "SuggestionsLoading", "EmailSignature", "EmailForm", "SmsForm", "Scripts", "SmsTemplates", "SmsConfig"];
+  const names = ["ViewingTicket", "DetailTab", "ToolsOpen", "Suggestions", "AiAnalysis", "DeviceStatus", "Enrichment", "ClientContacts", "TicketParticipants", "TicketSubscribers", "TicketNotes", "TicketEmails", "ChildTickets", "TimeEntries", "AuditLog", "TicketAttachments", "TicketProducts", "TicketPurchaseOrders", "TicketSms", "WorksheetItems", "SuggestionsLoading", "EmailSignature", "EmailForm", "SmsForm", "Scripts", "SmsTemplates", "SmsConfig"];
   names.forEach(name => { setters[`set${name}`] = value => { state[name] = typeof value === "function" ? value(state[name]) : value; }; });
   return { state, context: {
     ...setters, ticketDetailRequestRef: { current: 0 }, clients: [], user: {},
