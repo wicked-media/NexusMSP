@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { Send, Mail, PhoneCall, Loader2, Zap, LockKeyhole, Globe2, MailCheck, CircleAlert, Paperclip, Timer, CircleDollarSign } from "lucide-react";
+import { Send, Mail, PhoneCall, Loader2, Zap, LockKeyhole, Globe2, MailCheck, CircleAlert, Paperclip, Timer, CircleDollarSign, Bell } from "lucide-react";
 import DOMPurify from "dompurify";
 import { formatDistanceToNow } from "date-fns";
 import { Link } from "react-router-dom";
@@ -106,7 +106,7 @@ export default function TicketConversationTab({
   newNote, setNewNote, handleAddNote, cannedResponses,
   emailForm, setEmailForm, handleSendEmail, emailSignature, clientContacts,
   smsForm, setSmsForm, handleSendSms, applySmsTemplate, smsTemplates, smsConfig, smsSending,
-  ticketNotes, ticketEmails, ticketSms, ticketParticipants = [], ticketAttachments = [], ticketTimeEntries = [], labourTypes = [],
+  ticketNotes, ticketEmails, ticketSms, ticketParticipants = [], ticketSubscribers = [], ticketAttachments = [], ticketTimeEntries = [], labourTypes = [],
   composerFocusRequest = 0,
   recordLabel = "ticket",
   allowStatusChange = true,
@@ -204,6 +204,17 @@ export default function TicketConversationTab({
               </span>
             ))}
             {ticketParticipants.length > 5 && <span className="rounded-full border border-white/[0.08] px-2 py-1 text-zinc-500">+{ticketParticipants.length - 5}</span>}
+          </div>
+        )}
+        {ticketSubscribers.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] pt-2 text-[10px] text-zinc-500" data-testid="conversation-subscribers">
+            <span className="mr-1 inline-flex items-center gap-1 uppercase tracking-[0.12em] text-zinc-600"><Bell className="h-2.5 w-2.5" />Following this work</span>
+            {ticketSubscribers.slice(0, 4).map(subscriber => (
+              <span key={subscriber.user_id} className="inline-flex items-center rounded-full border border-violet-400/15 bg-violet-400/[0.045] px-2 py-1 text-violet-100/80">
+                {subscriber.user?.name || "Technician"}
+              </span>
+            ))}
+            {ticketSubscribers.length > 4 && <span className="rounded-full border border-white/[0.08] px-2 py-1 text-zinc-500">+{ticketSubscribers.length - 4}</span>}
           </div>
         )}
       </div>

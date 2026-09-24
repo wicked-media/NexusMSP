@@ -2684,6 +2684,7 @@ export default function TicketsPage() {
                   ticketNotes={ticketNotes} ticketEmails={ticketEmails} ticketSms={ticketSms}
                   ticketTimeEntries={timeEntries} labourTypes={labourTypes}
                   ticketParticipants={ticketParticipants}
+                  ticketSubscribers={ticketSubscribers}
                   composerFocusRequest={composerFocusRequest}
                 />
               </TabsContent>
