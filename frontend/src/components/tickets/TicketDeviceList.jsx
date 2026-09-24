@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -472,11 +472,16 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
 
       {/* Live Metrics Drawer */}
       <Dialog open={metricsOpen} onOpenChange={(v) => !v && setMetricsOpen(false)}>
-        <DialogContent className="max-w-3xl" data-testid={`metrics-drawer-${device.id}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Gauge className="w-4 h-4 text-sky-400" />Live Metrics — {device.name}</DialogTitle>
-            <DialogDescription className="text-xs">Last {metricsData?.minutes || 30} minutes · auto-refreshing every 30s</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-3xl"
+          eyebrow="Endpoint telemetry · live evidence"
+          title={`Live metrics — ${device.name}`}
+          description={`Last ${metricsData?.minutes || 30} minutes · auto-refreshing every 30 seconds.`}
+          icon={Gauge}
+          tone="cyan"
+          data-testid={`metrics-drawer-${device.id}`}
+          footer={<><Button variant="outline" onClick={openMetrics}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button><Button onClick={() => setMetricsOpen(false)}>Close</Button></>}
+        >
           {metricsLoading && !metricsData ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
             metricsData && (
               <div className="space-y-3">
@@ -527,20 +532,21 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
                 </Card>
               </div>
             )}
-          <DialogFooter>
-            <Button variant="outline" onClick={openMetrics}><RefreshCw className="w-3 h-3 mr-1" />Refresh</Button>
-            <Button onClick={() => setMetricsOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* AI Diagnose Dialog */}
       <Dialog open={diagOpen} onOpenChange={(v) => !v && setDiagOpen(false)}>
-        <DialogContent className="max-w-2xl" data-testid={`diagnose-${device.id}`}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><BrainCircuit className="w-4 h-4 text-fuchsia-400" />AI Diagnose — {device.name}</DialogTitle>
-            <DialogDescription className="text-xs">Nexus AI analyses telemetry, events, services, and patches, then posts the result to the ticket.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-2xl"
+          eyebrow="Endpoint intelligence · evidence review"
+          title={`AI diagnosis — ${device.name}`}
+          description="Nexus analyses current telemetry, events, services, and patches, then records the result against this ticket."
+          icon={BrainCircuit}
+          tone="violet"
+          data-testid={`diagnose-${device.id}`}
+          footer={<><Button variant="outline" onClick={runDiagnose} disabled={diagLoading}><RefreshCw className="w-3 h-3 mr-1" />Re-run</Button><Button onClick={() => setDiagOpen(false)}>Close</Button></>}
+        >
           {diagLoading ? <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div> :
             diagData && (
               <div className="space-y-3">
@@ -579,11 +585,7 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
                 )}
               </div>
             )}
-          <DialogFooter>
-            <Button variant="outline" onClick={runDiagnose} disabled={diagLoading}><RefreshCw className="w-3 h-3 mr-1" />Re-run</Button>
-            <Button onClick={() => setDiagOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Terminal modal */}
