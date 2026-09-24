@@ -32,6 +32,7 @@ export default function TicketConsoleHeader({
   onReply,
   onResolve,
   onStatusChange,
+  onRequestResolution,
   onChangeCustomer,
   onMoreAction,
   onOpenTools,
@@ -98,6 +99,13 @@ export default function TicketConsoleHeader({
     const secs = total % 60;
     return [hours, minutes, secs].map(value => String(value).padStart(2, "0")).join(":");
   };
+  const requestResolution = (target) => {
+    if (onRequestResolution) {
+      onRequestResolution(ticket, target);
+      return;
+    }
+    setResolutionTarget(target);
+  };
 
   if (!ticket) return null;
 
@@ -163,9 +171,6 @@ export default function TicketConsoleHeader({
             </div>
 
             <TicketHeaderAction icon={MessageSquareReply} onClick={onReply} data-testid="console-reply-btn">Update client</TicketHeaderAction>
-            {onAddItems && <TicketHeaderAction icon={PackagePlus} onClick={onAddItems} data-testid="console-add-items-btn">Add products{itemCount > 0 ? ` · ${itemCount}` : ""}</TicketHeaderAction>}
-            {onCatchUp && <TicketHeaderAction icon={History} onClick={onCatchUp} data-testid="ticket-catch-up">Catch me up</TicketHeaderAction>}
-            {onToggleFocus && <TicketHeaderAction aria-pressed={focusMode} onClick={onToggleFocus} tone={focusMode ? "accent" : "neutral"} data-testid="ticket-focus-toggle">{focusMode ? "Show full context" : "Focus view"}</TicketHeaderAction>}
             <TicketHeaderAction
               icon={isTimerRunning ? Square : Play}
               tone={isTimerRunning ? "warning" : "compact"}
@@ -174,9 +179,8 @@ export default function TicketConsoleHeader({
               data-testid="console-timer-btn"
             >{isTimerRunning ? formatElapsed(timerElapsed) : "Start timer"}</TicketHeaderAction>
             {isActiveTicket && <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>}
-            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => setResolutionTarget("resolved")} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
-            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => setResolutionTarget("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
-            <TicketHeaderAction icon={Wrench} tone="compact" onClick={onOpenTools} data-testid="console-tools-btn">Tools</TicketHeaderAction>
+            {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => requestResolution("resolved")} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
+            {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => requestResolution("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -184,6 +188,10 @@ export default function TicketConsoleHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Quick actions</DropdownMenuLabel>
+                {onCatchUp && <DropdownMenuItem onClick={onCatchUp} data-testid="ticket-catch-up"><History className="w-3.5 h-3.5 mr-2" />Catch me up</DropdownMenuItem>}
+                {onAddItems && <DropdownMenuItem onClick={onAddItems} data-testid="console-add-items-btn"><PackagePlus className="w-3.5 h-3.5 mr-2" />Add products{itemCount > 0 ? ` · ${itemCount}` : ""}</DropdownMenuItem>}
+                {onToggleFocus && <DropdownMenuItem onClick={onToggleFocus} data-testid="ticket-focus-toggle">{focusMode ? <Search className="w-3.5 h-3.5 mr-2" /> : <Wrench className="w-3.5 h-3.5 mr-2" />}{focusMode ? "Show full context" : "Focus view"}</DropdownMenuItem>}
+                <DropdownMenuItem onClick={onOpenTools} data-testid="console-tools-btn"><Wrench className="w-3.5 h-3.5 mr-2" />Tools & integrations</DropdownMenuItem>
                 <DropdownMenuItem onClick={onInvoice} data-testid="console-invoice-btn"><Receipt className="w-3.5 h-3.5 mr-2" />Review billing</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onMoreAction?.("transfer")}><ArrowLeftRight className="w-3.5 h-3.5 mr-2" />Reassign technician</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onPinObject?.()} data-testid="pin-ticket-object"><Bookmark className="w-3.5 h-3.5 mr-2" />Pin to Object Dock</DropdownMenuItem>
@@ -233,7 +241,7 @@ export default function TicketConsoleHeader({
                 return (
                   <button
                     key={s}
-                    onClick={() => ["resolved", "closed"].includes(s) ? setResolutionTarget(s) : onStatusChange?.(s)}
+                    onClick={() => ["resolved", "closed"].includes(s) ? requestResolution(s) : onStatusChange?.(s)}
                 className={`text-[10px] uppercase tracking-[0.1em] px-2 py-1 rounded-md transition-colors ${
                       active ? "bg-white/[0.12] text-white ring-1 ring-white/[0.14]" :
                       past ? "text-emerald-300/70 hover:bg-emerald-500/[0.06]" :

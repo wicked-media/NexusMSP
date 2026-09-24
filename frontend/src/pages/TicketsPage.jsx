@@ -28,6 +28,7 @@ import {
 import AICopilotStrip from "@/components/tickets/AICopilotStrip";
 import TicketRequestRecord from "@/components/tickets/TicketRequestRecord";
 import TicketHandoverDialog from "@/components/tickets/TicketHandoverDialog";
+import TicketResolutionReviewDialog from "@/components/tickets/TicketResolutionReviewDialog";
 import TicketQueueRecovery from "@/components/tickets/TicketQueueRecovery";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import HeroTile from "@/components/HeroTile";
@@ -174,7 +175,7 @@ export default function TicketsPage() {
   }, []);
 
   // Focus is session-only; ownership, billing, assets and the briefing stay available.
-  const [ticketFocusMode, setTicketFocusMode] = useState(false);
+  const [ticketFocusMode, setTicketFocusMode] = useState(true);
   const [handoverOpen, setHandoverOpen] = useState(false);
   const panelVisible = {
     serviceTier: !ticketFocusMode, aiAnalysis: true, related: !ticketFocusMode,
@@ -184,6 +185,8 @@ export default function TicketsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
+  const [resolutionReview, setResolutionReview] = useState(null);
+  const [resolutionProcessing, setResolutionProcessing] = useState(false);
   const [runbookCreating, setRunbookCreating] = useState(false);
   const [ticketRunbook, setTicketRunbook] = useState(null);
   const [runbookSuggestions, setRunbookSuggestions] = useState([]);
@@ -829,6 +832,45 @@ export default function TicketsPage() {
     }
   };
 
+  const requestResolutionReview = (ticketsForReview, target = "resolved") => {
+    const selected = (Array.isArray(ticketsForReview) ? ticketsForReview : [ticketsForReview]).filter(ticket => ticket?.id);
+    if (selected.length === 0) return;
+    setResolutionReview({ tickets: selected, target });
+  };
+
+  const confirmResolutionReview = async () => {
+    const review = resolutionReview;
+    const ticketsForReview = review?.tickets || [];
+    if (ticketsForReview.length === 0) return;
+    setResolutionProcessing(true);
+    try {
+      if (ticketsForReview.length === 1) {
+        const ticket = ticketsForReview[0];
+        const response = await axios.put(`${API}/tickets/${ticket.id}`, { status: review.target }, { headers });
+        if (viewingTicket?.id === ticket.id) {
+          setViewingTicket(previous => ({ ...previous, ...(response.data?.ticket || {}), status: review.target === "resolved" ? "closed" : review.target }));
+        }
+        toast.success(review.target === "closed" ? "Ticket closed and retained in service history" : "Ticket resolved, closed and retained in service history");
+      } else {
+        const response = await axios.post(`${API}/tickets/bulk-action`, {
+          ticket_ids: ticketsForReview.map(ticket => ticket.id),
+          action: "close",
+          value: "",
+        }, { headers });
+        toast.success(response.data?.message || `Closed ${ticketsForReview.length} tickets`);
+        setSelectedTickets(new Set());
+        setBulkAction("");
+        setBulkValue("");
+      }
+      await fetchTickets();
+      setResolutionReview(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update the selected ticket transition");
+    } finally {
+      setResolutionProcessing(false);
+    }
+  };
+
   const updateTicketSubscriber = async (userId, subscribed) => {
     if (!viewingTicket?.id || !userId) return;
     if (isLocalTicketPreview() && viewingTicket.id.startsWith("ticket-preview-")) {
@@ -857,17 +899,20 @@ export default function TicketsPage() {
       navigate(`/remote-access?device=${encodeURIComponent(deviceId)}&ticket=${encodeURIComponent(ticket.id)}`);
       return;
     }
+    if (action === "resolve") {
+      requestResolutionReview(ticket, "resolved");
+      return;
+    }
     const patches = {
       claim: { assigned_to: user?.id },
       start: { status: "in_progress" },
-      resolve: { status: "resolved" },
     };
     const patch = patches[action];
     if (!patch || (action === "claim" && !user?.id)) return;
     try {
       await axios.put(`${API}/tickets/${ticket.id}`, patch, { headers });
       await fetchTickets();
-      const label = action === "claim" ? "Ticket claimed" : action === "start" ? "Work started" : "Ticket resolved, closed and retained in client history";
+      const label = action === "claim" ? "Ticket claimed" : "Work started";
       toast.success(label);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Could not update ticket");
@@ -2054,7 +2099,7 @@ export default function TicketsPage() {
           }}
           onReply={() => {
             setDetailTab("conversation");
-            setConversationType("email");
+            setConversationType("public");
             setComposerFocusRequest((request) => request + 1);
             window.requestAnimationFrame(() => {
               conversationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -2062,6 +2107,7 @@ export default function TicketsPage() {
           }}
           onResolve={() => handleUpdateTicket("status", "resolved")}
           onStatusChange={(s) => handleUpdateTicket("status", s)}
+          onRequestResolution={(ticket, target) => requestResolutionReview(ticket, target)}
           onOpenTools={() => setToolsOpen(true)}
           onInvoice={openTicketInvoiceWorkflow}
           onAddItems={() => setIsAddItemOpen(true)}
@@ -2099,6 +2145,12 @@ export default function TicketsPage() {
             }}));
             toast.success("Ticket pinned to your Object Dock");
           }}
+        />
+        <TicketResolutionReviewDialog
+          review={resolutionReview}
+          onOpenChange={(open) => !open && setResolutionReview(null)}
+          onConfirm={confirmResolutionReview}
+          busy={resolutionProcessing}
         />
 
         {/* The briefing is intentionally adjacent to the ticket header: it
@@ -4304,7 +4356,19 @@ export default function TicketsPage() {
               {bulkAction === "tag" && (
                 <Input className="w-[130px] h-8 text-xs" placeholder="Tag name..." value={bulkValue} onChange={e => setBulkValue(e.target.value)} />
               )}
-              <Button size="sm" className="h-8 text-xs" onClick={handleBulkAction} disabled={bulkProcessing || !bulkAction || (bulkAction !== "close" && !bulkValue)} data-testid="apply-bulk-btn">
+              <Button
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  if (bulkAction === "close") {
+                    requestResolutionReview(filteredTickets.filter(ticket => selectedTickets.has(ticket.id)), "closed");
+                    return;
+                  }
+                  handleBulkAction();
+                }}
+                disabled={bulkProcessing || !bulkAction || (bulkAction !== "close" && !bulkValue)}
+                data-testid="apply-bulk-btn"
+              >
                 {bulkProcessing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
                 Apply ({selectedTickets.size})
               </Button>
@@ -4510,6 +4574,13 @@ export default function TicketsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <TicketResolutionReviewDialog
+        review={resolutionReview}
+        onOpenChange={(open) => !open && setResolutionReview(null)}
+        onConfirm={confirmResolutionReview}
+        busy={resolutionProcessing}
+      />
 
       </div>
     </PageShell>
