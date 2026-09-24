@@ -79,7 +79,11 @@ export default function InsightsHubPage() {
           description="Find repeat demand, knowledge gaps, reusable outcomes and documented operational decisions—always linked back to the Nexus records that support them. Suggestions never change systems, tickets or client records automatically."
           icon={BrainCircuit}
           tone="violet"
-          signal="recommendation"
+          signal="ready"
+          signalLabel="Evidence mode"
+          signalDescription="Tenant-private recommendations are read-only until you open their owning workflow."
+          actionsLabel="Knowledge tools"
+          actionsDescription="Search retained evidence or open the governing knowledge workflow."
           actions={<><Button asChild variant="outline" size="sm"><Link to="/documentation-hub?tab=library"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Knowledge library</Link></Button><Button variant="outline" size="sm" onClick={() => selectTab("runbooks")}><BookOpen className="mr-1.5 h-3.5 w-3.5" />Runbooks</Button><Button size="sm" onClick={() => selectTab("brain")}><BrainCircuit className="mr-1.5 h-3.5 w-3.5" />Ask Nexus Memory</Button></>}
         />
 
