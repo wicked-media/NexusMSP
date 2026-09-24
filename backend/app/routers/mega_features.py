@@ -24,7 +24,14 @@ from typing import Optional
 from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_global_scope, assert_record_scope, effective_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_global_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    effective_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -191,12 +198,35 @@ async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_c
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 2. TICKET TIME MACHINE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+def _timeline_audit_event(entry: dict) -> dict:
+    """Present both current and legacy audit formats without inventing change data."""
+    action = str(entry.get("action") or "").strip()
+    details = str(entry.get("details") or "").strip()
+    if action:
+        return {
+            "type": "status_change" if action == "updated" and "status:" in details else "audit",
+            "icon": "shuffle",
+            "label": details or action.replace("_", " ").capitalize(),
+        }
+
+    field = str(entry.get("field") or "field")
+    return {
+        "type": "status_change" if field == "status" else "audit",
+        "icon": "shuffle",
+        "label": f"{field}: {entry.get('old_value', '—')} → {entry.get('new_value', '—')}",
+    }
+
+
 @router.get("/tickets/{ticket_id}/timeline")
 async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Aggregate notes, status changes, sentiment events, time entries into one chronological feed."""
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Ticket not found")
+    t = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.timeline.read",
+        resource_name="Ticket",
+    )
 
     events = []
 
@@ -208,8 +238,22 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
         "actor": t.get("created_by_name") or "system",
     })
 
-    notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
-    for n in notes:
+    comments, legacy_notes, audit = await asyncio.gather(
+        db.ticket_comments.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+        ).sort("created_at", 1).to_list(200),
+        db.ticket_notes.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+        ).sort("created_at", 1).to_list(200),
+        db.ticket_audit_log.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+        ).sort("created_at", 1).to_list(200),
+    )
+    notes_by_id = {
+        str(note.get("id") or f"legacy:{index}"): note
+        for index, note in enumerate([*comments, *legacy_notes])
+    }
+    for n in notes_by_id.values():
         events.append({
             "ts": n.get("created_at"),
             "type": "internal_note" if n.get("is_internal") else "comment",
@@ -218,13 +262,11 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
             "actor": n.get("author") or n.get("user_name") or "?",
         })
 
-    audit = await db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
     for a in audit:
+        presentation = _timeline_audit_event(a)
         events.append({
             "ts": a.get("created_at") or a.get("timestamp"),
-            "type": "status_change" if a.get("field") == "status" else "audit",
-            "icon": "shuffle",
-            "label": f"{a.get('field','field')}: {a.get('old_value','â€”')} â†’ {a.get('new_value','â€”')}",
+            **presentation,
             "actor": a.get("user_name") or a.get("changed_by") or "system",
         })
 
