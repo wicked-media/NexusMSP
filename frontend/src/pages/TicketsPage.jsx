@@ -4202,38 +4202,42 @@ export default function TicketsPage() {
 
       <div className="space-y-3" data-testid="ticket-queue-controls">
 
-      <details className="rounded-xl border border-white/[0.08] px-4 py-2 text-xs text-muted-foreground" data-testid="service-desk-delivery-model">
-        <summary className="cursor-pointer py-1 font-medium hover:text-foreground focus-visible:outline-cyan-300">Working with workshop &amp; cabling kits</summary>
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-300/25 bg-violet-400/[0.1] text-violet-100"><GitBranch className="h-4 w-4" /></div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-zinc-100">One request. One authoritative service record.</p>
-            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">Workshop Repair and Cabling &amp; Field Kits add their specialist checklists, evidence and billing context below the parent ticket—without creating a competing queue.</p>
+      <details className="rounded-xl border border-white/[0.08] bg-black/[0.12] px-3 py-2 text-xs text-muted-foreground" data-testid="ticket-queue-overview">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-1 py-1 font-medium hover:text-foreground focus-visible:outline-cyan-300">
+          <span>Queue overview</span>
+          <span className={criticalCount > 0 ? "text-rose-300" : staleCount > 0 ? "text-amber-300" : "text-emerald-300"}>
+            {criticalCount > 0 ? `${criticalCount} critical` : staleCount > 0 ? `${staleCount} need an update` : "No immediate exceptions"}
+          </span>
+        </summary>
+        <div className="space-y-3 pb-1 pt-3">
+          <div className="flex min-w-0 items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3" data-testid="service-desk-delivery-model">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-300/25 bg-violet-400/[0.1] text-violet-100"><GitBranch className="h-4 w-4" /></div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-100">One request. One authoritative service record.</p>
+              <p className="mt-0.5 text-xs leading-5 text-muted-foreground">Workshop Repair and Cabling &amp; Field Kits add their specialist checklists, evidence and billing context below the parent ticket—without creating a competing queue.</p>
+            </div>
           </div>
+
+          <div key="hero-tiles" className="min-w-0">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+              <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
+              <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
+              <HeroTile label="Completed" value={completedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && attentionFilter === "all"} testId="stat-resolved" />
+              <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
+              <HeroTile label="Activity Stale" value={staleCount} icon={MessageSquare} glow={staleCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
+              <HeroTile label="Avg Resolve" value={formatDuration(avgResTime)} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
+            </div>
+          </div>
+
+          <TicketQueueRecovery
+            signals={queueRecoverySignals}
+            activeAttention={attentionFilter}
+            onFilterChange={attention => applyQueueFilter({ attention })}
+            onClear={() => applyQueueFilter({})}
+            onOpenTicket={ticket => fetchTicketDetail(ticket)}
+          />
         </div>
       </details>
-
-      {/* HeroTile metric strip */}
-      <div key="hero-tiles" className="min-w-0">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
-          <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
-          <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
-          <HeroTile label="Completed" value={completedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && attentionFilter === "all"} testId="stat-resolved" />
-          <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
-          <HeroTile label="Activity Stale" value={staleCount} icon={MessageSquare} glow={staleCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
-          <HeroTile label="Avg Resolve" value={formatDuration(avgResTime)} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
-        </div>
-      </div>
-
-      <div key="queue-recovery" className="min-w-0">
-        <TicketQueueRecovery
-          signals={queueRecoverySignals}
-          activeAttention={attentionFilter}
-          onFilterChange={attention => applyQueueFilter({ attention })}
-          onClear={() => applyQueueFilter({})}
-          onOpenTicket={ticket => fetchTicketDetail(ticket)}
-        />
-      </div>
 
        {/* Type Filter Tabs */}
       <div key="type-tabs" className="min-w-0">
