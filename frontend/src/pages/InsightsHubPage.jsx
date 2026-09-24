@@ -3,6 +3,7 @@ import axios from "axios";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import HeroTile from "@/components/HeroTile";
 import SecondBrainView from "@/components/insights/SecondBrainView";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
@@ -72,13 +73,15 @@ export default function InsightsHubPage() {
   return (
     <PageShell>
       <div className="space-y-5" data-testid="insights-hub-page">
-        <section className="nx-ambient-surface relative overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(139,92,246,0.16),transparent_34%),radial-gradient(circle_at_top_right,rgba(34,211,238,0.10),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:p-6" data-nx-signal="recommendation">
-          <div className="relative flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-            <div className="max-w-3xl"><div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-violet-400/25 bg-violet-400/[0.07] text-[10px] font-semibold uppercase tracking-[0.16em] text-violet-200">Nexus Intelligence</Badge><span className="text-xs text-muted-foreground">Tenant-private evidence · no autonomous action</span></div><h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-[2rem]">Operational memory, made useful</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Find repeat demand, knowledge gaps, reusable outcomes and documented operational decisions—always linked back to the Nexus records that support them.</p></div>
-            <div className="flex flex-wrap gap-2"><Button asChild variant="outline" size="sm"><Link to="/documentation-hub?tab=library"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Knowledge library</Link></Button><Button variant="outline" size="sm" onClick={() => selectTab("runbooks")}><BookOpen className="mr-1.5 h-3.5 w-3.5" />Runbooks</Button><Button size="sm" onClick={() => selectTab("brain")}><BrainCircuit className="mr-1.5 h-3.5 w-3.5" />Ask Nexus Memory</Button></div>
-          </div>
-          <div className="relative mt-5 flex flex-wrap gap-x-4 gap-y-1 border-t border-white/[0.08] pt-4 text-xs text-muted-foreground"><span>Patterns are evidence-backed, not inferred causes.</span><span>Suggestions never change systems, tickets or client records automatically.</span></div>
-        </section>
+        <OperationalPageHeader
+          eyebrow="Nexus Intelligence · tenant-private evidence"
+          title="Operational memory, made useful"
+          description="Find repeat demand, knowledge gaps, reusable outcomes and documented operational decisions—always linked back to the Nexus records that support them. Suggestions never change systems, tickets or client records automatically."
+          icon={BrainCircuit}
+          tone="violet"
+          signal="recommendation"
+          actions={<><Button asChild variant="outline" size="sm"><Link to="/documentation-hub?tab=library"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Knowledge library</Link></Button><Button variant="outline" size="sm" onClick={() => selectTab("runbooks")}><BookOpen className="mr-1.5 h-3.5 w-3.5" />Runbooks</Button><Button size="sm" onClick={() => selectTab("brain")}><BrainCircuit className="mr-1.5 h-3.5 w-3.5" />Ask Nexus Memory</Button></>}
+        />
 
         <Tabs value={tab} onValueChange={selectTab} className="w-full">
           <TabsList className="grid h-auto w-full max-w-xl grid-cols-2 gap-1 rounded-2xl border border-border/70 bg-muted/30 p-1.5" data-testid="insights-tabs">
