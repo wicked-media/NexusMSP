@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from fastapi.responses import Response
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
+import asyncio
 import os
 import re
 import json
@@ -323,12 +324,36 @@ async def ticket_timeline(ticket_id: str, current_user: dict = Depends(get_curre
 @router.post("/tickets/{ticket_id}/apology-draft")
 async def apology_draft(ticket_id: str, payload: dict = Body(default={}), current_user: dict = Depends(get_current_user)):
     """Generate a context-aware apology + makegood email."""
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Ticket not found")
-
-    notes = await db.ticket_notes.find({"ticket_id": ticket_id}, {"_id": 0, "body": 1, "author": 1}).sort("created_at", -1).limit(10).to_list(10)
-    convo = "\n".join([f"  {n.get('author','?')}: {(n.get('body') or '')[:200]}" for n in notes])
+    t = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.apology_draft.create",
+        resource_name="Ticket",
+    )
+    comments, legacy_notes = await asyncio.gather(
+        db.ticket_comments.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+            {"_id": 0, "id": 1, "content": 1, "user_name": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(10).to_list(10),
+        db.ticket_notes.find(
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+            {"_id": 0, "id": 1, "body": 1, "author": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(10).to_list(10),
+    )
+    notes_by_id = {
+        str(note.get("id") or f"legacy:{index}"): note
+        for index, note in enumerate([*comments, *legacy_notes])
+    }
+    notes = sorted(
+        notes_by_id.values(),
+        key=lambda note: str(note.get("created_at") or ""),
+        reverse=True,
+    )[:10]
+    convo = "\n".join(
+        f"  {n.get('author') or n.get('user_name') or '?'}: {(n.get('body') or n.get('content') or '')[:200]}"
+        for n in notes
+    )
 
     breached = False
     sla_due = _parse_iso(t.get("sla_due_at"))
