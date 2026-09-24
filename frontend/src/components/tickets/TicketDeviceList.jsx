@@ -35,15 +35,17 @@ const fmtBytes = (n) => {
 };
 
 function MiniGauge({ value, label, icon: Icon }) {
-  const v = Math.min(100, Math.max(0, Number(value) || 0));
+  const numericValue = Number(value);
+  const known = Number.isFinite(numericValue);
+  const v = known ? Math.min(100, Math.max(0, numericValue)) : 0;
   const tone = v > 90 ? "bg-rose-500" : v > 75 ? "bg-amber-500" : "bg-emerald-500";
   return (
-    <div className="flex items-center gap-1 min-w-0" aria-label={`${label}: ${v.toFixed(0)} percent`}>
+    <div className="flex items-center gap-1 min-w-0" aria-label={known ? `${label}: ${v.toFixed(0)} percent` : `${label}: not available`}>
       {Icon && <Icon className="w-3 h-3 text-zinc-500 shrink-0" />}
       <div className="flex-1 min-w-[40px] max-w-[80px] h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div className={`h-full ${tone}`} style={{ width: `${v}%` }} />
+        {known && <div className={`h-full ${tone}`} style={{ width: `${v}%` }} />}
       </div>
-      <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{v.toFixed(0)}%</span>
+      <span className="text-[10px] font-mono text-zinc-400 w-8 text-right">{known ? `${v.toFixed(0)}%` : "—"}</span>
     </div>
   );
 }
@@ -87,8 +89,8 @@ function DeviceRow({ device, ticketId, headers, onMutate }) {
   }, [fetchAgent, device.has_agent]);
 
   const isOnline = (agent?.status || device.status) === "online";
-  const cpu = agent?.cpu_load ?? 0;
-  const ram = agent?.used_ram ?? 0;
+  const cpu = agent?.cpu_load;
+  const ram = agent?.used_ram;
   const disk = agent?.disks?.[0]?.percent;
 
   const runAction = async (path, label, opts = {}) => {
