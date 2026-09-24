@@ -758,18 +758,18 @@ export default function TicketDeviceList({ ticketId, headers, refreshTicketDetai
 
       {/* Fan-out reboot confirmation */}
       <Dialog open={fanoutConfirm === "reboot"} onOpenChange={(v) => !v && setFanoutConfirm(null)}>
-        <DialogContent className="max-w-sm" data-testid="fanout-reboot-confirm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Power className="w-4 h-4 text-amber-400" />Reboot all {agentCount} devices?</DialogTitle>
-            <DialogDescription className="text-xs">
-              Each linked device will reboot immediately in parallel. Offline devices and devices without an agent will be skipped. The action is audited on this ticket.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setFanoutConfirm(null)}>Cancel</Button>
-            <Button onClick={() => runFanout("reboot", "Reboot (all)")} disabled={!!fanoutBusy} data-testid="fanout-reboot-go">Reboot all</Button>
-          </DialogFooter>
-        </DialogContent>
+        <NexusWorkflowDialog
+          className="max-w-lg"
+          eyebrow="Ticket device control · audited action"
+          title={`Reboot all ${agentCount} devices?`}
+          description="Each linked device will reboot immediately in parallel. Offline devices and devices without an agent will be skipped."
+          icon={Power}
+          tone="amber"
+          data-testid="fanout-reboot-confirm"
+          footer={<><Button variant="outline" onClick={() => setFanoutConfirm(null)}>Cancel</Button><Button onClick={() => runFanout("reboot", "Reboot (all)")} disabled={!!fanoutBusy} data-testid="fanout-reboot-go">Reboot all</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">This action is recorded against the current ticket. Verify the target list before continuing.</div>
+        </NexusWorkflowDialog>
       </Dialog>
     </Card>
   );
