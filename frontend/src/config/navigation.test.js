@@ -25,7 +25,7 @@ describe("Nexus navigation registry", () => {
 
     expect(workshopEntries).toHaveLength(1);
     expect(workshopEntries[0]).toMatchObject({
-      label: "Legacy workshop records",
+      label: "Historical workshop records",
       group: "Service Desk",
       parentLabel: "Tickets",
     });

@@ -21,7 +21,7 @@ export const navGroups = [
         children: [
           { path: "/triage-queue", label: "Triage queue" },
           { path: "/dispatch-board", label: "Dispatch board" },
-          { path: "/workshop-bench", label: "Legacy workshop records" },
+          { path: "/workshop-bench", label: "Historical workshop records" },
           { path: "/escalation-matrix", label: "Escalation management" },
           { path: "/blueprints", label: "Ticket blueprints" },
           { path: "/blueprints?tab=patterns", label: "Pattern discovery" },

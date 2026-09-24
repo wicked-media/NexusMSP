@@ -11,7 +11,7 @@ export const TICKET_WORKSPACE_TOOLS = [
   // This is a retained record board only. New repair work begins as a Service
   // Desk ticket with a Workshop Repair Kit so technicians do not mistake it
   // for a second active ticket queue.
-  { id: "workshop", label: "Legacy workshop records", path: "/workshop-bench", group: "Historical records", description: "Find earlier repair records; start new repairs with a ticket kit." },
+  { id: "workshop", label: "Historical workshop records", path: "/workshop-bench", group: "Historical records", description: "Find earlier repair records; start new repairs with a ticket kit." },
   { id: "escalations", label: "Escalation Matrix", path: "/escalation-matrix", group: "Assignment & escalation", description: "Define who takes over when a ticket needs specialist help." },
   { id: "routing", label: "Smart Routing", path: "/intelligent-routing", group: "Assignment & escalation", description: "Review how incoming work reaches the right technician." },
   { id: "blueprints", label: "Blueprints", path: "/blueprints", group: "Repeatable work", description: "Reuse proven ticket plans and task checklists." },

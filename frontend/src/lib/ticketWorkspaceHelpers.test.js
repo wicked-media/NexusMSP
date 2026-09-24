@@ -14,7 +14,7 @@ describe("ticket workspace helpers", () => {
     expect(ticketModuleForPath("/dispatch-board")).toBe("dispatch");
     expect(ticketWorkspaceToolForPath("/workshop-bench")).toMatchObject({
       id: "workshop",
-      label: "Legacy workshop records",
+      label: "Historical workshop records",
     });
     expect(ticketWorkspaceToolForPath("/blueprints")?.id).toBe("blueprints");
   });

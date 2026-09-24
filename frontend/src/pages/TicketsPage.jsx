@@ -4189,8 +4189,8 @@ export default function TicketsPage() {
           {[
             { val: "all", label: "Service Desk", icon: Ticket, count: tickets.length },
             { val: "sla", label: "SLA", icon: Shield, count: tickets.length, color: "text-blue-400" },
-            { val: "workshop", label: "Legacy workshop", icon: Wrench, count: standaloneWorkshopJobs.length, color: "text-purple-400" },
-            { val: "cabling_wisp", label: "Legacy cabling & field", icon: Wifi, count: standaloneFieldJobs.length, color: "text-cyan-400" },
+            { val: "workshop", label: "Historical workshop", icon: Wrench, count: standaloneWorkshopJobs.length, color: "text-purple-400" },
+            { val: "cabling_wisp", label: "Historical field work", icon: Wifi, count: standaloneFieldJobs.length, color: "text-cyan-400" },
           ].map(t => (
             <Button key={t.val} variant="outline" size="sm"
               onClick={() => setTypeFilter(t.val)}
