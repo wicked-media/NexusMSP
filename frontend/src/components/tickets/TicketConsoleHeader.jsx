@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
@@ -260,11 +260,16 @@ export default function TicketConsoleHeader({
       />
 
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-w-lg" data-testid="customer-history-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><History className="w-4 h-4 text-amber-400" />Customer Change History</DialogTitle>
-            <DialogDescription>Every customer reassignment is logged.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-lg"
+          eyebrow="Ticket relationship · audit evidence"
+          title="Customer change history"
+          description="Every customer reassignment is recorded before the ticket relationship changes."
+          icon={History}
+          tone="amber"
+          data-testid="customer-history-dialog"
+          footer={<>{hasHistory && <Button variant="outline" onClick={revert} className="text-amber-300 border-amber-500/30" data-testid="revert-customer-btn"><RotateCcw className="w-3 h-3 mr-1" />Revert last</Button>}<Button onClick={() => setHistoryOpen(false)}>Close</Button></>}
+        >
           {history.length === 0 ? <p className="text-xs text-muted-foreground text-center py-4">No changes yet.</p> :
             <ScrollArea className="max-h-64">
               <div className="space-y-2">
@@ -284,11 +289,7 @@ export default function TicketConsoleHeader({
               </div>
             </ScrollArea>
           }
-          <DialogFooter>
-            {hasHistory && <Button variant="outline" onClick={revert} className="text-amber-300 border-amber-500/30" data-testid="revert-customer-btn"><RotateCcw className="w-3 h-3 mr-1" />Revert last</Button>}
-            <Button onClick={() => setHistoryOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={confirmRevert} onOpenChange={setConfirmRevert}>
         <NexusWorkflowDialog
@@ -374,14 +375,16 @@ function ChangeCustomerDialog({ open, onClose, ticket, clients, onChanged }) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-xl" data-testid="change-customer-dialog">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Building2 className="w-5 h-5 text-emerald-400" />Change Customer</DialogTitle>
-          <DialogDescription>
-            Reassign <b>{ticket.ticket_number || ticket.id?.slice(0, 8)}</b> from <b className="text-zinc-300">{ticket.client_name || "—"}</b> to another customer.
-            History is logged and a comment is auto-posted.
-          </DialogDescription>
-        </DialogHeader>
+      <NexusWorkflowDialog
+        className="max-w-xl"
+        eyebrow="Ticket relationship · audited reassignment"
+        title="Change customer"
+        description={`Reassign ${ticket.ticket_number || ticket.id?.slice(0, 8)} from ${ticket.client_name || "an unassigned customer"}. Nexus records the history and posts an internal comment.`}
+        icon={Building2}
+        tone="emerald"
+        data-testid="change-customer-dialog"
+        footer={<><Button variant="outline" onClick={onClose}><X className="w-3 h-3 mr-1" />Cancel</Button><Button onClick={submit} disabled={busy || !selectedClientId} className="bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/40" data-testid="change-customer-submit">{busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ArrowLeftRight className="w-3 h-3 mr-1" />}Reassign</Button></>}
+      >
 
         <div className="space-y-3">
           <div className="relative">
@@ -448,13 +451,7 @@ function ChangeCustomerDialog({ open, onClose, ticket, clients, onChanged }) {
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}><X className="w-3 h-3 mr-1" />Cancel</Button>
-          <Button onClick={submit} disabled={busy || !selectedClientId} className="bg-emerald-500/30 text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/40" data-testid="change-customer-submit">
-            {busy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <ArrowLeftRight className="w-3 h-3 mr-1" />}Reassign
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      </NexusWorkflowDialog>
     </Dialog>
   );
 }
