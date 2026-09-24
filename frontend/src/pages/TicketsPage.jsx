@@ -12,7 +12,6 @@ import {
   TicketWorksheetTab, TicketAttachmentsTab, TicketItemsTab,
   TicketChildrenTab, TicketTimeTab, TicketAuditTab,
 } from "@/components/tickets/TicketSecondaryTabs";
-import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
 import TicketConnectivityVerification from "@/components/tickets/TicketConnectivityVerification";
 import TicketJumpAccessRequest from "@/components/tickets/TicketJumpAccessRequest";
@@ -2165,7 +2164,7 @@ export default function TicketsPage() {
             onActionClick={(target) => {
               if (["reply", "note", "ack"].includes(target)) {
                 setDetailTab("conversation");
-                setConversationType(target === "note" ? "note" : "email");
+                setConversationType(target === "note" ? "note" : "public");
                 setComposerFocusRequest(request => request + 1);
                 window.requestAnimationFrame(() => conversationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
               }
@@ -2772,6 +2771,25 @@ export default function TicketsPage() {
                 />
               </div>
             )}
+            <div key="sla-posture" className="min-w-0" data-testid="ticket-sla-posture">
+                <Card className="overflow-hidden border border-amber-400/20 bg-[linear-gradient(125deg,rgba(251,191,36,0.10),rgba(17,19,24,0.92)_55%,rgba(10,12,17,0.92))]">
+                  <CardContent className="flex items-center justify-between gap-3 p-3">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200"><Timer className="h-3.5 w-3.5" />SLA posture</p>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {ticketCompleted
+                          ? "Resolution is recorded; service history remains available."
+                          : viewingTicket.sla_due
+                            ? `Resolution target ${format(new Date(viewingTicket.sla_due), "MMM d, HH:mm")}`
+                            : "No resolution target is recorded for this ticket."}
+                      </p>
+                    </div>
+                    <Badge className={ticketCompleted ? "shrink-0 border-emerald-400/30 bg-emerald-500/15 text-emerald-200" : slaHours == null ? "shrink-0 border-zinc-500/30 bg-zinc-500/10 text-zinc-300" : slaHours < 0 ? "shrink-0 border-rose-400/30 bg-rose-500/15 text-rose-200" : slaHours <= 4 ? "shrink-0 border-amber-400/30 bg-amber-500/15 text-amber-100" : "shrink-0 border-cyan-400/30 bg-cyan-500/15 text-cyan-100"}>
+                      {ticketCompleted ? "Closed" : slaHours == null ? "No target" : slaHours < 0 ? `${Math.abs(slaHours)}h overdue` : `${slaHours}h remaining`}
+                    </Badge>
+                  </CardContent>
+                </Card>
+            </div>
             <div key="statusCard" className="min-w-0">
               <Card className="overflow-hidden rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.13),transparent_40%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.07),transparent_28%),linear-gradient(145deg,rgba(17,19,24,0.92),rgba(10,12,17,0.92))] shadow-[0_16px_42px_rgba(0,0,0,0.2)]">
               <CardContent className="space-y-4 p-4">
@@ -2885,13 +2903,6 @@ export default function TicketsPage() {
               </CardContent>
             </Card>
             </div>
-
-            {/* SLA Burn-down */}
-            {panelVisible.burndown && (
-              <div key="burndown" className="min-w-0">
-                <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />
-              </div>
-            )}
 
             {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
 
