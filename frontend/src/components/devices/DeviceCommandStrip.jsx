@@ -40,6 +40,17 @@ function isAtRisk(device) {
     || numericSignal(device, "checks_failing") > 0;
 }
 
+function formatOperationalDuration(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value < 0) return "—";
+  if (value < 60) return `${Math.round(value)}m`;
+  const totalHours = Math.round(value / 60);
+  if (totalHours < 24) return `${totalHours}h`;
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return hours ? `${days}d ${hours}h` : `${days}d`;
+}
+
 export default function DeviceCommandStrip({ headers, API, devices = [], telemetry = {} }) {
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
@@ -95,7 +106,7 @@ export default function DeviceCommandStrip({ headers, API, devices = [], telemet
             <MetricTile label="At Risk" value={fleet.atRisk} accent={fleet.atRisk ? "amber" : "slate"} icon={<AlertTriangle className="h-2.5 w-2.5 text-amber-400" />} testid="dev-tile-warning" />
             <MetricTile label="Patches" value={fleet.patchesPending} accent="cyan" icon={<Download className="h-2.5 w-2.5 text-cyan-400" />} testid="dev-tile-patches" />
             <MetricTile label="Disk risk" value={fleet.diskAtRisk} accent={fleet.diskAtRisk ? "rose" : "emerald"} icon={<HardDrive className="h-2.5 w-2.5 text-rose-400" />} testid="dev-tile-disk" />
-            <MetricTile label="MTTR · 30d" value={stats?.mttr_30d_minutes ? `${stats.mttr_30d_minutes}m` : "—"} accent="sky" icon={<Zap className="h-2.5 w-2.5 text-sky-400" />} testid="dev-tile-mttr" />
+            <MetricTile label="MTTR · 30d" value={formatOperationalDuration(stats?.mttr_30d_minutes)} accent="sky" icon={<Zap className="h-2.5 w-2.5 text-sky-400" />} testid="dev-tile-mttr" />
           </MetricStrip>
         </div>
       </section>

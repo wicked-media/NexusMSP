@@ -157,6 +157,7 @@ export default function DevicesPage() {
       setSearch(requestedSearch);
       setTab("directory");
     }
+    if (searchParams.get("source")) setTab("directory");
   }, [searchParams]);
 
   useEffect(() => {
