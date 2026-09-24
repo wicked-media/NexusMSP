@@ -122,8 +122,14 @@ export default function TicketConversationTab({
   const emailRecipientRef = useRef(null);
   const previousConversationTypeRef = useRef(conversationType);
   useEffect(() => {
-    if (!composerFocusRequest || conversationType !== "email") return;
-    const frame = window.requestAnimationFrame(() => emailRecipientRef.current?.focus());
+    if (!composerFocusRequest) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (conversationType === "email") {
+        emailRecipientRef.current?.focus();
+      } else if (conversationType === "public") {
+        document.querySelector('[data-testid="public-update-composer"] [contenteditable="true"]')?.focus();
+      }
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [composerFocusRequest, conversationType]);
   useEffect(() => {
