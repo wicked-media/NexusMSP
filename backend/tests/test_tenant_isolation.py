@@ -322,7 +322,7 @@ def test_similar_ticket_search_is_scoped_to_the_technicians_clients(monkeypatch)
         return {"id": "ticket-1", "client_id": "client-a", "title": "Printer offline investigation"}
 
     monkeypatch.setattr(mega_features.db, "tickets", Tickets())
-    monkeypatch.setattr(mega_features, "assert_record_scope", owned_ticket)
+    monkeypatch.setattr(mega_features, "assert_tenant_record_scope", owned_ticket)
     result = asyncio.run(mega_features.ticket_doppelganger("ticket-1", {
         "id": "tech-1",
         "role": "technician",
@@ -332,6 +332,7 @@ def test_similar_ticket_search_is_scoped_to_the_technicians_clients(monkeypatch)
 
     assert result["matches"] == []
     assert captured["query"]["$and"][1] == {"client_id": {"$in": ["client-a"]}}
+    assert "tenant_id" in str(captured["query"]["$and"][0])
 
 
 def test_mission_control_queries_are_client_and_site_scoped():

@@ -127,7 +127,7 @@ def _dedupe_team_members(records: list[dict]) -> list[dict]:
 @router.get("/tickets/{ticket_id}/doppelganger")
 async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Find similar resolved tickets within the technician's permitted scope."""
-    target = await assert_record_scope(
+    target = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -144,14 +144,15 @@ async def ticket_doppelganger(ticket_id: str, current_user: dict = Depends(get_c
 
     regex = "|".join(re.escape(k) for k in keywords)
     candidates = await db.tickets.find(
-        scoped_query(current_user, {
-            "id": {"$ne": ticket_id},
-            "status": {"$in": ["resolved", "closed"]},
-            "$or": [
-                {"title": {"$regex": regex, "$options": "i"}},
-                {"description": {"$regex": regex, "$options": "i"}},
-            ],
-        }),
+        scoped_query(current_user, tenant_scoped_query(current_user, {
+                "id": {"$ne": ticket_id},
+                "status": {"$in": ["resolved", "closed"]},
+                "$or": [
+                    {"title": {"$regex": regex, "$options": "i"}},
+                    {"description": {"$regex": regex, "$options": "i"}},
+                ],
+            }),
+        ),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1,
          "category": 1, "priority": 1, "resolved_at": 1, "resolution_notes": 1, "description": 1},
     ).limit(40).to_list(40)
