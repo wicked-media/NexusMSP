@@ -2,8 +2,9 @@ import { useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
 import { API, useAuth } from "@/App";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Sparkles, Loader2, Copy, Users, Mail, BookPlus, Activity, UserCheck, Wand2 } from "lucide-react";
 import { toast } from "sonner";
@@ -77,17 +78,28 @@ export function TicketAIBundle({ ticket, variant = "buttons", renderMenuItems })
 }
 
 function TicketAIBundleDialog({ view, setView, loading, data, copy }) {
+  const title = view === "doppel" ? "Similar resolved tickets"
+    : view === "apology" ? "AI apology draft"
+      : view === "runbook" ? "Runbook published"
+        : view === "assign" ? "Assignment recommendation"
+          : "Suggested resolution";
+  const description = view === "doppel" ? "Compare the recorded outcomes before applying any resolution to this ticket."
+    : view === "apology" ? "Review the draft before copying it into a customer communication."
+      : view === "runbook" ? "Review the ticket-derived procedure before relying on it in a live incident."
+        : view === "assign" ? "This recommendation does not assign the ticket or alter technician workload."
+          : "Review the matching resolved-ticket evidence before applying the suggested steps.";
   return (
     <Dialog open={!!view} onOpenChange={(v) => !v && setView(null)}>
-        <DialogContent className="max-w-2xl" data-testid="ai-bundle-dialog">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-violet-400" />
-              {view === "doppel" && "Similar resolved tickets"}
-              {view === "apology" && "AI Apology Draft"}
-              {view === "runbook" && "Runbook published"}
-            </DialogTitle>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          className="max-w-2xl"
+          eyebrow="Ticket intelligence · evidence review"
+          title={title}
+          description={description}
+          icon={Sparkles}
+          tone="violet"
+          data-testid="ai-bundle-dialog"
+          footer={<><Button variant="outline" onClick={() => setView(null)}>Close</Button>{view === "apology" && data && !loading && <Button variant="outline" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10" onClick={() => copy(`Subject: ${data.subject}\n\n${data.body}`)} data-testid="apology-copy"><Copy className="w-3.5 h-3.5 mr-1" />Copy Email</Button>}{view === "resolution" && data?.suggestion && !loading && <Button variant="outline" className="text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/10" onClick={() => copy(data.suggestion.resolution_notes)} data-testid="resolution-copy"><Copy className="w-3.5 h-3.5 mr-1" />Copy Resolution</Button>}</>}
+        >
 
           {loading && <div className="py-10 flex flex-col items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin text-violet-400" />Working…</div>}
 
@@ -175,22 +187,7 @@ function TicketAIBundleDialog({ view, setView, loading, data, copy }) {
             </div>
           )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setView(null)}>Close</Button>
-            {view === "apology" && data && !loading && (
-              <Button variant="outline" className="text-violet-400 border-violet-500/30 hover:bg-violet-500/10"
-                onClick={() => copy(`Subject: ${data.subject}\n\n${data.body}`)} data-testid="apology-copy">
-                <Copy className="w-3.5 h-3.5 mr-1" />Copy Email
-              </Button>
-            )}
-            {view === "resolution" && data?.suggestion && !loading && (
-              <Button variant="outline" className="text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/10"
-                onClick={() => copy(data.suggestion.resolution_notes)} data-testid="resolution-copy">
-                <Copy className="w-3.5 h-3.5 mr-1" />Copy Resolution
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
   );
 }
