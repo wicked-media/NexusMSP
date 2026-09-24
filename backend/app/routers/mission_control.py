@@ -95,6 +95,8 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
         clients,
         open_tickets,
         critical_tickets,
+        sla_breaches,
+        stale_tickets,
         offline_devices,
         high_cpu_devices,
         failed_backups,
@@ -123,6 +125,17 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
         db.tickets.count_documents(_query(current_user, {
             "status": {"$in": active_ticket_statuses},
             "priority": "critical",
+        })),
+        db.tickets.count_documents(_query(current_user, {
+            "status": {"$in": active_ticket_statuses},
+            "$or": [
+                {"sla_breached": True},
+                {"sla_status": {"$in": ["breached", "overdue"]}},
+            ],
+        })),
+        db.tickets.count_documents(_query(current_user, {
+            "status": {"$in": active_ticket_statuses},
+            "updated_at": {"$lt": day_ago},
         })),
         db.devices.count_documents(_query(current_user, {"status": "offline"})),
         db.devices.count_documents(_query(current_user, {
@@ -171,7 +184,7 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
     )
 
     expiring_items = expiring_domains + expiring_certificates + expiring_warranties
-    client_risk = critical_tickets + overdue_invoices
+    client_risk = critical_tickets + sla_breaches + stale_tickets + overdue_invoices
     security_risk = critical_security + open_vulnerabilities
     infrastructure_risk = offline_devices + high_cpu_devices + failed_backups + expiring_items
     billing_risk = overdue_invoices + failed_xero_syncs + unbilled_time + uninvoiced_product_tickets
@@ -187,6 +200,7 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
             [
                 {"label": "Active clients", "value": clients},
                 {"label": "Active tickets", "value": open_tickets},
+                {"label": "SLA breaches", "value": sla_breaches},
                 {"label": "Critical tickets", "value": critical_tickets},
             ],
         ),
@@ -562,10 +576,12 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
             client_name=row.get("client_name"),
         ))
 
-    critical_pressure = critical_tickets + offline_devices + failed_backups + critical_security
+    # SLA-breached work is client-impacting even when its ticket priority has not been escalated.
+    # Stale active work is warning pressure until a technician verifies or updates it.
+    critical_pressure = critical_tickets + sla_breaches + offline_devices + failed_backups + critical_security
     warning_pressure = (
         high_cpu_devices + open_vulnerabilities + failed_automations
-        + expiring_items + active_predictions + overdue_invoices + failed_xero_syncs
+        + expiring_items + active_predictions + overdue_invoices + failed_xero_syncs + stale_tickets
     )
     health_score = max(
         0,
@@ -573,6 +589,10 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
     )
     health_label = "Healthy" if health_score >= 90 else "Stable" if health_score >= 75 else "At risk" if health_score >= 50 else "Critical"
     health_factors = []
+    if sla_breaches:
+        health_factors.append(f"{sla_breaches} SLA breach{'es' if sla_breaches != 1 else ''}")
+    if stale_tickets:
+        health_factors.append(f"{stale_tickets} stale active ticket{'s' if stale_tickets != 1 else ''}")
     if critical_tickets:
         health_factors.append(f"{critical_tickets} critical ticket{'s' if critical_tickets != 1 else ''}")
     if offline_devices:
@@ -645,6 +665,8 @@ async def mission_control_overview(current_user: dict = Depends(get_current_user
         "summary": {
             "attention_count": attention_count,
             "automated_actions_24h": automated_actions_24h,
+            "sla_breaches": sla_breaches,
+            "stale_tickets": stale_tickets,
             "health_score": health_score,
             "health_label": health_label,
             "health_factors": health_factors[:4],
