@@ -266,13 +266,14 @@ def test_client_a_registry_and_device_mapping_cannot_target_client_b(monkeypatch
             _request("POST"),
             technician,
         ), 403),
-        (lambda: remote.get_device_remote_options("device-b", _request(), technician), 403),
+        # Device resources outside the caller's scope are deliberately non-enumerable.
+        (lambda: remote.get_device_remote_options("device-b", _request(), technician), 404),
         (lambda: remote.save_device_remote_access(
             "device-b",
             {"remote_provider": "rustdesk", "rustdesk_id": "peer-foreign"},
             _request("PUT"),
             technician,
-        ), 403),
+        ), 404),
         # Either side of a proposed link must be in the technician's scope.
         (lambda: rustdesk.link_rustdesk_registry_entry(
             "registry-a", {"managed_device_id": "device-b"}, _request("PUT"), technician
