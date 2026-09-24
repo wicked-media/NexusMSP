@@ -6,6 +6,7 @@ import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
+import TicketDeviceList from "@/components/tickets/TicketDeviceList";
 import TicketEnrichmentRail from "@/components/tickets/TicketEnrichmentRail";
 import TicketConversationTab from "@/components/tickets/TicketConversationTab";
 import {
@@ -2178,7 +2179,7 @@ export default function TicketsPage() {
           />
         )}
 
-        {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, briefing and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
+        {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, briefing, SLA and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
 
         <TicketServiceKitPanel
           ticket={viewingTicket}
@@ -2697,6 +2698,22 @@ export default function TicketsPage() {
                   handleAttachmentUpload={handleAttachmentUpload}
                   handleDeleteAttachment={handleDeleteAttachment}
                   handleDownloadAttachment={handleDownloadAttachment}
+                />
+              </TabsContent>
+
+              <TabsContent value="devices" className="space-y-3">
+                <TicketDeviceList
+                  ticketId={viewingTicket.id}
+                  headers={headers}
+                  refreshTicketDetails={async () => {
+                    try {
+                      const response = await axios.get(`${API}/tickets/${viewingTicket.id}`, { headers });
+                      setViewingTicket(response.data);
+                      fetchTickets();
+                    } catch {
+                      toast.warning("Endpoint action completed, but the ticket could not refresh. Reopen it to load the latest evidence.");
+                    }
+                  }}
                 />
               </TabsContent>
 
@@ -4344,7 +4361,7 @@ export default function TicketsPage() {
               <Select value={bulkAction} onValueChange={v => { setBulkAction(v); setBulkValue(""); }}>
                 <SelectTrigger className="w-[150px] h-8 text-xs" data-testid="bulk-action-select"><SelectValue placeholder="Bulk action..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="close">Close All</SelectItem>
+                  <SelectItem value="close">Close selected</SelectItem>
                   <SelectItem value="assign">Assign To...</SelectItem>
                   <SelectItem value="priority">Change Priority</SelectItem>
                   <SelectItem value="status">Change Status</SelectItem>
