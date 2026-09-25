@@ -424,17 +424,10 @@ class TestClientQuirkyFeatures:
         print(f"Ã¢Å“â€œ Mood ring: {data['colour']} - {data['label']}")
 
     def test_slow_internet_detective(self, auth_headers, client_id):
-        """POST /api/network/slow-internet/{client_id} - returns verdict"""
+        """POST /api/network/slow-internet/{client_id} - does not fabricate a verdict"""
         response = requests.post(f"{BASE_URL}/api/network/slow-internet/{client_id}", headers=auth_headers)
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "verdict" in data
-        assert "confidence" in data
-        assert "metrics" in data
-        assert "reasons" in data
-        assert "avg_ping_ms" in data["metrics"]
-        print(f"Ã¢Å“â€œ Slow internet: {data['verdict']} ({data['confidence']*100:.0f}% confidence)")
+        assert response.status_code == 409
+        assert "telemetry" in response.json().get("detail", "").lower()
 
     def test_password_pet(self, auth_headers, client_id):
         """GET /api/security/password-pet/{client_id} - returns pet health"""

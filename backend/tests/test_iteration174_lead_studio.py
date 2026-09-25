@@ -96,6 +96,9 @@ def test_activity_ticker(client):
     assert r.status_code == 200
     data = r.json()
     assert "events" in data and isinstance(data["events"], list)
+    assert data.get("meta", {}).get("data_status") in {"current", "empty"}
+    assert data.get("meta", {}).get("source") == "lead_activities"
+    assert data.get("meta", {}).get("window_hours") == 72
     if data["events"]:
         e = data["events"][0]
         for k in ("kind", "icon", "label", "ts"):

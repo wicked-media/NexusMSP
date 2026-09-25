@@ -309,6 +309,7 @@ async def lead_activity_ticker(current_user: dict = Depends(get_current_user)):
     async for a in cursor:
         kind_map = {"call": "📞", "email": "✉️", "note": "📝", "meeting": "📅", "stage_change": "🔀", "proposal_sent": "📄"}
         events.append({
+            "id": a.get("id"),
             "kind": a.get("type", "note"),
             "icon": kind_map.get(a.get("type"), "📝"),
             "label": a.get("title") or a.get("description", "Activity"),
@@ -317,17 +318,17 @@ async def lead_activity_ticker(current_user: dict = Depends(get_current_user)):
             "user": a.get("created_by_name", ""),
             "ts": a.get("created_at"),
         })
-    # Backfill with synthesized examples if empty
-    if not events:
-        now = datetime.now(timezone.utc)
-        events = [
-            {"kind": "email", "icon": "✉️", "label": "Follow-up email sent", "lead_id": None, "lead_name": "Stride Manufacturing", "user": "Alex T.", "ts": (now - timedelta(minutes=12)).isoformat()},
-            {"kind": "stage_change", "icon": "🔀", "label": "Moved to Proposal", "lead_id": None, "lead_name": "Harbor Logistics", "user": "Sarah C.", "ts": (now - timedelta(minutes=28)).isoformat()},
-            {"kind": "call", "icon": "📞", "label": "Discovery call · 32 min", "lead_id": None, "lead_name": "Apex Dental", "user": "Aaron B.", "ts": (now - timedelta(hours=1, minutes=4)).isoformat()},
-            {"kind": "proposal_sent", "icon": "📄", "label": "Proposal #PR-1042 sent", "lead_id": None, "lead_name": "Pinnacle Systems", "user": "Mike R.", "ts": (now - timedelta(hours=2)).isoformat()},
-        ]
     events.sort(key=lambda e: e.get("ts", ""), reverse=True)
-    return {"events": events[:25]}
+    visible_events = events[:25]
+    return {
+        "events": visible_events,
+        "meta": {
+            "data_status": "current" if visible_events else "empty",
+            "source": "lead_activities",
+            "window_hours": 72,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────

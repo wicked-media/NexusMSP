@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_record_scope, scoped_query
+from app.services.scope_permissions import assert_record_scope, platform_tenant_id, scoped_query
 from app.services.module_permissions import require_module_permission
-import random; random = random.SystemRandom()
 import uuid
 from urllib.parse import urlsplit
 
@@ -60,17 +59,36 @@ async def get_bandwidth_overview(current_user: dict = Depends(get_current_user))
     await require_module_permission(current_user, "networking", "view")
     sites = await _network_sites_in_scope(current_user)
     site_ids = [site["id"] for site in sites]
-    data = await db.bandwidth_data.find({"site_id": {"$in": site_ids}}, {"_id": 0}).to_list(500)
-    if not data:
-        data = await _seed_bandwidth_data(sites)
-    return {"sites": [_public_network_site(site) for site in sites], "bandwidth_data": data}
+    data = await db.bandwidth_data.find(
+        {"site_id": {"$in": site_ids}, "source": {"$exists": True, "$ne": "demo_placeholder"}},
+        {"_id": 0},
+    ).to_list(500)
+    return {
+        "sites": [_public_network_site(site) for site in sites],
+        "bandwidth_data": data,
+        "meta": {
+            "data_status": "current" if data else "empty",
+            "source": "controller_telemetry",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
 
 @router.get("/bandwidth-monitor/site/{site_id}")
 async def get_site_bandwidth(site_id: str, current_user: dict = Depends(get_current_user)):
     await require_module_permission(current_user, "networking", "view")
     await _scoped_network_site(site_id, current_user, operation="bandwidth.site.read")
-    data = await db.bandwidth_data.find({"site_id": site_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
-    return data
+    data = await db.bandwidth_data.find(
+        {"site_id": site_id, "source": {"$exists": True, "$ne": "demo_placeholder"}},
+        {"_id": 0},
+    ).sort("timestamp", -1).to_list(288)
+    return {
+        "samples": data,
+        "meta": {
+            "data_status": "current" if data else "empty",
+            "source": "controller_telemetry",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
 
 @router.get("/bandwidth-monitor/alerts")
 async def get_bandwidth_alerts(current_user: dict = Depends(get_current_user)):
@@ -78,12 +96,17 @@ async def get_bandwidth_alerts(current_user: dict = Depends(get_current_user)):
     sites = await _network_sites_in_scope(current_user)
     site_ids = [site["id"] for site in sites]
     alerts = await db.bandwidth_alerts.find(
-        {"site_id": {"$in": site_ids}},
+        {"site_id": {"$in": site_ids}, "source": {"$ne": "demo_placeholder"}},
         {"_id": 0},
     ).sort("detected_at", -1).to_list(100)
-    if not alerts:
-        alerts = await _seed_bandwidth_alerts(sites)
-    return alerts
+    return {
+        "alerts": alerts,
+        "meta": {
+            "data_status": "current" if alerts else "empty",
+            "source": "controller_telemetry",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
 
 @router.post("/bandwidth-monitor/alerts/{alert_id}/resolve")
 async def resolve_bandwidth_alert(alert_id: str, data: dict = None, current_user: dict = Depends(get_current_user)):
@@ -109,6 +132,8 @@ async def resolve_bandwidth_alert(alert_id: str, data: dict = None, current_user
     await db.bandwidth_alerts.update_one({"id": alert_id, "site_id": alert.get("site_id")}, {"$set": update})
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(current_user),
+        "client_id": alert.get("client_id"),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name") or current_user.get("email"),
         "action": "resolve",
@@ -127,53 +152,3 @@ async def get_top_talkers(site_id: str, current_user: dict = Depends(get_current
     clients = await db.network_clients.find({"site_id": site_id}, {"_id": 0}).to_list(50)
     sorted_clients = sorted(clients, key=lambda c: (c.get("rx_bytes", 0) + c.get("tx_bytes", 0)), reverse=True)
     return sorted_clients[:10]
-
-async def _seed_bandwidth_data(sites: list[dict]):
-    now = datetime.now(timezone.utc)
-    data = []
-    for site in sites[:50]:
-        site_id = str(site.get("id") or "")
-        if not site_id:
-            continue
-        max_down = float(site.get("download_speed_mbps") or 100)
-        max_up = float(site.get("upload_speed_mbps") or 50)
-        for i in range(144):
-            ts = (now - timedelta(minutes=i * 10)).isoformat()
-            hour = (now - timedelta(minutes=i * 10)).hour
-            multiplier = 0.8 if 9 <= hour <= 17 else 0.3
-            down = round(random.uniform(0.1, multiplier) * max_down, 1)
-            up = round(random.uniform(0.05, multiplier * 0.6) * max_up, 1)
-            latency = round(random.uniform(1, 25), 1)
-            jitter = round(random.uniform(0.1, 5), 2)
-            packet_loss = round(random.uniform(0, 0.5), 3) if random.random() > 0.8 else 0
-            entry = {"site_id": site_id, "client_id": site.get("client_id"), "timestamp": ts, "download_mbps": down, "upload_mbps": up, "latency_ms": latency, "jitter_ms": jitter, "packet_loss_pct": packet_loss}
-            data.append(entry)
-    for d in data:
-        await db.bandwidth_data.insert_one(d)
-    return [dict((k, v) for k, v in d.items() if k != "_id") for d in data]
-
-
-async def _seed_bandwidth_alerts(sites: list[dict]) -> list[dict]:
-    """Seed only the caller-visible sites; never create cross-client demo alerts."""
-    now = datetime.now(timezone.utc)
-    alerts: list[dict] = []
-    for index, site in enumerate(sites[:3]):
-        site_id = str(site.get("id") or "")
-        if not site_id:
-            continue
-        alerts.append({
-            "id": f"bwa-{uuid.uuid4()}",
-            "site_id": site_id,
-            "client_id": site.get("client_id"),
-            "site_name": site.get("name") or "Network site",
-            "client_name": site.get("client_name") or "",
-            "type": ("high_utilization", "spike", "packet_loss")[index],
-            "severity": ("warning", "info", "warning")[index],
-            "message": "Bandwidth monitoring is awaiting live controller telemetry",
-            "detected_at": (now - timedelta(hours=index + 1)).isoformat(),
-            "resolved": False,
-            "source": "demo_placeholder",
-        })
-    for alert in alerts:
-        await db.bandwidth_alerts.insert_one(alert)
-    return alerts

@@ -404,22 +404,14 @@ class TestMoodRing:
 # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â SLOW INTERNET DETECTIVE TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â
 
 class TestSlowInternetDetective:
-    """Slow internet detective tests (MOCKED - uses random values)"""
+    """Legacy WAN diagnostics must fail closed without real telemetry."""
 
     def test_slow_internet_detective(self, headers):
-        """POST /api/network/slow-internet/{client_id} - get verdict"""
+        """POST /api/network/slow-internet/{client_id} - does not invent a verdict"""
         response = requests.post(f"{BASE_URL}/api/network/slow-internet/client-001", 
                                  json={}, headers=headers)
-        assert response.status_code == 200
-        data = response.json()
-        assert "verdict" in data
-        assert "confidence" in data
-        assert "metrics" in data
-        assert "avg_ping_ms" in data["metrics"]
-        assert "jitter_ms" in data["metrics"]
-        assert "speed_down_mbps" in data["metrics"]
-        assert "reasons" in data
-        print(f"Ã¢Å“â€œ Slow internet detective (MOCKED): verdict={data['verdict']}, confidence={data['confidence']}")
+        assert response.status_code in (403, 404, 409)
+        assert "telemetry" in response.json().get("detail", "").lower() or response.status_code in (403, 404)
 
 
 # Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â DEVICE GRAVEYARD TESTS Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â

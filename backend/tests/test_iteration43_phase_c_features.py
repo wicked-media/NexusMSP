@@ -307,7 +307,9 @@ class TestBandwidthMonitor:
         response = requests.get(f"{BASE_URL}/api/bandwidth-monitor/overview", headers=headers)
         assert response.status_code == 200
         data = response.json()
-        assert "sites" in data or "bandwidth_data" in data
+        assert "sites" in data and "bandwidth_data" in data
+        assert data.get("meta", {}).get("data_status") in {"current", "empty"}
+        assert data.get("meta", {}).get("source") == "controller_telemetry"
         if "bandwidth_data" in data:
             assert isinstance(data["bandwidth_data"], list)
             print(f"Bandwidth Overview: {len(data['bandwidth_data'])} data points")
@@ -316,15 +318,16 @@ class TestBandwidthMonitor:
         """GET /api/bandwidth-monitor/alerts - returns bandwidth alerts"""
         response = requests.get(f"{BASE_URL}/api/bandwidth-monitor/alerts", headers=headers)
         assert response.status_code == 200
-        alerts = response.json()
-        assert isinstance(alerts, list)
-        assert len(alerts) >= 1, "Expected at least 1 bandwidth alert"
+        payload = response.json()
+        assert isinstance(payload.get("alerts"), list)
+        assert payload.get("meta", {}).get("data_status") in {"current", "empty"}
+        alerts = payload["alerts"]
         # Verify alert structure
         for alert in alerts[:3]:
             assert "severity" in alert
             assert "message" in alert
             assert "site_name" in alert
-        print(f"Bandwidth Alerts: {len(alerts)} alerts")
+        print(f"Bandwidth Alerts: {len(alerts)} controller-created alerts")
 
 
 if __name__ == "__main__":

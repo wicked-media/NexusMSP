@@ -18,31 +18,51 @@ const KIND_STYLE = {
 export default function LeadActivityTicker() {
   const { token } = useAuth();
   const [events, setEvents] = useState([]);
+  const [meta, setMeta] = useState(null);
+  const [status, setStatus] = useState("loading");
 
   useEffect(() => {
     let live = true;
     const tick = () => axios.get(`${API}/lead-studio/activity-ticker`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => { if (live) setEvents(r.data?.events || []); }).catch(() => {});
+      .then((r) => {
+        if (!live) return;
+        setEvents(r.data?.events || []);
+        setMeta(r.data?.meta || null);
+        setStatus("ready");
+      })
+      .catch(() => {
+        if (live) setStatus("unavailable");
+      });
     tick();
     const id = setInterval(tick, 25000);
     return () => { live = false; clearInterval(id); };
   }, [token]);
 
-  if (events.length === 0) return null;
+  const windowHours = meta?.window_hours || 72;
+  const isEmpty = status === "ready" && events.length === 0;
+
   return (
     <section className="overflow-hidden rounded-xl border border-white/[0.08] bg-zinc-950/45" data-testid="lead-activity-ticker">
       <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-50 motion-safe:animate-ping" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
-          </span>
           <Radio className="h-3.5 w-3.5 text-emerald-300" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Live CRM signal</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Recent CRM activity</span>
         </div>
-        <span className="text-[10px] text-zinc-600">Updates every 25 seconds</span>
+        <span className="text-[10px] text-zinc-600">Nexus ledger · past {windowHours}h</span>
       </div>
-      <div className="grid divide-y divide-white/[0.06] md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
+      {status === "loading" && (
+        <p className="px-4 py-5 text-center text-[11px] text-zinc-500" data-testid="lead-activity-ticker-loading">Checking recorded activity…</p>
+      )}
+      {status === "unavailable" && (
+        <p className="px-4 py-5 text-center text-[11px] text-amber-300" data-testid="lead-activity-ticker-unavailable">Recent activity is unavailable. No activity has been inferred.</p>
+      )}
+      {isEmpty && (
+        <div className="px-4 py-5 text-center" data-testid="lead-activity-ticker-empty">
+          <p className="text-[11px] font-medium text-zinc-300">No activity recorded in the past {windowHours} hours</p>
+          <p className="mt-1 text-[10px] text-zinc-500">Calls, emails, notes, meetings and stage changes appear here once they are recorded in Nexus.</p>
+        </div>
+      )}
+      {status === "ready" && events.length > 0 && <div className="grid divide-y divide-white/[0.06] md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4">
         {events.slice(0, 4).map((event, index) => {
           const style = KIND_STYLE[event.kind] || KIND_STYLE.note;
           const Icon = style.icon;
@@ -66,7 +86,7 @@ export default function LeadActivityTicker() {
             </div>
           );
         })}
-      </div>
+      </div>}
     </section>
   );
 }

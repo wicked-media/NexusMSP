@@ -16,7 +16,7 @@ Friday wrap-up:
 Quirky data:
   GET  /api/clients/{id}/trading-card     â€” client trading card stats
   GET  /api/clients/{id}/mood-ring        â€” 30-day sentiment colour
-  POST /api/network/slow-internet/{client_id} â€” instant "is it the VPN" verdict
+  POST /api/network/slow-internet/{client_id} â€” legacy WAN diagnostic capability status
   GET  /api/devices/graveyard             â€” decommissioned device tombstones
   GET  /api/devices/family-tree/{client_id} â€” devices grouped by model/age
   GET  /api/team/{id}/brain-bucket  / POST â€” private scratchpad
@@ -35,6 +35,8 @@ from typing import Optional
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope
+from app.services.module_permissions import require_module_permission
 
 router = APIRouter()
 
@@ -439,51 +441,17 @@ async def client_mood_ring(client_id: str, current_user: dict = Depends(get_curr
 
 @router.post("/network/slow-internet/{client_id}")
 async def slow_internet_detective(client_id: str, current_user: dict = Depends(get_current_user)):
-    """Quick verdict: is the client's internet slow because of THEIR setup or the line?"""
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0, "name": 1, "device_type": 1, "errors_count": 1, "vpn_active": 1, "status": 1}).limit(200).to_list(200)
-    online = sum(1 for d in devices if d.get("status") == "online")
-    offline = sum(1 for d in devices if d.get("status") == "offline")
-    error_devices = [d for d in devices if (d.get("errors_count") or 0) > 50]
-    vpn_count = sum(1 for d in devices if d.get("vpn_active"))
+    """Fail closed until a client-scoped WAN telemetry collector is available.
 
-    # Fake-but-realistic ping/jitter results (real RMM/UniFi keys aren't seeded)
-    avg_ping_ms = random.randint(15, 95)
-    jitter_ms = random.randint(2, 30)
-    speed_down = random.randint(20, 850)
-
-    verdict = "Likely fine"
-    confidence = 0.5
-    reasons = []
-
-    if offline > online * 0.3:
-        verdict = "Wide outage â€” check the WAN link first"
-        confidence = 0.85
-        reasons.append(f"{offline} devices offline")
-    elif vpn_count > 5 and avg_ping_ms > 60:
-        verdict = "VPN bottleneck"
-        confidence = 0.75
-        reasons.append(f"{vpn_count} VPN sessions, {avg_ping_ms}ms ping")
-    elif jitter_ms > 20:
-        verdict = "Likely Wi-Fi or local switch issue"
-        confidence = 0.65
-        reasons.append(f"jitter {jitter_ms}ms is high")
-    elif error_devices:
-        verdict = "Device-specific â€” only some endpoints affected"
-        confidence = 0.7
-        reasons.append(f"{len(error_devices)} devices with high error counts")
-    else:
-        verdict = "Looks healthy â€” escalate to ISP"
-        reasons.append(f"ping {avg_ping_ms}ms, down {speed_down}Mbps, jitter {jitter_ms}ms")
-
-    return {
-        "client_id": client_id,
-        "verdict": verdict,
-        "confidence": confidence,
-        "metrics": {"avg_ping_ms": avg_ping_ms, "jitter_ms": jitter_ms, "speed_down_mbps": speed_down,
-                    "online": online, "offline": offline, "vpn_active": vpn_count},
-        "reasons": reasons,
-        "generated_at": _now_iso(),
-    }
+    This legacy endpoint previously invented latency, jitter and throughput
+    values. Network diagnosis must only present controller or Edge evidence.
+    """
+    await require_module_permission(current_user, "networking", "view")
+    await assert_client_scope(current_user, client_id, operation="network.slow_internet.diagnose")
+    raise HTTPException(
+        status_code=409,
+        detail="Live WAN diagnostics are not enabled for this client. Connect an authorised controller or Nexus Edge telemetry source before Nexus can produce a network verdict. No test was run.",
+    )
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• DEVICE GRAVEYARD â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

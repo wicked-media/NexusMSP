@@ -4,7 +4,7 @@ import {
   Receipt, Clock, BookOpen, BarChart3, Settings, UserPlus, Shield,
   Mail, FolderKanban, Server, UserCog, ShoppingCart, Wifi, Phone,
   ShieldCheck, Radar, Workflow, TrendingUp, ShieldAlert, GitBranch,
-  MessageSquare, HardDrive, Layers, ClipboardList, BrainCircuit,
+  MessageSquare, HardDrive, Layers, BrainCircuit,
   Siren, Sparkles, Bookmark, Briefcase, Boxes, ArrowRightLeft, DatabaseBackup, Database, Activity,
 } from "lucide-react";
 
@@ -56,13 +56,12 @@ export const navGroups = [
         workspacePaths: ["/live-chat", "/script-ticket"],
         children: [{ path: "/live-chat", label: "Client live chat" }, { path: "/script-ticket", label: "Ticket automations" }],
       },
-      { path: "/onboarding", icon: ClipboardList, label: "Client Onboarding" },
       { path: "/wallboard", icon: Monitor, label: "NOC Wallboard" },
     ]
   },
   {
     id: "infrastructure",
-    title: "Infrastructure",
+    title: "Managed Operations",
     items: [
       {
         path: "/devices", icon: Monitor, label: "Devices & RMM",
@@ -146,12 +145,13 @@ export const navGroups = [
   },
   {
     id: "business",
-    title: "Business",
+    title: "Clients & Revenue",
     items: [
       {
         path: "/clients", icon: Users, label: "Clients",
-        workspacePaths: ["/client-insights", "/client-compare", "/client-portal", "/web-studio", "/nexus-assurance", "/expected-state"],
+        workspacePaths: ["/client-insights", "/client-compare", "/client-portal", "/web-studio", "/nexus-assurance", "/expected-state", "/onboarding"],
         children: [
+          { path: "/onboarding", label: "Client onboarding" },
           { path: "/client-insights", label: "Client insights" },
           { path: "/client-insights?tab=what-changed", label: "What Changed" },
           { path: "/nexus-assurance", label: "Nexus Assurance" },
@@ -253,7 +253,7 @@ export const navGroups = [
   },
   {
     id: "intelligence",
-    title: "AI & Intelligence",
+    title: "Automation & Intelligence",
     items: [
       {
         path: "/auto-ops", icon: BrainCircuit, label: "AI Operations",
@@ -275,7 +275,7 @@ export const navGroups = [
   },
   {
     id: "reports",
-    title: "Reports & Comms",
+    title: "Insights & Communications",
     items: [
       {
         path: "/reports", icon: BarChart3, label: "Reports",
