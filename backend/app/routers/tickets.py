@@ -257,7 +257,7 @@ async def get_ticket_handover(ticket_id: str, hours: int = 0, current_user: dict
 
 
 async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -> dict:
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -1517,6 +1517,7 @@ async def create_child_ticket(ticket_id: str, ticket_data: dict, current_user: d
         tags=ticket_data.get("tags", []),
     )
     child_dict = child.model_dump()
+    child_dict["tenant_id"] = platform_tenant_id(current_user)
     child_dict["created_at"] = child_dict["created_at"].isoformat()
     child_dict["updated_at"] = child_dict["updated_at"].isoformat()
     if child_dict.get("sla_due"):
@@ -1535,7 +1536,10 @@ async def link_ticket(ticket_id: str, link_data: dict, current_user: dict = Depe
     child = await _ticket_in_scope(child_id, current_user, "ticket.link")
     if child.get("client_id") != parent.get("client_id"):
         raise HTTPException(status_code=400, detail="Linked tickets must belong to the same client")
-    await db.tickets.update_one({"id": child_id}, {"$set": {"parent_id": ticket_id}})
+    await db.tickets.update_one(
+        tenant_scoped_query(current_user, {"id": child_id}),
+        {"$set": {"parent_id": ticket_id}},
+    )
     await ticket_audit(ticket_id, current_user, "ticket_linked", f"Linked ticket {child_id}")
     return {"message": "Tickets linked"}
 
