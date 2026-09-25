@@ -6,6 +6,8 @@ Status: initial audit baseline, 2026-08-14. This is a classification document, n
 
 Ticket handover (`GET /tickets/{id}/handover`) is a read-only, ephemeral projection of the authorised parent ticket, tenant-scoped `ticket_comments` and same-client child tickets. It creates no collection, reading receipt, last-view marker or AI summary record. Existing records remain authoritative. Results are bounded and omissions are disclosed; legacy notes missing tenant ownership are not implicitly imported into an explicitly named tenant.
 
+Ticket Context (`GET /ticket-enrichment/{id}`) is a read-only, ephemeral projection of the authorised ticket, same-client ticket records, the linked client and device records, and active contracts. It creates no score, forecast, health value or synthetic activity. Missing client linkage is explicitly marked partial, and all source reads use the caller's platform tenant and client scope.
+
 | Data domain | Authoritative store now | Secondary store | Classification | Reason / retention | Tenant scoped |
 |---|---|---|---|---|---|
 | Ticket labour-type configuration | MongoDB (`labour_types`) | Canonical time entries snapshot the selected label, code and rate | Keep MongoDB | Tenant-owned configuration; archive rather than deleting types referenced by historical work. Rate changes do not rewrite historical time entries. Retention follows the tenant's commercial-record policy. | Yes, server-side tenant scope |

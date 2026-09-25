@@ -50,7 +50,7 @@ def get_sample_ticket_id():
 
 
 class TestTicketEnrichmentAPI:
-    """Tests for the ticket enrichment endpoint - MOCKED AI data"""
+    """Tests for the evidence-only ticket context endpoint."""
     
     def test_ticket_enrichment_endpoint_exists(self):
         """Test that ticket-enrichment endpoint returns 200"""
@@ -72,71 +72,38 @@ class TestTicketEnrichmentAPI:
         ctx = data["client_context"]
         
         # Check required fields
-        required_fields = ["name", "health_score", "open_tickets", "total_tickets_lifetime", 
-                         "total_devices", "offline_devices", "contract_status"]
+        required_fields = ["id", "name", "open_tickets", "total_tickets_lifetime", "total_devices", "offline_devices", "active_contracts"]
         for field in required_fields:
             assert field in ctx, f"Missing {field} in client_context"
         
         # Validate data types
-        assert isinstance(ctx["health_score"], (int, float)), "health_score should be numeric"
         assert isinstance(ctx["open_tickets"], int), "open_tickets should be int"
         assert isinstance(ctx["total_devices"], int), "total_devices should be int"
-        print(f"✓ Client context has all required fields: health_score={ctx['health_score']}, open_tickets={ctx['open_tickets']}")
+        assert isinstance(ctx["active_contracts"], list)
     
-    def test_ticket_enrichment_has_sentiment(self):
-        """Test that enrichment returns sentiment analysis"""
+    def test_ticket_enrichment_declares_record_source(self):
+        """The response identifies its persisted evidence source."""
         headers = get_auth_headers()
         ticket_id = get_sample_ticket_id()
         response = _session.get(f"{BASE_URL}/api/ticket-enrichment/{ticket_id}", headers=headers)
         assert response.status_code == 200
         data = response.json()
         
-        assert "sentiment" in data, "Missing sentiment in enrichment response"
-        sentiment = data["sentiment"]
-        
-        assert "label" in sentiment, "Missing label in sentiment"
-        assert "score" in sentiment, "Missing score in sentiment"
-        assert "reason" in sentiment, "Missing reason in sentiment"
-        
-        assert sentiment["label"] in ["frustrated", "neutral", "positive"], f"Invalid sentiment label: {sentiment['label']}"
-        assert 0 <= sentiment["score"] <= 100, f"Sentiment score out of range: {sentiment['score']}"
-        print(f"✓ Sentiment: {sentiment['label']} (score: {sentiment['score']}) - {sentiment['reason']}")
+        assert data["meta"]["source"] == "ticket_client_device_contract_records"
+        assert data["meta"]["data_status"] in {"current", "partial"}
+        assert "observed_at" in data["meta"]
     
-    def test_ticket_enrichment_has_blast_radius(self):
-        """Test that enrichment returns impact blast radius"""
+    def test_ticket_enrichment_does_not_invent_predictions(self):
+        """Impact and resolution estimates require a verified model."""
         headers = get_auth_headers()
         ticket_id = get_sample_ticket_id()
         response = _session.get(f"{BASE_URL}/api/ticket-enrichment/{ticket_id}", headers=headers)
         assert response.status_code == 200
         data = response.json()
         
-        assert "blast_radius" in data, "Missing blast_radius in enrichment response"
-        blast = data["blast_radius"]
-        
-        assert "affected_users" in blast, "Missing affected_users in blast_radius"
-        assert "affected_services" in blast, "Missing affected_services in blast_radius"
-        assert isinstance(blast["affected_users"], int), "affected_users should be int"
-        assert isinstance(blast["affected_services"], list), "affected_services should be list"
-        print(f"✓ Blast radius: {blast['affected_users']} users, services: {blast['affected_services']}")
-    
-    def test_ticket_enrichment_has_ttr_prediction(self):
-        """Test that enrichment returns TTR (time-to-resolution) prediction"""
-        headers = get_auth_headers()
-        ticket_id = get_sample_ticket_id()
-        response = _session.get(f"{BASE_URL}/api/ticket-enrichment/{ticket_id}", headers=headers)
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "ttr_prediction" in data, "Missing ttr_prediction in enrichment response"
-        ttr = data["ttr_prediction"]
-        
-        assert "predicted_minutes" in ttr, "Missing predicted_minutes in ttr_prediction"
-        assert "confidence" in ttr, "Missing confidence in ttr_prediction"
-        assert "based_on" in ttr, "Missing based_on in ttr_prediction"
-        
-        assert isinstance(ttr["predicted_minutes"], int), "predicted_minutes should be int"
-        assert 0 <= ttr["confidence"] <= 1, f"Confidence out of range: {ttr['confidence']}"
-        print(f"✓ TTR Prediction: {ttr['predicted_minutes']}min ({ttr['confidence']*100:.0f}% confidence) - {ttr['based_on']}")
+        assert "sentiment" not in data
+        assert "blast_radius" not in data
+        assert "ttr_prediction" not in data
     
     def test_ticket_enrichment_has_merge_candidates(self):
         """Test that enrichment returns merge_candidates array"""
@@ -154,10 +121,7 @@ class TestTicketEnrichmentAPI:
         """Test that enrichment handles non-existent ticket gracefully"""
         headers = get_auth_headers()
         response = _session.get(f"{BASE_URL}/api/ticket-enrichment/INVALID-TICKET-ID-999", headers=headers)
-        assert response.status_code == 200, "Should still return 200 for invalid ticket"
-        data = response.json()
-        assert "error" in data or "client_context" in data, "Should return error or empty enrichment"
-        print("✓ Invalid ticket handled gracefully")
+        assert response.status_code == 404
 
 
 class TestPhaseGRegressionEndpoints:
