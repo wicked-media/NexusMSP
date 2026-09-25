@@ -83,9 +83,13 @@ async def update_ticket_numbering(data: dict, current_user: dict = Depends(get_c
     }}, upsert=True)
     return {"message": "Ticket numbering scheme updated"}
 
-async def generate_ticket_number(ticket_type: str) -> str:
+async def generate_ticket_number(
+    ticket_type: str, *, tenant_id: str = "nexus-local"
+) -> str:
     """Generate a ticket number based on the configured scheme"""
-    doc = await db.settings.find_one({"type": "ticket_numbering"}, {"_id": 0})
+    doc = await db.settings.find_one(
+        {"type": "ticket_numbering", "tenant_id": tenant_id}, {"_id": 0}
+    )
     scheme = (doc or {}).get("scheme", DEFAULT_SCHEME)
     pad_digits = (doc or {}).get("pad_digits", 4)
     separator = (doc or {}).get("separator", "-")
@@ -95,7 +99,7 @@ async def generate_ticket_number(ticket_type: str) -> str:
     
     # Count tickets of this type for sequential numbering
     count = await db.ticket_counters.find_one_and_update(
-        {"prefix": prefix},
+        {"tenant_id": tenant_id, "prefix": prefix},
         {"$inc": {"count": 1}},
         upsert=True,
         return_document=True,

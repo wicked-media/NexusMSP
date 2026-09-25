@@ -695,7 +695,9 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     
     # Generate ticket number using configurable scheme
     from app.routers.ticket_suggestions import generate_ticket_number
-    ticket_number = await generate_ticket_number(ticket_data.ticket_type)
+    ticket_number = await generate_ticket_number(
+        ticket_data.ticket_type, tenant_id=platform_tenant_id(current_user)
+    )
     
     ticket = Ticket(
         **ticket_data.model_dump(),
@@ -1498,7 +1500,10 @@ async def get_child_tickets(ticket_id: str, current_user: dict = Depends(get_cur
 async def create_child_ticket(ticket_id: str, ticket_data: dict, current_user: dict = Depends(get_current_user)):
     parent = await _ticket_in_scope(ticket_id, current_user, "ticket.child.create")
     from app.routers.ticket_suggestions import generate_ticket_number
-    child_number = await generate_ticket_number(ticket_data.get("ticket_type", parent.get("ticket_type", "incident")))
+    child_number = await generate_ticket_number(
+        ticket_data.get("ticket_type", parent.get("ticket_type", "incident")),
+        tenant_id=platform_tenant_id(current_user),
+    )
     child = Ticket(
         ticket_number=child_number,
         title=ticket_data.get("title", ""),
