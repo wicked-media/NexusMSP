@@ -14,12 +14,16 @@ import uuid
 from fastapi import HTTPException
 
 from app.database import db
-from app.services.scope_permissions import assert_record_scope
+from app.services.scope_permissions import (
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 from app.services.ticket_time import sync_ticket_time_cache
 
 
 async def _ticket_in_scope(ticket_id: str, current_user: dict, operation: str) -> dict:
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.tickets,
         str(ticket_id),
@@ -33,6 +37,7 @@ async def _audit(ticket_id: str, current_user: dict, action: str, details: str, 
         {
             "id": str(uuid.uuid4()),
             "ticket_id": ticket_id,
+            "tenant_id": platform_tenant_id(current_user),
             "user_id": current_user.get("id", "system"),
             "user_name": current_user.get("name", "System"),
             "action": action,
@@ -92,7 +97,7 @@ async def merge_tickets(
         }
         for collection_name in ("ticket_comments", "ticket_notes", "ticket_attachments", "ticket_time_entries"):
             await db[collection_name].update_many(
-                {"ticket_id": source_id},
+                tenant_scoped_query(current_user, {"ticket_id": source_id}),
                 {"$set": {"ticket_id": primary_id, **provenance}},
             )
         # Canonical billable time lives in ``time_entries``.  Preserve the
@@ -100,7 +105,7 @@ async def merge_tickets(
         # ticket relationship used by totals and invoices.  Legacy
         # ``ticket_time_entries`` above remain visible history only.
         await db.time_entries.update_many(
-            {"ticket_id": source_id, "client_id": primary.get("client_id")},
+            tenant_scoped_query(current_user, {"ticket_id": source_id, "client_id": primary.get("client_id")}),
             {
                 "$set": {
                     "ticket_id": primary_id,
@@ -112,7 +117,7 @@ async def merge_tickets(
         await sync_ticket_time_cache(source_id, database=db, calculated_at=now)
 
         await db.tickets.update_one(
-            {"id": source_id},
+            tenant_scoped_query(current_user, {"id": source_id}),
             {
                 "$set": {
                     "status": "closed",
@@ -147,6 +152,7 @@ async def merge_tickets(
                 "primary_title": primary.get("title", ""),
                 "secondary_title": source.get("title", ""),
                 "client_id": primary.get("client_id"),
+                "tenant_id": platform_tenant_id(current_user),
                 "client_name": primary.get("client_name", ""),
                 "merged_by": current_user.get("name", ""),
                 "merged_by_id": current_user.get("id"),
@@ -157,7 +163,7 @@ async def merge_tickets(
 
     if merged:
         await db.tickets.update_one(
-            {"id": primary_id},
+            tenant_scoped_query(current_user, {"id": primary_id}),
             {
                 "$addToSet": {"merged_from": {"$each": merged}},
                 "$set": {"updated_at": now},
