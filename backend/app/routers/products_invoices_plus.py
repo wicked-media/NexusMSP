@@ -31,7 +31,12 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import evaluate_action_permission, require_action
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_client_scope, assert_global_scope
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_tenant_record_scope,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -415,8 +420,13 @@ async def delete_kit(kit_id: str, current_user: dict = Depends(get_current_user)
 )
 async def apply_kit_to_ticket(ticket_id: str, kit_id: str, current_user: dict = Depends(get_current_user)):
     await _require_catalogue_pricing_permission(current_user)
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t: raise HTTPException(404, "ticket not found")
+    t = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.billing.quote_advisory",
+        resource_name="Ticket",
+    )
     client = await _load_scoped_client(
         t.get("client_id"),
         current_user,
@@ -889,8 +899,13 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not t: raise HTTPException(404, "ticket not found")
     # Signals
-    comments = await db.ticket_comments.count_documents({"ticket_id": ticket_id})
-    timelog = await db.time_entries.find({"ticket_id": ticket_id}, {"_id": 0, "duration_minutes": 1}).to_list(100)
+    comments = await db.ticket_comments.count_documents(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id})
+    )
+    timelog = await db.time_entries.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"_id": 0, "duration_minutes": 1},
+    ).to_list(100)
     mins = sum(int(e.get("duration_minutes") or 0) for e in timelog)
     text = f"{t.get('title','')} {t.get('description','')}"
     keyword_hits = sum(1 for kw in ["install", "migrate", "deploy", "setup", "onboard", "upgrade", "refresh", "replace", "procure", "license", "project"] if kw in text.lower())
@@ -906,7 +921,10 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     elif keyword_hits >= 1: score += 10
 
     # Existing quote/estimate?
-    existing = await db.estimates.find_one({"ticket_id": ticket_id}, {"_id": 0, "id": 1})
+    existing = await db.estimates.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"_id": 0, "id": 1},
+    )
     if existing:
         signals.append("Estimate already exists")
         return {"should_quote": False, "score": score, "existing_estimate_id": existing["id"], "signals": signals}

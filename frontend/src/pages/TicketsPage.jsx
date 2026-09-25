@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
-import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
 import TicketDeviceList from "@/components/tickets/TicketDeviceList";
@@ -2342,9 +2341,6 @@ export default function TicketsPage() {
             fetchTickets();
           }}
         />
-
-        {/* Finance Intel: Quote Nudge banner */}
-        <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
 
         {!ticketFocusMode && <TicketElevateEvidence ticket={viewingTicket} headers={headers} />}
 
