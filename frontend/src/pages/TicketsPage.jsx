@@ -25,7 +25,6 @@ import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
   GroupBySelector, useGroupedTickets,
 } from "@/components/tickets/TicketRow";
-import AICopilotStrip from "@/components/tickets/AICopilotStrip";
 import TicketRequestRecord from "@/components/tickets/TicketRequestRecord";
 import TicketHandoverDialog from "@/components/tickets/TicketHandoverDialog";
 import TicketResolutionReviewDialog from "@/components/tickets/TicketResolutionReviewDialog";
@@ -179,7 +178,7 @@ export default function TicketsPage() {
   const [handoverOpen, setHandoverOpen] = useState(false);
   const panelVisible = {
     serviceTier: !ticketFocusMode, aiAnalysis: true, related: !ticketFocusMode,
-    enrichment: !ticketFocusMode, copilot: true, burndown: !ticketFocusMode, workflow: true,
+    enrichment: !ticketFocusMode, burndown: !ticketFocusMode, workflow: true,
     cockpit: true, runScripts: true, quickActions: false, devicePanel: true,
   };
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -2153,33 +2152,7 @@ export default function TicketsPage() {
           busy={resolutionProcessing}
         />
 
-        {/* The briefing is intentionally adjacent to the ticket header: it
-            answers "what matters next?" before the technician enters the
-            wider workflow, related-record and diagnostic context. */}
-        {panelVisible.copilot && (
-          <AICopilotStrip
-            key={`briefing-${viewingTicket.id}`}
-            ticket={viewingTicket}
-            deviceStatus={deviceStatus}
-            headers={headers}
-            onActionClick={(target) => {
-              if (["reply", "note", "ack"].includes(target)) {
-                setDetailTab("conversation");
-                setConversationType(target === "note" ? "note" : "public");
-                setComposerFocusRequest(request => request + 1);
-                window.requestAnimationFrame(() => conversationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
-              }
-              else if (["escalate", "reboot", "blocker"].includes(target)) setToolsOpen(true);
-              else if (target === "csat") { axios.post(`${API}/tickets/${viewingTicket.id}/send-csat`, {}, { headers }).then(() => toast.success("CSAT sent")).catch(e => toast.error(e.response?.data?.detail || "Failed")); }
-              else if (target === "assign") { try { document.querySelector('[data-testid="ticket-assignee-select"]')?.click(); } catch { /* noop */ } }
-              else if (target === "wol") axios.post(`${API}/tickets/${viewingTicket.id}/device/wol`, {}, { headers }).then(r => toast(r.data?.message || "Logged")).catch(() => {});
-              else if (target === "patches") axios.post(`${API}/tickets/${viewingTicket.id}/device/install-patches`, {}, { headers }).then(() => toast.success("Patch install started")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
-              else if (target === "checks") axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
-            }}
-          />
-        )}
-
-        {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, briefing, SLA and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
+        {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, SLA and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
 
         <TicketServiceKitPanel
           ticket={viewingTicket}
