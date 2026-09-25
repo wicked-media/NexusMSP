@@ -73,7 +73,7 @@ def test_device_chat_dependency_enforces_device_record_scope(monkeypatch):
     assert captured["kwargs"]["resource_name"] == "Device"
 
 
-def test_ticket_attachment_dependency_enforces_ticket_record_scope(monkeypatch):
+def test_ticket_attachment_dependency_enforces_ticket_tenant_scope(monkeypatch):
     collection = object()
     captured = {}
 
@@ -81,7 +81,7 @@ def test_ticket_attachment_dependency_enforces_ticket_record_scope(monkeypatch):
         captured.update(user=user, collection=selected_collection, record_id=record_id, kwargs=kwargs)
 
     monkeypatch.setattr(ticket_attachments, "db", SimpleNamespace(tickets=collection))
-    monkeypatch.setattr(ticket_attachments, "assert_record_scope", capture_scope)
+    monkeypatch.setattr(ticket_attachments, "assert_tenant_record_scope", capture_scope)
 
     asyncio.run(ticket_attachments._enforce_ticket_scope(_request("ticket_id", "ticket-1"), {"id": "tech-1"}))
 

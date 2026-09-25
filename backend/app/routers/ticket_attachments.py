@@ -1,13 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from fastapi.responses import Response
-from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import os
 from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_record_scope
+from app.services.scope_permissions import assert_tenant_record_scope, tenant_scoped_query
 from app.services.upload_quarantine import (
     UploadQuarantineFailure,
     discard_upload,
@@ -27,7 +26,7 @@ from app.services.supabase_storage import archive_record_artifact, delete_artifa
 async def _enforce_ticket_scope(request: Request, current_user: dict = Depends(get_current_user)):
     ticket_id = request.path_params.get("ticket_id")
     if ticket_id:
-        await assert_record_scope(
+        await assert_tenant_record_scope(
             current_user, db.tickets, ticket_id, request=request,
             operation=f"ticket_attachment:{request.method.lower()}", resource_name="Ticket",
         )
@@ -87,6 +86,7 @@ async def store_ticket_attachment(
     attachment = {
         "id": attachment_id,
         "ticket_id": ticket["id"],
+        "tenant_id": ticket.get("tenant_id") or "nexus-local",
         "client_id": ticket.get("client_id") or None,
         "filename": safe_original_filename(filename),
         "stored_filename": stored_filename,
@@ -122,6 +122,7 @@ async def store_ticket_attachment(
             "entity_id": attachment_id,
             "entity_name": attachment["filename"],
             "ticket_id": ticket["id"],
+            "tenant_id": attachment["tenant_id"],
             "client_id": ticket.get("client_id") or None,
             "user_id": uploaded_by,
             "user_name": uploaded_by_name,
@@ -150,7 +151,7 @@ async def store_ticket_attachment(
 async def get_ticket_attachments(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Get all attachments for a ticket"""
     attachments = await db.ticket_attachments.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
     ).sort("created_at", -1).to_list(100)
     return [_attachment_response(attachment) for attachment in attachments]
 
@@ -158,7 +159,10 @@ async def get_ticket_attachments(ticket_id: str, current_user: dict = Depends(ge
 @router.post("/tickets/{ticket_id}/attachments", dependencies=[Depends(require_action("ticket.attachment.upload"))])
 async def upload_ticket_attachment(ticket_id: str, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     """Upload an attachment to a ticket"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0, "id": 1, "tenant_id": 1, "client_id": 1, "ticket_number": 1})
+    ticket = await db.tickets.find_one(
+        tenant_scoped_query(current_user, {"id": ticket_id}),
+        {"_id": 0, "id": 1, "tenant_id": 1, "client_id": 1, "ticket_number": 1},
+    )
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -175,7 +179,9 @@ async def upload_ticket_attachment(ticket_id: str, file: UploadFile = File(...),
 @router.get("/tickets/{ticket_id}/attachments/{attachment_id}/download")
 async def download_ticket_attachment(ticket_id: str, attachment_id: str, current_user: dict = Depends(get_current_user)):
     """Serve a retained attachment only after ticket scope has been enforced."""
-    attachment = await db.ticket_attachments.find_one({"id": attachment_id, "ticket_id": ticket_id}, {"_id": 0})
+    attachment = await db.ticket_attachments.find_one(
+        tenant_scoped_query(current_user, {"id": attachment_id, "ticket_id": ticket_id}), {"_id": 0}
+    )
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
     if not upload_is_releasable(attachment):
@@ -203,6 +209,7 @@ async def download_ticket_attachment(ticket_id: str, attachment_id: str, current
         "entity_id": attachment_id,
         "entity_name": filename,
         "ticket_id": ticket_id,
+        "tenant_id": attachment.get("tenant_id") or "nexus-local",
         "client_id": attachment.get("client_id"),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),
@@ -223,7 +230,9 @@ async def download_ticket_attachment(ticket_id: str, attachment_id: str, current
 @router.delete("/tickets/{ticket_id}/attachments/{attachment_id}", dependencies=[Depends(require_action("ticket.attachment.delete"))])
 async def delete_ticket_attachment(ticket_id: str, attachment_id: str, current_user: dict = Depends(get_current_user)):
     """Delete a ticket attachment"""
-    att = await db.ticket_attachments.find_one({"id": attachment_id, "ticket_id": ticket_id}, {"_id": 0})
+    att = await db.ticket_attachments.find_one(
+        tenant_scoped_query(current_user, {"id": attachment_id, "ticket_id": ticket_id}), {"_id": 0}
+    )
     if not att:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
@@ -240,7 +249,7 @@ async def delete_ticket_attachment(ticket_id: str, attachment_id: str, current_u
         if os.path.isfile(filepath):
             os.remove(filepath)
 
-    await db.ticket_attachments.delete_one({"id": attachment_id})
+    await db.ticket_attachments.delete_one(tenant_scoped_query(current_user, {"id": attachment_id}))
     await db.audit_logs.insert_one({
         "id": str(uuid.uuid4()),
         "action": "ticket_attachment_deleted",
@@ -248,6 +257,7 @@ async def delete_ticket_attachment(ticket_id: str, attachment_id: str, current_u
         "entity_id": attachment_id,
         "entity_name": att.get("filename") or attachment_id,
         "ticket_id": ticket_id,
+        "tenant_id": att.get("tenant_id") or "nexus-local",
         "client_id": att.get("client_id"),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name") or current_user.get("email") or current_user.get("id"),

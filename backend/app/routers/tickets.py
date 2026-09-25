@@ -18,7 +18,6 @@ from app.services.action_permissions import assert_action_permission, require_ac
 from app.services.labour_types import labour_snapshot, resolve_labour_type
 from app.services.scope_permissions import (
     assert_client_scope,
-    assert_record_scope,
     assert_tenant_record_scope,
     platform_tenant_id,
     scoped_query,
@@ -1760,7 +1759,7 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
     if attachment_ids:
         from app.services.supabase_storage import read_artifact
         attachments = await db.ticket_attachments.find(
-            {"ticket_id": ticket_id, "id": {"$in": attachment_ids}}, {"_id": 0}
+            tenant_scoped_query(current_user, {"ticket_id": ticket_id, "id": {"$in": attachment_ids}}), {"_id": 0}
         ).to_list(len(attachment_ids))
         by_id = {attachment.get("id"): attachment for attachment in attachments}
         missing = [attachment_id for attachment_id in attachment_ids if attachment_id not in by_id]
