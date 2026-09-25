@@ -42,31 +42,22 @@ class TestDashboardBuilder(TestAuth):
         # Should have layouts array
         assert "layouts" in data
         assert isinstance(data["layouts"], list)
-        assert len(data["layouts"]) >= 3, "Should have at least 3 default layouts"
+        # No tenant data is fabricated when a technician has not saved a layout.
         
         # Should have widget catalog
         assert "available_widgets" in data
         assert isinstance(data["available_widgets"], list)
         assert len(data["available_widgets"]) >= 12, "Should have at least 12 widget types"
         
-        # Check first layout structure
-        layout = data["layouts"][0]
-        assert "layout_id" in layout
-        assert "name" in layout
-        assert "widgets" in layout
-        assert "columns" in layout
+        assert data["meta"]["data_status"] in {"current", "empty"}
+        assert data["meta"]["creates_sample_data"] is False
         print(f"✓ Dashboard Builder: {len(data['layouts'])} layouts, {len(data['available_widgets'])} widget types")
     
     def test_get_specific_layout(self, headers):
         """GET /api/dashboard-builder/layout/{layout_id} - Get specific layout"""
-        response = requests.get(f"{BASE_URL}/api/dashboard-builder/layout/default-ops", headers=headers)
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "layout_id" in data
-        assert "widgets" in data
-        assert isinstance(data["widgets"], list)
-        print(f"✓ Dashboard Builder: Retrieved layout '{data.get('name', 'N/A')}' with {len(data['widgets'])} widgets")
+        # A missing layout must be a clear 404 rather than a generated dashboard.
+        response = requests.get(f"{BASE_URL}/api/dashboard-builder/layout/missing-layout", headers=headers)
+        assert response.status_code == 404
     
     def test_save_layout(self, headers):
         """POST /api/dashboard-builder/layout - Save new layout"""
@@ -88,7 +79,14 @@ class TestDashboardBuilder(TestAuth):
     
     def test_delete_layout(self, headers):
         """DELETE /api/dashboard-builder/layout/{layout_id} - Remove layout"""
-        response = requests.delete(f"{BASE_URL}/api/dashboard-builder/layout/TEST-phase-g-layout", headers=headers)
+        created = requests.post(f"{BASE_URL}/api/dashboard-builder/layout", json={
+            "name": "Disposable dashboard layout",
+            "widgets": [],
+            "columns": 3,
+        }, headers=headers)
+        assert created.status_code == 200
+        layout_id = created.json()["layout_id"]
+        response = requests.delete(f"{BASE_URL}/api/dashboard-builder/layout/{layout_id}", headers=headers)
         assert response.status_code == 200
         data = response.json()
         assert data.get("status") == "deleted"
