@@ -2486,6 +2486,10 @@ export default function TicketsPage() {
 
               {/* AI SUGGESTIONS TAB */}
               <TabsContent value="suggestions" className="space-y-4">
+                <div className="flex items-start gap-2 rounded-xl border border-sky-500/15 bg-sky-500/[0.035] px-3 py-2.5 text-xs text-muted-foreground">
+                  <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
+                  <p>Historical Matches uses recorded resolutions from this client and authorised knowledge articles. Review the source record before reusing a fix.</p>
+                </div>
                 {suggestionsLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="w-6 h-6 animate-spin text-primary mr-2" />
@@ -2507,7 +2511,7 @@ export default function TicketsPage() {
                     <div>
                       <div className="flex items-center gap-2 mb-2">
                         <Sparkles className="w-4 h-4 text-amber-400" />
-                        <h4 className="text-sm font-semibold">Similar Resolved Tickets ({suggestions.similar_tickets?.length || 0})</h4>
+                        <h4 className="text-sm font-semibold">Same-client resolved tickets ({suggestions.similar_tickets?.length || 0})</h4>
                       </div>
                       {suggestions.similar_tickets?.length > 0 ? (
                         <ScrollArea className="h-[220px]">
