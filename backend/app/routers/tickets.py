@@ -820,7 +820,9 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
         cl = old_ticket.get("blueprint_checklist") or []
         missing_items = [c.get("label") for c in cl if c.get("required") and not c.get("done")]
         # Resolve required worksheet field labels too
-        bp = await db.blueprints.find_one({"id": old_ticket.get("blueprint_id")}, {"_id": 0, "fields": 1}) if old_ticket.get("blueprint_id") else None
+        bp = await db.blueprints.find_one(
+            tenant_scoped_query(current_user, {"id": old_ticket.get("blueprint_id")}), {"_id": 0, "fields": 1}
+        ) if old_ticket.get("blueprint_id") else None
         required_fields = [f for f in ((bp or {}).get("fields") or []) if f.get("required")]
         fvals = old_ticket.get("blueprint_fields") or {}
         missing_fields = [f["label"] for f in required_fields if not str(fvals.get(f["key"], "") or "").strip()]
@@ -832,7 +834,7 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     # Resolve device name if device_id changed
     if 'device_id' in ticket_data and ticket_data['device_id']:
         device = await db.devices.find_one(
-            {"id": ticket_data['device_id'], "client_id": target_client_id},
+            tenant_scoped_query(current_user, {"id": ticket_data['device_id'], "client_id": target_client_id}),
             {"_id": 0, "name": 1},
         )
         if not device:
@@ -843,7 +845,7 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     if "device_ids" in ticket_data:
         requested_device_ids = list(dict.fromkeys(ticket_data.get("device_ids") or []))
         found_devices = await db.devices.find(
-            {"id": {"$in": requested_device_ids}, "client_id": target_client_id},
+            tenant_scoped_query(current_user, {"id": {"$in": requested_device_ids}, "client_id": target_client_id}),
             {"_id": 0, "id": 1, "name": 1},
         ).to_list(500) if requested_device_ids else []
         devices_by_id = {device["id"]: device for device in found_devices}
@@ -863,17 +865,17 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
             ticket_data['assigned_at'] = datetime.now(timezone.utc).isoformat()
         else:
             ticket_data['assigned_name'] = None
-    ticket_update_query = {"id": ticket_id}
+    ticket_update_filter = {"id": ticket_id}
     if target_client_id != old_ticket.get("client_id"):
         # Automation note creation keeps a brief, parent-document lock while
         # it writes a separate child note. A client move must race safely with
         # that action rather than splitting the ticket and its audit evidence
         # across customer scopes.
-        ticket_update_query.update({
+        ticket_update_filter.update({
             "client_id": old_ticket.get("client_id"),
             "automation_note_lock": {"$exists": False},
         })
-    result = await db.tickets.update_one(ticket_update_query, {"$set": ticket_data})
+    result = await db.tickets.update_one(tenant_scoped_query(current_user, ticket_update_filter), {"$set": ticket_data})
     if result.matched_count == 0:
         if target_client_id != old_ticket.get("client_id"):
             raise HTTPException(
@@ -903,6 +905,7 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
                     survey_id = _uuid.uuid4().hex
                     await db.csat_surveys.insert_one({
                         "id": survey_id,
+                        "tenant_id": platform_tenant_id(current_user),
                         "ticket_id": ticket_id,
                         "ticket_number": old_ticket.get("ticket_number"),
                         "client_id": old_ticket.get("client_id"),
@@ -913,12 +916,15 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
                         "sent_by_id": "system",
                         "sent_by_name": "Auto-CSAT (on close)",
                     })
-                    await db.tickets.update_one({"id": ticket_id}, {"$set": {"csat_sent": True, "csat_sent_at": datetime.now(timezone.utc).isoformat()}})
+                    await db.tickets.update_one(
+                        tenant_scoped_query(current_user, {"id": ticket_id}),
+                        {"$set": {"csat_sent": True, "csat_sent_at": datetime.now(timezone.utc).isoformat()}},
+                    )
         except Exception as e:
             logger.warning(f"Auto-CSAT failed for {ticket_id}: {e}")
     # Return the persisted record so every client surface immediately reflects
     # lifecycle automation (in particular resolved -> closed) without a stale UI state.
-    updated_ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+    updated_ticket = await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
     return {"message": "Ticket updated", "ticket": updated_ticket}
 
 @router.post("/tickets/{ticket_id}/devices")
@@ -929,7 +935,7 @@ async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Dep
         raise HTTPException(status_code=400, detail="device_id required")
     ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.device.link")
     device = await db.devices.find_one(
-        {"id": device_id, "client_id": ticket.get("client_id")},
+        tenant_scoped_query(current_user, {"id": device_id, "client_id": ticket.get("client_id")}),
         {"_id": 0, "name": 1, "id": 1},
     )
     if not device:
@@ -942,7 +948,7 @@ async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Dep
         return {"message": "Device already linked", "device_ids": device_ids}
     device_ids.append(device_id)
     # Refresh names parallel array
-    cursor = db.devices.find({"id": {"$in": device_ids}}, {"_id": 0, "id": 1, "name": 1})
+    cursor = db.devices.find(tenant_scoped_query(current_user, {"id": {"$in": device_ids}}), {"_id": 0, "id": 1, "name": 1})
     id_to_name = {}
     async for d in cursor:
         id_to_name[d["id"]] = d.get("name") or d["id"]
@@ -956,7 +962,7 @@ async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Dep
     if not ticket.get("device_id"):
         update["device_id"] = device_id
         update["device_name"] = device.get("name") or device_id
-    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": update})
     await ticket_audit(ticket_id, current_user, "device_linked", f"Linked device {device.get('name') or device_id}")
     return {"message": "Device linked", "device_ids": device_ids, "device_names": device_names}
 
@@ -971,7 +977,7 @@ async def remove_ticket_device(ticket_id: str, device_id: str, current_user: dic
     if device_id not in device_ids:
         raise HTTPException(status_code=404, detail="Device not linked to this ticket")
     device_ids = [d for d in device_ids if d != device_id]
-    cursor = db.devices.find({"id": {"$in": device_ids}}, {"_id": 0, "id": 1, "name": 1}) if device_ids else None
+    cursor = db.devices.find(tenant_scoped_query(current_user, {"id": {"$in": device_ids}}), {"_id": 0, "id": 1, "name": 1}) if device_ids else None
     id_to_name = {}
     if cursor:
         async for d in cursor:
@@ -990,7 +996,7 @@ async def remove_ticket_device(ticket_id: str, device_id: str, current_user: dic
         else:
             update["device_id"] = None
             update["device_name"] = None
-    await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": update})
     await ticket_audit(ticket_id, current_user, "device_unlinked", f"Unlinked device {device_id}")
     return {"message": "Device unlinked", "device_ids": device_ids, "device_names": device_names}
 
@@ -998,9 +1004,9 @@ async def remove_ticket_device(ticket_id: str, device_id: str, current_user: dic
 @router.delete("/tickets/{ticket_id}")
 async def delete_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.delete")
-    await db.clients.update_one({"id": ticket['client_id']}, {"$inc": {"ticket_count": -1}})
+    await db.clients.update_one(tenant_scoped_query(current_user, {"id": ticket['client_id']}), {"$inc": {"ticket_count": -1}})
     await log_activity(current_user, "deleted", "ticket", ticket_id, ticket.get("title", ""), f"Deleted ticket {ticket.get('ticket_number', '')}")
-    result = await db.tickets.delete_one({"id": ticket_id})
+    result = await db.tickets.delete_one(tenant_scoped_query(current_user, {"id": ticket_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"message": "Ticket deleted"}
@@ -1675,9 +1681,9 @@ async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_
     # once at read time so existing history remains visible while all new
     # records are written to ``ticket_audit_log``.
     current, legacy, central = await asyncio.gather(
-        db.ticket_audit_log.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
-        db.ticket_audit.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
-        db.audit_logs.find({"ticket_id": ticket_id}, {"_id": 0}).to_list(500),
+        db.ticket_audit_log.find(tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}).to_list(500),
+        db.ticket_audit.find(tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}).to_list(500),
+        db.audit_logs.find(tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}).to_list(500),
     )
     entries_by_id = {
         entry.get("id"): _ticket_audit_display_entry(entry)
