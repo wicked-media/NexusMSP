@@ -32,7 +32,12 @@ import uuid
 from app.database import db
 from app.auth import get_current_user
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_client_scope, assert_record_scope
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -138,13 +143,13 @@ def _validate_child_templates(items):
 @router.get("/blueprints")
 async def list_blueprints(active_only: bool = True, current_user: dict = Depends(get_current_user)):
     q = {"active": True} if active_only else {}
-    items = await db.blueprints.find(q, {"_id": 0}).sort("name", 1).to_list(500)
+    items = await db.blueprints.find(tenant_scoped_query(current_user, q), {"_id": 0}).sort("name", 1).to_list(500)
     return items
 
 
 @router.get("/blueprints/{bp_id}")
 async def get_blueprint(bp_id: str, current_user: dict = Depends(get_current_user)):
-    doc = await db.blueprints.find_one({"id": bp_id}, {"_id": 0})
+    doc = await db.blueprints.find_one(tenant_scoped_query(current_user, {"id": bp_id}), {"_id": 0})
     if not doc:
         raise HTTPException(404, "Blueprint not found")
     return doc
@@ -173,6 +178,7 @@ async def create_blueprint(data: dict, current_user: dict = Depends(get_current_
         "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("name"),
+        "tenant_id": platform_tenant_id(current_user),
     }
     await db.blueprints.insert_one(doc)
     doc.pop("_id", None)
@@ -310,10 +316,12 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
     bp_id = data.get("blueprint_id")
     if not bp_id:
         raise HTTPException(400, "blueprint_id required")
-    bp = await db.blueprints.find_one({"id": bp_id, "active": True}, {"_id": 0})
+    bp = await db.blueprints.find_one(
+        tenant_scoped_query(current_user, {"id": bp_id, "active": True}), {"_id": 0}
+    )
     if not bp:
         raise HTTPException(404, "Blueprint not found or inactive")
-    ticket = await assert_record_scope(
+    ticket = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -323,7 +331,7 @@ async def apply_blueprint(ticket_id: str, data: dict, current_user: dict = Depen
     _hydrate_ticket_with_blueprint(ticket, bp)
     ticket["blueprint_applied_at"] = datetime.now(timezone.utc).isoformat()
     ticket["blueprint_applied_by"] = current_user.get("name")
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {k: ticket[k] for k in (
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {k: ticket[k] for k in (
         "priority", "category", "status", "assignee_id", "sla_minutes",
         "blueprint_id", "blueprint_name", "blueprint_require_completion",
         "blueprint_fields", "blueprint_checklist",
