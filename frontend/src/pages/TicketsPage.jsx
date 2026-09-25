@@ -175,7 +175,7 @@ export default function TicketsPage() {
   const [ticketFocusMode, setTicketFocusMode] = useState(true);
   const [handoverOpen, setHandoverOpen] = useState(false);
   const panelVisible = {
-    serviceTier: !ticketFocusMode, aiAnalysis: true, related: !ticketFocusMode,
+    serviceTier: !ticketFocusMode, related: !ticketFocusMode,
     burndown: !ticketFocusMode, workflow: true,
     cockpit: true, runScripts: true, quickActions: false, devicePanel: true,
   };
@@ -207,9 +207,10 @@ export default function TicketsPage() {
   const [cannedResponses, setCannedResponses] = useState([]);
   const [suggestions, setSuggestions] = useState(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  // The former diagnostic panel is retired from the ticket workflow.
+  const aiAnalysis = null;
+  const setAiAnalysis = () => {};
   // AI enhanced features
-  const [aiAnalysis, setAiAnalysis] = useState(null);
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [proofreadResult, setProofreadResult] = useState(null);
   const [proofreadLoading, setProofreadLoading] = useState(false);
   const [scripts, setScripts] = useState([]);
@@ -2016,21 +2017,6 @@ export default function TicketsPage() {
   };
 
 
-  // AI Analysis
-  const handleAiAnalysis = async () => {
-    if (!viewingTicket) return;
-    setAiAnalyzing(true);
-    try {
-      const res = await axios.post(`${API}/ai/analyze-device`, {
-        device_id: viewingTicket.device_id || "",
-        ticket_title: viewingTicket.title,
-        ticket_description: viewingTicket.description,
-      }, { headers });
-      setAiAnalysis(res.data);
-    } catch { toast.error("AI analysis failed"); }
-    finally { setAiAnalyzing(false); }
-  };
-
   // Proofread text
   const handleProofread = async (text, target) => {
     if (!text || text.length < 3) return;
@@ -2273,15 +2259,6 @@ export default function TicketsPage() {
           onOpenChange={setToolsOpen}
           ticket={viewingTicket}
           sections={[
-            {
-              id: "ai",
-              title: "AI assistance",
-              description: "One focused diagnostic action. Ticket summaries remain in the main ticket header.",
-              icon: Sparkles,
-              content: <>
-                <TicketToolAction icon={Brain} title="AI diagnosis" description="Analyse likely cause, severity, and recommended next steps." busy={aiAnalyzing} onClick={handleAiAnalysis} testId="tools-ai-diagnose" />
-              </>,
-            },
             {
               id: "work",
               title: "Ticket actions",
