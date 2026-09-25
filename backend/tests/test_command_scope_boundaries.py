@@ -365,3 +365,16 @@ def test_ticket_maintenance_cannot_target_device_from_another_client(monkeypatch
 
     assert denied.value.status_code == 404
     assert database.maintenance_windows.inserted == []
+
+
+def test_ticket_blocker_must_be_visible_and_in_the_same_client(monkeypatch):
+    database = _Database()
+    _install_database(monkeypatch, database)
+
+    with pytest.raises(HTTPException) as denied:
+        asyncio.run(ticket_workflow.block_ticket_on(
+            "ticket-a", {"blocking_ticket_id": "ticket-b"}, current_user=_restricted_operator()
+        ))
+
+    assert denied.value.status_code == 404
+    assert database.tickets.update_calls == []

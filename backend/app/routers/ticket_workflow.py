@@ -15,7 +15,7 @@ from app.database import db
 from app.routers.auth import get_current_user
 from app.routers.nexus_agent import require_agent_operator
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_record_scope
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 
 MAINTENANCE_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
@@ -27,13 +27,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _audit(ticket_id: str, user: dict, action: str, details: str):
+async def _ticket_in_scope(ticket_id: str, user: dict, operation: str) -> dict:
+    return await assert_tenant_record_scope(
+        user,
+        db.tickets,
+        ticket_id,
+        operation=operation,
+        resource_name="Ticket",
+    )
+
+
+async def _audit(ticket_id: str, user: dict, action: str, details: str, *, tenant_id: str | None = None):
     # The ticket detail Audit tab is backed by ticket_audit_log.  Keep workflow
     # events in that canonical collection so technicians see the full story in
     # one place instead of having to infer actions from a separate activity view.
     await db.ticket_audit_log.insert_one({
         "id": uuid.uuid4().hex,
         "ticket_id": ticket_id,
+        "tenant_id": tenant_id or platform_tenant_id(user),
         "user_id": user.get("id"),
         "user_name": user.get("name"),
         "action": action,
@@ -49,10 +60,11 @@ async def block_ticket_on(ticket_id: str, payload: dict = Body(...), current_use
     blocking_id = payload.get("blocking_ticket_id")
     if not blocking_id or blocking_id == ticket_id:
         raise HTTPException(400, "blocking_ticket_id required and must differ from ticket_id")
-    blocker = await db.tickets.find_one({"id": blocking_id}, {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1})
-    if not blocker:
-        raise HTTPException(404, "Blocking ticket not found")
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.block_on")
+    blocker = await _ticket_in_scope(blocking_id, current_user, "ticket.block_on")
+    if blocker.get("client_id") != ticket.get("client_id"):
+        raise HTTPException(409, "Blocking tickets must belong to the same client")
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {
         "blocked_by_ticket_id": blocking_id,
         "blocked_by_ticket_number": blocker.get("ticket_number"),
         "updated_at": _now(),
@@ -63,7 +75,8 @@ async def block_ticket_on(ticket_id: str, payload: dict = Body(...), current_use
 
 @router.delete("/tickets/{ticket_id}/block-on")
 async def unblock_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    await db.tickets.update_one({"id": ticket_id}, {"$unset": {
+    await _ticket_in_scope(ticket_id, current_user, "ticket.block_on.remove")
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$unset": {
         "blocked_by_ticket_id": "",
         "blocked_by_ticket_number": "",
     }, "$set": {"updated_at": _now()}})
@@ -88,7 +101,8 @@ async def convert_to_change(ticket_id: str, payload: dict = Body(default={}), cu
         "change_planned_duration_min": payload.get("planned_duration_min") or 60,
         "updated_at": _now(),
     }
-    res = await db.tickets.update_one({"id": ticket_id}, {"$set": update})
+    await _ticket_in_scope(ticket_id, current_user, "ticket.change.convert")
+    res = await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Ticket not found")
     await _audit(ticket_id, current_user, "converted_to_change", f"risk={risk}")
@@ -115,17 +129,11 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
     except Exception:
         raise HTTPException(400, "start must be valid ISO datetime")
 
-    ticket = await assert_record_scope(
-        current_user,
-        db.tickets,
-        ticket_id,
-        operation="ticket.maintenance.schedule",
-        resource_name="Ticket",
-    )
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.maintenance.schedule")
     device_id = device_id or ticket.get("device_id") or ""
     if not device_id:
         raise HTTPException(400, "Link a device to the ticket before scheduling maintenance")
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user,
         db.devices,
         device_id,
@@ -144,6 +152,7 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
 
     window = {
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(current_user),
         "ticket_id": ticket_id,
         "parent_ticket_id": ticket_id,
         "device_id": device_id,
@@ -170,7 +179,7 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
     }
     await db.maintenance_windows.insert_one(dict(window))
     window.pop("_id", None)
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {
+    await db.tickets.update_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"$set": {
         "maintenance_window_id": window["id"],
         "maintenance_start": window["start"],
         "maintenance_end": window["end"],
@@ -183,15 +192,9 @@ async def schedule_maintenance(ticket_id: str, payload: dict = Body(...), curren
 
 @router.get("/tickets/{ticket_id}/maintenance-window")
 async def get_maintenance_window(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    ticket = await assert_record_scope(
-        current_user,
-        db.tickets,
-        ticket_id,
-        operation="ticket.maintenance.read",
-        resource_name="Ticket",
-    )
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.maintenance.read")
     return await db.maintenance_windows.find_one(
-        {"ticket_id": ticket_id, "client_id": ticket.get("client_id")}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id, "client_id": ticket.get("client_id")}), {"_id": 0}
     )
 
 
@@ -201,19 +204,14 @@ async def get_maintenance_window(ticket_id: str, current_user: dict = Depends(ge
 async def send_csat(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Generate a CSAT survey link for the ticket and log that it was sent.
     Actual email delivery is best-effort via the existing email layer."""
-    ticket = await assert_record_scope(
-        current_user,
-        db.tickets,
-        ticket_id,
-        operation="ticket_workflow.send_csat",
-        resource_name="Ticket",
-    )
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket_workflow.send_csat")
     if not ticket.get("contact_email") and not ticket.get("requester_email"):
         raise HTTPException(400, "Ticket has no contact email")
 
     survey_id = uuid.uuid4().hex
     survey = {
         "id": survey_id,
+        "tenant_id": platform_tenant_id(current_user),
         "ticket_id": ticket_id,
         "ticket_number": ticket.get("ticket_number"),
         "client_id": ticket.get("client_id"),
@@ -225,7 +223,10 @@ async def send_csat(ticket_id: str, current_user: dict = Depends(get_current_use
         "sent_by_name": current_user.get("name"),
     }
     await db.csat_surveys.insert_one(dict(survey))
-    await db.tickets.update_one({"id": ticket_id}, {"$set": {"csat_sent": True, "csat_sent_at": survey["sent_at"]}})
+    await db.tickets.update_one(
+        tenant_scoped_query(current_user, {"id": ticket_id}),
+        {"$set": {"csat_sent": True, "csat_sent_at": survey["sent_at"]}},
+    )
     await _audit(ticket_id, current_user, "csat_sent", f"to {survey['contact_email']}")
     survey.pop("_id", None)
     return {"success": True, "survey": survey}
@@ -254,7 +255,13 @@ async def respond_csat(survey_id: str, payload: dict = Body(...)):
     }})
     if res.matched_count == 0:
         raise HTTPException(409, "Survey was already answered")
-    await _audit(survey.get("ticket_id"), {"id": None, "name": "Client survey respondent"}, "csat_responded", f"Submitted {score}/5 CSAT feedback")
+    await _audit(
+        survey.get("ticket_id"),
+        {"id": None, "name": "Client survey respondent"},
+        "csat_responded",
+        f"Submitted {score}/5 CSAT feedback",
+        tenant_id=survey.get("tenant_id") or "nexus-local",
+    )
     return {"success": True}
 
 
@@ -263,9 +270,7 @@ async def respond_csat(survey_id: str, payload: dict = Body(...)):
 @router.get("/tickets/{ticket_id}/burndown")
 async def ticket_burndown(ticket_id: str, current_user: dict = Depends(get_current_user)):
     """Returns elapsed vs SLA target so the UI can render a burn-down bar."""
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t:
-        raise HTTPException(404, "Ticket not found")
+    t = await _ticket_in_scope(ticket_id, current_user, "ticket.burndown.read")
     created = t.get("created_at")
     due = (
         t.get("sla_resolution_due")
