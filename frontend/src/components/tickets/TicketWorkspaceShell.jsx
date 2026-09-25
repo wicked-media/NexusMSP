@@ -98,7 +98,7 @@ const PRIMARY_TABS = [
 
 const MORE_TABS = [
   { value: "blueprint", label: "Blueprint / worksheet", icon: FileText },
-  { value: "suggestions", label: "Suggested fixes", icon: Sparkles },
+  { value: "suggestions", label: "Historical matches", icon: Sparkles },
   { value: "devices", label: "Endpoint actions", icon: Gauge },
   { value: "items", label: "Products & billing", icon: Wrench, countKey: "items" },
   { value: "procurement", label: "Procurement & cost", icon: ShoppingCart, countKey: "procurement" },

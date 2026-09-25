@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import re
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_tenant_record_scope, tenant_scoped_query
 
 router = APIRouter()
 
@@ -99,20 +100,21 @@ async def generate_ticket_number(ticket_type: str) -> str:
 
 @router.get("/tickets/{ticket_id}/suggestions")
 async def get_ticket_suggestions(ticket_id: str, current_user: dict = Depends(get_current_user)):
-    """Get AI-powered fix suggestions based on similar resolved tickets and KB articles"""
-    ticket = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
+    """Return same-client historical matches and authorised knowledge evidence."""
+    ticket = await assert_tenant_record_scope(
+        current_user, db.tickets, ticket_id,
+        operation="ticket.suggestions.read", resource_name="Ticket",
+    )
     
     search_text = f"{ticket.get('title', '')} {ticket.get('description', '')} {ticket.get('category', '')}"
     keywords = extract_keywords(search_text)
     
     if not keywords:
-        return {"similar_tickets": [], "kb_articles": [], "keywords": []}
+        return {"similar_tickets": [], "kb_articles": [], "keywords": [], "meta": {"data_status": "empty", "source": "ticket_and_knowledge_records"}}
     
     # Search resolved/closed tickets
     resolved_tickets = await db.tickets.find(
-        {"status": {"$in": ["resolved", "closed"]}, "id": {"$ne": ticket_id}},
+        tenant_scoped_query(current_user, {"client_id": ticket.get("client_id"), "status": {"$in": ["resolved", "closed"]}, "id": {"$ne": ticket_id}}),
         {"_id": 0, "id": 1, "title": 1, "description": 1, "ticket_number": 1, 
          "category": 1, "resolution_notes": 1, "status": 1, "tags": 1,
          "total_time_minutes": 1, "assigned_name": 1, "priority": 1}
@@ -125,7 +127,7 @@ async def get_ticket_suggestions(ticket_id: str, current_user: dict = Depends(ge
         if score >= 2:
             # Get resolution comments for this ticket
             comments = await db.ticket_comments.find(
-                {"ticket_id": rt["id"]},
+                tenant_scoped_query(current_user, {"ticket_id": rt["id"]}),
                 {"_id": 0, "content": 1, "is_internal": 1, "user_name": 1}
             ).sort("created_at", -1).to_list(5)
             
@@ -150,7 +152,7 @@ async def get_ticket_suggestions(ticket_id: str, current_user: dict = Depends(ge
     
     # Search KB articles
     kb_articles = await db.kb_articles.find(
-        {}, {"_id": 0, "id": 1, "title": 1, "content": 1, "category": 1, 
+        tenant_scoped_query(current_user, {}), {"_id": 0, "id": 1, "title": 1, "content": 1, "category": 1,
              "tags": 1, "views": 1, "helpful_count": 1, "author_name": 1}
     ).to_list(500)
     
@@ -177,6 +179,7 @@ async def get_ticket_suggestions(ticket_id: str, current_user: dict = Depends(ge
         "similar_tickets": scored_tickets[:8],
         "kb_articles": scored_articles[:8],
         "keywords": keywords[:10],
+        "meta": {"data_status": "current", "source": "same_client_resolved_tickets_and_knowledge_records"},
     }
 
 @router.get("/ticket-search/suggestions")
