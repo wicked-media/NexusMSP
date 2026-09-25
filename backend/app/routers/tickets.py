@@ -1085,6 +1085,7 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
     comment = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
+        "tenant_id": platform_tenant_id(user),
         "tenant_id": platform_tenant_id(current_user),
         "client_id": ticket.get("client_id"),
         "site_id": ticket.get("site_id"),
