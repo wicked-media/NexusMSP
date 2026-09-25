@@ -7,7 +7,6 @@ import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
 import TicketDeviceList from "@/components/tickets/TicketDeviceList";
-import TicketEnrichmentRail from "@/components/tickets/TicketEnrichmentRail";
 import TicketConversationTab from "@/components/tickets/TicketConversationTab";
 import {
   TicketWorksheetTab, TicketAttachmentsTab, TicketItemsTab,
@@ -178,7 +177,7 @@ export default function TicketsPage() {
   const [handoverOpen, setHandoverOpen] = useState(false);
   const panelVisible = {
     serviceTier: !ticketFocusMode, aiAnalysis: true, related: !ticketFocusMode,
-    enrichment: !ticketFocusMode, burndown: !ticketFocusMode, workflow: true,
+    burndown: !ticketFocusMode, workflow: true,
     cockpit: true, runScripts: true, quickActions: false, devicePanel: true,
   };
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -2897,12 +2896,6 @@ export default function TicketsPage() {
 
             {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
 
-            {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
-            {panelVisible.enrichment && (
-              <div key="enrichment" className="min-w-0">
-                <TicketEnrichmentRail enrichment={enrichment} />
-              </div>
-            )}
           </aside>
         </div>
 
