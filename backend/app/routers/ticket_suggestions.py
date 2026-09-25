@@ -6,6 +6,7 @@ from app.database import db
 from app.auth import get_current_user
 from app.services.scope_permissions import (
     assert_tenant_record_scope,
+    platform_tenant_id,
     scoped_query,
     tenant_scoped_query,
 )
@@ -59,7 +60,10 @@ DEFAULT_SCHEME = {
 
 @router.get("/ticket-numbering")
 async def get_ticket_numbering(current_user: dict = Depends(get_current_user)):
-    doc = await db.settings.find_one({"type": "ticket_numbering"}, {"_id": 0})
+    doc = await db.settings.find_one(
+        tenant_scoped_query(current_user, {"type": "ticket_numbering"}),
+        {"_id": 0},
+    )
     if not doc:
         return {"type": "ticket_numbering", "scheme": DEFAULT_SCHEME, "pad_digits": 4, "separator": "-"}
     return doc
@@ -69,8 +73,9 @@ async def update_ticket_numbering(data: dict, current_user: dict = Depends(get_c
     scheme = data.get("scheme", DEFAULT_SCHEME)
     pad_digits = data.get("pad_digits", 4)
     separator = data.get("separator", "-")
-    await db.settings.update_one({"type": "ticket_numbering"}, {"$set": {
+    await db.settings.update_one(tenant_scoped_query(current_user, {"type": "ticket_numbering"}), {"$set": {
         "type": "ticket_numbering",
+        "tenant_id": platform_tenant_id(current_user),
         "scheme": scheme,
         "pad_digits": pad_digits,
         "separator": separator,
