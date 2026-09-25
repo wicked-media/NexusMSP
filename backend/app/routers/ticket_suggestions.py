@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 import re
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_tenant_record_scope, tenant_scoped_query
+from app.services.scope_permissions import (
+    assert_tenant_record_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
@@ -195,12 +199,21 @@ async def global_search_suggestions(q: str = "", current_user: dict = Depends(ge
     regex_parts = [{"title": {"$regex": kw, "$options": "i"}} for kw in keywords[:5]]
     
     tickets = await db.tickets.find(
-        {"$or": regex_parts, "status": {"$in": ["resolved", "closed"]}},
+        tenant_scoped_query(
+            current_user,
+            scoped_query(
+                current_user,
+                {"$or": regex_parts, "status": {"$in": ["resolved", "closed"]}},
+            ),
+        ),
         {"_id": 0, "id": 1, "title": 1, "ticket_number": 1, "category": 1, "resolution_notes": 1}
     ).limit(5).to_list(5)
     
     articles = await db.kb_articles.find(
-        {"$or": [{"title": {"$regex": kw, "$options": "i"}} for kw in keywords[:5]]},
+        tenant_scoped_query(
+            current_user,
+            {"$or": [{"title": {"$regex": kw, "$options": "i"}} for kw in keywords[:5]]},
+        ),
         {"_id": 0, "id": 1, "title": 1, "category": 1}
     ).limit(5).to_list(5)
     
