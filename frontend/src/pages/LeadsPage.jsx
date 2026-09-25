@@ -33,6 +33,7 @@ import PipelineFunnelCanvas from "../components/leads/PipelineFunnelCanvas";
 import LeadsKanban from "../components/leads/LeadsKanban";
 import LeadSavedViewsBar from "../components/leads/LeadSavedViewsBar";
 import LeadDrawer from "../components/leads/LeadDrawer";
+import LeadIntakeWorkspace from "../components/leads/LeadIntakeWorkspace";
 import QuickAddPasteDialog from "../components/leads/QuickAddPasteDialog";
 import MergeLeadIntoTicketDialog from "../components/leads/MergeLeadIntoTicketDialog";
 import CreateTicketFromLeadDialog from "../components/leads/CreateTicketFromLeadDialog";
@@ -51,7 +52,7 @@ export default function LeadsPage() {
   const { token, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState(() => searchParams.get("tab") || "pipeline");
+  const [tab, setTab] = useState(() => searchParams.get("tab") || "intake");
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
   const [scores, setScores] = useState({});
@@ -126,7 +127,7 @@ export default function LeadsPage() {
 
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
-    const validTabs = ["pipeline", "kanban", "directory", "insights", "campaigns", "renewals"];
+    const validTabs = ["intake", "pipeline", "kanban", "directory", "insights", "campaigns", "renewals"];
     if (requestedTab && validTabs.includes(requestedTab) && requestedTab !== tab) setTab(requestedTab);
   }, [searchParams, tab]);
 
@@ -257,13 +258,14 @@ export default function LeadsPage() {
       <Tabs value={tab} onValueChange={selectTab}>
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-white/[0.08] bg-zinc-950/55 p-1.5 shadow-[0_12px_35px_rgba(0,0,0,0.16)]">
           {[
+            { v: "intake", l: "Lead Intake", Icon: Mail },
             { v: "pipeline", l: "Pipeline", Icon: Funnel },
             { v: "kanban", l: "Kanban", Icon: KanbanSquare },
             { v: "directory", l: "Directory", Icon: TableIcon },
             { v: "insights", l: "Insights", Icon: BarChart3 },
             { v: "campaigns", l: "Campaigns", Icon: Mail },
             { v: "renewals", l: "Renewals", Icon: Trophy },
-          ].map(t => (
+        ].map(t => (
             <TabsTrigger key={t.v} value={t.v}
               className="h-8 shrink-0 gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-zinc-500 shadow-none transition-all hover:bg-white/[0.035] hover:text-zinc-200 data-[state=active]:border-emerald-400/20 data-[state=active]:bg-emerald-400/[0.09] data-[state=active]:text-emerald-100 data-[state=active]:shadow-none"
               data-testid={`leads-tab-${t.v}`}>
@@ -271,6 +273,10 @@ export default function LeadsPage() {
             </TabsTrigger>
           ))}
         </TabsList>
+
+        <TabsContent value="intake" className="mt-4">
+          <LeadIntakeWorkspace canManage={canManageLeads} onOpenLead={setDrawerLeadId} />
+        </TabsContent>
 
         <TabsContent value="pipeline" className="mt-4 space-y-4">
           <PipelineFunnelCanvas onStageClick={(s) => { setSearch(""); setFilters({}); setStatusFilter(s); setTab("directory"); }} />

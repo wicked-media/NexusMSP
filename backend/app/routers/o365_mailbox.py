@@ -17,6 +17,8 @@ from app.services.microsoft365_credentials import (
 )
 from app.services.secret_store import encrypt_secret
 from app.services.ticket_subscriptions import notify_ticket_subscribers
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
+from app.routers.lead_studio import create_email_intake_item
 
 router = APIRouter()
 # Every shared sender is selected centrally in Mailbox & Email.  Keep this
@@ -415,7 +417,7 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
         since = cursor.replace("+00:00", "Z")
     else:
         since = (now - timedelta(days=7)).isoformat().replace("+00:00", "Z")
-    fetched = leads_created = tickets_created = activities_added = skipped = errors = 0
+    fetched = intake_created = leads_created = tickets_created = activities_added = skipped = errors = 0
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             token_response = await client.post(
@@ -458,6 +460,7 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
                                 "mailbox_email": address,
                             })
                             status = result.get("status")
+                            intake_created += status == "intake_created"
                             leads_created += status == "lead_created"
                             tickets_created += status == "ticket_created"
                             activities_added += status == "activity_added"
@@ -472,9 +475,9 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
     sync_time = now.isoformat()
     await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"last_sync": sync_time, "last_graph_sync": sync_time, "live_sync_enabled": errors == 0}})
     return {
-        "message": f"Synced {fetched} email(s): {leads_created} lead(s), {tickets_created} ticket(s), {activities_added} activity update(s)",
+        "message": f"Synced {fetched} email(s): {intake_created} intake item(s), {leads_created} lead(s), {tickets_created} ticket(s), {activities_added} activity update(s)",
         "mode": "live_graph", "emails_fetched": fetched, "leads_created": leads_created,
-        "tickets_created": tickets_created, "activities_added": activities_added, "skipped": skipped, "errors": errors,
+        "intake_created": intake_created, "tickets_created": tickets_created, "activities_added": activities_added, "skipped": skipped, "errors": errors,
     }
 
 # ============== EMAIL-TO-LEAD WEBHOOK ==============
@@ -866,7 +869,7 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
     if not email_to_lead:
         return await remember({"status": "skipped", "mailbox": routed_mailbox, "reason": "email-to-lead disabled for this mailbox"})
     
-    existing_lead = await db.leads.find_one({"email": email_match}, {"_id": 0})
+    existing_lead = await db.leads.find_one(tenant_scoped_query(current_user, {"email": email_match}), {"_id": 0})
     if existing_lead:
         activity = {
             "id": str(uuid.uuid4()),
@@ -881,62 +884,32 @@ async def handle_incoming_email(data: dict, current_user: dict = Depends(get_cur
             "mailbox_email": routed_mailbox,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        activity["tenant_id"] = platform_tenant_id(current_user)
         await db.lead_activities.insert_one(activity)
-        await db.leads.update_one({"id": existing_lead["id"]}, {"$set": {"last_contact": datetime.now(timezone.utc).isoformat()}})
+        await db.leads.update_one(tenant_scoped_query(current_user, {"id": existing_lead["id"]}), {"$set": {"last_contact": datetime.now(timezone.utc).isoformat()}})
         return await remember({"status": "activity_added", "lead_id": existing_lead["id"], "mailbox": routed_mailbox, "message": "Email logged as activity on existing lead"})
-    
-    company_name = sender_name if sender_name != "Unknown" else sender_email.split("@")[1].split(".")[0].title()
-    
-    lead = Lead(
-        company_name=company_name,
-        contact_name=sender_name,
-        email=sender_email,
-        source="email",
-        notes=f"Auto-created from incoming email.\n\nSubject: {subject}\n\n{body[:1000] if body else ''}",
-        status="new",
-        pipeline_stage=1,
-        estimated_value=0,
+
+    intake = await create_email_intake_item(
+        current_user=current_user, sender_email=sender_email, sender_name=sender_name,
+        subject=subject, body=body, mailbox=routed_mailbox, message_id=inbound_message_id,
     )
-    doc = lead.model_dump()
-    doc["created_at"] = doc["created_at"].isoformat()
-    doc["updated_at"] = doc["updated_at"].isoformat()
-    if doc.get("last_contact"):
-        doc["last_contact"] = doc["last_contact"].isoformat()
-    if doc.get("next_follow_up"):
-        doc["next_follow_up"] = doc["next_follow_up"].isoformat()
-    doc["source_mailbox"] = routed_mailbox
-    await db.leads.insert_one(doc)
 
     await db.notifications.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": "all",
         "type": "new_lead",
-        "title": f"New email lead: {company_name}",
+        "title": f"New lead intake: {sender_name or sender_email}",
         "message": f"{sender_name} ({sender_email}) emailed: {subject}",
         "mailbox_email": routed_mailbox,
-        "ref_id": lead.id,
-        "ref_type": "lead",
+        "ref_id": intake["id"],
+        "ref_type": "lead_intake",
         "severity": "info",
         "read": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "tenant_id": platform_tenant_id(current_user),
     })
     
-    activity = {
-        "id": str(uuid.uuid4()),
-        "lead_id": lead.id,
-        "lead_name": company_name,
-        "user_id": "system",
-        "user_name": "Email Bot",
-        "activity_type": "email",
-        "subject": f"Initial email: {subject}",
-        "description": body[:500] if body else "",
-        "outcome": "positive",
-        "mailbox_email": routed_mailbox,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await db.lead_activities.insert_one(activity)
-    
-    return await remember({"status": "lead_created", "lead_id": lead.id, "mailbox": routed_mailbox, "message": f"New lead created from email: {company_name}"})
+    return await remember({"status": "intake_created", "intake_id": intake["id"], "mailbox": routed_mailbox, "message": "Inbound email queued for Lead Intake review"})
 
 @router.get("/o365/email-leads")
 async def get_email_generated_leads(current_user: dict = Depends(get_current_user)):

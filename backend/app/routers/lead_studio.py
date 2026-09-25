@@ -29,9 +29,148 @@ from app.services.scope_permissions import platform_tenant_id, tenant_scoped_que
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import hashlib
+import re
 import uuid
+from app.models import Lead
 
 router = APIRouter(tags=["Lead Studio"], dependencies=[Depends(require_action("crm.lead.view"))])
+
+
+def _clean_intake_preview(value: object, limit: int = 1200) -> str:
+    """Retain enough message context for review without treating an inbox as an archive."""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()[:limit]
+
+
+async def create_email_intake_item(*, current_user: dict, sender_email: str, sender_name: str,
+                                  subject: str, body: str, mailbox: str | None,
+                                  message_id: str | None) -> dict:
+    """Persist a tenant-bound review item for an unmapped inbound opportunity.
+
+    This intentionally does not create a lead or client. A technician must make
+    the matching/conversion decision in Lead Intake, leaving evidence behind.
+    """
+    tenant_id = platform_tenant_id(current_user)
+    email = str(sender_email or "").strip().lower()
+    if not email:
+        raise ValueError("sender_email is required")
+
+    query = tenant_scoped_query(current_user, {"sender_email": email})
+    lead_matches = await db.leads.find(
+        tenant_scoped_query(current_user, {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}),
+        {"_id": 0, "id": 1, "company_name": 1, "contact_name": 1, "email": 1},
+    ).to_list(5)
+    client_matches = await db.clients.find(
+        tenant_scoped_query(current_user, {"$or": [
+            {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+            {"contact_email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+            {"contacts.email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+        ]}),
+        {"_id": 0, "id": 1, "name": 1, "email": 1},
+    ).to_list(5)
+    candidates = ([{"kind": "lead", "id": item["id"], "label": item.get("company_name") or item.get("contact_name") or email,
+                    "detail": item.get("email") or "Exact email match", "confidence": "high"} for item in lead_matches]
+                  + [{"kind": "client", "id": item["id"], "label": item.get("name") or email,
+                      "detail": item.get("email") or "Exact email match", "confidence": "high"} for item in client_matches])
+    now = datetime.now(timezone.utc).isoformat()
+    item = {
+        "id": str(uuid.uuid4()), "tenant_id": tenant_id, "status": "pending",
+        "source": "email", "message_id": str(message_id or "").strip() or None,
+        "mailbox": str(mailbox or "").strip().lower() or None,
+        "sender_email": email, "sender_name": str(sender_name or "Unknown")[:240],
+        "subject": str(subject or "No subject")[:500], "body_preview": _clean_intake_preview(body),
+        "match_candidates": candidates, "received_at": now, "created_at": now, "updated_at": now,
+    }
+    if item["message_id"]:
+        existing = await db.lead_intake_items.find_one(
+            tenant_scoped_query(current_user, {"message_id": item["message_id"]}), {"_id": 0},
+        )
+        if existing:
+            return existing
+    await db.lead_intake_items.insert_one(item)
+    await db.lead_intake_events.insert_one({
+        "id": str(uuid.uuid4()), "tenant_id": tenant_id, "intake_id": item["id"],
+        "action": "received", "actor_id": "system", "actor_name": "Email intake",
+        "created_at": now,
+    })
+    return item
+
+
+@router.get("/lead-studio/intake")
+async def list_lead_intake(status: str = "pending", current_user: dict = Depends(get_current_user)):
+    query: dict = {}
+    if status != "all":
+        query["status"] = status
+    rows = await db.lead_intake_items.find(
+        tenant_scoped_query(current_user, query), {"_id": 0, "body_preview": 1, "created_at": 1, "updated_at": 1,
+                                                    "received_at": 1, "sender_email": 1, "sender_name": 1, "subject": 1,
+                                                    "match_candidates": 1, "status": 1, "mailbox": 1, "id": 1, "source": 1,
+                                                    "decision": 1, "processed_at": 1},
+    ).sort("received_at", -1).to_list(250)
+    return {"items": rows, "pending": sum(1 for row in rows if row.get("status") == "pending")}
+
+
+@router.post("/lead-studio/intake/{intake_id}/process", dependencies=[Depends(require_action("crm.lead.manage"))])
+async def process_lead_intake(intake_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    item_query = tenant_scoped_query(current_user, {"id": intake_id})
+    item = await db.lead_intake_items.find_one(item_query, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Lead intake item not found")
+    if item.get("status") != "pending":
+        raise HTTPException(409, "This intake item has already been decided")
+
+    action = str((data or {}).get("action") or "").strip()
+    now = datetime.now(timezone.utc).isoformat()
+    actor_name = current_user.get("name") or current_user.get("email") or "Technician"
+    decision: dict
+    lead_id = None
+    if action == "create_lead":
+        existing = await db.leads.find_one(tenant_scoped_query(current_user, {"email": item["sender_email"]}), {"_id": 0, "id": 1})
+        if existing:
+            raise HTTPException(409, "A lead already exists for this sender. Link it instead.")
+        company_name = str((data or {}).get("company_name") or item.get("sender_name") or item["sender_email"].split("@")[-1].split(".")[0].title()).strip()[:240]
+        lead = Lead(company_name=company_name, contact_name=item.get("sender_name") or company_name,
+                    email=item["sender_email"], source="email", status="new", pipeline_stage=1,
+                    notes=f"Created from reviewed inbound email.\n\nSubject: {item.get('subject') or ''}\n\n{item.get('body_preview') or ''}")
+        doc = lead.model_dump()
+        doc.update({"tenant_id": platform_tenant_id(current_user), "source_mailbox": item.get("mailbox"),
+                    "source_intake_id": intake_id, "created_at": doc["created_at"].isoformat(), "updated_at": doc["updated_at"].isoformat()})
+        await db.leads.insert_one(doc)
+        lead_id = lead.id
+        await db.lead_activities.insert_one({
+            "id": str(uuid.uuid4()), "tenant_id": platform_tenant_id(current_user), "lead_id": lead_id,
+            "lead_name": company_name, "type": "intake_processed", "title": "Created from Lead Intake",
+            "description": f"Reviewed inbound email: {item.get('subject') or 'No subject'}", "created_at": now,
+            "created_by_name": actor_name,
+        })
+        decision = {"action": action, "lead_id": lead_id, "label": company_name}
+    elif action == "link_existing":
+        lead_id = str((data or {}).get("lead_id") or "").strip()
+        lead = await db.leads.find_one(tenant_scoped_query(current_user, {"id": lead_id}), {"_id": 0, "id": 1, "company_name": 1})
+        if not lead:
+            raise HTTPException(404, "Lead not found in your Nexus tenant")
+        await db.lead_activities.insert_one({
+            "id": str(uuid.uuid4()), "tenant_id": platform_tenant_id(current_user), "lead_id": lead_id,
+            "lead_name": lead.get("company_name"), "type": "email", "title": f"Inbound intake: {item.get('subject') or 'No subject'}",
+            "description": item.get("body_preview") or "", "created_at": now, "created_by_name": actor_name,
+        })
+        await db.leads.update_one(tenant_scoped_query(current_user, {"id": lead_id}), {"$set": {"last_contact": now, "last_activity_at": now}})
+        decision = {"action": action, "lead_id": lead_id, "label": lead.get("company_name")}
+    elif action == "dismiss":
+        reason = str((data or {}).get("reason") or "Not a sales opportunity").strip()[:320]
+        decision = {"action": action, "reason": reason}
+    else:
+        raise HTTPException(400, "action must be create_lead, link_existing, or dismiss")
+
+    update = {"status": "processed" if action != "dismiss" else "dismissed", "decision": decision,
+              "processed_at": now, "processed_by": actor_name, "updated_at": now}
+    await db.lead_intake_items.update_one(item_query, {"$set": update})
+    await db.lead_intake_events.insert_one({
+        "id": str(uuid.uuid4()), "tenant_id": platform_tenant_id(current_user), "intake_id": intake_id,
+        "action": action, "lead_id": lead_id, "actor_id": current_user.get("id"), "actor_name": actor_name,
+        "decision": decision, "created_at": now,
+    })
+    return {"ok": True, "intake_id": intake_id, **update}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
