@@ -18,7 +18,12 @@ from app.routers.nexus_agent import queue_command_for_device, require_agent_oper
 from app.services.action_permissions import require_action
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import start_remote_session
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -36,7 +41,7 @@ async def _ticket_in_scope(
     request: Request | None = None,
 ) -> dict:
     """Load a ticket only after enforcing its client and site boundary."""
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
@@ -82,7 +87,7 @@ async def _ticket_with_linked_device(
     if device_id and device_id not in linked:
         raise HTTPException(400, f"Device {device_id} is not linked to this ticket")
 
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user,
         db.devices,
         target_id,
@@ -119,6 +124,7 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
     await db.ticket_notes.insert_one({
         "id": uuid.uuid4().hex,
         "ticket_id": ticket_id,
+        "tenant_id": platform_tenant_id(user),
         "user_id": user.get("id"),
         "user_name": user.get("name"),
         "content": body,
@@ -130,6 +136,7 @@ async def _post_action_note(ticket_id: str, user: dict, action_label: str, detai
     await db.ticket_audit_log.insert_one({
         "id": uuid.uuid4().hex,
         "ticket_id": ticket_id,
+        "tenant_id": platform_tenant_id(user),
         "user_id": user.get("id"),
         "user_name": user.get("name"),
         "action": "device_action",
