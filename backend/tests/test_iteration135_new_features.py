@@ -235,6 +235,8 @@ class TestAutoQuote:
             assert "ticket_id" in data
             assert data["ticket_id"] == ticket_id
             assert "generated_at" in data
+            assert data["evidence_status"] == "review_required"
+            assert "requires_manual_pricing" in data
             print(f"Auto-quote: {len(data['line_items'])} items, total: ${data.get('total', 0)}")
     
     def test_auto_quote_not_found(self, headers):
