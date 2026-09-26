@@ -969,6 +969,74 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     updated_ticket = await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
     return {"message": "Ticket updated", "ticket": updated_ticket}
 
+
+@router.post("/tickets/{ticket_id}/resolution", dependencies=[Depends(require_action("ticket.lifecycle.transition"))])
+async def record_ticket_resolution(ticket_id: str, payload: dict, current_user: dict = Depends(get_current_user)):
+    """Close active work through an evidence-bearing service lifecycle transition."""
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.lifecycle.resolve")
+    target = str(payload.get("status") or "resolved").strip().lower()
+    if target not in {"resolved", "closed"}:
+        raise HTTPException(status_code=422, detail="Resolution status must be resolved or closed")
+    if str(ticket.get("status") or "").lower() == "closed":
+        raise HTTPException(status_code=409, detail="Closed tickets must be reopened before recording another resolution")
+    summary = str(payload.get("resolution_summary") or "").strip()
+    reason = str(payload.get("closure_reason") or "").strip()
+    customer_outcome = str(payload.get("customer_outcome") or "").strip()
+    if not summary:
+        raise HTTPException(status_code=422, detail="A resolution summary is required")
+    if not reason:
+        raise HTTPException(status_code=422, detail="A closure reason is required")
+    if len(summary) > 10_000 or len(reason) > 120 or len(customer_outcome) > 2_000:
+        raise HTTPException(status_code=422, detail="Resolution evidence exceeds the supported length")
+    result = await update_ticket(
+        ticket_id,
+        {
+            "status": target,
+            "resolution_summary": summary,
+            "closure_reason": reason,
+            "customer_outcome": customer_outcome or None,
+            "resolution_recorded_at": datetime.now(timezone.utc).isoformat(),
+            "resolution_recorded_by": current_user.get("id") or current_user.get("email"),
+        },
+        current_user=current_user,
+    )
+    await ticket_audit(
+        ticket_id,
+        current_user,
+        "resolution_recorded",
+        f"Recorded {reason.lower()} resolution: {summary[:240]}",
+    )
+    return {**result, "message": "Resolution recorded"}
+
+
+@router.post("/tickets/{ticket_id}/reopen", dependencies=[Depends(require_action("ticket.lifecycle.transition"))])
+async def reopen_ticket(ticket_id: str, payload: dict, current_user: dict = Depends(get_current_user)):
+    """Return completed work to the active queue while retaining its resolution evidence."""
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.lifecycle.reopen")
+    if str(ticket.get("status") or "").lower() not in {"resolved", "closed"}:
+        raise HTTPException(status_code=409, detail="Only resolved or closed tickets can be reopened")
+    reason = str(payload.get("reason") or "").strip()
+    if not reason or len(reason) > 2_000:
+        raise HTTPException(status_code=422, detail="A reopen reason of up to 2000 characters is required")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    result = await db.tickets.update_one(
+        tenant_scoped_query(current_user, {"id": ticket_id, "status": ticket.get("status")}),
+        {"$set": {
+            "status": "open",
+            "resolution_status": "reopened",
+            "reopened_at": now_iso,
+            "reopened_by": current_user.get("id") or current_user.get("email"),
+            "reopened_by_name": current_user.get("name") or current_user.get("email"),
+            "reopen_reason": reason,
+            "updated_at": now_iso,
+        }},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Ticket changed while it was being reopened; refresh and retry")
+    await ticket_audit(ticket_id, current_user, "ticket_reopened", f"Reopened ticket: {reason[:240]}")
+    updated_ticket = await db.tickets.find_one(tenant_scoped_query(current_user, {"id": ticket_id}), {"_id": 0})
+    return {"message": "Ticket reopened", "ticket": updated_ticket}
+
 @router.post("/tickets/{ticket_id}/devices")
 async def add_ticket_device(ticket_id: str, body: dict, current_user: dict = Depends(get_current_user)):
     """Link an additional device to a ticket (Syncro-style multi-asset linking)."""

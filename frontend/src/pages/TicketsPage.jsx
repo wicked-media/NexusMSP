@@ -834,7 +834,7 @@ export default function TicketsPage() {
     setResolutionReview({ tickets: selected, target });
   };
 
-  const confirmResolutionReview = async () => {
+  const confirmResolutionReview = async (evidence = {}) => {
     const review = resolutionReview;
     const ticketsForReview = review?.tickets || [];
     if (ticketsForReview.length === 0) return;
@@ -842,7 +842,10 @@ export default function TicketsPage() {
     try {
       if (ticketsForReview.length === 1) {
         const ticket = ticketsForReview[0];
-        const response = await axios.put(`${API}/tickets/${ticket.id}`, { status: review.target }, { headers });
+        const response = await axios.post(`${API}/tickets/${ticket.id}/resolution`, {
+          status: review.target,
+          ...evidence,
+        }, { headers });
         if (viewingTicket?.id === ticket.id) {
           setViewingTicket(previous => ({ ...previous, ...(response.data?.ticket || {}), status: review.target === "resolved" ? "closed" : review.target }));
         }

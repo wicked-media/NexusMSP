@@ -398,6 +398,15 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("tickets", "delete"),
     },
     {
+        "id": "ticket.lifecycle.transition",
+        "category": "Service desk",
+        "label": "Resolve and reopen tickets",
+        "description": "Record a governed ticket resolution or reopen a completed request with auditable service evidence.",
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("tickets", "edit"),
+    },
+    {
         "id": "ticket.bulk.modify",
         "category": "Service desk",
         "label": "Modify tickets in bulk",

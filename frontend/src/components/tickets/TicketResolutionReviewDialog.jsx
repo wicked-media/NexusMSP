@@ -1,6 +1,10 @@
+import { useEffect, useState } from "react";
 import { CheckCircle2, FileText, Receipt, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
 export default function TicketResolutionReviewDialog({ review, onOpenChange, onConfirm, busy = false }) {
@@ -9,6 +13,16 @@ export default function TicketResolutionReviewDialog({ review, onOpenChange, onC
   const isClose = review?.target === "closed";
   const shownTickets = tickets.slice(0, 4);
   const remaining = tickets.length - shownTickets.length;
+  const activeTicketId = review?.tickets?.[0]?.id;
+  const [summary, setSummary] = useState("");
+  const [reason, setReason] = useState("");
+  const [customerOutcome, setCustomerOutcome] = useState("");
+
+  useEffect(() => {
+    setSummary(""); setReason(""); setCustomerOutcome("");
+  }, [activeTicketId, review?.target]);
+
+  const evidenceReady = isBulk || Boolean(summary.trim() && reason.trim());
 
   return (
     <Dialog open={Boolean(review)} onOpenChange={(open) => !open && onOpenChange(false)}>
@@ -26,7 +40,7 @@ export default function TicketResolutionReviewDialog({ review, onOpenChange, onC
         data-testid="ticket-resolution-review"
         footer={<>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Keep working</Button>
-          <Button onClick={onConfirm} disabled={busy || tickets.length === 0} data-testid="confirm-ticket-resolution-review">
+          <Button onClick={() => onConfirm({ resolution_summary: summary.trim(), closure_reason: reason.trim(), customer_outcome: customerOutcome.trim() })} disabled={busy || tickets.length === 0 || !evidenceReady} data-testid="confirm-ticket-resolution-review">
             <CheckCircle2 className="mr-1.5 h-4 w-4" />
             {busy ? "Recording transition…" : isBulk ? `Close ${tickets.length} tickets` : isClose ? "Close ticket" : "Confirm resolution"}
           </Button>
@@ -51,6 +65,12 @@ export default function TicketResolutionReviewDialog({ review, onOpenChange, onC
             <ReviewCheck icon={Receipt} title="Time & billing" detail="Recorded work remains available for review." />
             <ReviewCheck icon={Users} title="Service history" detail="Ownership and audit evidence are retained." />
           </div>
+
+          {!isBulk && <div className="space-y-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4">
+            <div><Label htmlFor="ticket-resolution-summary">Resolution summary</Label><Textarea id="ticket-resolution-summary" value={summary} onChange={(event) => setSummary(event.target.value)} className="mt-1.5 min-h-24" placeholder="What was fixed, changed, or confirmed?" /></div>
+            <div><Label htmlFor="ticket-closure-reason">Closure reason</Label><Input id="ticket-closure-reason" value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5" placeholder="e.g. Resolved remotely" /></div>
+            <div><Label htmlFor="ticket-customer-outcome">Customer outcome <span className="text-muted-foreground">optional</span></Label><Textarea id="ticket-customer-outcome" value={customerOutcome} onChange={(event) => setCustomerOutcome(event.target.value)} className="mt-1.5 min-h-16" placeholder="What the requester was told or confirmed." /></div>
+          </div>}
 
           <p className="text-xs leading-5 text-muted-foreground">
             This transition is recorded against every affected ticket. Use the ticket workspace when a customer update, resolution note or billing follow-up is still required.
