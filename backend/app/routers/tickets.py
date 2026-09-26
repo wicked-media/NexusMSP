@@ -520,11 +520,11 @@ async def _place_project_task_into_review(ticket: dict, current_user: dict, comp
         return
 
     result = await db.project_tasks.update_one(
-        {
+        tenant_scoped_query(current_user, {
             "project_id": ticket["project_id"],
             "ticket_id": ticket.get("id"),
             "status": {"$nin": ["review", "completed"]},
-        },
+        }),
         {
             "$set": {
                 "status": "review",
