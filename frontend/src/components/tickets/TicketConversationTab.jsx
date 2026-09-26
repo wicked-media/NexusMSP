@@ -150,10 +150,12 @@ export default function TicketConversationTab({
   ].sort((a, b) => (b._sort || "").localeCompare(a._sort || ""));
   const visibleItems = filterTicketActivity(allItems, activityFilter);
   const timeById = useMemo(() => new Map(ticketTimeEntries.map(entry => [entry.id, entry])), [ticketTimeEntries]);
-  const hasDraftContent = String(newNote || "")
+  const hasMeaningfulContent = (value) => String(value || "")
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .trim().length > 0;
+  const hasDraftContent = hasMeaningfulContent(newNote);
+  const hasEmailBody = hasMeaningfulContent(emailForm.body);
 
   const submitConversationEntry = async (options) => {
     if (postingEntry) return;
@@ -395,7 +397,7 @@ export default function TicketConversationTab({
             )}
           </div>
           <div className="flex justify-end">
-            <Button size="sm" onClick={handleSendEmail} disabled={!emailForm.to?.trim()} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
+            <Button size="sm" onClick={handleSendEmail} disabled={!emailForm.to?.trim() || !hasEmailBody} data-testid="send-inline-email-btn"><Send className="w-3 h-3 mr-1" />Send Email</Button>
           </div>
         </div>
       )}
