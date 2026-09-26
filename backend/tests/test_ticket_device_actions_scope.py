@@ -16,9 +16,17 @@ from app.services import scope_permissions
 def _matches(row: dict, query: dict) -> bool:
     for key, expected in (query or {}).items():
         if key == "$and":
-            return all(_matches(row, clause) for clause in expected)
-        if isinstance(expected, dict) and "$in" in expected:
-            if row.get(key) not in expected["$in"]:
+            if not all(_matches(row, clause) for clause in expected):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches(row, clause) for clause in expected):
+                return False
+            continue
+        if isinstance(expected, dict):
+            if "$in" in expected and row.get(key) not in expected["$in"]:
+                return False
+            if "$exists" in expected and (key in row) != bool(expected["$exists"]):
                 return False
         elif row.get(key) != expected:
             return False
@@ -69,6 +77,7 @@ class _Database(SimpleNamespace):
             tickets=_Collection([
                 {
                     "id": "ticket-a",
+                    "tenant_id": "tenant-a",
                     "client_id": "client-a",
                     "title": "Client A server maintenance",
                     "device_id": "device-a",
@@ -76,6 +85,7 @@ class _Database(SimpleNamespace):
                 },
                 {
                     "id": "ticket-b",
+                    "tenant_id": "tenant-a",
                     "client_id": "client-b",
                     "title": "Client B confidential incident",
                     "device_id": "device-b",
@@ -85,6 +95,7 @@ class _Database(SimpleNamespace):
             devices=_Collection([
                 {
                     "id": "device-a",
+                    "tenant_id": "tenant-a",
                     "client_id": "client-a",
                     "name": "CLIENT-A-SERVER",
                     "nexus_agent_id": "agent-a",
@@ -92,6 +103,7 @@ class _Database(SimpleNamespace):
                 },
                 {
                     "id": "device-b",
+                    "tenant_id": "tenant-a",
                     "client_id": "client-b",
                     "name": "CLIENT-B-SERVER",
                     "nexus_agent_id": "agent-b",
@@ -105,6 +117,7 @@ class _Database(SimpleNamespace):
 def _restricted_client_a_operator() -> dict:
     return {
         "id": "tech-a",
+        "tenant_id": "tenant-a",
         "name": "Technician A",
         "email": "tech-a@example.test",
         "role": "technician",
@@ -117,6 +130,7 @@ def _restricted_client_a_operator() -> dict:
 def _global_operator() -> dict:
     return {
         "id": "admin-1",
+        "tenant_id": "tenant-a",
         "name": "Administrator",
         "email": "admin@example.test",
         "role": "admin",

@@ -92,6 +92,7 @@ class _Database(SimpleNamespace):
                 [
                     {
                         "id": "ticket-a",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "INC-1001",
                         "title": "Client A issue",
                         "client_id": "client-a",
@@ -102,6 +103,7 @@ class _Database(SimpleNamespace):
                     },
                     {
                         "id": "ticket-a-site-b",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "INC-1002",
                         "title": "Client A second site issue",
                         "client_id": "client-a",
@@ -111,6 +113,7 @@ class _Database(SimpleNamespace):
                     },
                     {
                         "id": "ticket-a-unassigned-site",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "INC-1004",
                         "title": "Legacy unassigned-site issue",
                         "client_id": "client-a",
@@ -119,6 +122,7 @@ class _Database(SimpleNamespace):
                     },
                     {
                         "id": "ticket-b",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "INC-2001",
                         "title": "Client B issue",
                         "client_id": "client-b",
@@ -128,6 +132,7 @@ class _Database(SimpleNamespace):
                     },
                     {
                         "id": "ticket-blueprint",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "INC-1003",
                         "title": "Blueprint-gated issue",
                         "client_id": "client-a",
@@ -141,7 +146,7 @@ class _Database(SimpleNamespace):
                     },
                 ]
             ),
-            users=_Collection([{"id": "tech-b", "name": "Technician B"}]),
+            users=_Collection([{"id": "tech-b", "tenant_id": "tenant-a", "name": "Technician B"}]),
             blueprints=_Collection([{"id": "blueprint-a", "fields": []}]),
             project_tasks=_Collection(),
             ticket_audit_log=_Collection(),
@@ -155,6 +160,7 @@ class _Database(SimpleNamespace):
 def _restricted_user(*, sites: list[str] | None = None, legacy_edit: bool = True) -> dict[str, Any]:
     return {
         "id": "tech-a",
+        "tenant_id": "tenant-a",
         "name": "Client A Technician",
         "role": "technician",
         "client_scope_mode": "restricted",
@@ -225,6 +231,36 @@ async def _test_bulk_ticket_action_checks_all_client_scope_before_any_write(monk
     assert foreign_selection.value.status_code == 404
     assert [ticket["priority"] for ticket in database.tickets.rows[:3]] == ["low", "low", "low"]
     assert database.scope_denials.rows[-1]["operation"] == "ticket.bulk.priority"
+    assert not database.activity_logs.rows
+
+
+def test_bulk_ticket_action_masks_cross_tenant_selection_before_any_write(monkeypatch: pytest.MonkeyPatch):
+    asyncio.run(_test_bulk_ticket_action_masks_cross_tenant_selection_before_any_write(monkeypatch))
+
+
+async def _test_bulk_ticket_action_masks_cross_tenant_selection_before_any_write(monkeypatch: pytest.MonkeyPatch):
+    database = _install(monkeypatch)
+    database.tickets.rows.append({
+        "id": "ticket-other-tenant",
+        "tenant_id": "tenant-b",
+        "ticket_number": "INC-9001",
+        "title": "Same client in another tenant",
+        "client_id": "client-a",
+        "site_id": "site-a",
+        "status": "open",
+        "priority": "low",
+    })
+
+    with pytest.raises(HTTPException) as foreign_selection:
+        await xero.bulk_ticket_action(
+            {"ticket_ids": ["ticket-a", "ticket-other-tenant"], "action": "priority", "value": "high"},
+            request=None,
+            current_user=_restricted_user(),
+        )
+
+    assert foreign_selection.value.status_code == 404
+    assert database.tickets.rows[0]["priority"] == "low"
+    assert database.tickets.rows[-1]["priority"] == "low"
     assert not database.activity_logs.rows
 
 

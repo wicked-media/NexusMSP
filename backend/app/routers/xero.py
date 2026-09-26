@@ -9,7 +9,14 @@ _srand = _random_mod.SystemRandom()
 from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, effective_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    effective_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.services.activity import log_activity, ticket_audit
 from app.services.integration_security import redact_connection_settings
 
@@ -799,7 +806,7 @@ async def _load_scoped_bulk_tickets(
 ) -> list[dict]:
     """Resolve the whole selection first so a foreign/missing ticket changes nothing."""
     records = await db.tickets.find(
-        {"id": {"$in": ticket_ids}},
+        tenant_scoped_query(current_user, {"id": {"$in": ticket_ids}}),
         {"_id": 0},
     ).to_list(len(ticket_ids))
     tickets_by_id = {str(ticket.get("id")): ticket for ticket in records if ticket.get("id")}
@@ -939,7 +946,10 @@ async def bulk_ticket_action(
 
     assignee = None
     if action == "assign":
-        assignee = await db.users.find_one({"id": value}, {"_id": 0, "id": 1, "name": 1})
+        assignee = await db.users.find_one(
+            tenant_scoped_query(current_user, {"id": value}),
+            {"_id": 0, "id": 1, "name": 1},
+        )
         if not assignee:
             raise HTTPException(status_code=422, detail="Assigned technician was not found")
 
@@ -988,11 +998,14 @@ async def bulk_ticket_action(
                 })
 
         result = await db.tickets.update_one(
-            {
-                "id": ticket["id"],
-                "client_id": ticket.get("client_id"),
-                "site_id": ticket.get("site_id"),
-            },
+            tenant_scoped_query(
+                current_user,
+                {
+                    "id": ticket["id"],
+                    "client_id": ticket.get("client_id"),
+                    "site_id": ticket.get("site_id"),
+                },
+            ),
             {"$set": updates},
         )
         if not result.matched_count:
@@ -1017,6 +1030,7 @@ async def bulk_ticket_action(
                 "selection_size": len(tickets),
                 "client_id": ticket.get("client_id"),
                 "site_id": ticket.get("site_id"),
+                "tenant_id": platform_tenant_id(current_user),
             },
         )
 
