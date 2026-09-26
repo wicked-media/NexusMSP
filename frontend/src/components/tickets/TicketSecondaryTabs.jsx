@@ -72,7 +72,7 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
           <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500" style={{ width: `${progress}%` }} /></div>
           <div className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/[0.12] p-1.5">
             <Input className="h-8 border-0 bg-transparent shadow-none focus-visible:ring-0" placeholder="Add the next work item..." value={newWorksheetItem} onChange={e => setNewWorksheetItem(e.target.value)} onKeyDown={e => e.key === "Enter" && add()} data-testid="worksheet-input" />
-            <Button size="sm" className="h-8 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={add} data-testid="add-worksheet-btn"><Plus className="w-3.5 h-3.5 mr-1" />Add task</Button>
+            <Button size="sm" className="h-8 bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={add} disabled={!newWorksheetItem.trim()} data-testid="add-worksheet-btn"><Plus className="w-3.5 h-3.5 mr-1" />Add task</Button>
           </div>
         </CardContent>
       </Card>
