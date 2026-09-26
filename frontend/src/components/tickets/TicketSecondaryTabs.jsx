@@ -106,6 +106,13 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
       setDeleting(false);
     }
   };
+  const uploadAttachment = async (event) => {
+    try {
+      await handleAttachmentUpload(event);
+    } finally {
+      event.target.value = "";
+    }
+  };
 
   return (
     <>
@@ -113,7 +120,7 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
         <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div><p className="text-sm font-semibold text-zinc-100">Evidence & files</p><p className="mt-0.5 text-[11px] text-zinc-500">Screenshots, exports, diagnostics and customer documents.</p></div>
           <div className="relative">
-          <input type="file" id="attachment-upload" className="hidden" onChange={handleAttachmentUpload} />
+          <input type="file" id="attachment-upload" className="hidden" onChange={uploadAttachment} />
           <Button size="sm" className="bg-sky-500 text-sky-950 hover:bg-sky-400" onClick={() => document.getElementById("attachment-upload").click()} disabled={attachmentUploading} data-testid="upload-attachment-btn">
             {attachmentUploading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Paperclip className="w-3.5 h-3.5 mr-1.5" />}Upload file
           </Button>
