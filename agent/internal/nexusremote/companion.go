@@ -90,6 +90,15 @@ func (c *Coordinator) Process(delivered DeliveredGrant, now time.Time) (*Session
 	if err != nil {
 		return nil, err
 	}
+	// The first-party companion deliberately implements only attended or
+	// standing-authorised *view* sessions. Keep that invariant local to the
+	// endpoint: a future server-side regression or malformed signed envelope
+	// must not make a control grant look accepted while the transport has no
+	// safe input path.
+	if delivered.Mode != View || session.grant.Mode != View {
+		session.Revoke()
+		return nil, errors.New("native remote companion supports view-only sessions")
+	}
 	if session.grant.ConsentRequired {
 		approved, reason := c.prompt(delivered.SessionID, delivered.Mode, session.grant.ExpiresAt)
 		if !approved {

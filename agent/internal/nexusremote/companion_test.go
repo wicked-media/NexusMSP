@@ -67,3 +67,17 @@ func TestCoordinatorAcceptsSignedStandingAuthorisationWithoutPrompt(t *testing.T
 		t.Fatal(err)
 	}
 }
+
+func TestCoordinatorRejectsSignedControlGrantUntilAnInputTransportExists(t *testing.T) {
+	pub, private, _ := ed25519.GenerateKey(rand.Reader)
+	now := time.Now().UTC()
+	payload, _ := json.Marshal(grantPayload{Version: 1, SessionID: "session-control", TenantID: "tenant-1", DeviceID: "device-1", ActorID: "tech-1", Mode: Control, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+	delivered := DeliveredGrant{SessionID: "session-control", Mode: Control, KeyID: "key-1", PublicKeyB64: base64.StdEncoding.EncodeToString(pub), PayloadB64: base64.StdEncoding.EncodeToString(payload), SignatureB64: base64.StdEncoding.EncodeToString(ed25519.Sign(private, append([]byte(grantDomain), payload...)))}
+	coordinator, err := NewCoordinator(CompanionPolicy{Enabled: true, TenantID: "tenant-1", ManagedDeviceID: "device-1", GrantKeyID: "key-1", GrantPublicKey: delivered.PublicKeyB64}, NewMemoryReplayStore(8), func(string, Mode, time.Time) (bool, string) { return true, "" }, func(string, string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Process(delivered, now); err == nil {
+		t.Fatal("control grant was accepted by a view-only companion")
+	}
+}
