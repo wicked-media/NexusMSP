@@ -22,7 +22,7 @@ os.environ.setdefault("JWT_SECRET", "test-only-secret-that-is-long-and-random-en
 os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "nexusops-tests")
 
-from app.routers import asset_lifecycle, device_agent, device_discovery, device_pulse, nexus_agent, patch_compliance, scripting, third_party_patching  # noqa: E402
+from app.routers import asset_lifecycle, device_agent, device_discovery, device_pulse, devices, nexus_agent, patch_compliance, scripting, third_party_patching  # noqa: E402
 from app.services import scope_permissions  # noqa: E402
 
 
@@ -364,6 +364,44 @@ def test_patch_compliance_policy_register_and_evidence_are_tenant_partitioned(mo
     assert [policy["id"] for policy in overview["policies"]] == ["policy-a"]
     assert devices.find_queries[-1] == {"tenant_id": "tenant-a"}
     assert policies.find_queries[-1] == {"tenant_id": "tenant-a"}
+
+
+def test_patch_ring_assignment_requires_a_confirmed_tenant_policy_and_records_audit(monkeypatch):
+    user = {"id": "admin-a", "name": "Admin A", "role": "admin", "tenant_id": "tenant-a"}
+    device_rows = _Collection([{
+        "id": "device-a", "tenant_id": "tenant-a", "client_id": "client-a", "site_id": "site-a",
+        "name": "Tenant A endpoint", "os": "Windows 11", "patch_ring": "Broad",
+    }])
+    policies = _Collection([
+        {"id": "policy-a", "tenant_id": "tenant-a", "ring": "Pilot", "os_filter": "Windows", "source": "manual", "confirmed_at": "2026-01-01T00:00:00+00:00"},
+        {"id": "policy-b", "tenant_id": "tenant-b", "ring": "Foreign", "os_filter": "Windows", "source": "manual", "confirmed_at": "2026-01-01T00:00:00+00:00"},
+    ])
+    database = SimpleNamespace(devices=device_rows, patch_compliance=policies, scope_denials=_Collection())
+    audit_events = []
+
+    async def capture_audit(*args, **kwargs):
+        audit_events.append((args, kwargs))
+
+    monkeypatch.setattr(devices, "db", database)
+    monkeypatch.setattr(scope_permissions, "db", database)
+    monkeypatch.setattr(devices, "log_activity", capture_audit)
+
+    result = asyncio.run(devices.assign_device_patch_ring(
+        "device-a", {"patch_ring": "Pilot", "reason": "Move validated pilot endpoint into the staged rollout."}, current_user=user,
+    ))
+
+    assert result["patch_ring"] == "Pilot"
+    assert result["execution_state"] == "not_deployed"
+    assert device_rows.rows[0]["patch_ring"] == "Pilot"
+    assert device_rows.rows[0]["patch_ring_assigned_by"] == "Admin A"
+    assert policies.find_queries[-1]["tenant_id"] == "tenant-a"
+    assert audit_events[-1][0][1:4] == ("updated", "device_patch_ring", "device-a")
+
+    with pytest.raises(HTTPException) as foreign_ring:
+        asyncio.run(devices.assign_device_patch_ring(
+            "device-a", {"patch_ring": "Foreign", "reason": "Attempt to use another tenant policy."}, current_user=user,
+        ))
+    assert foreign_ring.value.status_code == 404
 
 
 def test_agent_patch_evidence_explicitly_clears_a_prior_count_when_collector_is_unavailable():

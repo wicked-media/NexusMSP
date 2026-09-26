@@ -57,6 +57,11 @@ export default function DeviceDetailPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [diskHealth, setDiskHealth] = useState([]);
   const [patchWindowOpen, setPatchWindowOpen] = useState(false);
+  const [patchRingDialogOpen, setPatchRingDialogOpen] = useState(false);
+  const [patchRingOptions, setPatchRingOptions] = useState([]);
+  const [patchRingSelection, setPatchRingSelection] = useState("");
+  const [patchRingReason, setPatchRingReason] = useState("");
+  const [patchRingBusy, setPatchRingBusy] = useState(false);
   const [safetyCheckOpen, setSafetyCheckOpen] = useState(false);
   const [deviceEditorOpen, setDeviceEditorOpen] = useState(false);
   const [deviceEditorBusy, setDeviceEditorBusy] = useState(false);
@@ -137,6 +142,40 @@ export default function DeviceDetailPage() {
       fetchDetail();
     } catch (e) { toast.error(e.response?.data?.detail || "Could not update device"); }
     finally { setDeviceEditorBusy(false); }
+  };
+
+  const openPatchRingDialog = async () => {
+    setPatchRingSelection(data?.device?.patch_ring || "__unassigned__");
+    setPatchRingReason("");
+    setPatchRingDialogOpen(true);
+    try {
+      const response = await axios.get(`${API}/patch-compliance/rings`, { headers: { Authorization: `Bearer ${token}` } });
+      setPatchRingOptions(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      setPatchRingOptions([]);
+      toast.error(error.response?.data?.detail || "Nexus could not load the patch rollout register");
+    }
+  };
+
+  const savePatchRing = async () => {
+    if (patchRingReason.trim().length < 3) {
+      toast.error("Record why this asset is changing rollout group");
+      return;
+    }
+    setPatchRingBusy(true);
+    try {
+      const response = await axios.put(`${API}/devices/${deviceId}/patch-ring`, {
+        patch_ring: patchRingSelection === "__unassigned__" ? "" : patchRingSelection,
+        reason: patchRingReason.trim(),
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(response.data?.message || "Patch rollout group updated");
+      setPatchRingDialogOpen(false);
+      fetchDetail();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Nexus could not update the patch rollout group");
+    } finally {
+      setPatchRingBusy(false);
+    }
   };
 
   const closeLifecycleDialog = (force = false) => {
@@ -954,6 +993,18 @@ export default function DeviceDetailPage() {
 
         {/* PATCHES TAB */}
         <TabsContent value="patches" className="mt-4 space-y-4">
+          <Card className="border-violet-500/20 bg-violet-500/[0.03]">
+            <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-medium text-sm">Patch rollout group</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{dev.patch_ring ? `${dev.patch_ring} is recorded for this asset.` : "No rollout group is recorded for this asset."} Assignment records intent only; Nexus will not queue an update until an execution provider is connected.</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => navigate("/patch-compliance")}>Policy register</Button>
+                <Button size="sm" variant="outline" onClick={openPatchRingDialog} data-testid="device-assign-patch-ring"><ShieldCheck className="mr-1.5 h-4 w-4" />Assign group</Button>
+              </div>
+            </CardContent>
+          </Card>
           <Card className="border-cyan-500/20 bg-cyan-500/[0.03]">
             <CardContent className="py-3 flex items-center justify-between gap-4">
               <div><p className="font-medium text-sm">Patch deployment is maintenance-window controlled</p><p className="text-xs text-muted-foreground">{dev.pending_patches || 0} Windows updates currently pending. Review the list, then schedule an approved window.</p></div>
@@ -1319,6 +1370,37 @@ export default function DeviceDetailPage() {
                 <Label htmlFor="edit-device-location">Location</Label>
                 <Input id="edit-device-location" value={deviceEditor.location} onChange={e => setDeviceEditor(prev => ({ ...prev, location: e.target.value }))} placeholder="e.g. Home office" className="mt-1.5" data-testid="edit-device-location" />
               </div>
+            </div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={patchRingDialogOpen} onOpenChange={(open) => !patchRingBusy && setPatchRingDialogOpen(open)}>
+        <NexusWorkflowDialog
+          eyebrow="Patch compliance · rollout intent"
+          title="Assign patch rollout group"
+          description="Choose a confirmed tenant policy group for this asset. This is an auditable assignment only; no update command is sent or scheduled."
+          icon={ShieldCheck}
+          tone="violet"
+          data-testid="assign-patch-ring-workflow"
+          footer={<><Button variant="outline" onClick={() => setPatchRingDialogOpen(false)} disabled={patchRingBusy}>Cancel</Button><Button onClick={savePatchRing} disabled={patchRingBusy || patchRingReason.trim().length < 3} data-testid="save-device-patch-ring">{patchRingBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-1.5 h-4 w-4" />}Save rollout group</Button></>}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] p-3 text-xs leading-relaxed text-muted-foreground">Only confirmed policy-register groups are available. Removing the group also leaves an audit entry; it does not change agent settings or cancel a maintenance window.</div>
+            <div>
+              <Label htmlFor="device-patch-ring">Rollout group</Label>
+              <Select value={patchRingSelection} onValueChange={setPatchRingSelection} disabled={patchRingBusy}>
+                <SelectTrigger id="device-patch-ring" className="mt-1.5" data-testid="device-patch-ring"><SelectValue placeholder="Select a rollout group" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unassigned__">No rollout group</SelectItem>
+                  {patchRingOptions.map((ring) => <SelectItem key={ring.id || ring.name} value={ring.name}>{ring.name} · {ring.device_count || 0} assigned</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {patchRingOptions.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No confirmed rollout groups are available to this account. Create one in the Patch Compliance policy register first.</p>}
+            </div>
+            <div>
+              <Label htmlFor="device-patch-ring-reason">Why is this assignment changing?</Label>
+              <Textarea id="device-patch-ring-reason" className="mt-1.5 min-h-24" value={patchRingReason} onChange={(event) => setPatchRingReason(event.target.value)} maxLength={1000} placeholder="e.g. New endpoint validated for the staged pilot group" data-testid="device-patch-ring-reason" />
             </div>
           </div>
         </NexusWorkflowDialog>

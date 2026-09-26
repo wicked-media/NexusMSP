@@ -6,7 +6,7 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, assert_tenant_record_scope, scoped_query, tenant_scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, assert_tenant_record_scope, scoped_query, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -267,6 +267,107 @@ async def update_device(device_id: str, device_data: dict, current_user: dict = 
         if change_dict:
             await log_activity(current_user, "updated", "device", device_id, old_device.get("name", ""), f"Updated device fields: {', '.join(change_dict.keys())}", changes=change_dict)
     return {"message": "Device updated"}
+
+
+@router.put(
+    "/devices/{device_id}/patch-ring",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def assign_device_patch_ring(
+    device_id: str,
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Assign an asset to a confirmed, tenant-owned patch rollout group.
+
+    A rollout assignment is configuration intent, not patch execution.  It is
+    deliberately separate from the generic device editor because changing a
+    ring can affect the next provider-backed deployment once that capability
+    exists.  The current policy register remains the canonical source of the
+    allowed ring names; ``devices.patch_ring`` is only the per-device
+    assignment projection.
+    """
+    await assert_global_scope(current_user, operation="device.patch_ring.assign")
+    device = await assert_tenant_record_scope(
+        current_user, db.devices, device_id,
+        operation="device.patch_ring.assign", resource_name="Device",
+    )
+    payload = data if isinstance(data, dict) else {}
+    requested_ring = str(payload.get("patch_ring") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    if not 3 <= len(reason) <= 1000:
+        raise HTTPException(status_code=422, detail="Provide an assignment reason between 3 and 1000 characters")
+
+    policy = None
+    if requested_ring:
+        policy = await db.patch_compliance.find_one(
+            tenant_scoped_query(current_user, {
+                "ring": requested_ring,
+                "source": "manual",
+                "confirmed_at": {"$exists": True},
+            }),
+            {"_id": 0},
+        )
+        if not policy:
+            raise HTTPException(status_code=404, detail="Choose a confirmed patch rollout group from this tenant's policy register")
+        os_filter = str(policy.get("os_filter") or "All operating systems").strip().lower()
+        device_os = str(device.get("os") or device.get("os_name") or "").strip().lower()
+        if os_filter not in {"", "all operating systems", "all"} and os_filter not in device_os:
+            raise HTTPException(
+                status_code=422,
+                detail=f"The {requested_ring} rollout group is limited to {policy.get('os_filter')}; this asset reports {device.get('os') or 'an unknown operating system'}.",
+            )
+
+    previous_ring = str(device.get("patch_ring") or "").strip()
+    if previous_ring == requested_ring:
+        return {
+            "message": "Patch rollout group is already assigned",
+            "patch_ring": requested_ring or None,
+            "execution_state": "not_deployed",
+        }
+
+    assigned_at = _now()
+    update = {
+        "patch_ring": requested_ring or None,
+        "patch_ring_assigned_at": assigned_at,
+        "patch_ring_assigned_by": _actor_name(current_user),
+        "patch_ring_assignment_reason": reason,
+        "updated_at": assigned_at,
+    }
+    result = await db.devices.update_one(
+        tenant_scoped_query(current_user, {"id": device_id}),
+        {"$set": update},
+    )
+    if result.matched_count != 1:
+        # Do not report a configuration change when the device disappeared or
+        # moved outside the caller's tenant between authorisation and write.
+        raise HTTPException(status_code=409, detail="The managed asset changed before its rollout assignment could be saved. Refresh and try again.")
+    target_label = requested_ring or "Unassigned"
+    await log_activity(
+        current_user,
+        "updated",
+        "device_patch_ring",
+        device_id,
+        device.get("name", ""),
+        f"Changed patch rollout group from {previous_ring or 'Unassigned'} to {target_label}.",
+        changes={"patch_ring": {"old": previous_ring or "Unassigned", "new": target_label}},
+        metadata={
+            "device_id": device_id,
+            "client_id": device.get("client_id"),
+            "site_id": device.get("site_id"),
+            "tenant_id": device.get("tenant_id"),
+            "previous_ring": previous_ring or None,
+            "patch_ring": requested_ring or None,
+            "policy_id": policy.get("id") if policy else None,
+            "reason": reason,
+            "execution_state": "not_deployed",
+        },
+    )
+    return {
+        "message": "Patch rollout group updated. No patch deployment was queued.",
+        "patch_ring": requested_ring or None,
+        "execution_state": "not_deployed",
+    }
 
 @router.delete(
     "/devices/{device_id}",

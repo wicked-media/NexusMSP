@@ -250,6 +250,11 @@ class Device(BaseModel):
     encryption_status: Optional[str] = None
     compliance_score: Optional[int] = None
     patch_status: Optional[str] = None
+    # This is a device assignment projection of a confirmed policy-register
+    # ring. It never means patches have been deployed.
+    patch_ring: Optional[str] = None
+    patch_ring_assigned_at: Optional[str] = None
+    patch_ring_assigned_by: Optional[str] = None
     pending_patches: Optional[int] = 0
     last_patch_date: Optional[str] = None
     installed_software_count: Optional[int] = 0
