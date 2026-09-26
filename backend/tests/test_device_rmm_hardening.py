@@ -346,6 +346,26 @@ def test_patch_compliance_requires_fresh_signed_patch_evidence_not_a_generic_hea
     assert by_id["missing"]["patch_status"] == "not_assessed"
 
 
+def test_patch_compliance_policy_register_and_evidence_are_tenant_partitioned(monkeypatch):
+    user = {"id": "admin-a", "role": "admin", "tenant_id": "tenant-a"}
+    now = datetime.now(timezone.utc).isoformat()
+    policies = _Collection([
+        {"id": "policy-a", "tenant_id": "tenant-a", "name": "Tenant A policy", "source": "manual", "confirmed_at": now},
+        {"id": "policy-b", "tenant_id": "tenant-b", "name": "Tenant B policy", "source": "manual", "confirmed_at": now},
+    ])
+    devices = _Collection([
+        {"id": "device-a", "tenant_id": "tenant-a", "name": "Tenant A endpoint", "source": "nexus-agent"},
+        {"id": "device-b", "tenant_id": "tenant-b", "name": "Tenant B endpoint", "source": "nexus-agent"},
+    ])
+    monkeypatch.setattr(patch_compliance, "db", SimpleNamespace(devices=devices, patch_compliance=policies))
+
+    overview = asyncio.run(patch_compliance.get_patch_compliance(user))
+
+    assert [policy["id"] for policy in overview["policies"]] == ["policy-a"]
+    assert devices.find_queries[-1] == {"tenant_id": "tenant-a"}
+    assert policies.find_queries[-1] == {"tenant_id": "tenant-a"}
+
+
 def test_agent_patch_evidence_explicitly_clears_a_prior_count_when_collector_is_unavailable():
     observed_at = "2026-08-31T00:00:00+00:00"
     reported = nexus_agent._patch_evidence_update({"security": {"pending_update_count": 0}}, observed_at)

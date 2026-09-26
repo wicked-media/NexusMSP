@@ -15,7 +15,13 @@ from app.auth import get_current_user
 from app.database import db
 from app.services.action_permissions import require_action
 from app.services.activity import log_activity
-from app.services.scope_permissions import assert_global_scope, effective_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_global_scope,
+    effective_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 
 
 router = APIRouter()
@@ -87,7 +93,10 @@ def _safe_number(value: Any) -> int | None:
 async def _observed_devices(current_user: dict) -> list[dict]:
     # Device IDs are the server-side access boundary for older child patch
     # collections which do not consistently carry client_id themselves.
-    devices = await db.devices.find(scoped_query(current_user), {"_id": 0}).to_list(1000)
+    devices = await db.devices.find(
+        tenant_scoped_query(current_user, scoped_query(current_user)),
+        {"_id": 0},
+    ).to_list(1000)
     trusted_devices = [device for device in devices if _agent_source(device)]
 
     observed = []
@@ -131,8 +140,11 @@ async def _observed_devices(current_user: dict) -> list[dict]:
     return observed
 
 
-async def _policy_rows() -> tuple[list[dict], int]:
-    rows = await db.patch_compliance.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+async def _policy_rows(current_user: dict) -> tuple[list[dict], int]:
+    rows = await db.patch_compliance.find(
+        tenant_scoped_query(current_user),
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
     confirmed = [row for row in rows if _confirmed_policy(row)]
     legacy_unverified = len(rows) - len(confirmed)
     return confirmed, legacy_unverified
@@ -149,7 +161,7 @@ def _policy_view(policy: dict) -> dict:
 @router.get("/patch-compliance/overview")
 async def get_patch_compliance(current_user: dict = Depends(get_current_user)):
     can_view_global_policy = effective_scope(current_user)["mode"] == "all"
-    policies, legacy_unverified = await _policy_rows() if can_view_global_policy else ([], 0)
+    policies, legacy_unverified = await _policy_rows(current_user) if can_view_global_policy else ([], 0)
     devices = await _observed_devices(current_user)
     assessed = [device for device in devices if device["assessment_state"] == "assessed"]
     current = sum(1 for device in assessed if device["patch_status"] == "current")
@@ -183,7 +195,7 @@ async def get_patch_rings(current_user: dict = Depends(get_current_user)):
         # data source.  Restricted technicians retain their scoped evidence
         # view but cannot infer other customers' deployment strategy.
         return []
-    policies, _ = await _policy_rows()
+    policies, _ = await _policy_rows(current_user)
     devices = await _observed_devices(current_user)
     ring_names = sorted({str(policy.get("ring") or "").strip() for policy in policies if str(policy.get("ring") or "").strip()})
     rings = []
@@ -232,6 +244,7 @@ async def create_patch_policy(data: dict, current_user: dict = Depends(get_curre
     await assert_global_scope(current_user, operation="patch_policy.create")
     policy = {
         "id": f"pp-{uuid.uuid4().hex[:10]}",
+        "tenant_id": platform_tenant_id(current_user),
         **_validate_policy(data),
         "source": "manual",
         "created_at": _now(),
@@ -257,7 +270,7 @@ async def create_patch_policy(data: dict, current_user: dict = Depends(get_curre
 )
 async def update_patch_policy(policy_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     await assert_global_scope(current_user, operation="patch_policy.update")
-    existing = await db.patch_compliance.find_one({"id": policy_id}, {"_id": 0})
+    existing = await db.patch_compliance.find_one(tenant_scoped_query(current_user, {"id": policy_id}), {"_id": 0})
     if not existing or not _confirmed_policy(existing):
         raise HTTPException(status_code=404, detail="Confirmed policy record not found")
     update = {
@@ -266,7 +279,7 @@ async def update_patch_policy(policy_id: str, data: dict, current_user: dict = D
         "updated_at": _now(),
         "updated_by": current_user.get("name") or current_user.get("email") or current_user.get("id", ""),
     }
-    await db.patch_compliance.update_one({"id": policy_id}, {"$set": update})
+    await db.patch_compliance.update_one(tenant_scoped_query(current_user, {"id": policy_id}), {"$set": update})
     await log_activity(
         current_user,
         "updated",
@@ -286,10 +299,10 @@ async def update_patch_policy(policy_id: str, data: dict, current_user: dict = D
 )
 async def delete_patch_policy(policy_id: str, current_user: dict = Depends(get_current_user)):
     await assert_global_scope(current_user, operation="patch_policy.delete")
-    existing = await db.patch_compliance.find_one({"id": policy_id}, {"_id": 0})
+    existing = await db.patch_compliance.find_one(tenant_scoped_query(current_user, {"id": policy_id}), {"_id": 0})
     if not existing or not _confirmed_policy(existing):
         raise HTTPException(status_code=404, detail="Confirmed policy record not found")
-    await db.patch_compliance.delete_one({"id": policy_id})
+    await db.patch_compliance.delete_one(tenant_scoped_query(current_user, {"id": policy_id}))
     await log_activity(
         current_user,
         "deleted",
