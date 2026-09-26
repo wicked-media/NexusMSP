@@ -339,7 +339,8 @@ def test_ticket_client_move_routes_fail_closed_while_an_automation_note_lock_is_
 
     assert update_exc.value.status_code == 409
     assert locked_ticket.record["client_id"] == "client-a"
-    assert locked_ticket.update_queries[0][0]["automation_note_lock"] == {"$exists": False}
+    scoped_filter = locked_ticket.update_queries[0][0]
+    assert scoped_filter["$and"][0]["automation_note_lock"] == {"$exists": False}
 
     monkeypatch.setattr(ticket_meta, "db", database)
     with pytest.raises(HTTPException) as meta_exc:
