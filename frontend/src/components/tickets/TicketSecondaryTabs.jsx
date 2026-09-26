@@ -21,6 +21,8 @@ import { API } from "@/App";
 
 /* ============== Worksheets Tab ============== */
 export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, setNewWorksheetItem, worksheetItems, setWorksheetItems }) {
+  const [pendingRemoval, setPendingRemoval] = useState(null);
+  const [removing, setRemoving] = useState(false);
   const reload = async () => {
     try {
       const r = await axios.get(`${API}/tickets/${viewingTicket.id}/worksheet`, { headers });
@@ -41,6 +43,20 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
       await axios.post(`${API}/tickets/${viewingTicket.id}/worksheet/check`, { item_id: wi.id, checked: !wi.checked }, { headers });
       await reload();
     } catch { toast.error("Failed"); }
+  };
+  const remove = async () => {
+    if (!pendingRemoval) return;
+    setRemoving(true);
+    try {
+      await axios.delete(`${API}/tickets/${viewingTicket.id}/worksheet/${pendingRemoval.id}`, { headers });
+      await reload();
+      setPendingRemoval(null);
+      toast.success("Worksheet item removed");
+    } catch {
+      toast.error("Failed to remove worksheet item");
+    } finally {
+      setRemoving(false);
+    }
   };
   const completed = worksheetItems.filter(item => item.checked).length;
   const progress = worksheetItems.length ? Math.round((completed / worksheetItems.length) * 100) : 0;
@@ -81,6 +97,7 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
                 <span className={`text-sm ${wi.checked ? "line-through text-zinc-500" : "text-zinc-200"}`}>{wi.item}</span>
                 {wi.checked_by_name && <span className="text-[10px] text-muted-foreground ml-2">by {wi.checked_by_name} {wi.checked_at?.slice(0, 16)}</span>}
               </div>
+              <Button type="button" variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 text-zinc-500 opacity-0 transition-opacity hover:bg-rose-500/[0.10] hover:text-rose-300 group-hover:opacity-100 focus-visible:opacity-100" onClick={(event) => { event.stopPropagation(); setPendingRemoval(wi); }} aria-label={`Remove task: ${wi.item}`} title="Remove task"><Trash2 className="h-3.5 w-3.5" /></Button>
             </div>
           ))}
           <div className="flex items-center justify-between px-1 pt-2 text-[11px] text-zinc-500">
@@ -88,6 +105,18 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
           </div>
         </div>
       )}
+      <AlertDialog open={Boolean(pendingRemoval)} onOpenChange={(open) => !open && !removing && setPendingRemoval(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove worksheet task?</AlertDialogTitle>
+            <AlertDialogDescription>{pendingRemoval ? `Remove “${pendingRemoval.item}” from this ticket checklist?` : ""}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Keep task</AlertDialogCancel>
+            <AlertDialogAction onClick={remove} disabled={removing} className="bg-rose-600 text-white hover:bg-rose-500">{removing ? "Removing…" : "Remove task"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

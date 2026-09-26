@@ -300,6 +300,30 @@ async def check_worksheet_item(ticket_id: str, data: dict, current_user: dict = 
     }})
     return {"message": "Item updated", "completed": completed, "total": len(items)}
 
+
+@router.delete("/tickets/{ticket_id}/worksheet/{item_id}")
+async def remove_worksheet_item(ticket_id: str, item_id: str, current_user: dict = Depends(get_current_user)):
+    await _ticket_or_404(ticket_id, current_user)
+    ws = await db.ticket_worksheets.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
+    )
+    if not ws:
+        raise HTTPException(status_code=404, detail="Worksheet not found")
+    items = list(ws.get("items") or [])
+    remaining = [item for item in items if item.get("id") != item_id]
+    if len(remaining) == len(items):
+        raise HTTPException(status_code=404, detail="Worksheet item not found")
+    completed = sum(1 for item in remaining if item.get("checked"))
+    await db.ticket_worksheets.update_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"$set": {
+            "items": remaining, "completed": completed, "total": len(remaining),
+            "updated_by": current_user.get("name", ""),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return {"message": "Worksheet item removed", "completed": completed, "total": len(remaining)}
+
 @router.get("/worksheet-templates")
 async def get_worksheet_templates(current_user: dict = Depends(get_current_user)):
     return {
