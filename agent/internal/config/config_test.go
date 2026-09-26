@@ -74,3 +74,34 @@ func TestNativeRemoteCompanionReadyRequiresPinnedDigest(t *testing.T) {
 		t.Fatal("mismatched companion digest must fail closed")
 	}
 }
+
+func TestRuntimeCapabilitiesAdvertiseNativeRemoteOnlyForPinnedCompanion(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{
+		configPath: filepath.Join(dir, "config.json"),
+		PlatformPolicy: &PlatformPolicy{NativeRemote: map[string]any{
+			"enabled":          true,
+			"companion_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+		}},
+	}
+	for _, capability := range cfg.RuntimeCapabilities() {
+		if capability == "native_remote_v1" || capability == "native_remote_v2" {
+			t.Fatalf("missing companion must not advertise %q", capability)
+		}
+	}
+	payload := []byte("pinned remote companion")
+	if err := os.WriteFile(filepath.Join(dir, "nexus-remote-companion.exe"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(payload)
+	cfg.PlatformPolicy.NativeRemote["companion_sha256"] = fmt.Sprintf("%x", digest)
+	capabilities := cfg.RuntimeCapabilities()
+	foundV1, foundV2 := false, false
+	for _, capability := range capabilities {
+		foundV1 = foundV1 || capability == "native_remote_v1"
+		foundV2 = foundV2 || capability == "native_remote_v2"
+	}
+	if !foundV1 || !foundV2 {
+		t.Fatalf("pinned companion must advertise the native remote capabilities: %v", capabilities)
+	}
+}
