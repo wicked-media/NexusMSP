@@ -1697,13 +1697,14 @@ async def get_ticket_audit_log(ticket_id: str, current_user: dict = Depends(get_
 
 @router.get("/canned-responses")
 async def get_canned_responses(current_user: dict = Depends(get_current_user)):
-    responses = await db.canned_responses.find({}, {"_id": 0}).to_list(500)
+    responses = await db.canned_responses.find(tenant_scoped_query(current_user), {"_id": 0}).to_list(500)
     return responses
 
 @router.post("/canned-responses")
 async def create_canned_response(data: dict, current_user: dict = Depends(get_current_user)):
     response = {
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(current_user),
         "title": data.get("title", ""),
         "content": data.get("content", ""),
         "category": data.get("category", "general"),
@@ -1716,7 +1717,7 @@ async def create_canned_response(data: dict, current_user: dict = Depends(get_cu
 
 @router.delete("/canned-responses/{response_id}")
 async def delete_canned_response(response_id: str, current_user: dict = Depends(get_current_user)):
-    await db.canned_responses.delete_one({"id": response_id})
+    await db.canned_responses.delete_one(tenant_scoped_query(current_user, {"id": response_id}))
     return {"message": "Deleted"}
 
 
