@@ -1,3 +1,4 @@
+import { useState } from "react";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -5,6 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Plus, CheckCircle, Loader2, Paperclip, FileText, Download, Trash2,
   ShoppingCart, Receipt, History, Boxes, Clock,
@@ -89,6 +94,19 @@ export function TicketWorksheetTab({ viewingTicket, headers, newWorksheetItem, s
 
 /* ============== Attachments Tab ============== */
 export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, handleAttachmentUpload, handleDeleteAttachment, handleDownloadAttachment }) {
+  const [pendingDeletion, setPendingDeletion] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const confirmDeletion = async () => {
+    if (!pendingDeletion) return;
+    setDeleting(true);
+    try {
+      await handleDeleteAttachment(pendingDeletion.id);
+      setPendingDeletion(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <>
       <Card className="overflow-hidden border border-white/[0.08] bg-[linear-gradient(120deg,rgba(59,130,246,0.08),transparent_48%)]">
@@ -117,8 +135,8 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
               </div>
             </div>
             <div className="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-sky-300 hover:bg-sky-500/[0.10] hover:text-sky-100" onClick={() => handleDownloadAttachment(att)}><Download className="w-3.5 h-3.5" /></Button>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-zinc-500 hover:bg-rose-500/[0.10] hover:text-rose-300" onClick={() => handleDeleteAttachment(att.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-sky-300 hover:bg-sky-500/[0.10] hover:text-sky-100" onClick={() => handleDownloadAttachment(att)} aria-label={`Download ${att.filename}`} title={`Download ${att.filename}`}><Download className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-zinc-500 hover:bg-rose-500/[0.10] hover:text-rose-300" onClick={() => setPendingDeletion(att)} aria-label={`Delete ${att.filename}`} title={`Delete ${att.filename}`}><Trash2 className="w-3.5 h-3.5" /></Button>
             </div>
           </div>
         )) : (
@@ -130,6 +148,22 @@ export function TicketAttachmentsTab({ ticketAttachments, attachmentUploading, h
           </div>
         )}
       </ScrollArea>
+      <AlertDialog open={Boolean(pendingDeletion)} onOpenChange={(open) => !open && !deleting && setPendingDeletion(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove ticket evidence?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDeletion ? `Remove “${pendingDeletion.filename}” from this ticket? This cannot be undone.` : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep file</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeletion} disabled={deleting} className="bg-rose-600 text-white hover:bg-rose-500">
+              {deleting ? "Removing…" : "Remove file"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
