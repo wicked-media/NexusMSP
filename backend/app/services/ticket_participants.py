@@ -35,14 +35,18 @@ async def sync_ticket_participants(
     client_id = str(ticket.get("client_id") or "").strip()
     if not ticket_id or not client_id:
         return
+    tenant_id = str(ticket.get("tenant_id") or "nexus-local").strip() or "nexus-local"
     now = datetime.now(timezone.utc).isoformat()
     for raw_email in addresses:
         email = _normalise_email(raw_email)
         if not email:
             continue
-        participant_id = "ticket-participant-" + hashlib.sha256(f"{ticket_id}:{email}".encode("utf-8")).hexdigest()[:24]
+        participant_id = "ticket-participant-" + hashlib.sha256(
+            f"{tenant_id}:{ticket_id}:{email}".encode("utf-8")
+        ).hexdigest()[:24]
         updates = {
             "$set": {
+                "tenant_id": tenant_id,
                 "ticket_id": ticket_id,
                 "client_id": client_id,
                 "email": email,
@@ -57,4 +61,6 @@ async def sync_ticket_participants(
             },
             "$addToSet": {"roles": role},
         }
-        await db.ticket_participants.update_one({"id": participant_id}, updates, upsert=True)
+        await db.ticket_participants.update_one(
+            {"tenant_id": tenant_id, "id": participant_id}, updates, upsert=True
+        )

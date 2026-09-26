@@ -1727,7 +1727,7 @@ async def get_ticket_participants(ticket_id: str, current_user: dict = Depends(g
     """Visible people involved in this ticket conversation; BCC is intentionally excluded."""
     await _ticket_in_scope(ticket_id, current_user, "ticket.participants.read")
     return await db.ticket_participants.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
     ).sort("last_seen_at", -1).to_list(100)
 
 @router.get("/tickets/{ticket_id}/emails")
@@ -1736,7 +1736,7 @@ async def get_ticket_emails(ticket_id: str, current_user: dict = Depends(get_cur
     await _ticket_in_scope(ticket_id, current_user, "ticket.email.read")
     
     emails = await db.ticket_emails.find(
-        {"ticket_id": ticket_id}, {"_id": 0}
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"_id": 0}
     ).sort("created_at", -1).to_list(100)
     return emails
 
