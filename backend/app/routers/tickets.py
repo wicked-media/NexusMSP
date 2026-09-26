@@ -296,7 +296,10 @@ async def _ticket_time_actor(current_user: dict) -> tuple[dict, float]:
     user_id = str(current_user.get("id") or "").strip()
     if not user_id:
         raise HTTPException(status_code=401, detail="Authenticated technician identity is required")
-    stored = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "email": 1, "hourly_rate": 1})
+    stored = await db.users.find_one(
+        tenant_scoped_query(current_user, {"id": user_id}),
+        {"_id": 0, "name": 1, "email": 1, "hourly_rate": 1},
+    )
     return (
         {
             "id": user_id,
@@ -657,7 +660,13 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     service_code = (ticket_data.model_dump().get("service_code") or "").strip()
     service_doc = None
     if service_code:
-        service_doc = await db.service_catalog.find_one({"$or": [{"code": service_code}, {"id": service_code}], "is_active": {"$ne": False}}, {"_id": 0})
+        service_doc = await db.service_catalog.find_one(
+            tenant_scoped_query(current_user, {
+                "$or": [{"code": service_code}, {"id": service_code}],
+                "is_active": {"$ne": False},
+            }),
+            {"_id": 0},
+        )
         if service_doc:
             # Override priority if not explicitly set in the request
             if ticket_data.priority == "medium":
@@ -744,7 +753,10 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     # Auto-apply default blueprint if the client has one (Syncro-style worksheet auto-apply)
     try:
         if client and client.get("default_blueprint_id"):
-            bp = await db.blueprints.find_one({"id": client["default_blueprint_id"], "active": True}, {"_id": 0})
+            bp = await db.blueprints.find_one(
+                tenant_scoped_query(current_user, {"id": client["default_blueprint_id"], "active": True}),
+                {"_id": 0},
+            )
             if bp:
                 from app.routers.blueprints import _hydrate_ticket_with_blueprint
                 _hydrate_ticket_with_blueprint(doc, bp)
