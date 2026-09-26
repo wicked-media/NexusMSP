@@ -343,12 +343,14 @@ def test_ticket_client_move_routes_fail_closed_while_an_automation_note_lock_is_
     assert scoped_filter["$and"][0]["automation_note_lock"] == {"$exists": False}
 
     monkeypatch.setattr(ticket_meta, "db", database)
+    monkeypatch.setattr(ticket_meta, "assert_tenant_record_scope", ticket_in_scope)
+    monkeypatch.setattr(ticket_meta, "assert_client_scope", allow_scope)
     with pytest.raises(HTTPException) as meta_exc:
         asyncio.run(ticket_meta.change_customer("ticket-a", {"client_id": "client-b"}, CLIENT_A_USER))
 
     assert meta_exc.value.status_code == 409
     assert locked_ticket.record["client_id"] == "client-a"
-    assert locked_ticket.update_queries[1][0]["automation_note_lock"] == {"$exists": False}
+    assert locked_ticket.update_queries[1][0]["$and"][0]["automation_note_lock"] == {"$exists": False}
 
 
 def test_compensation_treats_a_foreign_or_moved_target_as_a_conflict(monkeypatch):
