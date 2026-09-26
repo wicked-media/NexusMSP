@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import uuid
 from app.database import db
 from app.auth import get_current_user
+from app.services.activity import ticket_audit
 from app.services.scope_permissions import (
     assert_client_scope, assert_record_scope, assert_tenant_record_scope,
     platform_tenant_id, scoped_query, tenant_scoped_query,
@@ -258,6 +259,7 @@ async def add_worksheet_item(ticket_id: str, data: dict, current_user: dict = De
                   "updated_by": current_user.get("name", ""), "updated_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True
     )
+    await ticket_audit(ticket_id, current_user, "worksheet_item_added", f"Added worksheet task: {item_text}")
     return new_item
 
 @router.put("/tickets/{ticket_id}/worksheet")
@@ -298,6 +300,13 @@ async def check_worksheet_item(ticket_id: str, data: dict, current_user: dict = 
         "items": items, "completed": completed, "total": len(items),
         "updated_by": current_user.get("name", ""), "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
+    item_label = next((str(item.get("item") or "Worksheet task") for item in items if item.get("id") == item_id), "Worksheet task")
+    await ticket_audit(
+        ticket_id,
+        current_user,
+        "worksheet_item_completed" if checked else "worksheet_item_reopened",
+        f"{'Completed' if checked else 'Reopened'} worksheet task: {item_label}",
+    )
     return {"message": "Item updated", "completed": completed, "total": len(items)}
 
 
@@ -322,6 +331,8 @@ async def remove_worksheet_item(ticket_id: str, item_id: str, current_user: dict
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }},
     )
+    removed_label = next((str(item.get("item") or "Worksheet task") for item in items if item.get("id") == item_id), "Worksheet task")
+    await ticket_audit(ticket_id, current_user, "worksheet_item_removed", f"Removed worksheet task: {removed_label}")
     return {"message": "Worksheet item removed", "completed": completed, "total": len(remaining)}
 
 @router.get("/worksheet-templates")
