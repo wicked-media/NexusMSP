@@ -106,6 +106,16 @@ export default function TicketConsoleHeader({
     }
     setResolutionTarget(target);
   };
+  const saveTitle = () => {
+    const nextTitle = titleDraft.trim();
+    if (nextTitle && nextTitle !== (ticket?.title || "")) onTitleSave?.(nextTitle);
+    setTitleEdit(false);
+  };
+  const saveDescription = () => {
+    const nextDescription = descriptionDraft.trim();
+    if (nextDescription !== (ticket?.description || "")) onDescriptionSave?.(nextDescription);
+    setDescriptionEdit(false);
+  };
 
   if (!ticket) return null;
 
@@ -144,27 +154,29 @@ export default function TicketConsoleHeader({
                 <Input
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
-                  onBlur={() => { onTitleSave?.(titleDraft); setTitleEdit(false); }}
+                  onBlur={saveTitle}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") { onTitleSave?.(titleDraft); setTitleEdit(false); }
-                    if (e.key === "Escape") { setTitleDraft(ticket.title || ""); setTitleEdit(false); }
+                    if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                    if (e.key === "Escape") { e.preventDefault(); setTitleDraft(ticket.title || ""); setTitleEdit(false); }
                   }}
                   className="h-10 text-xl font-semibold bg-zinc-950 border-emerald-500/30"
                   autoFocus
                   data-testid="console-title-input"
                 />
               ) : (
-                <h2
-                  className="text-xl md:text-2xl font-semibold tracking-tight text-white truncate cursor-pointer hover:text-emerald-200 transition-colors"
+                <button
+                  type="button"
+                  className="block max-w-full truncate text-left text-xl md:text-2xl font-semibold tracking-tight text-white hover:text-emerald-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/70 rounded-sm"
                   onClick={() => setTitleEdit(true)}
-                  title="Click to edit"
+                  title="Edit ticket title"
+                  aria-label="Edit ticket title"
                   data-testid="console-title"
                 >
                   {ticket.title || "Untitled ticket"}
-                </h2>
+                </button>
               )}
               {descriptionEdit ? (
-                <Textarea value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} onBlur={() => { onDescriptionSave?.(descriptionDraft); setDescriptionEdit(false); }} onKeyDown={(e) => { if (e.key === "Escape") { setDescriptionDraft(ticket.description || ""); setDescriptionEdit(false); } }} rows={2} className="mt-2 min-h-16 resize-none border-cyan-500/25 bg-zinc-950 text-sm" autoFocus data-testid="console-description-input" />
+                <Textarea value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} onBlur={saveDescription} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); setDescriptionDraft(ticket.description || ""); setDescriptionEdit(false); } if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} rows={2} className="mt-2 min-h-16 resize-none border-cyan-500/25 bg-zinc-950 text-sm" autoFocus data-testid="console-description-input" />
               ) : (
                 <button type="button" onClick={() => setDescriptionEdit(true)} className="mt-1.5 block max-w-full truncate text-left text-xs text-zinc-400 transition-colors hover:text-cyan-100" title="Click to edit description" data-testid="console-description">{ticket.description || "Add a ticket description"}</button>
               )}
