@@ -289,18 +289,22 @@ async def check_worksheet_item(ticket_id: str, data: dict, current_user: dict = 
     item_id = data.get("item_id")
     checked = data.get("checked", True)
     items = ws.get("items", [])
+    updated_item = None
     for i in items:
         if i.get("id") == item_id:
             i["checked"] = checked
             i["checked_by_name"] = current_user.get("name", "")
             i["checked_at"] = datetime.now(timezone.utc).isoformat()
+            updated_item = i
             break
+    if not updated_item:
+        raise HTTPException(status_code=404, detail="Worksheet item not found")
     completed = sum(1 for i in items if i.get("checked"))
     await db.ticket_worksheets.update_one(tenant_scoped_query(current_user, {"ticket_id": ticket_id}), {"$set": {
         "items": items, "completed": completed, "total": len(items),
         "updated_by": current_user.get("name", ""), "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
-    item_label = next((str(item.get("item") or "Worksheet task") for item in items if item.get("id") == item_id), "Worksheet task")
+    item_label = str(updated_item.get("item") or "Worksheet task")
     await ticket_audit(
         ticket_id,
         current_user,
