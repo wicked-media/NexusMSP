@@ -1745,6 +1745,38 @@ async def add_ticket_time_entry(ticket_id: str, entry_data: dict, current_user: 
     entry["idempotent_replay"] = not created
     return entry
 
+
+@router.post("/tickets/{ticket_id}/time-entries/{entry_id}/adjustments", dependencies=[Depends(require_action("ticket.time.modify"))])
+async def add_ticket_time_adjustment(ticket_id: str, entry_id: str, payload: dict, current_user: dict = Depends(get_current_user)):
+    """Create a linked signed correction; invoiced source entries remain immutable."""
+    ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.time.adjust")
+    original = await db.time_entries.find_one(
+        tenant_scoped_query(current_user, {"id": entry_id, "ticket_id": ticket_id}), {"_id": 0}
+    )
+    if not original:
+        raise HTTPException(status_code=404, detail="Time entry not found")
+    if not original.get("invoiced"):
+        raise HTTPException(status_code=409, detail="Use the normal correction flow for uninvoiced time")
+    try:
+        minutes = int(payload.get("minutes") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Adjustment minutes must be a whole number")
+    reason = str(payload.get("reason") or "").strip()
+    if not minutes or abs(minutes) > 1_440 or not reason or len(reason) > 2_000:
+        raise HTTPException(status_code=422, detail="Provide signed minutes up to 1440 and an adjustment reason")
+    actor, _ = await _ticket_time_actor(current_user)
+    entry, created = await create_canonical_ticket_time_entry(
+        ticket=ticket, actor=actor, minutes=minutes,
+        description=f"Adjustment for {entry_id}: {reason}", billable=bool(original.get("billable")),
+        source="ticket_time_adjustment", source_reference=f"adjustment:{entry_id}:{uuid.uuid4().hex}",
+        hourly_rate=float(original.get("hourly_rate") or 0), date=payload.get("date") or original.get("date"),
+        allow_negative_adjustment=True,
+        extra={"tenant_id": platform_tenant_id(current_user), "adjustment_of": entry_id, "adjustment_reason": reason, "adjustment": True}, database=db,
+    )
+    if created:
+        await ticket_audit(ticket_id, current_user, "time_adjusted", f"Adjusted invoiced time by {minutes} minutes: {reason[:240]}")
+    return entry
+
 # ============== TICKET AUDIT LOG ==============
 
 async def ticket_audit(

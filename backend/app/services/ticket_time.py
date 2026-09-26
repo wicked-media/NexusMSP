@@ -39,6 +39,15 @@ def _minutes(value: Any) -> float:
         return 0.0
 
 
+def _signed_minutes(value: Any) -> float:
+    """Return a finite signed duration for explicit correction records only."""
+    try:
+        candidate = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return candidate if math.isfinite(candidate) else 0.0
+
+
 def _clean_total(value: float) -> int | float:
     return int(value) if value.is_integer() else round(value, 2)
 
@@ -174,7 +183,7 @@ async def canonical_ticket_minutes(
     entries = await database.time_entries.find(
         {"ticket_id": ticket_id}, {"_id": 0, "minutes": 1}
     ).to_list(10000)
-    return _clean_total(sum(_minutes(entry.get("minutes")) for entry in entries))
+    return _clean_total(sum(_signed_minutes(entry.get("minutes")) for entry in entries))
 
 
 async def sync_ticket_time_cache(
@@ -255,6 +264,7 @@ async def create_canonical_ticket_time_entry(
     date: str | None = None,
     extra: dict[str, Any] | None = None,
     created_at: str | None = None,
+    allow_negative_adjustment: bool = False,
     database: Any = default_db,
 ) -> tuple[dict[str, Any], bool]:
     """Write one authoritative ticket-time record, idempotently where possible.
@@ -267,9 +277,11 @@ async def create_canonical_ticket_time_entry(
     ticket_id = str(ticket.get("id") or "").strip()
     if not ticket_id:
         raise HTTPException(status_code=422, detail="A ticket ID is required for time entry")
-    duration = _minutes(minutes)
-    if duration < 1:
+    duration = _signed_minutes(minutes) if allow_negative_adjustment else _minutes(minutes)
+    if abs(duration) < 1:
         raise HTTPException(status_code=422, detail="Minutes must be at least one")
+    if duration < 0 and not allow_negative_adjustment:
+        raise HTTPException(status_code=422, detail="Negative minutes are only permitted for an adjustment entry")
     source = str(source or "manual_time_entry").strip() or "manual_time_entry"
     source_reference = str(source_reference or "").strip() or None
     # Entry IDs are always generated at the server-side domain boundary.

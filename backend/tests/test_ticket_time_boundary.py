@@ -7,6 +7,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 from app.routers import tickets, time_entries, voice_journal, work_sessions
+from app.services import ticket_time
 from app.services.ticket_time import (
     create_canonical_ticket_time_entry,
     list_ticket_time_history,
@@ -527,6 +528,7 @@ def test_manual_time_api_accepts_an_idempotency_key(monkeypatch):
 
 async def _test_manual_time_api_accepts_an_idempotency_key(monkeypatch):
     db = FakeDb()
+    ticket_time._indexed_database_ids.clear()
     monkeypatch.setattr(time_entries, "db", db)
     async def _allow_scope(*_args, **_kwargs):
         return {"mode": "all"}
