@@ -23,6 +23,7 @@ from fastapi import HTTPException
 
 from app.database import db
 from app.services.activity import log_activity, ticket_audit
+from app.services.scope_permissions import platform_tenant_id
 
 
 SERVICE_KITS: dict[str, dict[str, Any]] = {
@@ -217,6 +218,7 @@ async def _build_workshop_record(ticket: dict[str, Any], context: dict[str, Any]
     customer_name = ticket.get("client_name") or client.get("company_name") or client.get("name") or "Client"
     return {
         "id": str(uuid.uuid4()),
+        "tenant_id": str(ticket.get("tenant_id") or platform_tenant_id(current_user)),
         "job_number": _reference(ticket, "WS"),
         "job_type": "workshop",
         "service_kit_id": "workshop_repair",
@@ -277,6 +279,7 @@ async def _build_field_record(ticket: dict[str, Any], context: dict[str, Any], c
         ]
     return {
         "id": str(uuid.uuid4()),
+        "tenant_id": str(ticket.get("tenant_id") or platform_tenant_id(current_user)),
         "job_number": _reference(ticket, "FIELD"),
         "job_type": "field",
         "service_kit_id": "cabling_field",
@@ -376,6 +379,7 @@ async def activate_service_kit(
 
     specialist_audit = {
         "id": str(uuid.uuid4()),
+        "tenant_id": str(ticket.get("tenant_id") or platform_tenant_id(current_user)),
         "job_id": record["id"],
         "action": "created_from_service_kit",
         "details": f"Created from parent ticket {ticket.get('ticket_number') or ticket['id']} using {kit['name']}",

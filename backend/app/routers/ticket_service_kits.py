@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_record_scope
+from app.services.scope_permissions import assert_tenant_record_scope
 from app.database import db
 from app.services.ticket_service_kits import activate_service_kit, public_catalog
 
@@ -34,7 +34,7 @@ async def apply_ticket_service_kit(
     current_user: dict = Depends(get_current_user),
 ):
     """Attach exactly one specialist delivery workflow to a canonical ticket."""
-    ticket = await assert_record_scope(
+    ticket = await assert_tenant_record_scope(
         current_user,
         db.tickets,
         ticket_id,
