@@ -904,6 +904,15 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
                 detail="This ticket has a protected automation note in progress. Retry the customer change shortly.",
             )
         raise HTTPException(status_code=404, detail="Ticket not found")
+    if target_client_id != old_ticket.get("client_id"):
+        await db.clients.update_one(
+            tenant_scoped_query(current_user, {"id": old_ticket.get("client_id")}),
+            {"$inc": {"ticket_count": -1}},
+        )
+        await db.clients.update_one(
+            tenant_scoped_query(current_user, {"id": target_client_id}),
+            {"$inc": {"ticket_count": 1}},
+        )
     if ticket_data.get("status") == "closed" and old_ticket.get("status") != "closed":
         await _place_project_task_into_review(old_ticket, current_user, now_iso)
     if old_ticket:
