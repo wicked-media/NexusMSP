@@ -119,7 +119,7 @@ async def _validate_inventory_device_link(
     resolved_device_id = str(device_id or "").strip()
     if not resolved_device_id:
         return None
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user,
         db.devices,
         resolved_device_id,
@@ -131,7 +131,7 @@ async def _validate_inventory_device_link(
             status_code=409,
             detail="An inventory asset linked to an endpoint must use that endpoint's client ownership.",
         )
-    linked_assets = await db.assets.find({"device_id": resolved_device_id}, {"_id": 0, "id": 1}).to_list(10)
+    linked_assets = await db.assets.find(tenant_scoped_query(current_user, {"device_id": resolved_device_id}), {"_id": 0, "id": 1}).to_list(10)
     if any(str(asset.get("id") or "") != str(asset_id or "") for asset in linked_assets):
         raise HTTPException(status_code=409, detail="This managed asset is already linked to another inventory record")
     return device
@@ -909,7 +909,7 @@ async def get_assets(
     if client_id:
         query["client_id"] = client_id
     
-    assets = await db.assets.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
+    assets = await db.assets.find(tenant_scoped_query(current_user, scoped_query(current_user, query)), {"_id": 0}).to_list(1000)
     for a in assets:
         if isinstance(a.get('created_at'), str):
             a['created_at'] = datetime.fromisoformat(a['created_at'])
@@ -917,7 +917,7 @@ async def get_assets(
 
 @router.get("/assets/stats")
 async def get_asset_stats(current_user: dict = Depends(get_current_user)):
-    assets = await db.assets.find(scoped_query(current_user), {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(tenant_scoped_query(current_user, scoped_query(current_user)), {"_id": 0}).to_list(10000)
     total = len(assets)
     active = len([a for a in assets if a.get("status") == "active"])
     total_value = sum(a.get("cost", 0) for a in assets)
@@ -947,7 +947,7 @@ async def get_asset_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/assets/expiring")
 async def get_expiring_assets(current_user: dict = Depends(get_current_user)):
-    assets = await db.assets.find(scoped_query(current_user), {"_id": 0}).to_list(10000)
+    assets = await db.assets.find(tenant_scoped_query(current_user, scoped_query(current_user)), {"_id": 0}).to_list(10000)
     now = datetime.now()
     cutoff = now + timedelta(days=90)
     expiring = []
@@ -966,7 +966,7 @@ async def get_expiring_assets(current_user: dict = Depends(get_current_user)):
 
 @router.get("/assets/{asset_id}")
 async def get_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user, db.assets, asset_id,
         operation="asset.read", resource_name="Asset",
     )
@@ -978,7 +978,7 @@ async def get_asset(asset_id: str, current_user: dict = Depends(get_current_user
 )
 async def create_asset(asset_data: AssetCreate, current_user: dict = Depends(get_current_user)):
     await assert_client_scope(current_user, asset_data.client_id, operation="asset.create")
-    client = await db.clients.find_one({"id": asset_data.client_id}, {"_id": 0})
+    client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": asset_data.client_id}), {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     client_name = client['name'] if client else None
@@ -991,6 +991,7 @@ async def create_asset(asset_data: AssetCreate, current_user: dict = Depends(get
     
     asset = Asset(**asset_data.model_dump(), client_name=client_name)
     doc = asset.model_dump()
+    doc["tenant_id"] = platform_tenant_id(current_user)
     doc['created_at'] = doc['created_at'].isoformat()
     await db.assets.insert_one(doc)
     await log_activity(
@@ -1005,7 +1006,7 @@ async def create_asset(asset_data: AssetCreate, current_user: dict = Depends(get
     dependencies=[Depends(require_action("asset.lifecycle.manage"))],
 )
 async def update_asset(asset_id: str, asset_data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await assert_record_scope(
+    existing = await assert_tenant_record_scope(
         current_user, db.assets, asset_id,
         operation="asset.update", resource_name="Asset",
     )
@@ -1026,7 +1027,7 @@ async def update_asset(asset_id: str, asset_data: dict, current_user: dict = Dep
     next_device_id = updates.get("device_id", existing.get("device_id"))
     if "client_id" in updates and next_client_id != existing.get("client_id"):
         await assert_client_scope(current_user, next_client_id, operation="asset.move")
-        next_client = await db.clients.find_one({"id": next_client_id}, {"_id": 0, "id": 1, "name": 1}) if next_client_id else None
+        next_client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": next_client_id}), {"_id": 0, "id": 1, "name": 1}) if next_client_id else None
         if next_client_id and not next_client:
             raise HTTPException(status_code=404, detail="Client not found")
         updates["client_name"] = next_client.get("name") if next_client else None
@@ -1038,7 +1039,7 @@ async def update_asset(asset_id: str, asset_data: dict, current_user: dict = Dep
         operation="asset.update",
     )
     updates["updated_at"] = _now()
-    result = await db.assets.update_one({"id": asset_id}, {"$set": updates})
+    result = await db.assets.update_one(tenant_scoped_query(current_user, {"id": asset_id}), {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Asset not found")
     changes = {key: {"old": existing.get(key), "new": value} for key, value in updates.items() if key != "updated_at" and existing.get(key) != value}
@@ -1055,7 +1056,7 @@ async def update_asset(asset_id: str, asset_data: dict, current_user: dict = Dep
     dependencies=[Depends(require_action("asset.lifecycle.manage"))],
 )
 async def delete_asset(asset_id: str, current_user: dict = Depends(get_current_user)):
-    asset = await assert_record_scope(
+    asset = await assert_tenant_record_scope(
         current_user, db.assets, asset_id,
         operation="asset.delete", resource_name="Asset",
     )
@@ -1066,7 +1067,7 @@ async def delete_asset(asset_id: str, current_user: dict = Depends(get_current_u
         current_user, "deleted", "asset", asset_id, str(asset.get("name") or asset_id),
         "Permanently deleted an empty manual inventory record.", metadata={"purge": True, "client_id": asset.get("client_id")},
     )
-    result = await db.assets.delete_one({"id": asset_id})
+    result = await db.assets.delete_one(tenant_scoped_query(current_user, {"id": asset_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Asset not found")
     return {"message": "Asset deleted"}

@@ -427,6 +427,28 @@ def test_device_identity_update_rechecks_tenant_at_write_time(monkeypatch):
     assert device_rows.update_calls[-1][0] == {"$and": [{"id": "shared-device"}, {"tenant_id": "tenant-a"}]}
 
 
+def test_inventory_update_rechecks_tenant_at_write_time(monkeypatch):
+    user = {"id": "admin-a", "name": "Admin A", "role": "admin", "tenant_id": "tenant-a"}
+    asset_rows = _Collection([
+        {"id": "shared-asset", "tenant_id": "tenant-a", "client_id": "client-a", "name": "Tenant A asset"},
+        {"id": "shared-asset", "tenant_id": "tenant-b", "client_id": "client-b", "name": "Tenant B asset"},
+    ])
+    database = SimpleNamespace(assets=asset_rows, devices=_Collection(), scope_denials=_Collection())
+
+    async def no_op_audit(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(devices, "db", database)
+    monkeypatch.setattr(scope_permissions, "db", database)
+    monkeypatch.setattr(devices, "log_activity", no_op_audit)
+
+    asyncio.run(devices.update_asset("shared-asset", {"name": "Renamed safely"}, current_user=user))
+
+    assert asset_rows.rows[0]["name"] == "Renamed safely"
+    assert asset_rows.rows[1]["name"] == "Tenant B asset"
+    assert asset_rows.update_calls[-1][0] == {"$and": [{"id": "shared-asset"}, {"tenant_id": "tenant-a"}]}
+
+
 def test_agent_patch_evidence_explicitly_clears_a_prior_count_when_collector_is_unavailable():
     observed_at = "2026-08-31T00:00:00+00:00"
     reported = nexus_agent._patch_evidence_update({"security": {"pending_update_count": 0}}, observed_at)
