@@ -444,13 +444,13 @@ async def _set_ticket_activity(ticket: dict, actor: dict, *, public: bool, at: s
     )
 
 
-async def _attach_client_branding(tickets: list[dict]) -> None:
+async def _attach_client_branding(tickets: list[dict], current_user: dict) -> None:
     """Resolve current client branding so ticket views never carry a stale logo."""
     client_ids = {ticket.get("client_id") for ticket in tickets if ticket.get("client_id")}
     if not client_ids:
         return
     clients = await db.clients.find(
-        {"id": {"$in": list(client_ids)}},
+        tenant_scoped_query(current_user, {"id": {"$in": list(client_ids)}}),
         {"_id": 0, "id": 1, "logo_url": 1},
     ).to_list(len(client_ids))
     logos = {client["id"]: client.get("logo_url") for client in clients}
@@ -574,7 +574,7 @@ async def get_tickets(
     
     tickets = await db.tickets.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
     await attach_user_avatars(tickets, id_fields=("assigned_to",), output_field="assignee_avatar")
-    await _attach_client_branding(tickets)
+    await _attach_client_branding(tickets, current_user)
     for t in tickets:
         for field in ['created_at', 'updated_at', 'sla_due']:
             if isinstance(t.get(field), str):
@@ -589,7 +589,9 @@ async def get_ticket_note_counts(current_user: dict = Depends(get_current_user))
     ).to_list(10000)
     result = {}
     for t in open_tickets:
-        nc = await db.ticket_comments.count_documents({"ticket_id": t["id"]})
+        nc = await db.ticket_comments.count_documents(
+            tenant_scoped_query(current_user, {"ticket_id": t["id"]})
+        )
         result[t["id"]] = nc
     return result
 
@@ -616,7 +618,7 @@ async def get_active_viewers_proxy(current_user: dict = Depends(get_current_user
 async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
     ticket = await _ticket_in_scope(ticket_id, current_user, "ticket.read")
     await attach_user_avatars([ticket], id_fields=("assigned_to",), output_field="assignee_avatar")
-    await _attach_client_branding([ticket])
+    await _attach_client_branding([ticket], current_user)
     return ticket
 
 @router.post("/tickets", response_model=Ticket)

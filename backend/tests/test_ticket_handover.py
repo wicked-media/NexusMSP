@@ -83,6 +83,61 @@ def test_child_ticket_list_is_tenant_scoped_after_parent_authorisation(monkeypat
     }
 
 
+def test_ticket_queue_side_reads_keep_tenant_scope(monkeypatch):
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def sort(self, *_args):
+            return self
+
+        async def to_list(self, _limit):
+            return self.rows
+
+    class TicketRows:
+        def __init__(self):
+            self.query = None
+
+        def find(self, query, _projection):
+            self.query = query
+            return Cursor([{"id": "ticket-1"}])
+
+    class CommentRows:
+        def __init__(self):
+            self.queries = []
+
+        async def count_documents(self, query):
+            self.queries.append(query)
+            return 2
+
+    class ClientRows:
+        def __init__(self):
+            self.query = None
+
+        def find(self, query, _projection):
+            self.query = query
+            return Cursor([])
+
+    ticket_rows = TicketRows()
+    comment_rows = CommentRows()
+    client_rows = ClientRows()
+    user = {"id": "tech-1", "tenant_id": "tenant-a"}
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(
+        tickets=ticket_rows,
+        ticket_comments=comment_rows,
+        clients=client_rows,
+    ))
+
+    assert asyncio.run(tickets.get_ticket_note_counts(user)) == {"ticket-1": 2}
+    assert comment_rows.queries == [{
+        "$and": [{"ticket_id": "ticket-1"}, {"tenant_id": "tenant-a"}],
+    }]
+    asyncio.run(tickets._attach_client_branding([{"client_id": "client-1"}], user))
+    assert client_rows.query == {
+        "$and": [{"id": {"$in": ["client-1"]}}, {"tenant_id": "tenant-a"}],
+    }
+
+
 def test_handover_returns_active_subscriber_profiles(monkeypatch):
     class Rows:
         def __init__(self, rows):
