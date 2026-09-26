@@ -624,7 +624,10 @@ async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_us
 @router.post("/tickets", response_model=Ticket)
 async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(get_current_user)):
     await assert_client_scope(current_user, ticket_data.client_id, operation="ticket.create")
-    client = await db.clients.find_one({"id": ticket_data.client_id}, {"_id": 0})
+    client = await db.clients.find_one(
+        tenant_scoped_query(current_user, {"id": ticket_data.client_id}),
+        {"_id": 0},
+    )
     client_name = client['name'] if client else None
     if ticket_data.client_id and not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -716,6 +719,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     doc['created_at'] = doc['created_at'].isoformat()
     doc['updated_at'] = doc['updated_at'].isoformat()
     doc['sla_due'] = doc['sla_due'].isoformat() if doc['sla_due'] else None
+    doc["tenant_id"] = platform_tenant_id(current_user)
     if inherited_tier:
         doc.update({
             "service_tier_id": inherited_tier["id"],
@@ -725,7 +729,10 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
             "tier_resolution_sla_minutes": inherited_tier.get("resolution_sla_minutes"),
         })
     await db.tickets.insert_one(doc)
-    await db.clients.update_one({"id": ticket_data.client_id}, {"$inc": {"ticket_count": 1}})
+    await db.clients.update_one(
+        tenant_scoped_query(current_user, {"id": ticket_data.client_id}),
+        {"$inc": {"ticket_count": 1}},
+    )
     await ticket_audit(ticket.id, current_user, "created", f"Created ticket {ticket_number}")
 
     # Auto-apply default blueprint if the client has one (Syncro-style worksheet auto-apply)
