@@ -7,7 +7,12 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_tenant_record_scope,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.services.ticket_time import create_canonical_ticket_time_entry, sync_ticket_time_cache
 from app.models import *
 
@@ -15,7 +20,7 @@ router = APIRouter()
 
 
 async def _time_entry_or_404(entry_id: str, current_user: dict) -> dict:
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user,
         db.time_entries,
         entry_id,
@@ -84,7 +89,7 @@ async def get_time_entries(
         query["billable"] = billable
     
     entries = await db.time_entries.find(
-        scoped_query(current_user, query), {"_id": 0}
+        tenant_scoped_query(current_user, scoped_query(current_user, query)), {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
     for e in entries:
         if isinstance(e.get('created_at'), str):
@@ -93,7 +98,10 @@ async def get_time_entries(
 
 @router.post("/time-entries", response_model=TimeEntry)
 async def create_time_entry(entry_data: TimeEntryCreate, current_user: dict = Depends(get_current_user)):
-    ticket = await db.tickets.find_one({"id": entry_data.ticket_id}, {"_id": 0})
+    ticket = await db.tickets.find_one(
+        tenant_scoped_query(current_user, {"id": entry_data.ticket_id}),
+        {"_id": 0},
+    )
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     await assert_client_scope(
@@ -117,7 +125,7 @@ async def create_time_entry(entry_data: TimeEntryCreate, current_user: dict = De
     )
     return TimeEntry(**entry)
 
-@router.put("/time-entries/{entry_id}")
+@router.put("/time-entries/{entry_id}", dependencies=[Depends(require_action("ticket.time.modify"))])
 async def update_time_entry(entry_id: str, entry_data: dict, current_user: dict = Depends(get_current_user)):
     existing = await _time_entry_or_404(entry_id, current_user)
     if existing.get("invoiced"):
@@ -142,20 +150,37 @@ async def update_time_entry(entry_id: str, entry_data: dict, current_user: dict 
             if billable else 0,
             2,
         )
-    result = await db.time_entries.update_one({"id": entry_id}, {"$set": update})
+    result = await db.time_entries.update_one(
+        tenant_scoped_query(current_user, {"id": entry_id}),
+        {"$set": update},
+    )
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
     if "minutes" in update:
         await sync_ticket_time_cache(existing.get("ticket_id"), database=db)
+    await ticket_audit(
+        existing.get("ticket_id"),
+        current_user,
+        "time_corrected",
+        f"Corrected {existing.get('minutes', 0)} minute time entry ({entry_id}; {', '.join(sorted(update))})",
+    )
     return {"message": "Time entry updated"}
 
-@router.delete("/time-entries/{entry_id}")
+@router.delete("/time-entries/{entry_id}", dependencies=[Depends(require_action("ticket.time.delete"))])
 async def delete_time_entry(entry_id: str, current_user: dict = Depends(get_current_user)):
     entry = await _time_entry_or_404(entry_id, current_user)
-    result = await db.time_entries.delete_one({"id": entry_id})
+    if entry.get("invoiced"):
+        raise HTTPException(status_code=409, detail="Invoiced time cannot be deleted; issue an adjustment entry instead")
+    result = await db.time_entries.delete_one(tenant_scoped_query(current_user, {"id": entry_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Time entry not found")
     await sync_ticket_time_cache(entry["ticket_id"], database=db)
+    await ticket_audit(
+        entry["ticket_id"],
+        current_user,
+        "time_deleted",
+        f"Deleted uninvoiced {entry.get('minutes', 0)} minute time entry ({entry_id})",
+    )
     return {"message": "Time entry deleted"}
 
 # ============== TIME TRACKING ENHANCED ==============

@@ -315,6 +315,8 @@ export function TicketAuditTab({ auditLog }) {
     created: { label: "Created ticket", Icon: CheckCircle, tone: "border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300" },
     updated: { label: "Updated ticket", Icon: History, tone: "border-sky-500/25 bg-sky-500/[0.10] text-sky-300" },
     time_logged: { label: "Logged time", Icon: Clock, tone: "border-violet-500/25 bg-violet-500/[0.10] text-violet-300" },
+    time_corrected: { label: "Corrected time", Icon: Clock, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-200" },
+    time_deleted: { label: "Deleted time", Icon: Trash2, tone: "border-rose-500/25 bg-rose-500/[0.10] text-rose-300" },
     customer_changed: { label: "Changed client", Icon: Building2, tone: "border-amber-500/25 bg-amber-500/[0.10] text-amber-300" },
     categorisation_updated: { label: "Updated classification", Icon: Tags, tone: "border-sky-500/25 bg-sky-500/[0.10] text-sky-300" },
     picked_up: { label: "Picked up ticket", Icon: UserCheck, tone: "border-blue-500/25 bg-blue-500/[0.10] text-blue-300" },

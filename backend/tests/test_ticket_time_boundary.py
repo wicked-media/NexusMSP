@@ -18,9 +18,15 @@ from fastapi import HTTPException
 
 
 def _matches(row: dict, query: dict) -> bool:
-    if "$and" in query:
-        return all(_matches(row, clause) for clause in query["$and"])
     for key, value in query.items():
+        if key == "$and":
+            if not all(_matches(row, clause) for clause in value):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches(row, clause) for clause in value):
+                return False
+            continue
         actual = row.get(key)
         if isinstance(value, dict):
             if "$in" in value and actual not in value["$in"]:
@@ -28,6 +34,8 @@ def _matches(row: dict, query: dict) -> bool:
             if "$ne" in value and actual == value["$ne"]:
                 return False
             if "$gte" in value and (actual is None or actual < value["$gte"]):
+                return False
+            if "$exists" in value and (key in row) != bool(value["$exists"]):
                 return False
             continue
         if actual != value:
@@ -87,13 +95,14 @@ class FakeDb(SimpleNamespace):
                 [
                     {
                         "id": "ticket-1",
+                        "tenant_id": "tenant-a",
                         "title": "Restore workstation access",
                         "client_id": "client-1",
                         "client_name": "Northwind Dental",
                     }
                 ]
             ),
-            users=FakeCollection([{"id": "tech-1", "name": "Alex Tech", "hourly_rate": 120.0}]),
+            users=FakeCollection([{"id": "tech-1", "tenant_id": "tenant-a", "name": "Alex Tech", "hourly_rate": 120.0}]),
             time_entries=FakeCollection(),
             ticket_time_entries=FakeCollection(),
             ticket_audit_log=FakeCollection(),
@@ -471,6 +480,7 @@ async def _test_time_entry_edits_and_deletes_recalculate_from_canonical_rows(mon
         [
             {
                 "id": "time-1",
+                "tenant_id": "tenant-a",
                 "ticket_id": "ticket-1",
                 "client_id": "client-1",
                 "minutes": 10,
@@ -480,6 +490,7 @@ async def _test_time_entry_edits_and_deletes_recalculate_from_canonical_rows(mon
             },
             {
                 "id": "time-2",
+                "tenant_id": "tenant-a",
                 "ticket_id": "ticket-1",
                 "client_id": "client-1",
                 "minutes": 20,
@@ -490,11 +501,19 @@ async def _test_time_entry_edits_and_deletes_recalculate_from_canonical_rows(mon
         ]
     )
     monkeypatch.setattr(time_entries, "db", db)
+    async def _ticket_audit(ticket_id, user, action, details=""):
+        await db.ticket_audit_log.insert_one({
+            "ticket_id": ticket_id,
+            "user_id": user.get("id"),
+            "action": action,
+            "details": details,
+        })
+    monkeypatch.setattr(time_entries, "ticket_audit", _ticket_audit)
     async def _entry_or_404(entry_id, _user):
         return await db.time_entries.find_one({"id": entry_id})
     monkeypatch.setattr(time_entries, "_time_entry_or_404", _entry_or_404)
 
-    user = {"id": "tech-1", "name": "Alex Tech", "role": "technician"}
+    user = {"id": "tech-1", "tenant_id": "tenant-a", "name": "Alex Tech", "role": "technician"}
     await time_entries.update_time_entry("time-1", {"minutes": 15}, current_user=user)
     assert db.tickets.rows[0]["total_time_minutes"] == 35
     await time_entries.delete_time_entry("time-2", current_user=user)
@@ -523,7 +542,7 @@ async def _test_manual_time_api_accepts_an_idempotency_key(monkeypatch):
         billable=True,
         idempotency_key="time-api:ticket-1:request-1",
     )
-    user = {"id": "tech-1", "name": "Alex Tech", "role": "technician"}
+    user = {"id": "tech-1", "tenant_id": "tenant-a", "name": "Alex Tech", "role": "technician"}
     first = await time_entries.create_time_entry(request, current_user=user)
     second = await time_entries.create_time_entry(request, current_user=user)
 

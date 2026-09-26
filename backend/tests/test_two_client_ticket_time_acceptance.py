@@ -22,9 +22,17 @@ def _matches(row: dict, query: dict) -> bool:
     """Small Mongo-style matcher sufficient for the scoped acceptance paths."""
     for key, value in query.items():
         if key == "$and":
-            return all(_matches(row, clause) for clause in value)
-        if isinstance(value, dict) and "$in" in value:
-            if row.get(key) not in value["$in"]:
+            if not all(_matches(row, clause) for clause in value):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches(row, clause) for clause in value):
+                return False
+            continue
+        if isinstance(value, dict):
+            if "$in" in value and row.get(key) not in value["$in"]:
+                return False
+            if "$exists" in value and (key in row) != bool(value["$exists"]):
                 return False
             continue
         if row.get(key) != value:
@@ -65,6 +73,7 @@ class FakeDb(SimpleNamespace):
                 [
                     {
                         "id": "ticket-a",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "SR-1001",
                         "client_id": "client-a",
                         "client_name": "Client A",
@@ -72,6 +81,7 @@ class FakeDb(SimpleNamespace):
                     },
                     {
                         "id": "ticket-b",
+                        "tenant_id": "tenant-a",
                         "ticket_number": "SR-2001",
                         "client_id": "client-b",
                         "client_name": "Client B",
@@ -79,11 +89,12 @@ class FakeDb(SimpleNamespace):
                     },
                 ]
             ),
-            users=FakeCollection([{"id": "tech-a", "name": "Technician A", "hourly_rate": 140.0}]),
+            users=FakeCollection([{"id": "tech-a", "tenant_id": "tenant-a", "name": "Technician A", "hourly_rate": 140.0}]),
             time_entries=FakeCollection(
                 [
                     {
                         "id": "time-a",
+                        "tenant_id": "tenant-a",
                         "ticket_id": "ticket-a",
                         "client_id": "client-a",
                         "created_at": "2026-08-22T09:00:00+00:00",
@@ -91,6 +102,7 @@ class FakeDb(SimpleNamespace):
                     },
                     {
                         "id": "time-b",
+                        "tenant_id": "tenant-a",
                         "ticket_id": "ticket-b",
                         "client_id": "client-b",
                         "created_at": "2026-08-22T09:01:00+00:00",
@@ -115,6 +127,7 @@ class FakeDb(SimpleNamespace):
 def _restricted_client_a_technician() -> dict:
     return {
         "id": "tech-a",
+        "tenant_id": "tenant-a",
         "name": "Technician A",
         "role": "technician",
         "client_scope_mode": "restricted",
