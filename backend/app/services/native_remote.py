@@ -151,7 +151,18 @@ async def device_readiness(device: dict[str, Any], tenant_id: str | None = None)
     expected_tenant = str(tenant_id or "").strip()
     agent = await db.nexus_agents.find_one(
         tenant_scoped_query({"tenant_id": expected_tenant or "nexus-local"}, {"id": agent_id, "client_id": client_id, "is_active": True}),
-        {"_id": 0, "id": 1, "tenant_id": 1, "last_seen": 1, "nexus_shield_capabilities": 1, "agent_runtime_capabilities": 1},
+        {
+            "_id": 0,
+            "id": 1,
+            "tenant_id": 1,
+            "last_seen": 1,
+            "nexus_shield_capabilities": 1,
+            "agent_runtime_capabilities": 1,
+            # Readiness is reported by the authenticated agent heartbeat.  Keep
+            # it in this explicit projection so the server-side decision uses
+            # the same evidence that is persisted for the endpoint.
+            "native_remote_evidence": 1,
+        },
     )
     if not agent:
         return {"ready": False, "state": "agent_unavailable", "detail": "The linked Nexus Agent is inactive."}

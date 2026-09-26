@@ -79,6 +79,18 @@ class Rows:
         return SimpleNamespace(deleted_count=0)
 
 
+class ProjectionRows(Rows):
+    """Capture the requested database projection for persistence-bound tests."""
+
+    def __init__(self, rows=None):
+        super().__init__(rows)
+        self.last_projection = None
+
+    async def find_one(self, query, projection=None, **kwargs):
+        self.last_projection = deepcopy(projection)
+        return await super().find_one(query, projection, **kwargs)
+
+
 class _Cursor:
     def __init__(self, rows):
         self.rows = deepcopy(rows)
@@ -196,7 +208,7 @@ def test_revoked_native_grant_releases_endpoint_for_new_authorisation(monkeypatc
 
 def test_native_readiness_requires_online_capable_linked_agent(monkeypatch):
     database = SimpleNamespace(
-        nexus_agents=Rows([{
+        nexus_agents=ProjectionRows([{
             "id": "agent-1",
             "client_id": "client-1",
             "is_active": True,
@@ -217,6 +229,7 @@ def test_native_readiness_requires_online_capable_linked_agent(monkeypatch):
     assert result["companion_capability"] == native_remote.RUNTIME_CAPABILITY
     assert result["agent_last_seen"]
     assert result["checked_at"]
+    assert database.nexus_agents.last_projection["native_remote_evidence"] == 1
     assert missing == {
         "ready": False,
         "state": "not_enrolled",
