@@ -21,7 +21,8 @@ class _Collection:
     async def update_one(self, query, update):
         self.updates.append({"query": deepcopy(query), "update": deepcopy(update)})
         for row in self.rows:
-            if all(row.get(key) == value for key, value in query.items()):
+            clauses = query.get("$and", [query])
+            if all(all(row.get(key) == value for key, value in clause.items()) for clause in clauses):
                 row.update(deepcopy(update.get("$set", {})))
                 return SimpleNamespace(matched_count=1, modified_count=1)
         return SimpleNamespace(matched_count=0, modified_count=0)
@@ -29,7 +30,7 @@ class _Collection:
 
 def test_ticket_updates_record_activity_without_fabricating_customer_reply(monkeypatch):
     database = SimpleNamespace(
-        tickets=_Collection([{"id": "ticket-1", "client_id": "client-1", "title": "Restore access"}]),
+        tickets=_Collection([{"id": "ticket-1", "client_id": "client-1", "tenant_id": "tenant-a", "title": "Restore access"}]),
         ticket_comments=_Collection(),
     )
 
@@ -47,14 +48,19 @@ def test_ticket_updates_record_activity_without_fabricating_customer_reply(monke
     monkeypatch.setattr(tickets, "_ticket_in_tenant_scope", in_scope)
     monkeypatch.setattr(tickets, "ticket_audit", no_audit)
     monkeypatch.setattr(tickets, "assert_action_permission", allow_action)
-    technician = {"id": "tech-1", "name": "Alex Tech", "role": "technician"}
+    technician = {"id": "tech-1", "name": "Alex Tech", "role": "technician", "tenant_id": "tenant-a"}
 
     internal = asyncio.run(tickets.create_ticket_comment("ticket-1", {"content": "Checked identity configuration.", "visibility": "internal"}, technician))
     after_internal = database.tickets.rows[0]
     assert after_internal["last_activity_at"] == internal["created_at"]
     assert after_internal["last_activity_by_id"] == "tech-1"
     assert "last_technician_reply_at" not in after_internal
-    assert database.tickets.updates[0]["query"] == {"id": "ticket-1", "client_id": "client-1"}
+    assert database.tickets.updates[0]["query"] == {
+        "$and": [
+            {"id": "ticket-1", "client_id": "client-1"},
+            {"tenant_id": "tenant-a"},
+        ],
+    }
 
     public = asyncio.run(tickets.create_ticket_comment("ticket-1", {"content": "We are continuing the investigation.", "visibility": "public"}, technician))
     after_public = database.tickets.rows[0]

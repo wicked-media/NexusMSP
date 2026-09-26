@@ -1130,7 +1130,7 @@ async def create_ticket_comment(ticket_id: str, comment_data: dict, current_user
     if not is_internal:
         activity_update["last_technician_reply_at"] = activity_at
     await db.tickets.update_one(
-        {"id": ticket_id, "client_id": ticket.get("client_id")},
+        tenant_scoped_query(current_user, {"id": ticket_id, "client_id": ticket.get("client_id")}),
         {"$set": activity_update},
     )
     await ticket_audit(
