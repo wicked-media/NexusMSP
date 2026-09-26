@@ -156,6 +156,9 @@ export default function TicketConversationTab({
     .trim().length > 0;
   const hasDraftContent = hasMeaningfulContent(newNote);
   const hasEmailBody = hasMeaningfulContent(emailForm.body);
+  const canSendSms = Boolean(String(smsForm.to || "").trim()) && (
+    hasMeaningfulContent(smsForm.message) || Boolean(smsForm.template_key)
+  );
 
   const submitConversationEntry = async (options) => {
     if (postingEntry) return;
@@ -438,7 +441,7 @@ export default function TicketConversationTab({
           </div>
           <div className="flex justify-between items-center">
             <span className="text-[11px] text-muted-foreground">Replies from this number will appear inline in this conversation.</span>
-            <Button size="sm" onClick={handleSendSms} disabled={smsSending} data-testid="send-sms-btn">
+            <Button size="sm" onClick={handleSendSms} disabled={!canSendSms || smsSending} data-testid="send-sms-btn">
               {smsSending ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Send className="w-3 h-3 mr-1" />}
               Send SMS
             </Button>
