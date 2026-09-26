@@ -2061,6 +2061,12 @@ export default function TicketsPage() {
   if (viewingTicket) {
     const ticketCompleted = ["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase());
     const slaHours = viewingTicket.sla_due && !ticketCompleted ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
+    const formatSlaDuration = (hours) => {
+      const absoluteHours = Math.abs(Number(hours) || 0);
+      const days = Math.floor(absoluteHours / 24);
+      const remainder = absoluteHours % 24;
+      return days ? `${days}d${remainder ? ` ${remainder}h` : ""}` : `${remainder}h`;
+    };
     const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
     const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
     const unbilledTicketItems = ticketProducts.filter(item => !item.invoice_id);
@@ -2683,7 +2689,7 @@ export default function TicketsPage() {
                       </p>
                     </div>
                     <Badge className={ticketCompleted ? "shrink-0 border-emerald-400/30 bg-emerald-500/15 text-emerald-200" : slaHours == null ? "shrink-0 border-zinc-500/30 bg-zinc-500/10 text-zinc-300" : slaHours < 0 ? "shrink-0 border-rose-400/30 bg-rose-500/15 text-rose-200" : slaHours <= 4 ? "shrink-0 border-amber-400/30 bg-amber-500/15 text-amber-100" : "shrink-0 border-cyan-400/30 bg-cyan-500/15 text-cyan-100"}>
-                      {ticketCompleted ? "Closed" : slaHours == null ? "No target" : slaHours < 0 ? `${Math.abs(slaHours)}h overdue` : `${slaHours}h remaining`}
+                      {ticketCompleted ? "Closed" : slaHours == null ? "No target" : slaHours < 0 ? `${formatSlaDuration(slaHours)} overdue` : `${formatSlaDuration(slaHours)} remaining`}
                     </Badge>
                   </CardContent>
                 </Card>
