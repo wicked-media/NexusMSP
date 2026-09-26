@@ -223,6 +223,8 @@ export default function TicketsPage() {
   const [attachmentUploading, setAttachmentUploading] = useState(false);
   const [attachmentDeleteTarget, setAttachmentDeleteTarget] = useState(null);
   const [ticketProducts, setTicketProducts] = useState([]);
+  const [pendingProductRemoval, setPendingProductRemoval] = useState(null);
+  const [removingProduct, setRemovingProduct] = useState(false);
   const [ticketPurchaseOrders, setTicketPurchaseOrders] = useState([]);
   // SMS thread state
   const [ticketSms, setTicketSms] = useState([]);
@@ -1098,13 +1100,23 @@ export default function TicketsPage() {
     finally { addingItemRef.current = false; setAddingItem(false); }
   };
 
-  const handleRemoveItemFromTicket = async (itemId) => {
+  const handleRemoveItemFromTicket = (itemId) => {
+    const item = ticketProducts.find((product) => product.id === itemId);
+    if (item) setPendingProductRemoval(item);
+  };
+
+  const confirmRemoveItemFromTicket = async () => {
+    const itemId = pendingProductRemoval?.id;
     if (!viewingTicket) return;
+    if (!itemId) return;
+    setRemovingProduct(true);
     try {
       await axios.delete(`${API}/tickets/${viewingTicket.id}/products/${itemId}`, { headers });
       setTicketProducts(prev => prev.filter(p => p.id !== itemId));
+      setPendingProductRemoval(null);
       toast.success("Item removed");
     } catch { toast.error("Failed to remove item"); }
+    finally { setRemovingProduct(false); }
   };
 
   const handlePushToInvoice = async (invoiceId) => {
@@ -2139,6 +2151,24 @@ export default function TicketsPage() {
           onConfirm={confirmResolutionReview}
           busy={resolutionProcessing}
         />
+        <AlertDialog open={Boolean(pendingProductRemoval)} onOpenChange={(open) => !open && !removingProduct && setPendingProductRemoval(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove ticket line item?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingProductRemoval
+                  ? `Remove ${pendingProductRemoval.product_name || "this item"} · $${Number(pendingProductRemoval.total || 0).toFixed(2)} from this ticket? It will no longer be available for invoicing.`
+                  : ""}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={removingProduct}>Keep item</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmRemoveItemFromTicket} disabled={removingProduct} className="bg-rose-600 text-white hover:bg-rose-500">
+                {removingProduct ? "Removing…" : "Remove item"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, SLA and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
 
