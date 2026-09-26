@@ -1838,6 +1838,7 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
     doc['created_at'] = doc['created_at'].isoformat()
     if doc.get('sent_at'):
         doc['sent_at'] = doc['sent_at'].isoformat()
+    doc["tenant_id"] = ticket.get("tenant_id") or platform_tenant_id(current_user)
     doc['delivery_status'] = delivery.get('status', 'failed')
     doc['delivery_message'] = delivery.get('message', '')
     doc['sender_mailbox'] = delivery.get('sender')
@@ -1852,7 +1853,7 @@ async def send_ticket_email(ticket_id: str, email_data: TicketEmailCreate, curre
     if ticket_email.status == "sent":
         activity_update["last_technician_reply_at"] = activity_at
     await db.tickets.update_one(
-        {"id": ticket_id, "client_id": ticket.get("client_id")},
+        tenant_scoped_query(current_user, {"id": ticket_id, "client_id": ticket.get("client_id")}),
         {"$set": activity_update},
     )
     from app.services.ticket_participants import sync_ticket_participants
