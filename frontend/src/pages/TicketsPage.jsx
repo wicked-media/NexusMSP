@@ -172,7 +172,7 @@ export default function TicketsPage() {
   }, []);
 
   // Focus is session-only; ownership, billing, assets and the briefing stay available.
-  const [ticketFocusMode, setTicketFocusMode] = useState(true);
+  const [ticketFocusMode, setTicketFocusMode] = useState(false);
   const [handoverOpen, setHandoverOpen] = useState(false);
   const panelVisible = {
     serviceTier: !ticketFocusMode, related: !ticketFocusMode,
