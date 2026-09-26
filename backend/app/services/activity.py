@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import uuid
 from app.database import db
+from app.services.scope_permissions import platform_tenant_id
 
 ACHIEVEMENT_DEFINITIONS = [
     {"id": "first_ticket", "name": "First Resolve", "description": "Closed your first ticket", "icon": "trophy", "category": "tickets", "threshold": 1, "color": "#22c55e"},
@@ -46,6 +47,7 @@ async def ticket_audit(ticket_id: str, user: dict, action: str, details: str = "
     entry = {
         "id": str(uuid.uuid4()),
         "ticket_id": ticket_id,
+        "tenant_id": platform_tenant_id(user),
         "user_id": user.get("id", ""),
         "user_name": user.get("name", ""),
         "action": action,
