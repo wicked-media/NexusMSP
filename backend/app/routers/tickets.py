@@ -458,7 +458,7 @@ async def _attach_client_branding(tickets: list[dict], current_user: dict) -> No
         ticket["client_logo_url"] = logos.get(ticket.get("client_id"))
 
 
-async def _assert_project_plan_parent_can_close(ticket: dict) -> None:
+async def _assert_project_plan_parent_can_close(ticket: dict, current_user: dict) -> None:
     """Keep a generated project parent ticket open until required delivery work closes.
 
     The project plan is intentionally enforced in the domain API rather than in
@@ -473,14 +473,14 @@ async def _assert_project_plan_parent_can_close(ticket: dict) -> None:
         return
 
     child_tickets = await db.tickets.find(
-        {
+        tenant_scoped_query(current_user, {
             "id": {"$in": child_ticket_ids},
             "client_id": ticket.get("client_id"),
             "$or": [
                 {"project_ticket_plan_required": {"$ne": False}},
                 {"project_ticket_plan_required": {"$exists": False}},
             ],
-        },
+        }),
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "status": 1},
     ).to_list(len(child_ticket_ids))
     terminal_statuses = {"resolved", "closed", "completed"}
@@ -806,7 +806,7 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     # A closure is an audit event, not simply a queue state. Retain who closed
     # it, when it happened, and that it was resolved through the normal flow.
     if ticket_data.get("status") == "closed" and old_ticket and old_ticket.get("status") != "closed":
-        await _assert_project_plan_parent_can_close(old_ticket)
+        await _assert_project_plan_parent_can_close(old_ticket, current_user)
         ticket_data.update({
             "resolved_at": old_ticket.get("resolved_at") or now_iso,
             "closed_at": now_iso,

@@ -138,6 +138,33 @@ def test_ticket_queue_side_reads_keep_tenant_scope(monkeypatch):
     }
 
 
+def test_project_parent_close_gate_reads_only_tenant_children(monkeypatch):
+    class Rows:
+        def __init__(self):
+            self.query = None
+
+        def find(self, query, _projection):
+            self.query = query
+            return self
+
+        async def to_list(self, _limit):
+            return []
+
+    rows = Rows()
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(tickets=rows))
+
+    asyncio.run(tickets._assert_project_plan_parent_can_close({
+        "id": "parent-1",
+        "client_id": "client-1",
+        "project_ticket_plan_role": "parent",
+        "child_ticket_ids": ["child-1"],
+    }, {"id": "tech-1", "tenant_id": "tenant-a"}))
+
+    assert rows.query["$and"][0]["id"] == {"$in": ["child-1"]}
+    assert rows.query["$and"][0]["client_id"] == "client-1"
+    assert rows.query["$and"][1] == {"tenant_id": "tenant-a"}
+
+
 def test_handover_returns_active_subscriber_profiles(monkeypatch):
     class Rows:
         def __init__(self, rows):
