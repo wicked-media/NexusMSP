@@ -120,7 +120,7 @@ async def execute_command(session_id: str, data: dict, current_user: dict = Depe
     if not command_id:
         raise HTTPException(409, "Nexus Agent is not available")
     entry = {"id": command_id, "command": command, "status": "queued", "queued_at": _now()}
-    await db.terminal_sessions.update_one({"id": session_id}, {"$push": {"commands": entry}, "$set": {"last_command_at": entry["queued_at"]}})
+    await db.terminal_sessions.update_one(_session_scope(session_id, current_user), {"$push": {"commands": entry}, "$set": {"last_command_at": entry["queued_at"]}})
     await db.nexus_agent_commands.update_one({"id": command_id}, {"$set": {"terminal_session_id": session_id, "terminal_command_id": command_id}})
     await log_activity(current_user, "agent_command_queued", "device", device["id"], session["device_name"], command[:240], metadata={"session_id": session_id, "command_id": command_id, "shell": session["session_type"]})
     return {"command_id": command_id, "status": "queued", "message": "Queued for the live Nexus Agent"}
@@ -133,6 +133,6 @@ async def end_terminal_session(session_id: str, current_user: dict = Depends(req
         raise HTTPException(404, "Command session not found")
     if session.get("status") != "active":
         raise HTTPException(409, "Command session is already closed")
-    await db.terminal_sessions.update_one({"id": session_id}, {"$set": {"status": "ended", "ended_at": _now(), "ended_by": current_user.get("id")}})
+    await db.terminal_sessions.update_one(_session_scope(session_id, current_user), {"$set": {"status": "ended", "ended_at": _now(), "ended_by": current_user.get("id")}})
     await log_activity(current_user, "agent_command_session_closed", "device", session["device_id"], session.get("device_name", ""), "Command console closed", metadata={"session_id": session_id})
     return {"message": "Command session ended"}
