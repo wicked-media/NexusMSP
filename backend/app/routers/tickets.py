@@ -763,7 +763,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
                 doc["blueprint_applied_at"] = datetime.now(timezone.utc).isoformat()
                 doc["blueprint_applied_by"] = "auto"
                 await db.tickets.update_one(
-                    {"id": doc["id"]},
+                    tenant_scoped_query(current_user, {"id": doc["id"]}),
                     {"$set": {k: doc[k] for k in (
                         "priority", "category", "status", "assignee_id", "sla_minutes",
                         "blueprint_id", "blueprint_name", "blueprint_require_completion",
@@ -779,7 +779,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     # Persist service catalog metadata on the ticket if it was applied
     if service_doc:
         await db.tickets.update_one(
-            {"id": ticket.id},
+            tenant_scoped_query(current_user, {"id": ticket.id}),
             {"$set": {
                 "service_code": service_doc.get("code"),
                 "service_name": service_doc.get("name"),
