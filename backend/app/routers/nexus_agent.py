@@ -2392,9 +2392,21 @@ def _build_installer_zip(
         "nexus_shield": NEXUS_SHIELD_AGENT_PROFILE,
         "nexus_dns": NEXUS_DNS_AGENT_PROFILE,
     }
-    companion_copy_line = 'copy /Y "%~dp0nexus-client-chat.exe" "%INSTDIR%\\nexus-client-chat.exe" >nul\r\n' if chat_companion_bytes else ""
-    tray_copy_line = 'copy /Y "%~dp0nexus-agent-tray.exe" "%INSTDIR%\\nexus-agent-tray.exe" >nul\r\n' if tray_companion_bytes else ""
-    remote_copy_line = 'copy /Y "%~dp0nexus-remote-companion.exe" "%INSTDIR%\\nexus-remote-companion.exe" >nul\r\n' if remote_companion_bytes else ""
+    companion_copy_line = (
+        'copy /Y "%~dp0nexus-client-chat.exe" "%INSTDIR%\\nexus-client-chat.exe" >nul\r\n'
+        'if errorlevel 1 ( echo Could not copy nexus-client-chat.exe & exit /b 1 )\r\n'
+        if chat_companion_bytes else ""
+    )
+    tray_copy_line = (
+        'copy /Y "%~dp0nexus-agent-tray.exe" "%INSTDIR%\\nexus-agent-tray.exe" >nul\r\n'
+        'if errorlevel 1 ( echo Could not copy nexus-agent-tray.exe & exit /b 1 )\r\n'
+        if tray_companion_bytes else ""
+    )
+    remote_copy_line = (
+        'copy /Y "%~dp0nexus-remote-companion.exe" "%INSTDIR%\\nexus-remote-companion.exe" >nul\r\n'
+        'if errorlevel 1 ( echo Could not copy nexus-remote-companion.exe & exit /b 1 )\r\n'
+        if remote_companion_bytes else ""
+    )
     companion_start_menu_lines = (
         'if not exist "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP" mkdir "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP"\r\n'
         'copy /Y "%~dp0Open Nexus Client Chat.bat" "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\NexusMSP\\Nexus Client Chat.bat" >nul\r\n'
@@ -2426,6 +2438,10 @@ def _build_installer_zip(
         "  sc stop NexusOpsAgent >nul 2>&1\r\n"
         "  timeout /t 3 /nobreak >nul\r\n"
         ")\r\n"
+        "REM A previous interrupted install can leave a stopped service process holding the binary.\r\n"
+        "REM This image name is reserved for NexusOps Agent and is stopped before replacing its files.\r\n"
+        "taskkill /F /IM nexus-agent.exe >nul 2>&1\r\n"
+        "timeout /t 2 /nobreak >nul\r\n"
         "copy /Y \"%~dp0nexus-agent.exe\" \"%INSTDIR%\\nexus-agent.exe\" >nul\r\n"
         "if errorlevel 1 ( echo Could not copy nexus-agent.exe & exit /b 1 )\r\n"
         "copy /Y \"%~dp0config.json\"     \"%INSTDIR%\\config.json\"     >nul\r\n"

@@ -632,6 +632,8 @@ def test_installer_records_the_configured_agent_intervals():
     assert 'icacls "%INSTDIR%\\config.json" /inheritance:r' in install_script
     assert "*S-1-5-18:(F)" in install_script
     assert "*S-1-5-32-544:(F)" in install_script
+    assert 'taskkill /F /IM nexus-agent.exe' in install_script
+    assert 'Could not copy nexus-remote-companion.exe' in install_script
     assert {"nexus-client-chat.exe", "nexus-agent-tray.exe", "nexus-remote-companion.exe"} <= names
     assert release_manifest["bundled_components"] == {"client_chat": True, "agent_tray": True, "native_remote": True}
 
