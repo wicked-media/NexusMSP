@@ -1,16 +1,16 @@
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
-import uuid, os
+import uuid
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import scoped_query
+from app.services.scope_permissions import platform_tenant_id, scoped_query, tenant_scoped_query
 
 router = APIRouter()
 
 
 @router.get("/settings/auto-merge")
 async def get_auto_merge_settings(current_user: dict = Depends(get_current_user)):
-    settings = await db.settings.find_one({"type": "auto_merge"}, {"_id": 0})
+    settings = await db.settings.find_one(tenant_scoped_query(current_user, {"type": "auto_merge"}), {"_id": 0})
     if not settings:
         settings = {
             "enabled": False,
@@ -27,8 +27,8 @@ async def get_auto_merge_settings(current_user: dict = Depends(get_current_user)
 @router.put("/settings/auto-merge")
 async def update_auto_merge_settings(data: dict, current_user: dict = Depends(get_current_user)):
     await db.settings.update_one(
-        {"type": "auto_merge"},
-        {"$set": {**data, "type": "auto_merge", "updated_at": datetime.now(timezone.utc).isoformat()}},
+        tenant_scoped_query(current_user, {"type": "auto_merge"}),
+        {"$set": {**data, "type": "auto_merge", "tenant_id": platform_tenant_id(current_user), "updated_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
     return {"message": "Auto-merge settings updated"}
@@ -37,7 +37,7 @@ async def update_auto_merge_settings(data: dict, current_user: dict = Depends(ge
 @router.get("/tickets/merge-suggestions")
 async def get_merge_suggestions(current_user: dict = Depends(get_current_user)):
     """Find potential duplicate tickets that could be merged."""
-    settings = await db.settings.find_one({"type": "auto_merge"}, {"_id": 0})
+    settings = await db.settings.find_one(tenant_scoped_query(current_user, {"type": "auto_merge"}), {"_id": 0})
     if not settings or not settings.get("enabled", False):
         return {"enabled": False, "suggestions": []}
 
@@ -48,10 +48,10 @@ async def get_merge_suggestions(current_user: dict = Depends(get_current_user)):
     open_tickets = await db.tickets.find(
         scoped_query(
             current_user,
-            {
+            tenant_scoped_query(current_user, {
                 "status": {"$nin": ["closed", "resolved"]},
                 "priority": {"$nin": exclude_priorities},
-            },
+            }),
         ),
         {"_id": 0},
     ).sort("created_at", -1).to_list(500)
@@ -132,6 +132,7 @@ async def dismiss_merge_suggestion(data: dict, current_user: dict = Depends(get_
     suggestion_id = data.get("suggestion_id")
     await db.dismissed_merges.insert_one({
         "id": suggestion_id,
+        "tenant_id": platform_tenant_id(current_user),
         "dismissed_by": current_user.get("name", ""),
         "dismissed_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -140,12 +141,12 @@ async def dismiss_merge_suggestion(data: dict, current_user: dict = Depends(get_
 
 @router.get("/tickets/merge/history")
 async def get_merge_history(current_user: dict = Depends(get_current_user)):
-    logs = await db.merge_logs.find({}, {"_id": 0}).sort("merged_at", -1).to_list(50)
+    logs = await db.merge_logs.find(tenant_scoped_query(current_user), {"_id": 0}).sort("merged_at", -1).to_list(50)
     primary_ids = [item.get("primary_ticket_id") for item in logs if item.get("primary_ticket_id")]
     if not primary_ids:
         return []
     tickets = await db.tickets.find(
-        scoped_query(current_user, {"id": {"$in": primary_ids}}),
+        scoped_query(current_user, tenant_scoped_query(current_user, {"id": {"$in": primary_ids}})),
         {"_id": 0, "id": 1},
     ).to_list(len(primary_ids))
     permitted_ids = {ticket["id"] for ticket in tickets}
