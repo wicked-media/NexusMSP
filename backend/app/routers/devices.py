@@ -6,7 +6,7 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, assert_tenant_record_scope, scoped_query, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -539,30 +539,30 @@ async def merge_device(device_id: str, data: dict, current_user: dict = Depends(
 
 @router.get("/devices/{device_id}/detail")
 async def get_device_detail(device_id: str, current_user: dict = Depends(get_current_user)):
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.detail.read", resource_name="Device",
     )
-    software = await db.device_software.find({"device_id": device_id}, {"_id": 0}).to_list(500)
-    patches = await db.device_patches.find({"device_id": device_id}, {"_id": 0}).sort("installed_date", -1).to_list(100)
-    events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(100)
-    performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
+    software = await db.device_software.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).to_list(500)
+    patches = await db.device_patches.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("installed_date", -1).to_list(100)
+    events = await db.device_events.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("timestamp", -1).to_list(100)
+    performance = await db.device_performance.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("timestamp", -1).to_list(288)
     alerts = await db.alerts.find(
-        {
+        tenant_scoped_query(current_user, {
             "device_id": device_id,
             "$or": [
                 {"status": {"$in": ["active", "open", "triggered"]}},
                 {"status": {"$exists": False}},
             ],
-        },
+        }),
         {"_id": 0},
     ).sort("created_at", -1).to_list(50)
     tickets = await db.tickets.find(
-        {"$or": [{"device_id": device_id}, {"device_ids": device_id}]}, {"_id": 0}
+        tenant_scoped_query(current_user, {"$or": [{"device_id": device_id}, {"device_ids": device_id}]}), {"_id": 0}
     ).sort("created_at", -1).to_list(50)
-    network_adapters = await db.device_network.find({"device_id": device_id}, {"_id": 0}).to_list(20)
-    remote_sessions = await db.remote_sessions.find({"device_id": device_id}, {"_id": 0}).sort("started_at", -1).to_list(50)
-    activity_logs = await db.activity_logs.find({"entity_type": "device", "entity_id": device_id}, {"_id": 0}).sort("created_at", -1).to_list(100)
+    network_adapters = await db.device_network.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).to_list(20)
+    remote_sessions = await db.remote_sessions.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("started_at", -1).to_list(50)
+    activity_logs = await db.activity_logs.find(tenant_scoped_query(current_user, {"entity_type": "device", "entity_id": device_id}), {"_id": 0}).sort("created_at", -1).to_list(100)
     # Keep the hero metric and the detailed alert list on one source of truth.
     # Stored counts can drift after an alert is resolved, so derive the count
     # from the access-scoped active records returned with this response.
