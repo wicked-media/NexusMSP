@@ -637,13 +637,16 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     inherited_tier = None
     if client and client.get("service_tier_id"):
         inherited_tier = await db.service_tiers.find_one(
-            {"id": client["service_tier_id"], "is_active": True},
+            tenant_scoped_query(current_user, {"id": client["service_tier_id"], "is_active": True}),
             {"_id": 0},
         )
     
     assigned_name = None
     if ticket_data.assigned_to:
-        user = await db.users.find_one({"id": ticket_data.assigned_to}, {"_id": 0})
+        user = await db.users.find_one(
+            tenant_scoped_query(current_user, {"id": ticket_data.assigned_to}),
+            {"_id": 0},
+        )
         if not user:
             raise HTTPException(status_code=404, detail="Assigned technician not found")
         assigned_name = user['name'] if user else None
@@ -672,7 +675,10 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     # Resolve device name(s)
     device_name = None
     if ticket_data.device_id:
-        device = await db.devices.find_one({"id": ticket_data.device_id}, {"_id": 0, "name": 1, "client_id": 1})
+        device = await db.devices.find_one(
+            tenant_scoped_query(current_user, {"id": ticket_data.device_id}),
+            {"_id": 0, "name": 1, "client_id": 1},
+        )
         if not device:
             raise HTTPException(status_code=404, detail="Device not found")
         if device.get("client_id") != ticket_data.client_id:
@@ -686,7 +692,7 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
     device_names = []
     if device_ids:
         found_devices = await db.devices.find(
-            {"id": {"$in": device_ids}, "client_id": ticket_data.client_id},
+            tenant_scoped_query(current_user, {"id": {"$in": device_ids}, "client_id": ticket_data.client_id}),
             {"_id": 0, "id": 1, "name": 1},
         ).to_list(500)
         if len({device.get("id") for device in found_devices}) != len(set(device_ids)):
@@ -799,7 +805,10 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
     target_client_id = ticket_data.get("client_id", old_ticket.get("client_id"))
     await assert_client_scope(current_user, target_client_id, operation="ticket.move")
     if target_client_id != old_ticket.get("client_id"):
-        target_client = await db.clients.find_one({"id": target_client_id}, {"_id": 0, "name": 1, "logo_url": 1})
+        target_client = await db.clients.find_one(
+            tenant_scoped_query(current_user, {"id": target_client_id}),
+            {"_id": 0, "name": 1, "logo_url": 1},
+        )
         if not target_client:
             raise HTTPException(status_code=404, detail="Client not found")
         ticket_data["client_name"] = target_client.get("name")
@@ -867,7 +876,10 @@ async def update_ticket(ticket_id: str, ticket_data: dict, current_user: dict = 
         ]
     if 'assigned_to' in ticket_data:
         if ticket_data['assigned_to']:
-            assignee = await db.users.find_one({"id": ticket_data['assigned_to']}, {"_id": 0, "name": 1})
+            assignee = await db.users.find_one(
+                tenant_scoped_query(current_user, {"id": ticket_data['assigned_to']}),
+                {"_id": 0, "name": 1},
+            )
             if not assignee:
                 raise HTTPException(status_code=404, detail="Assigned technician not found")
             ticket_data['assigned_name'] = assignee.get('name')
