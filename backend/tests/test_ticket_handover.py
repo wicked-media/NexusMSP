@@ -52,6 +52,37 @@ def test_queries_are_tenant_scoped_and_read_only(monkeypatch):
     assert queries[2] == {"tenant_id": "tenant-a", "ticket_id": "t", "active": True}
 
 
+def test_child_ticket_list_is_tenant_scoped_after_parent_authorisation(monkeypatch):
+    class Rows:
+        def __init__(self):
+            self.query = None
+
+        def find(self, query, _projection):
+            self.query = query
+            return self
+
+        async def to_list(self, _limit):
+            return []
+
+    rows = Rows()
+
+    async def permitted(*_args):
+        return {"id": "parent-1", "client_id": "client-1"}
+
+    monkeypatch.setattr(tickets, "_ticket_in_scope", permitted)
+    monkeypatch.setattr(tickets, "db", SimpleNamespace(tickets=rows))
+
+    assert asyncio.run(tickets.get_child_tickets(
+        "parent-1", {"id": "tech-1", "tenant_id": "tenant-a"}
+    )) == []
+    assert rows.query == {
+        "$and": [
+            {"parent_id": "parent-1", "client_id": "client-1"},
+            {"tenant_id": "tenant-a"},
+        ],
+    }
+
+
 def test_handover_returns_active_subscriber_profiles(monkeypatch):
     class Rows:
         def __init__(self, rows):

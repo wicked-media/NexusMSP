@@ -1496,7 +1496,7 @@ async def create_ticket_conversation_entry(
 async def get_child_tickets(ticket_id: str, current_user: dict = Depends(get_current_user)):
     parent = await _ticket_in_scope(ticket_id, current_user, "ticket.children.read")
     children = await db.tickets.find(
-        {"parent_id": ticket_id, "client_id": parent.get("client_id")},
+        tenant_scoped_query(current_user, {"parent_id": ticket_id, "client_id": parent.get("client_id")}),
         {"_id": 0},
     ).to_list(100)
     return children
