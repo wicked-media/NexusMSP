@@ -16,6 +16,20 @@ async def _ticket_in_scope(ticket_id: str, user: dict, operation: str) -> dict:
         user, db.tickets, ticket_id, operation=operation, resource_name="Ticket"
     )
 
+
+def _background_ticket_query(ticket: dict) -> dict:
+    """Retain the ticket's observed tenant partition during unattended updates."""
+    ticket_id = str(ticket.get("id") or "")
+    tenant_id = str(ticket.get("tenant_id") or "nexus-local").strip() or "nexus-local"
+    if tenant_id != "nexus-local":
+        return {"id": ticket_id, "tenant_id": tenant_id}
+    return {
+        "$and": [
+            {"id": ticket_id},
+            {"$or": [{"tenant_id": "nexus-local"}, {"tenant_id": {"$exists": False}}, {"tenant_id": None}, {"tenant_id": ""}]},
+        ]
+    }
+
 # ============== TICKET AUTO-PING & ESCALATION ==============
 
 @router.get("/settings/ticket-ping")
@@ -252,7 +266,7 @@ async def check_unassigned_tickets():
                 if escalation_contacts:
                     await send_ping_notification(escalation_contacts, ticket, "escalation")
                     # Also update ticket priority
-                    await db.tickets.update_one({"id": ticket_id}, {"$set": {
+                    await db.tickets.update_one(_background_ticket_query(ticket), {"$set": {
                         "priority": "critical" if ticket.get("priority") != "critical" else "critical",
                         "escalated": True,
                         "escalated_at": now.isoformat(),
