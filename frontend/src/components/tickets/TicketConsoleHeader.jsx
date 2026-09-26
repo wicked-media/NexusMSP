@@ -193,6 +193,7 @@ export default function TicketConsoleHeader({
             {isActiveTicket && <TicketHeaderAction icon={Wrench} tone="accent" onClick={onStartWork} data-testid="console-start-work-btn">Start work</TicketHeaderAction>}
             {isActiveTicket && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => requestResolution("resolved")} data-testid="console-resolve-btn">Resolve ticket</TicketHeaderAction>}
             {isResolved && <TicketHeaderAction icon={CheckCircle2} tone="success" onClick={() => requestResolution("closed")} data-testid="console-resolve-btn">Close ticket</TicketHeaderAction>}
+            {isClosed && <TicketHeaderAction icon={RotateCcw} tone="warning" onClick={() => requestResolution("reopen")} data-testid="console-reopen-btn">Reopen ticket</TicketHeaderAction>}
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

@@ -842,14 +842,13 @@ export default function TicketsPage() {
     try {
       if (ticketsForReview.length === 1) {
         const ticket = ticketsForReview[0];
-        const response = await axios.post(`${API}/tickets/${ticket.id}/resolution`, {
-          status: review.target,
-          ...evidence,
-        }, { headers });
+        const response = review.target === "reopen"
+          ? await axios.post(`${API}/tickets/${ticket.id}/reopen`, { reason: evidence.closure_reason }, { headers })
+          : await axios.post(`${API}/tickets/${ticket.id}/resolution`, { status: review.target, ...evidence }, { headers });
         if (viewingTicket?.id === ticket.id) {
           setViewingTicket(previous => ({ ...previous, ...(response.data?.ticket || {}), status: review.target === "resolved" ? "closed" : review.target }));
         }
-        toast.success(review.target === "closed" ? "Ticket closed and retained in service history" : "Ticket resolved, closed and retained in service history");
+        toast.success(review.target === "reopen" ? "Ticket reopened and returned to the active queue" : review.target === "closed" ? "Ticket closed and retained in service history" : "Ticket resolved, closed and retained in service history");
       } else {
         const response = await axios.post(`${API}/tickets/bulk-action`, {
           ticket_ids: ticketsForReview.map(ticket => ticket.id),
