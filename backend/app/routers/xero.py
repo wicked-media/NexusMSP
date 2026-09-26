@@ -936,6 +936,10 @@ async def bulk_ticket_action(
     accessible records.
     """
     ticket_ids, action, value = _normalise_bulk_ticket_request(data)
+    resolution_summary = str(data.get("resolution_summary") or "").strip() if isinstance(data, dict) else ""
+    closure_reason = str(data.get("closure_reason") or "").strip() if isinstance(data, dict) else ""
+    if action == "close" and (not resolution_summary or not closure_reason):
+        raise HTTPException(status_code=422, detail="Bulk close requires a resolution summary and closure reason")
     operation = f"ticket.bulk.{action}"
     tickets = await _load_scoped_bulk_tickets(
         ticket_ids,
@@ -995,6 +999,10 @@ async def bulk_ticket_action(
                     "closed_by": current_user.get("id") or current_user.get("email"),
                     "closed_by_name": current_user.get("name") or current_user.get("email"),
                     "resolution_status": "resolved_and_closed" if str(ticket.get("status") or "").lower() == "resolved" else "closed",
+                    "resolution_summary": resolution_summary,
+                    "closure_reason": closure_reason,
+                    "resolution_recorded_at": now_iso,
+                    "resolution_recorded_by": current_user.get("id") or current_user.get("email"),
                 })
 
         result = await db.tickets.update_one(

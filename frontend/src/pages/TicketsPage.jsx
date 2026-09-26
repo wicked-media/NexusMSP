@@ -854,6 +854,7 @@ export default function TicketsPage() {
           ticket_ids: ticketsForReview.map(ticket => ticket.id),
           action: "close",
           value: "",
+          ...evidence,
         }, { headers });
         toast.success(response.data?.message || `Closed ${ticketsForReview.length} tickets`);
         setSelectedTickets(new Set());

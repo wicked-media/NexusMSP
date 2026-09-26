@@ -373,7 +373,7 @@ async def _test_bulk_ticket_close_preserves_blueprint_gate_and_validates_payload
 
     with pytest.raises(HTTPException) as blocked_close:
         await xero.bulk_ticket_action(
-            {"ticket_ids": ["ticket-blueprint"], "action": "close"},
+            {"ticket_ids": ["ticket-blueprint"], "action": "close", "resolution_summary": "Required work reviewed", "closure_reason": "Resolved"},
             request=None,
             current_user=user,
         )

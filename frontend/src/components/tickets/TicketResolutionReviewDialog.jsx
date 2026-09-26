@@ -23,7 +23,7 @@ export default function TicketResolutionReviewDialog({ review, onOpenChange, onC
     setSummary(""); setReason(""); setCustomerOutcome("");
   }, [activeTicketId, review?.target]);
 
-  const evidenceReady = isBulk || (isReopen ? Boolean(reason.trim()) : Boolean(summary.trim() && reason.trim()));
+  const evidenceReady = isReopen ? Boolean(reason.trim()) : Boolean(summary.trim() && reason.trim());
 
   return (
     <Dialog open={Boolean(review)} onOpenChange={(open) => !open && onOpenChange(false)}>
@@ -69,9 +69,9 @@ export default function TicketResolutionReviewDialog({ review, onOpenChange, onC
             <ReviewCheck icon={Users} title="Service history" detail="Ownership and audit evidence are retained." />
           </div>
 
-          {!isBulk && <div className="space-y-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4">
+          <div className="space-y-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4">
             {isReopen ? <div><Label htmlFor="ticket-closure-reason">Why is this work being reopened?</Label><Textarea id="ticket-closure-reason" value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5 min-h-24" placeholder="Describe the new impact or unfinished work." /></div> : <><div><Label htmlFor="ticket-resolution-summary">Resolution summary</Label><Textarea id="ticket-resolution-summary" value={summary} onChange={(event) => setSummary(event.target.value)} className="mt-1.5 min-h-24" placeholder="What was fixed, changed, or confirmed?" /></div><div><Label htmlFor="ticket-closure-reason">Closure reason</Label><Input id="ticket-closure-reason" value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1.5" placeholder="e.g. Resolved remotely" /></div><div><Label htmlFor="ticket-customer-outcome">Customer outcome <span className="text-muted-foreground">optional</span></Label><Textarea id="ticket-customer-outcome" value={customerOutcome} onChange={(event) => setCustomerOutcome(event.target.value)} className="mt-1.5 min-h-16" placeholder="What the requester was told or confirmed." /></div></>}
-          </div>}
+          </div>
 
           <p className="text-xs leading-5 text-muted-foreground">
             This transition is recorded against every affected ticket. Use the ticket workspace when a customer update, resolution note or billing follow-up is still required.
