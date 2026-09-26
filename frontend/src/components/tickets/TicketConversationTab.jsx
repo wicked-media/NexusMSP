@@ -150,6 +150,10 @@ export default function TicketConversationTab({
   ].sort((a, b) => (b._sort || "").localeCompare(a._sort || ""));
   const visibleItems = filterTicketActivity(allItems, activityFilter);
   const timeById = useMemo(() => new Map(ticketTimeEntries.map(entry => [entry.id, entry])), [ticketTimeEntries]);
+  const hasDraftContent = String(newNote || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .trim().length > 0;
 
   const submitConversationEntry = async (options) => {
     if (postingEntry) return;
@@ -288,7 +292,7 @@ export default function TicketConversationTab({
                 <Button
                   size="sm"
                   className="h-9 bg-emerald-400 text-emerald-950 hover:bg-emerald-300"
-                  disabled={postingEntry || (publicEmailEnabled && !publicRecipient)}
+                  disabled={!hasDraftContent || postingEntry || (publicEmailEnabled && !publicRecipient)}
                   onClick={() => submitConversationEntry({
                     visibility: "public",
                     notify_client: publicEmailEnabled,
@@ -332,7 +336,7 @@ export default function TicketConversationTab({
                 </SelectContent>
               </Select>
             )}
-            <Button size="sm" disabled={postingEntry} className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={() => submitConversationEntry({ visibility: "internal" })} data-testid="add-note-btn">{postingEntry ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Send className="w-3 h-3 mr-1.5" />}{recordTime ? `Add note + ${formatMinutes(timeDraft.minutes)}` : "Add private note"}</Button>
+            <Button size="sm" disabled={!hasDraftContent || postingEntry} className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={() => submitConversationEntry({ visibility: "internal" })} data-testid="add-note-btn">{postingEntry ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Send className="w-3 h-3 mr-1.5" />}{recordTime ? `Add note + ${formatMinutes(timeDraft.minutes)}` : "Add private note"}</Button>
             </div>
           </div>
           </div>
