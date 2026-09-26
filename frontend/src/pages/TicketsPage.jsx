@@ -2085,7 +2085,9 @@ export default function TicketsPage() {
             });
           }}
           onResolve={() => handleUpdateTicket("status", "resolved")}
-          onStatusChange={(s) => handleUpdateTicket("status", s)}
+          onStatusChange={(status) => ["resolved", "closed"].includes(status)
+            ? requestResolutionReview(viewingTicket, status)
+            : handleUpdateTicket("status", status)}
           onRequestResolution={(ticket, target) => requestResolutionReview(ticket, target)}
           onOpenTools={() => setToolsOpen(true)}
           onInvoice={openTicketInvoiceWorkflow}
