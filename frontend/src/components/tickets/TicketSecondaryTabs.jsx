@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -282,11 +284,27 @@ export function TicketChildrenTab({ childTickets, fetchTicketDetail, statusConfi
 }
 
 /* ============== Time Tab ============== */
-export function TicketTimeTab({ timeEntries }) {
+export function TicketTimeTab({ timeEntries, ticketId, headers, onUpdated }) {
+  const [adjustmentTarget, setAdjustmentTarget] = useState(null);
+  const [adjustmentMinutes, setAdjustmentMinutes] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [adjusting, setAdjusting] = useState(false);
   const authoritativeEntries = timeEntries.filter(entry => entry.authoritative !== false);
   const totalMinutes = authoritativeEntries.reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
   const billableMinutes = authoritativeEntries.filter(entry => entry.billable).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
   const formatDuration = (minutes) => minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60 ? `${minutes % 60}m` : ""}` : `${minutes}m`;
+  const submitAdjustment = async () => {
+    const minutes = Number(adjustmentMinutes);
+    if (!ticketId || !adjustmentTarget || !Number.isInteger(minutes) || !minutes || !adjustmentReason.trim()) return;
+    setAdjusting(true);
+    try {
+      await axios.post(`${API}/tickets/${ticketId}/time-entries/${adjustmentTarget.id}/adjustments`, { minutes, reason: adjustmentReason.trim() }, { headers });
+      toast.success("Time adjustment recorded");
+      setAdjustmentTarget(null); setAdjustmentMinutes(""); setAdjustmentReason("");
+      await onUpdated?.();
+    } catch (error) { toast.error(error.response?.data?.detail || "Could not record time adjustment"); }
+    finally { setAdjusting(false); }
+  };
   if (!timeEntries.length) return <div className="rounded-xl border border-dashed border-white/[0.10] bg-black/[0.08] py-12 text-center"><Clock className="mx-auto mb-3 h-9 w-9 text-violet-300/35" /><p className="text-sm text-zinc-300">No time entries recorded</p><p className="mt-1 text-[11px] text-zinc-500">Log technician effort to keep billing and service reporting accurate.</p></div>;
   return (
     <div className="space-y-3">
@@ -299,12 +317,13 @@ export function TicketTimeTab({ timeEntries }) {
           <TableHeader><TableRow className="border-white/[0.06]"><TableHead>Technician</TableHead><TableHead>Duration</TableHead><TableHead>Work performed</TableHead><TableHead>Labour</TableHead><TableHead>Billing</TableHead><TableHead>Logged</TableHead></TableRow></TableHeader>
           <TableBody>
             {timeEntries.map(te => (
-              <TableRow key={te.id} className="border-white/[0.06] hover:bg-white/[0.025]"><TableCell className="font-medium text-zinc-200">{te.user_name || "Technician"}</TableCell><TableCell className="font-mono text-violet-200">{formatDuration(Number(te.minutes || 0))}</TableCell><TableCell className="max-w-[300px] truncate text-zinc-300">{te.description || "No description"}</TableCell><TableCell><div className="min-w-[120px]"><p className="text-xs text-zinc-200">{te.labour_type_name || "Technician default"}</p>{te.labour_type_code && <p className="mt-0.5 font-mono text-[9px] text-zinc-500">{te.labour_type_code}</p>}</div></TableCell><TableCell><div className="flex flex-wrap items-center gap-1.5">{te.billable ? <Badge className="border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">Billable</Badge> : <Badge variant="outline" className="border-zinc-700 text-zinc-500">Internal</Badge>}{te.invoiced && <Badge variant="outline" className="border-sky-400/20 text-sky-200">Invoiced</Badge>}</div></TableCell><TableCell className="text-xs text-zinc-500"><span className="block">{te.created_at && formatDistanceToNow(new Date(te.created_at), { addSuffix: true })}</span>{te.performed_at && <span className="mt-0.5 block text-[10px] text-zinc-600">Performed {formatDistanceToNow(new Date(te.performed_at), { addSuffix: true })}</span>}</TableCell></TableRow>
+              <TableRow key={te.id} className="border-white/[0.06] hover:bg-white/[0.025]"><TableCell className="font-medium text-zinc-200">{te.user_name || "Technician"}</TableCell><TableCell className="font-mono text-violet-200">{formatDuration(Number(te.minutes || 0))}</TableCell><TableCell className="max-w-[300px] truncate text-zinc-300">{te.description || "No description"}</TableCell><TableCell><div className="min-w-[120px]"><p className="text-xs text-zinc-200">{te.labour_type_name || "Technician default"}</p>{te.labour_type_code && <p className="mt-0.5 font-mono text-[9px] text-zinc-500">{te.labour_type_code}</p>}</div></TableCell><TableCell><div className="flex flex-wrap items-center gap-1.5">{te.billable ? <Badge className="border-emerald-500/25 bg-emerald-500/[0.10] text-emerald-300">Billable</Badge> : <Badge variant="outline" className="border-zinc-700 text-zinc-500">Internal</Badge>}{te.invoiced && <><Badge variant="outline" className="border-sky-400/20 text-sky-200">Invoiced</Badge><Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10px] text-amber-200" onClick={() => setAdjustmentTarget(te)}>Adjust</Button></>}</div></TableCell><TableCell className="text-xs text-zinc-500"><span className="block">{te.created_at && formatDistanceToNow(new Date(te.created_at), { addSuffix: true })}</span>{te.performed_at && <span className="mt-0.5 block text-[10px] text-zinc-600">Performed {formatDistanceToNow(new Date(te.performed_at), { addSuffix: true })}</span>}</TableCell></TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
       {timeEntries.some(entry => entry.authoritative === false) && <p className="px-1 text-[10px] text-zinc-500">Legacy time history is retained below for context and excluded from the canonical effort and billing totals above.</p>}
+      <Dialog open={Boolean(adjustmentTarget)} onOpenChange={(open) => !open && setAdjustmentTarget(null)}><NexusWorkflowDialog eyebrow="Billing correction" title="Adjust invoiced time" description="The original invoice evidence stays unchanged. Nexus records this as a linked signed adjustment for the next billing review." icon={Clock} tone="amber" footer={<><Button variant="outline" onClick={() => setAdjustmentTarget(null)} disabled={adjusting}>Cancel</Button><Button onClick={submitAdjustment} disabled={adjusting || !adjustmentReason.trim() || !Number.isInteger(Number(adjustmentMinutes)) || !Number(adjustmentMinutes)}>{adjusting ? "Recording…" : "Record adjustment"}</Button></>}><div className="space-y-3"><div><Label>Signed minutes</Label><Input value={adjustmentMinutes} onChange={(event) => setAdjustmentMinutes(event.target.value)} placeholder="e.g. -15 for a credit, 15 for extra work" inputMode="numeric" /></div><div><Label>Reason</Label><Input value={adjustmentReason} onChange={(event) => setAdjustmentReason(event.target.value)} placeholder="Explain the billing correction" /></div></div></NexusWorkflowDialog></Dialog>
     </div>
   );
 }

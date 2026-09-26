@@ -2677,7 +2677,7 @@ export default function TicketsPage() {
 
               {/* TIME TAB */}
               <TabsContent value="time">
-                <TicketTimeTab timeEntries={timeEntries} />
+                <TicketTimeTab timeEntries={timeEntries} ticketId={viewingTicket.id} headers={headers} onUpdated={async () => { const response = await axios.get(`${API}/tickets/${viewingTicket.id}/time-entries`, { headers }); setTimeEntries(collectionFromResponse(response.data, ["time_entries", "entries"])); }} />
               </TabsContent>
 
               {/* AUDIT TAB */}
