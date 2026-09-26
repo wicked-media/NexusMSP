@@ -202,6 +202,7 @@ def test_native_readiness_requires_online_capable_linked_agent(monkeypatch):
             "is_active": True,
             "last_seen": native_remote._iso(native_remote._now()),
             "runtime_capabilities": [native_remote.RUNTIME_CAPABILITY],
+                "native_remote_evidence": {"status": "ready"},
         }]),
     )
     monkeypatch.setattr(native_remote, "db", database)

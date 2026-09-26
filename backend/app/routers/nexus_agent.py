@@ -91,7 +91,7 @@ TRAY_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_TRAY_COMPANION_BINARY"]) if 
 REMOTE_COMPANION_BINARY_PATH = Path(os.environ["NEXUS_REMOTE_COMPANION_BINARY"]) if os.environ.get("NEXUS_REMOTE_COMPANION_BINARY") else (
     _CONTAINER_REMOTE_COMPANION_BINARY if _CONTAINER_REMOTE_COMPANION_BINARY.exists() else _LOCAL_REMOTE_COMPANION_BINARY
 )
-AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.12-native-remote"
+AGENT_VERSION = os.environ.get("NEXUS_AGENT_VERSION") or "0.1.13-companion-health"
 MTLS_PROXY_TRUST_ENABLED = os.environ.get("NEXUS_TRUST_MTLS_PROXY_HEADER", "").strip().lower() in {
     "1", "true", "yes", "on",
 }
@@ -333,7 +333,12 @@ async def _ensure_native_remote_companion_for_agent(agent: dict) -> str:
     if not policy.get("enabled"):
         return "not_enabled"
     companion = _remote_companion_binary_info()
-    if agent.get("remote_companion_sha256") == companion["sha256"] and agent.get("remote_companion_installed_at"):
+    health_status = str((agent.get("native_remote_evidence") or {}).get("status") or "")
+    if (
+        agent.get("remote_companion_sha256") == companion["sha256"]
+        and agent.get("remote_companion_installed_at")
+        and health_status != "integrity_unverified"
+    ):
         return "current"
     existing = await db.nexus_agent_commands.find_one({
         "device_id": agent["id"], "kind": "install_remote_companion",
@@ -958,6 +963,7 @@ class HeartbeatPayload(BaseModel):
     policy_evidence: dict = Field(default_factory=dict)
     self_repair: dict = Field(default_factory=dict)
     update_evidence: dict = Field(default_factory=dict)
+    native_remote_evidence: dict = Field(default_factory=dict)
 
 
 class IdentityRenewRequest(BaseModel):
@@ -1467,6 +1473,13 @@ async def heartbeat(
             "signature_verified": bool(p.update_evidence.get("signature_verified")),
             "reported_at": now,
         }
+    if p.native_remote_evidence:
+        update["native_remote_evidence"] = {
+            "status": str(p.native_remote_evidence.get("status") or "unknown")[:80],
+            "detail": str(p.native_remote_evidence.get("detail") or "")[:500],
+            "observed_at": str(p.native_remote_evidence.get("observed_at") or "")[:64],
+            "reported_at": now,
+        }
     if p.nexus_dns:
         reported_deployment = str(p.nexus_dns.get("deployment_id") or "")
         expected_deployment = str((agent.get("nexus_dns") or {}).get("deployment_id") or "")
@@ -1521,6 +1534,7 @@ async def heartbeat(
                 "nexus_canary_enabled": "nexus_canary" in p.capabilities,
                 "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
                 "agent_runtime_capabilities": [item for item in p.runtime_capabilities if isinstance(item, str)][:64],
+                "native_remote_evidence": update.get("native_remote_evidence", agent.get("native_remote_evidence", {})),
                 **telemetry,
                 **patch_evidence,
             }},

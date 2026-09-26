@@ -90,6 +90,30 @@ func TestInstallVerifiedCompanionChecksFingerprintBeforeActivation(t *testing.T)
 	}
 }
 
+func TestRemoteCompanionRollbackCopyIsFingerprintedAndRestorable(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "nexus-remote-companion.exe")
+	if err := os.WriteFile(destination, []byte("known-good"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backup, retained, err := backupCompanionForRollback(destination)
+	if err != nil || !retained {
+		t.Fatalf("backupCompanionForRollback() retained=%t err=%v", retained, err)
+	}
+	if err := os.WriteFile(destination, []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreCompanionFromRollback(destination, backup); err != nil {
+		t.Fatal(err)
+	}
+	actual, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(actual) != "known-good" {
+		t.Fatalf("restored bytes = %q", actual)
+	}
+}
+
 func signedTestCommand(t *testing.T, cfg *config.Config, privateKey ed25519.PrivateKey, now time.Time) cmdItem {
 	t.Helper()
 	raw := json.RawMessage(`{"script":"Write-Output 'safe'","timeout_sec":30}`)

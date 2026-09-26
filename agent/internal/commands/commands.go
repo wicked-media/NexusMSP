@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -864,18 +865,99 @@ func installRemoteCompanion(tr *transport.Client, c cmdItem, res cmdResult) cmdR
 	// again at the next sign-in and never inherits the service's Session 0.
 	_ = exec.Command("taskkill", "/F", "/IM", "nexus-remote-companion.exe").Run()
 	remotePath := filepath.Join(installDir, "nexus-remote-companion.exe")
+	backupPath, hadBackup, err := backupCompanionForRollback(remotePath)
+	if err != nil {
+		res.Status = "error"
+		res.Stderr = "could not create a verified Remote Companion rollback copy: " + err.Error()
+		return res
+	}
 	if err := installVerifiedCompanion(tr, "/api/nexus-agent/remote-companion/latest", remotePath, expectedHash, "Nexus Remote Companion"); err != nil {
 		res.Status = "error"
 		res.Stderr = err.Error()
 		return res
 	}
 	if err := installRemoteCompanionLauncher(remotePath); err != nil {
+		if hadBackup {
+			if rollbackErr := restoreCompanionFromRollback(remotePath, backupPath); rollbackErr != nil {
+				res.Status = "error"
+				res.Stderr = "Nexus Remote Companion registration failed and rollback also failed: " + rollbackErr.Error()
+				return res
+			}
+			_ = installRemoteCompanionLauncher(remotePath)
+			res.Status = "error"
+			res.Stderr = "Nexus Remote Companion registration failed; the prior verified companion was restored: " + err.Error()
+			return res
+		}
 		res.Status = "error"
 		res.Stderr = "Nexus Remote Companion was installed but could not be registered for user sign-in: " + err.Error()
 		return res
 	}
-	res.Stdout = "Nexus Remote Companion installed and registered for user sign-in"
+	res.Stdout = "Nexus Remote Companion installed, hash-verified and registered for user sign-in"
+	if hadBackup {
+		res.Stdout += "; a prior verified build is retained for recovery"
+	}
 	return res
+}
+
+// backupCompanionForRollback retains one known-good binary before a signed
+// update replaces it. The copied bytes are fingerprinted before use so a
+// damaged local executable can never become a recovery artifact.
+func backupCompanionForRollback(destination string) (string, bool, error) {
+	if _, err := os.Stat(destination); err != nil {
+		if os.IsNotExist(err) {
+			return destination + ".previous", false, nil
+		}
+		return "", false, err
+	}
+	backup := destination + ".previous"
+	temporary := backup + ".download"
+	defer os.Remove(temporary)
+	if err := copyFile(destination, temporary); err != nil {
+		return "", false, err
+	}
+	sourceHash, err := fileSHA256(destination)
+	if err != nil {
+		return "", false, err
+	}
+	backupHash, err := fileSHA256(temporary)
+	if err != nil {
+		return "", false, err
+	}
+	if !strings.EqualFold(sourceHash, backupHash) {
+		return "", false, errors.New("rollback copy fingerprint mismatch")
+	}
+	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
+		return "", false, err
+	}
+	if err := os.Rename(temporary, backup); err != nil {
+		return "", false, err
+	}
+	return backup, true, nil
+}
+
+func restoreCompanionFromRollback(destination, backup string) error {
+	if err := os.Remove(destination); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(backup, destination)
+}
+
+func copyFile(source, destination string) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(output, input)
+	closeErr := output.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func installVerifiedCompanion(tr *transport.Client, route, destination, expectedHash, name string) error {

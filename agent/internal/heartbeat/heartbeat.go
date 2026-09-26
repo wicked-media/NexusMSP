@@ -10,6 +10,7 @@ import (
 	"nexusagent/internal/config"
 	"nexusagent/internal/enroll"
 	"nexusagent/internal/identity"
+	"nexusagent/internal/nexusremote"
 	"nexusagent/internal/telemetry"
 	"nexusagent/internal/transport"
 	"nexusagent/internal/updater"
@@ -31,15 +32,16 @@ func NewLoop(tr *transport.Client, cfg *config.Config, version string, fallback 
 }
 
 type payload struct {
-	AgentVersion string                 `json:"agent_version"`
-	Snapshot     telemetry.Snapshot     `json:"snapshot"`
-	Capabilities []string               `json:"capabilities,omitempty"`
-	RuntimeCapabilities []string        `json:"runtime_capabilities,omitempty"`
-	NexusDNS     *config.NexusDNSConfig `json:"nexus_dns,omitempty"`
-	Identity     map[string]any         `json:"identity,omitempty"`
-	Policy       map[string]any         `json:"policy_evidence,omitempty"`
-	SelfRepair   identity.Evidence      `json:"self_repair"`
-	Update       *config.UpdateEvidence `json:"update_evidence,omitempty"`
+	AgentVersion        string                 `json:"agent_version"`
+	Snapshot            telemetry.Snapshot     `json:"snapshot"`
+	Capabilities        []string               `json:"capabilities,omitempty"`
+	RuntimeCapabilities []string               `json:"runtime_capabilities,omitempty"`
+	NexusDNS            *config.NexusDNSConfig `json:"nexus_dns,omitempty"`
+	Identity            map[string]any         `json:"identity,omitempty"`
+	Policy              map[string]any         `json:"policy_evidence,omitempty"`
+	SelfRepair          identity.Evidence      `json:"self_repair"`
+	Update              *config.UpdateEvidence `json:"update_evidence,omitempty"`
+	NativeRemote        map[string]any         `json:"native_remote_evidence,omitempty"`
 }
 
 type heartbeatResponse struct {
@@ -82,15 +84,16 @@ func (l *Loop) sendOnce() {
 		}
 	}
 	request := payload{
-		AgentVersion: l.version,
-		Snapshot:     snapshot,
-		Capabilities: l.cfg.ShieldCapabilities(),
+		AgentVersion:        l.version,
+		Snapshot:            snapshot,
+		Capabilities:        l.cfg.ShieldCapabilities(),
 		RuntimeCapabilities: l.cfg.RuntimeCapabilities(),
-		NexusDNS:     l.cfg.NexusDNS,
-		Identity:     identity.Report(l.cfg),
-		Policy:       identity.PolicyEvidence(l.cfg),
-		SelfRepair:   repairEvidence,
-		Update:       l.cfg.UpdateEvidence,
+		NexusDNS:            l.cfg.NexusDNS,
+		Identity:            identity.Report(l.cfg),
+		Policy:              identity.PolicyEvidence(l.cfg),
+		SelfRepair:          repairEvidence,
+		Update:              l.cfg.UpdateEvidence,
+		NativeRemote:        nexusremote.CompanionHealthEvidence(l.cfg),
 	}
 	var response heartbeatResponse
 	if err := l.tr.Do("POST", "/api/nexus-agent/heartbeat", request, &response); err != nil {

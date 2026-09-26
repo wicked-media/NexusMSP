@@ -178,6 +178,15 @@ async def device_readiness(device: dict[str, Any], tenant_id: str | None = None)
             "state": "companion_required",
             "detail": "This agent build does not contain the Nexus Remote Companion yet.",
         }
+    evidence = agent.get("native_remote_evidence") if isinstance(agent.get("native_remote_evidence"), dict) else {}
+    if str(evidence.get("status") or "") != "ready":
+        return {
+            "ready": False,
+            "state": str(evidence.get("status") or "readiness_unreported"),
+            "detail": str(evidence.get("detail") or "The Remote Companion has not reported a verified signed-in user session yet."),
+            "agent_id": agent_id,
+            "agent_last_seen": last_seen,
+        }
     return {
         "ready": True,
         "state": "ready",

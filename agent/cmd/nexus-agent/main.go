@@ -24,7 +24,7 @@ import (
 )
 
 // Version is injected at build time via -ldflags.
-var Version = "0.1.12-native-remote"
+var Version = "0.1.13-companion-health"
 
 func main() {
 	var (
