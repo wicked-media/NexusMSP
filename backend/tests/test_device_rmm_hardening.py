@@ -78,10 +78,12 @@ class _Collection:
     def __init__(self, rows: list[dict] | None = None):
         self.rows = deepcopy(rows or [])
         self.find_queries: list[dict] = []
+        self.find_one_queries: list[dict] = []
         self.update_calls: list[tuple[dict, dict]] = []
         self.inserted: list[dict] = []
 
     async def find_one(self, query: dict, _projection=None):
+        self.find_one_queries.append(deepcopy(query))
         return next((deepcopy(row) for row in self.rows if _matches(row, query)), None)
 
     def find(self, query: dict, _projection=None):
@@ -394,7 +396,7 @@ def test_patch_ring_assignment_requires_a_confirmed_tenant_policy_and_records_au
     assert result["execution_state"] == "not_deployed"
     assert device_rows.rows[0]["patch_ring"] == "Pilot"
     assert device_rows.rows[0]["patch_ring_assigned_by"] == "Admin A"
-    assert policies.find_queries[-1]["tenant_id"] == "tenant-a"
+    assert {"tenant_id": "tenant-a"} in policies.find_one_queries[-1]["$and"]
     assert audit_events[-1][0][1:4] == ("updated", "device_patch_ring", "device-a")
 
     with pytest.raises(HTTPException) as foreign_ring:
