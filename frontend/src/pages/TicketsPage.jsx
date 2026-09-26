@@ -67,7 +67,7 @@ import {
   Ticket, MessageSquare, Mail, Send, User, ArrowLeft,
   Timer, GitBranch, Merge, Eye, History, X, Play,
   BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi,
-  Terminal, Zap, Brain, ExternalLink, Shield, Cpu, Users,
+  Terminal, Zap, ExternalLink, Shield, Cpu, Users,
   Download, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, DollarSign, Package,
   Camera, QrCode, ClipboardList, Bell, Image as ImageIcon, ListChecks,
@@ -207,9 +207,6 @@ export default function TicketsPage() {
   const [cannedResponses, setCannedResponses] = useState([]);
   const [suggestions, setSuggestions] = useState(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
-  // The former diagnostic panel is retired from the ticket workflow.
-  const aiAnalysis = null;
-  const setAiAnalysis = () => {};
   // AI enhanced features
   const [proofreadResult, setProofreadResult] = useState(null);
   const [proofreadLoading, setProofreadLoading] = useState(false);
@@ -600,7 +597,6 @@ export default function TicketsPage() {
     setDetailTab("conversation");
     setToolsOpen(false);
     setSuggestions(null);
-    setAiAnalysis(null);
     setDeviceStatus(null);
     setEnrichment(null);
     setClientContacts([]);
@@ -2359,73 +2355,6 @@ export default function TicketsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
-            {/* AI ANALYSIS PANEL */}
-            {panelVisible.aiAnalysis && aiAnalysis && (
-              <Card className="border-purple-500/20 bg-purple-500/[0.02]" data-testid="ai-analysis-panel">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Brain className="w-5 h-5 text-purple-400" />
-                      <CardTitle className="text-base text-purple-400">AI Diagnosis</CardTitle>
-                      <Badge className={`text-[10px] ${aiAnalysis.severity === "critical" ? "bg-red-500/20 text-red-400" : aiAnalysis.severity === "high" ? "bg-orange-500/20 text-orange-400" : aiAnalysis.severity === "medium" ? "bg-yellow-500/20 text-yellow-400" : "bg-green-500/20 text-green-400"}`}>
-                        {aiAnalysis.severity} severity
-                      </Badge>
-                      {aiAnalysis.estimated_time_minutes > 0 && (
-                        <Badge variant="outline" className="text-[10px]"><Clock className="w-2.5 h-2.5 mr-0.5" />Est. {aiAnalysis.estimated_time_minutes}m</Badge>
-                      )}
-                    </div>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setAiAnalysis(null)}><X className="w-3 h-3" /></Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <p className="text-sm">{aiAnalysis.diagnosis}</p>
-                  </div>
-                  {aiAnalysis.potential_causes?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Potential Causes</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {aiAnalysis.potential_causes.map((cause, i) => (
-                          <Badge key={`k-${i}`} variant="outline" className="text-[10px] bg-orange-500/5 border-orange-500/20">{cause}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {aiAnalysis.steps?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Recommended Fix Steps</p>
-                      <div className="space-y-1.5">
-                        {aiAnalysis.steps.map((step, i) => (
-                          <div key={`k-${i}`} className="flex items-start gap-2 py-1 px-2 rounded bg-muted/30">
-                            <span className="text-xs font-bold text-purple-400 mt-0.5">{i + 1}.</span>
-                            <span className="text-xs">{step}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {aiAnalysis.recommended_scripts?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Scripts / Commands</p>
-                      {aiAnalysis.recommended_scripts.map((script, i) => (
-                        <code key={`k-${i}`} className="block text-[11px] bg-muted/50 px-2 py-1 rounded font-mono mb-1">{script}</code>
-                      ))}
-                    </div>
-                  )}
-                  {aiAnalysis.kb_references?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Related KB Articles</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {aiAnalysis.kb_references.map((ref, i) => (
-                          <Badge key={`k-${i}`} variant="outline" className="text-[10px] text-blue-400 border-blue-500/20"><BookOpen className="w-2.5 h-2.5 mr-0.5" />{ref}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
             {/* Related tickets are deliberately presented as a compact review strip.
                 They are suggestions, not confirmed relationships, so they should
                 inform the technician without taking focus from the live record. */}
