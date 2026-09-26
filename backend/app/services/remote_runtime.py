@@ -651,6 +651,15 @@ async def end_remote_session_record(
         "ended_by": user.get("id"),
         "ended_by_name": user.get("name") or user.get("email"),
     }
+    if session.get("provider") == "nexus":
+        # Revocation immediately removes the relay frame. Keep the durable
+        # session evidence equally unambiguous: an ended native session cannot
+        # continue to present its last transport state as connected.
+        updates.update({
+            "transport_state": "disconnected",
+            "transport_detail": "session ended by technician",
+            "last_transport_disconnect_at": now_dt.isoformat(),
+        })
 
     policy = await remote_policy(platform_tenant_id(user))
     ticket = None

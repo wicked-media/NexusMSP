@@ -23,6 +23,9 @@ class Rows:
                 return deepcopy(row)
         return None
 
+    def find(self, query, _projection=None, **_kwargs):
+        return _Cursor([row for row in self.rows if self.matches(row, query)])
+
     @staticmethod
     def matches(row, query):
         for key, value in query.items():
@@ -76,6 +79,14 @@ class Rows:
         return SimpleNamespace(deleted_count=0)
 
 
+class _Cursor:
+    def __init__(self, rows):
+        self.rows = deepcopy(rows)
+
+    async def to_list(self, _limit):
+        return deepcopy(self.rows)
+
+
 def test_native_grant_is_signed_bound_and_idempotent(monkeypatch):
     database = SimpleNamespace(
         settings=Rows(),
@@ -121,6 +132,35 @@ def test_native_grant_rejects_control_until_input_is_explicitly_designed(monkeyp
         ))
     assert error.value.status_code == 422
     assert database.native_remote_grants.rows == []
+
+
+def test_expired_grants_close_abandoned_sessions_and_remove_relay_frame(monkeypatch):
+    database = SimpleNamespace(
+        native_remote_grants=Rows([{
+            "id": "grant-1", "tenant_id": "tenant-1", "session_id": "session-1",
+            "device_id": "device-1", "client_id": "client-1", "status": "acknowledged",
+            "expires_at": native_remote._iso(native_remote._now()),
+        }, {
+            "id": "other-tenant", "tenant_id": "tenant-2", "session_id": "session-2",
+            "device_id": "device-2", "client_id": "client-2", "status": "acknowledged",
+            "expires_at": native_remote._iso(native_remote._now()),
+        }]),
+        remote_sessions=Rows([{
+            "id": "session-1", "tenant_id": "tenant-1", "device_id": "device-1",
+            "client_id": "client-1", "status": "active", "ended_at": None,
+        }]),
+        native_remote_frames=Rows([{
+            "tenant_id": "tenant-1", "session_id": "session-1", "client_id": "client-1", "jpeg": b"frame",
+        }]),
+    )
+    monkeypatch.setattr(native_remote, "db", database)
+
+    assert asyncio.run(native_remote.expire_overdue_grants(tenant_id="tenant-1")) == 1
+    assert database.native_remote_grants.rows[0]["status"] == "expired"
+    assert database.native_remote_grants.rows[1]["status"] == "acknowledged"
+    assert database.remote_sessions.rows[0]["status"] == "ended"
+    assert database.remote_sessions.rows[0]["launch_status"] == "grant_expired"
+    assert database.native_remote_frames.rows == []
 
 
 def test_native_grants_are_single_active_session_per_endpoint(monkeypatch):

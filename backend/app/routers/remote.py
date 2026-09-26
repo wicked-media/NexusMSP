@@ -24,6 +24,7 @@ from app.services.remote_runtime import (
     remote_policy,
     start_remote_session,
 )
+from app.services.native_remote import expire_overdue_grants
 from app.models import *
 
 router = APIRouter()
@@ -259,6 +260,7 @@ async def get_remote_sessions(
     user_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
+    await expire_overdue_grants(tenant_id=platform_tenant_id(current_user))
     query = scope_query(current_user)
     if device_id:
         query["device_id"] = device_id
@@ -275,6 +277,7 @@ async def get_remote_sessions(
 @router.get("/remote/active-sessions")
 async def get_active_remote_sessions(current_user: dict = Depends(get_current_user)):
     """Get all currently active remote sessions"""
+    await expire_overdue_grants(tenant_id=platform_tenant_id(current_user))
     query = tenant_scoped_query(
         current_user,
         {**scope_query(current_user), "status": {"$in": ["authorised", "active", "ending"]}},

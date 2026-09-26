@@ -298,6 +298,60 @@ async def grant_for_session(*, tenant_id: str, session_id: str) -> dict[str, Any
     return _public_grant(record) if record else None
 
 
+async def expire_overdue_grants(*, tenant_id: str) -> int:
+    """Close expired native sessions even when the endpoint is no longer polling.
+
+    The companion performs this cleanup during its protected status check, but
+    an endpoint can be shut down or its companion can exit before that happens.
+    Reconcile the server-side lifecycle on technician reads as well so an old
+    signed grant can never leave an endpoint shown as actively accessible.
+    """
+    tenant = str(tenant_id or "").strip()
+    if not tenant:
+        return 0
+    now = _iso(_now())
+    grants = await db.native_remote_grants.find(
+        {
+            "tenant_id": tenant,
+            "status": {"$in": ["issued", "delivered", "acknowledged"]},
+            "expires_at": {"$lte": now},
+        },
+        {"_id": 0, "id": 1, "session_id": 1, "device_id": 1, "client_id": 1},
+    ).to_list(500)
+    expired = 0
+    for grant in grants:
+        changed = await db.native_remote_grants.update_one(
+            {
+                "id": grant["id"],
+                "tenant_id": tenant,
+                "status": {"$in": ["issued", "delivered", "acknowledged"]},
+                "expires_at": {"$lte": now},
+            },
+            {"$set": {"status": "expired", "expired_at": now}},
+        )
+        if not getattr(changed, "matched_count", 0):
+            continue
+        expired += 1
+        await db.remote_sessions.update_one(
+            {
+                "id": grant["session_id"],
+                "tenant_id": tenant,
+                "device_id": grant.get("device_id"),
+                "client_id": grant.get("client_id"),
+                "status": {"$in": ["authorised", "active", "ending"]},
+                "ended_at": None,
+            },
+            {"$set": {
+                "status": "ended", "ended_at": now, "launch_status": "grant_expired",
+                "transport_state": "disconnected", "transport_detail": "native remote grant expired",
+            }},
+        )
+        await db.native_remote_frames.delete_one(
+            {"tenant_id": tenant, "session_id": grant["session_id"], "client_id": grant.get("client_id")}
+        )
+    return expired
+
+
 async def revoke_grant(*, tenant_id: str, session_id: str, actor_id: str, reason: str) -> bool:
     # A relay frame is a transient view of an attended desktop, never a
     # recording. Remove it even for an idempotent revoke so no end path can
