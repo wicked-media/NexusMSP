@@ -312,9 +312,13 @@ export default function DeviceDetailPage() {
   const activeWorkTickets = (data.tickets || []).filter(canStartWorkSession);
   const agentControlPath = `/nexus-agent?deviceId=${encodeURIComponent(dev.id)}${dev.client_id ? `&clientId=${encodeURIComponent(dev.client_id)}` : ""}`;
   const hasLinkedAgent = Boolean(dev.nexus_agent_id);
+  const agentEligiblePlatform = /windows/i.test(`${dev.os || ""} ${dev.os_version || ""}`);
+  const networkControlPath = `/networking?deviceId=${encodeURIComponent(dev.id)}${dev.client_id ? `&clientId=${encodeURIComponent(dev.client_id)}` : ""}`;
   const agentToolsReady = !isArchived && hasLinkedAgent && telemetryState === "observed";
   const agentControlState = isArchived
     ? { label: "History retained", detail: "Operational controls are disabled while the asset is archived.", tone: "text-muted-foreground" }
+    : !agentEligiblePlatform && !hasLinkedAgent
+      ? { label: "Network-managed endpoint", detail: "This platform does not run Nexus Agent. Manage it through the network workspace and retain its monitoring evidence here.", tone: "text-sky-700 dark:text-sky-300" }
     : !hasLinkedAgent
       ? { label: "Agent not linked", detail: "Link Nexus Agent to enable remote support, terminal and file controls.", tone: "text-amber-600 dark:text-amber-300" }
       : telemetryState === "observed"
@@ -483,7 +487,7 @@ export default function DeviceDetailPage() {
             </div>
             {isArchived ? <Button className="nx-device-quick-actions__primary justify-start" onClick={restoreManagedAsset} disabled={lifecycleBusy}><RotateCcw className="mr-2 h-4 w-4" />Restore device</Button> : activeWorkTickets.length === 1 ? <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(workSessionPath(activeWorkTickets[0]))}><Wrench className="mr-2 h-4 w-4" />Start work</Button> : <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Plus className="mr-2 h-4 w-4" />Create ticket</Button>}
             <div className="nx-device-quick-actions__remote"><RemoteAccessButton device={dev} status={displayStatus} testid="remote-access-btn" /></div>
-            {!isArchived && (hasLinkedAgent ? <Button variant="outline" className="justify-start" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady} title={!agentToolsReady ? "Refresh or wait for a current Nexus Agent check-in before opening terminal and file controls" : undefined}><Terminal className="mr-2 h-4 w-4" />{agentToolsReady ? "Terminal & files" : "Agent verification required"}</Button> : <Button variant="outline" className="justify-start" onClick={() => navigate(agentControlPath)}><Terminal className="mr-2 h-4 w-4" />Link Nexus Agent</Button>)}
+            {!isArchived && (hasLinkedAgent ? <Button variant="outline" className="justify-start" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady} title={!agentToolsReady ? "Refresh or wait for a current Nexus Agent check-in before opening terminal and file controls" : undefined}><Terminal className="mr-2 h-4 w-4" />{agentToolsReady ? "Terminal & files" : "Agent verification required"}</Button> : agentEligiblePlatform ? <Button variant="outline" className="justify-start" onClick={() => navigate(agentControlPath)}><Terminal className="mr-2 h-4 w-4" />Link Nexus Agent</Button> : <Button variant="outline" className="justify-start" onClick={() => navigate(networkControlPath)}><Network className="mr-2 h-4 w-4" />Network controls</Button>)}
             {activeTab !== "tickets" && <Button variant="outline" className="justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Ticket className="mr-2 h-4 w-4" />Create linked ticket</Button>}
             <Button variant="outline" className="justify-start" onClick={() => setSafetyCheckOpen(true)}><ShieldCheck className="mr-2 h-4 w-4" />Safe-to-touch check</Button>
             {!isArchived && <Button variant="outline" className="justify-start" onClick={() => setPatchWindowOpen(true)}><Calendar className="mr-2 h-4 w-4" />Schedule maintenance</Button>}
@@ -518,9 +522,9 @@ export default function DeviceDetailPage() {
                 <p className={`mt-1 text-xs ${agentControlState.tone}`}>{agentControlState.detail}</p>
               </div>
               {!isArchived && <div className="flex flex-wrap gap-2">
-                {hasLinkedAgent ? <Button size="sm" variant="outline" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady}><Terminal className="mr-1.5 h-3.5 w-3.5" />Terminal & files</Button> : <Button size="sm" variant="outline" onClick={() => navigate(agentControlPath)}><Terminal className="mr-1.5 h-3.5 w-3.5" />Link Agent</Button>}
+                {hasLinkedAgent ? <Button size="sm" variant="outline" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady}><Terminal className="mr-1.5 h-3.5 w-3.5" />Terminal & files</Button> : agentEligiblePlatform ? <Button size="sm" variant="outline" onClick={() => navigate(agentControlPath)}><Terminal className="mr-1.5 h-3.5 w-3.5" />Link Agent</Button> : <Button size="sm" variant="outline" onClick={() => navigate(networkControlPath)}><Network className="mr-1.5 h-3.5 w-3.5" />Network controls</Button>}
                 <Button size="sm" variant="outline" onClick={() => setPatchWindowOpen(true)}><Calendar className="mr-1.5 h-3.5 w-3.5" />Maintenance</Button>
-                <Button size="sm" variant="outline" onClick={() => navigate(agentControlPath)}><Wrench className="mr-1.5 h-3.5 w-3.5" />Agent controls</Button>
+                <Button size="sm" variant="outline" onClick={() => navigate(hasLinkedAgent || agentEligiblePlatform ? agentControlPath : networkControlPath)}>{hasLinkedAgent || agentEligiblePlatform ? <Wrench className="mr-1.5 h-3.5 w-3.5" /> : <Network className="mr-1.5 h-3.5 w-3.5" />}{hasLinkedAgent || agentEligiblePlatform ? "Agent controls" : "Network workspace"}</Button>
               </div>}
             </CardContent>
           </Card>
