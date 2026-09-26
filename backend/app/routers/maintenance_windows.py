@@ -25,8 +25,10 @@ from app.services.activity import log_activity
 from app.routers.nexus_agent import require_agent_operator
 from app.services.scope_permissions import (
     assert_client_scope,
-    assert_record_scope,
+    assert_tenant_record_scope,
     effective_scope,
+    platform_tenant_id,
+    tenant_scoped_query,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,7 +86,7 @@ def _window_scope_query(current_user: dict, query: dict | None = None) -> dict:
     operational = dict(query or {})
     scope = effective_scope(current_user)
     if scope["mode"] == "all":
-        return operational
+        return tenant_scoped_query(current_user, operational)
 
     client_clause = {
         "$or": [
@@ -106,7 +108,12 @@ def _window_scope_query(current_user: dict, query: dict | None = None) -> dict:
                 "$not": {"$elemMatch": {"$nin": scope["site_ids"]}},
             }
         })
-    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+    return tenant_scoped_query(current_user, clauses[0] if len(clauses) == 1 else {"$and": clauses})
+
+
+def _window_tenant_query(window: dict, query: dict | None = None) -> dict:
+    """Scope a worker-side child operation to the window's immutable tenant."""
+    return tenant_scoped_query({"tenant_id": str(window.get("tenant_id") or "nexus-local")}, query)
 
 
 async def _resolve_scoped_devices(current_user: dict, device_ids: Any, *, operation: str) -> list[dict]:
@@ -115,7 +122,7 @@ async def _resolve_scoped_devices(current_user: dict, device_ids: Any, *, operat
     if not ids:
         raise HTTPException(400, "device_ids required")
     return [
-        await assert_record_scope(
+        await assert_tenant_record_scope(
             current_user,
             db.devices,
             device_id,
@@ -128,7 +135,7 @@ async def _resolve_scoped_devices(current_user: dict, device_ids: Any, *, operat
 
 async def _load_scoped_window(wid: str, current_user: dict, *, operation: str) -> tuple[dict, list[dict]]:
     """Load a window and prove every current target remains in technician scope."""
-    window = await db.maintenance_windows.find_one({"id": wid}, {"_id": 0})
+    window = await db.maintenance_windows.find_one(tenant_scoped_query(current_user, {"id": wid}), {"_id": 0})
     if not window:
         raise HTTPException(404, "Window not found")
 
@@ -158,7 +165,7 @@ async def _current_window_device(window: dict, stored_device: dict) -> tuple[dic
     allowed_client_ids = set(_window_client_ids(window))
     if not allowed_client_ids:
         return None, "window requires client-scope revalidation before dispatch"
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    device = await db.devices.find_one(_window_tenant_query(window, {"id": device_id}), {"_id": 0})
     if not device:
         return None, "target device no longer exists"
     current_client_id = str(device.get("client_id") or "").strip()
@@ -202,7 +209,7 @@ async def get_window(wid: str, current_user: dict = Depends(require_agent_operat
     w, _ = await _load_scoped_window(
         wid, current_user, operation="maintenance_window.read"
     )
-    runs = await db.maintenance_window_runs.find({"window_id": wid}, {"_id": 0}).to_list(2000)
+    runs = await db.maintenance_window_runs.find(_window_tenant_query(w, {"window_id": wid}), {"_id": 0}).to_list(2000)
     w["runs"] = runs
     return w
 
@@ -235,7 +242,7 @@ async def create_window(data: dict, current_user: dict = Depends(require_agent_o
     parent_ticket_id = (data.get("parent_ticket_id") or "").strip()
     if parent_ticket_id:
         parent_ticket = await db.tickets.find_one(
-            {"$or": [{"id": parent_ticket_id}, {"ticket_number": parent_ticket_id}]},
+            tenant_scoped_query(current_user, {"$or": [{"id": parent_ticket_id}, {"ticket_number": parent_ticket_id}]}),
             {"_id": 0, "id": 1, "ticket_number": 1, "client_id": 1, "site_id": 1},
         )
         if not parent_ticket:
@@ -257,6 +264,7 @@ async def create_window(data: dict, current_user: dict = Depends(require_agent_o
 
     window = {
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(current_user),
         "name": (data.get("name") or "").strip()[:140] or f"Maintenance - {scheduled.strftime('%Y-%m-%d %H:%M')}",
         "description": (data.get("description") or "").strip()[:600],
         "scheduled_at": scheduled.isoformat(),
@@ -299,7 +307,7 @@ async def cancel_window(wid: str, current_user: dict = Depends(require_agent_ope
     )
     if w.get("status") != "scheduled":
         raise HTTPException(400, f"Only a scheduled window can be cancelled (current status: {w.get('status')})")
-    await db.maintenance_windows.update_one({"id": wid}, {"$set": {"status": "cancelled", "cancelled_at": _now_iso(), "cancelled_by": current_user.get("name")}})
+    await db.maintenance_windows.update_one(tenant_scoped_query(current_user, {"id": wid}), {"$set": {"status": "cancelled", "cancelled_at": _now_iso(), "cancelled_by": current_user.get("name")}})
     await log_activity(current_user, "maintenance_window_cancelled", "maintenance_window", wid, w["name"], "cancelled")
     return {"success": True}
 
@@ -308,7 +316,7 @@ async def cancel_window(wid: str, current_user: dict = Depends(require_agent_ope
 async def run_now(wid: str, current_user: dict = Depends(require_agent_operator)):
     await _load_scoped_window(wid, current_user, operation="maintenance_window.run_now")
     claimed = await db.maintenance_windows.update_one(
-        {"id": wid, "status": "scheduled"},
+        tenant_scoped_query(current_user, {"id": wid, "status": "scheduled"}),
         {"$set": {
             "status": "dispatching",
             "run_now_requested_at": _now_iso(),
@@ -316,7 +324,7 @@ async def run_now(wid: str, current_user: dict = Depends(require_agent_operator)
         }},
     )
     if claimed.modified_count != 1:
-        window = await db.maintenance_windows.find_one({"id": wid}, {"_id": 0, "status": 1})
+        window = await db.maintenance_windows.find_one(tenant_scoped_query(current_user, {"id": wid}), {"_id": 0, "status": 1})
         if not window:
             raise HTTPException(404, "Window not found")
         raise HTTPException(409, f"Window is {window.get('status')}")
@@ -339,6 +347,7 @@ async def _run_device_action(device: dict, action: str, window: dict) -> dict:
     """
     rec = {
         "id": str(uuid.uuid4()),
+        "tenant_id": window.get("tenant_id") or "nexus-local",
         "window_id": window["id"],
         "device_id": device["id"],
         "device_name": device.get("name"),
@@ -382,7 +391,7 @@ $result=$session.CreateUpdateInstaller(); $result.Updates=$toInstall; $out=$resu
             command_id = await queue_command_for_device(device, "run_powershell", {"script": "$ErrorActionPreference='Continue'; " + commands, "timeout_sec": 7200}, queued_by="maintenance-window")
         elif action == "run-script":
             script_id = window.get("script_id")
-            script = await db.scripts.find_one({"id": script_id}, {"_id": 0}) if script_id else None
+            script = await db.scripts.find_one(_window_tenant_query(window, {"id": script_id}), {"_id": 0}) if script_id else None
             if not script or not (script.get("content") or "").strip():
                 rec.update({"status": "skipped", "message": "select a valid script for this maintenance window", "finished_at": _now_iso()})
                 return rec
@@ -402,7 +411,7 @@ async def _post_completion_to_ticket(window: dict, counts: dict, summary: str) -
     parent_ticket_id = window.get("parent_ticket_id")
     if not parent_ticket_id:
         return
-    ticket = await db.tickets.find_one({"id": parent_ticket_id}, {"_id": 0, "id": 1})
+    ticket = await db.tickets.find_one(_window_tenant_query(window, {"id": parent_ticket_id}), {"_id": 0, "id": 1})
     if not ticket:
         return
     body = (
@@ -413,6 +422,7 @@ async def _post_completion_to_ticket(window: dict, counts: dict, summary: str) -
     )
     await db.ticket_comments.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": window.get("tenant_id") or "nexus-local",
         "ticket_id": parent_ticket_id,
         "author": "Nexus Agent",
         "author_id": "nexus-agent",
@@ -421,7 +431,7 @@ async def _post_completion_to_ticket(window: dict, counts: dict, summary: str) -
         "window_id": window["id"],
         "created_at": _now_iso(),
     })
-    await db.tickets.update_one({"id": parent_ticket_id}, {"$inc": {"comments_count": 1}, "$set": {"updated_at": _now_iso()}})
+    await db.tickets.update_one(_window_tenant_query(window, {"id": parent_ticket_id}), {"$inc": {"comments_count": 1}, "$set": {"updated_at": _now_iso()}})
 
 
 async def reconcile_window_from_runs(wid: str) -> dict | None:
@@ -430,7 +440,7 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
     if not window or window.get("status") in {"completed", "failed", "cancelled"}:
         return window
 
-    runs = await db.maintenance_window_runs.find({"window_id": wid}, {"_id": 0, "status": 1}).to_list(2000)
+    runs = await db.maintenance_window_runs.find(_window_tenant_query(window, {"window_id": wid}), {"_id": 0, "status": 1}).to_list(2000)
     counts = {"queued": 0, "ok": 0, "failed": 0, "skipped": 0}
     for run in runs:
         status = run.get("status", "skipped")
@@ -438,7 +448,7 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
 
     if counts.get("queued", 0) or any(run.get("status") == "running" for run in runs):
         await db.maintenance_windows.update_one(
-            {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}},
+            _window_tenant_query(window, {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}}),
             {"$set": {"status": "awaiting_results", "summary_counts": counts, "reconciled_at": _now_iso()}},
         )
         return {**window, "status": "awaiting_results", "summary_counts": counts}
@@ -449,7 +459,7 @@ async def reconcile_window_from_runs(wid: str) -> dict | None:
         f"{counts.get('failed', 0)} failed, and {counts.get('skipped', 0)} skipped."
     )
     completed = await db.maintenance_windows.update_one(
-        {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}},
+        _window_tenant_query(window, {"id": wid, "status": {"$in": ["dispatching", "running", "awaiting_results"]}}),
         {"$set": {
             "status": final_status,
             "finished_at": _now_iso(),
@@ -476,7 +486,7 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
     if not w or w.get("status") not in expected_statuses:
         return
     claimed = await db.maintenance_windows.update_one(
-        {"id": wid, "status": {"$in": expected_statuses}},
+        _window_tenant_query(w, {"id": wid, "status": {"$in": expected_statuses}}),
         {"$set": {"status": "running", "started_at": _now_iso()}},
     )
     if claimed.modified_count != 1:
@@ -492,6 +502,7 @@ async def execute_window(wid: str, allow_dispatching: bool = False):
             if not device:
                 rec = {
                     "id": str(uuid.uuid4()),
+                    "tenant_id": w.get("tenant_id") or "nexus-local",
                     "window_id": w["id"],
                     "device_id": stored_device.get("id"),
                     "device_name": stored_device.get("name"),
@@ -600,10 +611,10 @@ async def maintenance_window_scheduler():
 
 @router.get("/maintenance-windows/stats/summary")
 async def stats_summary(current_user: dict = Depends(get_current_user)):
-    pipeline = [{"$group": {"_id": "$status", "n": {"$sum": 1}}}]
+    pipeline = [{"$match": _window_scope_query(current_user)}, {"$group": {"_id": "$status", "n": {"$sum": 1}}}]
     rows = await db.maintenance_windows.aggregate(pipeline).to_list(20)
     counts = {r["_id"]: r["n"] for r in rows}
     upcoming = await db.maintenance_windows.find(
-        {"status": "scheduled"}, {"_id": 0, "id": 1, "name": 1, "scheduled_at": 1, "device_ids": 1}
+        _window_scope_query(current_user, {"status": "scheduled"}), {"_id": 0, "id": 1, "name": 1, "scheduled_at": 1, "device_ids": 1}
     ).sort("scheduled_at", 1).limit(5).to_list(5)
     return {"counts": counts, "upcoming": upcoming}

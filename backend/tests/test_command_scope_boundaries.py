@@ -190,6 +190,7 @@ def test_global_operator_can_create_multi_client_window_with_provenance(monkeypa
 
     assert result["client_ids"] == ["client-a", "client-b"]
     assert result["site_ids"] == ["site-a", "site-b"]
+    assert result["tenant_id"] == "nexus-local"
     assert database.maintenance_windows.inserted[0]["client_ids"] == ["client-a", "client-b"]
 
 

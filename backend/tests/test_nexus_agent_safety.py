@@ -978,7 +978,9 @@ class MaintenanceDevicesCollection:
         return ListCursor(self.rows)
 
     async def find_one(self, query, *_args, **_kwargs):
-        return next((dict(row) for row in self.rows if row.get("id") == query.get("id")), None)
+        clauses = query.get("$and", [query])
+        device_id = next((clause.get("id") for clause in clauses if "id" in clause), None)
+        return next((dict(row) for row in self.rows if row.get("id") == device_id), None)
 
 
 def test_maintenance_requires_enrolled_nexus_agent(monkeypatch):
