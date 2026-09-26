@@ -1127,6 +1127,12 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
 .nx-device-quick-actions > button, .nx-device-quick-actions__remote button { width: 100%; min-height: 2.55rem; justify-content: flex-start; font-size: .7rem; }
 .nx-device-quick-actions__primary { background: #12d98b !important; color: #031a12 !important; font-weight: 800; }
 .nx-device-quick-actions__remote { min-width: 0; }
+.nx-device-control-readiness {
+    border-color: hsl(var(--primary) / .24);
+    background: linear-gradient(118deg, hsl(var(--primary) / .08), hsl(var(--card) / .9) 46%, hsl(var(--card)));
+    box-shadow: 0 18px 34px -32px hsl(var(--primary) / .72);
+}
+.nx-device-control-readiness .nx-button { min-height: 2.15rem; }
 .nx-device-current-work {
     border-color: hsl(var(--border) / .68);
     background: hsl(var(--card) / .78);

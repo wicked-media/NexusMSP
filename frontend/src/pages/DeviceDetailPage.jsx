@@ -310,6 +310,16 @@ export default function DeviceDetailPage() {
   const activeAdapter = adapters.find(adapter => adapter.status === "up") || adapters.find(adapter => adapter.ip_address) || null;
   const software = data.software || [];
   const activeWorkTickets = (data.tickets || []).filter(canStartWorkSession);
+  const agentControlPath = `/nexus-agent?deviceId=${encodeURIComponent(dev.id)}${dev.client_id ? `&clientId=${encodeURIComponent(dev.client_id)}` : ""}`;
+  const hasLinkedAgent = Boolean(dev.nexus_agent_id);
+  const agentToolsReady = !isArchived && hasLinkedAgent && telemetryState === "observed";
+  const agentControlState = isArchived
+    ? { label: "History retained", detail: "Operational controls are disabled while the asset is archived.", tone: "text-muted-foreground" }
+    : !hasLinkedAgent
+      ? { label: "Agent not linked", detail: "Link Nexus Agent to enable remote support, terminal and file controls.", tone: "text-amber-600 dark:text-amber-300" }
+      : telemetryState === "observed"
+        ? { label: "Endpoint control ready", detail: "Remote, terminal and file actions are available from this trusted observation.", tone: "text-emerald-600 dark:text-emerald-300" }
+        : { label: "Verification required", detail: "Refresh or wait for a current Agent check-in before opening live endpoint controls.", tone: "text-amber-600 dark:text-amber-300" };
   const softwareQuery = softwareSearch.trim().toLowerCase();
   const filteredSoftware = software.filter(item => !softwareQuery || [item.name, item.publisher, item.version, item.category].some(value => String(value || "").toLowerCase().includes(softwareQuery)));
   const softwareInventoryAt = software.reduce((latest, item) => item.last_inventory_at && (!latest || item.last_inventory_at > latest) ? item.last_inventory_at : latest, null);
@@ -473,9 +483,10 @@ export default function DeviceDetailPage() {
             </div>
             {isArchived ? <Button className="nx-device-quick-actions__primary justify-start" onClick={restoreManagedAsset} disabled={lifecycleBusy}><RotateCcw className="mr-2 h-4 w-4" />Restore device</Button> : activeWorkTickets.length === 1 ? <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(workSessionPath(activeWorkTickets[0]))}><Wrench className="mr-2 h-4 w-4" />Start work</Button> : <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Plus className="mr-2 h-4 w-4" />Create ticket</Button>}
             <div className="nx-device-quick-actions__remote"><RemoteAccessButton device={dev} status={displayStatus} testid="remote-access-btn" /></div>
-            {!isArchived && dev.nexus_agent_id && <Button variant="outline" className="justify-start" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={telemetryState !== "observed"} title={telemetryState !== "observed" ? "Refresh or wait for a current Nexus Agent check-in before opening terminal and file controls" : undefined}><Terminal className="mr-2 h-4 w-4" />{telemetryState !== "observed" ? "Agent verification required" : "Terminal & files"}</Button>}
+            {!isArchived && (hasLinkedAgent ? <Button variant="outline" className="justify-start" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady} title={!agentToolsReady ? "Refresh or wait for a current Nexus Agent check-in before opening terminal and file controls" : undefined}><Terminal className="mr-2 h-4 w-4" />{agentToolsReady ? "Terminal & files" : "Agent verification required"}</Button> : <Button variant="outline" className="justify-start" onClick={() => navigate(agentControlPath)}><Terminal className="mr-2 h-4 w-4" />Link Nexus Agent</Button>)}
             {activeTab !== "tickets" && <Button variant="outline" className="justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Ticket className="mr-2 h-4 w-4" />Create linked ticket</Button>}
             <Button variant="outline" className="justify-start" onClick={() => setSafetyCheckOpen(true)}><ShieldCheck className="mr-2 h-4 w-4" />Safe-to-touch check</Button>
+            {!isArchived && <Button variant="outline" className="justify-start" onClick={() => setPatchWindowOpen(true)}><Calendar className="mr-2 h-4 w-4" />Schedule maintenance</Button>}
             <Button variant="outline" className="justify-start" onClick={() => setActiveTab("patches")}><Download className="mr-2 h-4 w-4" />Check patches</Button>
             <Button variant="outline" className="justify-start" onClick={() => setActiveTab("backups")}><HardDrive className="mr-2 h-4 w-4" />View backups</Button>
             <Button variant="outline" className="justify-start" onClick={openDeviceEditor}><Pencil className="mr-2 h-4 w-4" />Edit identity</Button>
@@ -484,7 +495,7 @@ export default function DeviceDetailPage() {
               <DropdownMenuTrigger asChild><Button variant="outline" className="justify-between" data-testid="device-lifecycle-menu"><span className="flex items-center"><MoreHorizontal className="mr-2 h-4 w-4" />More actions</span><ChevronRight className="h-4 w-4" /></Button></DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="min-w-64">
                 <DropdownMenuItem onSelect={openLiveSupport}><MessageSquare className="mr-2 h-4 w-4" />Start live support</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => navigate(`/nexus-agent?deviceId=${encodeURIComponent(dev.id)}${dev.client_id ? `&clientId=${encodeURIComponent(dev.client_id)}` : ""}`)}><Terminal className="mr-2 h-4 w-4" />Nexus Agent control plane</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate(agentControlPath)}><Terminal className="mr-2 h-4 w-4" />Nexus Agent control plane</DropdownMenuItem>
                 {!isArchived && <DropdownMenuItem onSelect={() => openLifecycleDialog("archive")} data-testid="archive-device-menu"><Archive className="mr-2 h-4 w-4" />Archive asset</DropdownMenuItem>}
                 {!isArchived && <DropdownMenuItem onSelect={() => openLifecycleDialog("merge")} data-testid="merge-device-menu"><GitMerge className="mr-2 h-4 w-4" />Merge duplicate</DropdownMenuItem>}
                 <DropdownMenuSeparator />
@@ -500,6 +511,19 @@ export default function DeviceDetailPage() {
 
         {/* CURRENT WORK TAB */}
         <TabsContent value="overview" className="mt-3 space-y-3">
+          <Card className="nx-device-control-readiness" data-testid="device-control-readiness">
+            <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2"><ShieldCheck className="h-4 w-4 text-cyan-500" /><p className="text-sm font-semibold">{agentControlState.label}</p></div>
+                <p className={`mt-1 text-xs ${agentControlState.tone}`}>{agentControlState.detail}</p>
+              </div>
+              {!isArchived && <div className="flex flex-wrap gap-2">
+                {hasLinkedAgent ? <Button size="sm" variant="outline" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady}><Terminal className="mr-1.5 h-3.5 w-3.5" />Terminal & files</Button> : <Button size="sm" variant="outline" onClick={() => navigate(agentControlPath)}><Terminal className="mr-1.5 h-3.5 w-3.5" />Link Agent</Button>}
+                <Button size="sm" variant="outline" onClick={() => setPatchWindowOpen(true)}><Calendar className="mr-1.5 h-3.5 w-3.5" />Maintenance</Button>
+                <Button size="sm" variant="outline" onClick={() => navigate(agentControlPath)}><Wrench className="mr-1.5 h-3.5 w-3.5" />Agent controls</Button>
+              </div>}
+            </CardContent>
+          </Card>
           <Card className="nx-device-current-work overflow-hidden">
             <CardContent className="divide-y divide-border/50 p-0">
               <section className="nx-device-current-work__section">
