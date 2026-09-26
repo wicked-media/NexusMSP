@@ -110,7 +110,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, wo
     return () => { cancelled = true; };
   }, [device?.id, headers, providersOverride]);
 
-  const isOffline = status === "offline";
+  const isOffline = status === "offline" || status === "stale";
 
   // Determine which providers actually apply to THIS device right now.
   const nexusCfg = providers.find(p => p.id === "nexus");
@@ -271,7 +271,7 @@ export default function RemoteAccessButton({ device, status, ticketId = null, wo
   if (isOffline) {
     return (
       <Button size="sm" variant="outline" disabled className={sizeCls} data-testid={`${testid}-offline`}>
-        <XCircle className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> Offline
+        <XCircle className={`${compact ? "w-3 h-3" : "w-4 h-4"} mr-1`} /> {status === "stale" ? "Agent stale" : "Offline"}
       </Button>
     );
   }
