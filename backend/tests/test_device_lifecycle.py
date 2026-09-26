@@ -102,7 +102,7 @@ def test_archive_retires_the_asset_without_deleting_endpoint_evidence(monkeypatc
     fake_db = _db(evidence={"tickets": 3, "device_events": 5})
     activities = []
     monkeypatch.setattr(devices, "db", fake_db)
-    monkeypatch.setattr(devices, "assert_record_scope", _scope_map({"device-a": _device()}))
+    monkeypatch.setattr(devices, "assert_tenant_record_scope", _scope_map({"device-a": _device()}))
 
     async def capture_activity(*args, **kwargs):
         activities.append((args, kwargs))
@@ -124,7 +124,7 @@ def test_archive_retires_the_asset_without_deleting_endpoint_evidence(monkeypatc
 def test_archive_requires_a_handover_reason_before_mutating(monkeypatch):
     fake_db = _db()
     monkeypatch.setattr(devices, "db", fake_db)
-    monkeypatch.setattr(devices, "assert_record_scope", _scope_map({"device-a": _device()}))
+    monkeypatch.setattr(devices, "assert_tenant_record_scope", _scope_map({"device-a": _device()}))
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(devices.archive_device("device-a", {"reason": ""}, _user()))
@@ -138,7 +138,7 @@ def test_restore_never_restores_a_duplicate_that_was_merged(monkeypatch):
     monkeypatch.setattr(devices, "db", fake_db)
     monkeypatch.setattr(
         devices,
-        "assert_record_scope",
+        "assert_tenant_record_scope",
         _scope_map({"device-a": _device(archived=True, status="archived", merged_into_id="device-b")}),
     )
 
@@ -155,7 +155,7 @@ def test_merge_blocks_an_agent_linked_source_from_becoming_a_duplicate(monkeypat
     source = _device(nexus_agent_id="agent-a")
     survivor = _device("device-b", name="Manual duplicate")
     monkeypatch.setattr(devices, "db", fake_db)
-    monkeypatch.setattr(devices, "assert_record_scope", _scope_map({"device-a": source, "device-b": survivor}))
+    monkeypatch.setattr(devices, "assert_tenant_record_scope", _scope_map({"device-a": source, "device-b": survivor}))
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(devices.merge_device("device-a", {"survivor_id": "device-b", "reason": "Duplicate record"}, _user()))
@@ -171,7 +171,7 @@ def test_merge_archives_manual_duplicate_and_keeps_evidence_on_source(monkeypatc
     survivor = _device("device-b", name="Reception PC · Agent", nexus_agent_id="agent-a")
     activities = []
     monkeypatch.setattr(devices, "db", fake_db)
-    monkeypatch.setattr(devices, "assert_record_scope", _scope_map({"device-a": source, "device-b": survivor}))
+    monkeypatch.setattr(devices, "assert_tenant_record_scope", _scope_map({"device-a": source, "device-b": survivor}))
 
     async def capture_activity(*args, **kwargs):
         activities.append((args, kwargs))
@@ -199,7 +199,7 @@ def test_merge_archives_manual_duplicate_and_keeps_evidence_on_source(monkeypatc
 def test_purge_rejects_any_record_with_retained_operational_evidence(monkeypatch):
     fake_db = _db(evidence={"tickets": 1})
     monkeypatch.setattr(devices, "db", fake_db)
-    monkeypatch.setattr(devices, "assert_record_scope", _scope_map({"device-a": _device()}))
+    monkeypatch.setattr(devices, "assert_tenant_record_scope", _scope_map({"device-a": _device()}))
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(devices.delete_device("device-a", _user()))
@@ -221,7 +221,7 @@ def test_active_device_list_excludes_archived_records_by_default(monkeypatch):
 def test_generic_device_edit_cannot_bypass_lifecycle_or_agent_identity(monkeypatch):
     fake_db = _db()
     monkeypatch.setattr(devices, "db", fake_db)
-    monkeypatch.setattr(devices, "assert_record_scope", _scope_map({"device-a": _device()}))
+    monkeypatch.setattr(devices, "assert_tenant_record_scope", _scope_map({"device-a": _device()}))
 
     with pytest.raises(HTTPException) as rejected:
         asyncio.run(devices.update_device(

@@ -19,6 +19,24 @@ const COMMAND_STATUS_STYLE = {
   timeout: "text-rose-300 border-rose-500/30 bg-rose-500/10",
 };
 
+const TRANSFER_STATUS_STYLE = {
+  queued: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  dispatched: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  staged: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  completed: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  failed: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+  cancelled: "border-zinc-500/30 bg-zinc-500/10 text-zinc-700 dark:text-zinc-300",
+};
+
+const transferStatusHint = (transfer) => {
+  const status = String(transfer?.status || "queued").toLowerCase();
+  if (status === "staged") return "Ready for a private download.";
+  if (status === "failed") return "The Agent could not complete this request. Check the endpoint connection, then submit a new request.";
+  if (status === "queued" || status === "dispatched") return "Waiting for the endpoint Agent to report back.";
+  if (status === "completed") return "Completed and recorded in the transfer audit trail.";
+  return "Reported by the endpoint Agent.";
+};
+
 const formatElapsed = (seconds) => {
   const total = Math.max(0, Number.isFinite(seconds) ? seconds : 0);
   const minutes = Math.floor(total / 60);
@@ -309,7 +327,7 @@ export default function DeviceTerminalPage() {
 
       {selectedDevice && <Card><CardHeader><CardTitle className="text-base">Browse endpoint folders</CardTitle><p className="text-xs text-muted-foreground">Read-only, bounded listings from the active Nexus Agent. Start at the system drive or open a folder to continue.</p></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="secondary" onClick={() => browseDirectory("C:\\")} disabled={browsing}><FolderOpen className="mr-1.5 h-3.5 w-3.5" />System drive (C:)</Button><Button type="button" size="sm" variant="outline" onClick={() => browseDirectory(parentBrowsePath)} disabled={browsing || !parentBrowsePath} title={parentBrowsePath ? `Back to ${parentBrowsePath}` : "Already at the endpoint root"}><ArrowLeft className="mr-1.5 h-3.5 w-3.5" />Up one folder</Button><span className="self-center text-xs text-muted-foreground">Uses the endpoint agent’s local read access.</span></div><form onSubmit={(event) => { event.preventDefault(); browseDirectory(); }} className="flex gap-2"><Input value={browsePath} onChange={(event) => setBrowsePath(event.target.value)} placeholder="C:\\Logs" /><Button type="submit" disabled={browsing}><FolderOpen className="mr-1.5 h-4 w-4" />{browsing ? "Listing…" : "Browse"}</Button></form>{browserEntries.length > 0 && <div className="overflow-hidden rounded-lg border border-border/70">{browserEntries.map((entry) => <button key={entry.path} type="button" className="flex w-full items-center gap-3 border-b border-border/60 p-3 text-left last:border-0 hover:bg-muted/50 disabled:cursor-default" disabled={!entry.directory} onClick={() => entry.directory && browseDirectory(entry.path)}><FolderOpen className={`h-4 w-4 ${entry.directory ? "text-sky-400" : "text-muted-foreground"}`} /><span className="min-w-0 flex-1 truncate text-sm">{entry.name}</span><span className="text-xs text-muted-foreground">{entry.directory ? "Folder" : `${entry.size || 0} bytes`}</span></button>)}</div>}</CardContent></Card>}
 
-      {selectedDevice && <Card><CardHeader className="flex-row items-center justify-between space-y-0"><div><CardTitle className="text-base">Transfer history</CardTitle><p className="mt-1 text-xs text-muted-foreground">Agent-reported status only. Refreshes automatically.</p></div><Button size="sm" variant="ghost" onClick={loadTransfers}><RefreshCw className="h-3.5 w-3.5" /></Button></CardHeader><CardContent className="space-y-2">{transfers.length === 0 ? <p className="py-3 text-sm text-muted-foreground">No file transfers for this asset.</p> : transfers.map((transfer) => <div key={transfer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 p-3"><div className="min-w-0"><p className="truncate text-sm font-medium">{transfer.filename}</p><p className="mt-1 text-xs text-muted-foreground">{transfer.direction === "endpoint_to_technician" ? "Endpoint → technician" : "Technician → endpoint"} · {transfer.status}{transfer.agent_detail ? ` · ${transfer.agent_detail}` : ""}</p></div>{transfer.direction === "endpoint_to_technician" && transfer.status === "staged" && <Button size="sm" variant="outline" onClick={() => downloadTransfer(transfer)}><Download className="mr-1.5 h-3.5 w-3.5" />Download</Button>}</div>)}</CardContent></Card>}
+      {selectedDevice && <Card><CardHeader className="flex-row items-center justify-between space-y-0"><div><CardTitle className="text-base">Transfer history</CardTitle><p className="mt-1 text-xs text-muted-foreground">Agent-reported status only. Refreshing never resends a file request.</p></div><Button size="sm" variant="ghost" onClick={loadTransfers} aria-label="Refresh transfer history"><RefreshCw className="h-3.5 w-3.5" /></Button></CardHeader><CardContent className="space-y-2">{transfers.length === 0 ? <p className="py-3 text-sm text-muted-foreground">No file transfers for this asset.</p> : transfers.map((transfer) => { const status = String(transfer.status || "queued").toLowerCase(); return <div key={transfer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 p-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="max-w-full truncate text-sm font-medium">{transfer.filename}</p><Badge variant="outline" className={`capitalize ${TRANSFER_STATUS_STYLE[status] || TRANSFER_STATUS_STYLE.queued}`}>{status}</Badge></div><p className="mt-1 text-xs text-muted-foreground">{transfer.direction === "endpoint_to_technician" ? "Endpoint → technician" : "Technician → endpoint"}{transfer.agent_detail ? ` · ${transfer.agent_detail}` : ""}</p><p className="mt-1 text-xs text-muted-foreground">{transferStatusHint(transfer)}</p></div>{transfer.direction === "endpoint_to_technician" && status === "staged" && <Button size="sm" variant="outline" onClick={() => downloadTransfer(transfer)}><Download className="mr-1.5 h-3.5 w-3.5" />Download</Button>}</div>; })}</CardContent></Card>}
     </div>
   );
 }

@@ -189,7 +189,7 @@ async def get_stale_devices_route(hours: int = 24, current_user: dict = Depends(
 
 @router.get("/devices/{device_id}")
 async def get_device(device_id: str, current_user: dict = Depends(get_current_user)):
-    return await assert_record_scope(
+    return await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.read", resource_name="Device",
     )
@@ -213,7 +213,7 @@ async def create_device(device_data: DeviceCreate, current_user: dict = Depends(
 
 @router.put("/devices/{device_id}")
 async def update_device(device_id: str, device_data: dict, current_user: dict = Depends(get_current_user)):
-    old_device = await assert_record_scope(
+    old_device = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.update", resource_name="Device",
     )
@@ -279,7 +279,7 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
     this narrow purge is retained for accidental/manual duplicates that never
     acquired an Agent identity or linked operational records.
     """
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.delete", resource_name="Device",
     )
@@ -318,7 +318,7 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
 )
 async def archive_device(device_id: str, data: dict, current_user: dict = Depends(get_current_user)):
     """Retire a managed asset while preserving its endpoint identity and evidence."""
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.archive", resource_name="Device",
     )
@@ -364,7 +364,7 @@ async def restore_device(device_id: str, current_user: dict = Depends(get_curren
     Restore never asserts the endpoint is online: the next trusted Agent or
     remote provider check-in establishes that state independently.
     """
-    device = await assert_record_scope(
+    device = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.restore", resource_name="Device",
     )
@@ -409,7 +409,7 @@ async def restore_device(device_id: str, current_user: dict = Depends(get_curren
 
 @router.get("/devices/{device_id}/merge-candidates")
 async def get_device_merge_candidates(device_id: str, current_user: dict = Depends(get_current_user)):
-    source = await assert_record_scope(
+    source = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.merge.candidates", resource_name="Device",
     )
@@ -443,11 +443,11 @@ async def get_device_merge_preview(
     survivor_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    source = await assert_record_scope(
+    source = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.merge.preview", resource_name="Device",
     )
-    survivor = await assert_record_scope(
+    survivor = await assert_tenant_record_scope(
         current_user, db.devices, survivor_id,
         operation="device.merge.preview", resource_name="Device",
     )
@@ -468,11 +468,11 @@ async def merge_device(device_id: str, data: dict, current_user: dict = Depends(
     if len(reason) < 3:
         raise HTTPException(status_code=422, detail="Record why these assets are duplicates before merging them")
 
-    source = await assert_record_scope(
+    source = await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.merge", resource_name="Device",
     )
-    survivor = await assert_record_scope(
+    survivor = await assert_tenant_record_scope(
         current_user, db.devices, survivor_id,
         operation="device.merge", resource_name="Device",
     )
@@ -582,38 +582,38 @@ async def get_device_detail(device_id: str, current_user: dict = Depends(get_cur
 
 @router.get("/devices/{device_id}/software")
 async def get_device_software(device_id: str, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(
+    await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.software.read", resource_name="Device",
     )
-    software = await db.device_software.find({"device_id": device_id}, {"_id": 0}).to_list(500)
+    software = await db.device_software.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).to_list(500)
     return software
 
 @router.get("/devices/{device_id}/patches")
 async def get_device_patches(device_id: str, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(
+    await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.patches.read", resource_name="Device",
     )
-    patches = await db.device_patches.find({"device_id": device_id}, {"_id": 0}).sort("installed_date", -1).to_list(200)
+    patches = await db.device_patches.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("installed_date", -1).to_list(200)
     return patches
 
 @router.get("/devices/{device_id}/events")
 async def get_device_events(device_id: str, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(
+    await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.events.read", resource_name="Device",
     )
-    events = await db.device_events.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    events = await db.device_events.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("timestamp", -1).to_list(200)
     return events
 
 @router.get("/devices/{device_id}/performance")
 async def get_device_performance(device_id: str, current_user: dict = Depends(get_current_user)):
-    await assert_record_scope(
+    await assert_tenant_record_scope(
         current_user, db.devices, device_id,
         operation="device.performance.read", resource_name="Device",
     )
-    performance = await db.device_performance.find({"device_id": device_id}, {"_id": 0}).sort("timestamp", -1).to_list(288)
+    performance = await db.device_performance.find(tenant_scoped_query(current_user, {"device_id": device_id}), {"_id": 0}).sort("timestamp", -1).to_list(288)
     return performance
 
 @router.get("/devices/stats/summary")
