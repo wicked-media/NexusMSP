@@ -404,6 +404,29 @@ def test_patch_ring_assignment_requires_a_confirmed_tenant_policy_and_records_au
     assert foreign_ring.value.status_code == 404
 
 
+def test_device_identity_update_rechecks_tenant_at_write_time(monkeypatch):
+    """A colliding stable ID in another tenant must never receive the write."""
+    user = {"id": "admin-a", "name": "Admin A", "role": "admin", "tenant_id": "tenant-a"}
+    device_rows = _Collection([
+        {"id": "shared-device", "tenant_id": "tenant-a", "client_id": "client-a", "name": "Tenant A name"},
+        {"id": "shared-device", "tenant_id": "tenant-b", "client_id": "client-b", "name": "Tenant B name"},
+    ])
+    database = SimpleNamespace(devices=device_rows, scope_denials=_Collection())
+
+    async def no_op_audit(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(devices, "db", database)
+    monkeypatch.setattr(scope_permissions, "db", database)
+    monkeypatch.setattr(devices, "log_activity", no_op_audit)
+
+    asyncio.run(devices.update_device("shared-device", {"name": "Renamed safely"}, current_user=user))
+
+    assert device_rows.rows[0]["name"] == "Renamed safely"
+    assert device_rows.rows[1]["name"] == "Tenant B name"
+    assert device_rows.update_calls[-1][0] == {"$and": [{"id": "shared-device"}, {"tenant_id": "tenant-a"}]}
+
+
 def test_agent_patch_evidence_explicitly_clears_a_prior_count_when_collector_is_unavailable():
     observed_at = "2026-08-31T00:00:00+00:00"
     reported = nexus_agent._patch_evidence_update({"security": {"pending_update_count": 0}}, observed_at)

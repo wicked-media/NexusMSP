@@ -6,7 +6,7 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, assert_tenant_record_scope, scoped_query, tenant_scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, assert_tenant_record_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -47,7 +47,7 @@ def _actor_name(current_user: dict) -> str:
     return current_user.get("name") or current_user.get("email") or "Technician"
 
 
-async def _device_evidence_counts(device_id: str) -> dict[str, int]:
+async def _device_evidence_counts(current_user: dict, device_id: str) -> dict[str, int]:
     """Count retained endpoint evidence without changing any historical link.
 
     A duplicate merge deliberately keeps source evidence immutable.  These
@@ -65,7 +65,7 @@ async def _device_evidence_counts(device_id: str) -> dict[str, int]:
             filter_query = {"$or": [{"device_id": device_id}, {"device_ids": device_id}]}
         else:
             filter_query = {"device_id": device_id}
-        counts[collection_name] = int(await collection.count_documents(filter_query))
+        counts[collection_name] = int(await collection.count_documents(tenant_scoped_query(current_user, filter_query)))
     return counts
 
 
@@ -87,10 +87,10 @@ def _merge_compatibility(source: dict, survivor: dict) -> None:
         )
 
 
-async def _merge_plan(source: dict, survivor: dict) -> dict:
-    evidence = await _device_evidence_counts(str(source.get("id") or ""))
-    source_assets = await db.assets.find({"device_id": source.get("id")}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
-    survivor_assets = await db.assets.find({"device_id": survivor.get("id")}, {"_id": 0, "id": 1, "name": 1}).to_list(20)
+async def _merge_plan(current_user: dict, source: dict, survivor: dict) -> dict:
+    evidence = await _device_evidence_counts(current_user, str(source.get("id") or ""))
+    source_assets = await db.assets.find(tenant_scoped_query(current_user, {"device_id": source.get("id")}), {"_id": 0, "id": 1, "name": 1}).to_list(20)
+    survivor_assets = await db.assets.find(tenant_scoped_query(current_user, {"device_id": survivor.get("id")}), {"_id": 0, "id": 1, "name": 1}).to_list(20)
     return {
         "source": {"id": source.get("id"), "name": source.get("name"), "status": source.get("status")},
         "survivor": {"id": survivor.get("id"), "name": survivor.get("name"), "status": survivor.get("status")},
@@ -164,7 +164,7 @@ async def get_devices(
     if not include_archived and status != "archived":
         query["archived"] = {"$ne": True}
     
-    devices = await db.devices.find(scoped_query(current_user, query), {"_id": 0}).to_list(1000)
+    devices = await db.devices.find(tenant_scoped_query(current_user, scoped_query(current_user, query)), {"_id": 0}).to_list(1000)
     for d in devices:
         for field in ['created_at', 'last_seen']:
             if isinstance(d.get(field), str):
@@ -176,7 +176,7 @@ async def get_devices(
 async def get_stale_devices_route(hours: int = 24, current_user: dict = Depends(get_current_user)):
     """Get devices that haven't reported in within the specified hours"""
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-    stale = await db.devices.find(scoped_query(current_user, {
+    stale = await db.devices.find(tenant_scoped_query(current_user, scoped_query(current_user, {
         "$and": [
             {"archived": {"$ne": True}},
             {"$or": [
@@ -184,7 +184,7 @@ async def get_stale_devices_route(hours: int = 24, current_user: dict = Depends(
                 {"last_heartbeat": {"$exists": False}},
             ]},
         ]
-    }), {"_id": 0}).to_list(500)
+    })), {"_id": 0}).to_list(500)
     return stale
 
 @router.get("/devices/{device_id}")
@@ -197,17 +197,18 @@ async def get_device(device_id: str, current_user: dict = Depends(get_current_us
 @router.post("/devices", response_model=Device)
 async def create_device(device_data: DeviceCreate, current_user: dict = Depends(get_current_user)):
     await assert_client_scope(current_user, device_data.client_id, operation="device.create")
-    client = await db.clients.find_one({"id": device_data.client_id}, {"_id": 0})
+    client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": device_data.client_id}), {"_id": 0})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     client_name = client['name'] if client else None
     
     device = Device(**device_data.model_dump(), client_name=client_name)
     doc = device.model_dump()
+    doc["tenant_id"] = platform_tenant_id(current_user)
     doc['created_at'] = doc['created_at'].isoformat()
     doc['last_seen'] = doc['last_seen'].isoformat()
     await db.devices.insert_one(doc)
-    await db.clients.update_one({"id": device_data.client_id}, {"$inc": {"device_count": 1}})
+    await db.clients.update_one(tenant_scoped_query(current_user, {"id": device_data.client_id}), {"$inc": {"device_count": 1}})
     await log_activity(current_user, "created", "device", device.id, device.name, f"Added {device.device_type} '{device.name}' for {client_name}", metadata={"device_type": device.device_type, "client_name": client_name})
     return device
 
@@ -241,7 +242,7 @@ async def update_device(device_id: str, device_data: dict, current_user: dict = 
         new_client_id = updates.get("client_id") or None
         await assert_client_scope(current_user, new_client_id, operation="device.move")
         if new_client_id:
-            new_client = await db.clients.find_one({"id": new_client_id}, {"_id": 0, "id": 1, "name": 1})
+            new_client = await db.clients.find_one(tenant_scoped_query(current_user, {"id": new_client_id}), {"_id": 0, "id": 1, "name": 1})
             if not new_client:
                 raise HTTPException(status_code=404, detail="Client not found")
             updates["client_id"] = new_client_id
@@ -252,11 +253,13 @@ async def update_device(device_id: str, device_data: dict, current_user: dict = 
         old_client_id = old_device.get("client_id")
         if old_client_id != new_client_id:
             if old_client_id:
-                await db.clients.update_one({"id": old_client_id}, {"$inc": {"device_count": -1}})
+                await db.clients.update_one(tenant_scoped_query(current_user, {"id": old_client_id}), {"$inc": {"device_count": -1}})
             if new_client_id:
-                await db.clients.update_one({"id": new_client_id}, {"$inc": {"device_count": 1}})
+                await db.clients.update_one(tenant_scoped_query(current_user, {"id": new_client_id}), {"$inc": {"device_count": 1}})
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.devices.update_one({"id": device_id}, {"$set": updates})
+    result = await db.devices.update_one(tenant_scoped_query(current_user, {"id": device_id}), {"$set": updates})
+    if result.matched_count != 1:
+        raise HTTPException(status_code=409, detail="The managed asset changed before its identity could be saved. Refresh and try again.")
     if old_device:
         change_dict = {}
         for k, v in updates.items():
@@ -389,7 +392,7 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
             status_code=409,
             detail="This is a Nexus Agent-linked asset. Archive it to retain the trusted endpoint identity and audit evidence.",
         )
-    evidence_counts = await _device_evidence_counts(device_id)
+    evidence_counts = await _device_evidence_counts(current_user, device_id)
     retained = {name: count for name, count in evidence_counts.items() if count}
     if retained:
         evidence_label = ", ".join(f"{count} {name.replace('_', ' ')}" for name, count in retained.items())
@@ -401,13 +404,13 @@ async def delete_device(device_id: str, current_user: dict = Depends(get_current
     if not 3 <= len(reason) <= 1000:
         raise HTTPException(status_code=422, detail="Provide a deletion reason between 3 and 1000 characters")
     if device.get("client_id"):
-        await db.clients.update_one({"id": device["client_id"], "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})
+        await db.clients.update_one(tenant_scoped_query(current_user, {"id": device["client_id"], "device_count": {"$gt": 0}}), {"$inc": {"device_count": -1}})
     await log_activity(
         current_user, "deleted", "device", device_id, device.get("name", ""),
         f"Permanently deleted empty manual asset '{device.get('name', '')}'",
         metadata={"purge": True, "reason": reason, "client_id": device.get("client_id"), "site_id": device.get("site_id"), "tenant_id": device.get("tenant_id"), "device_id": device_id, "method": "manual_asset_purge", "location": device.get("location"), "source": "device_record"},
     )
-    result = await db.devices.delete_one({"id": device_id})
+    result = await db.devices.delete_one(tenant_scoped_query(current_user, {"id": device_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Device not found")
     return {"message": "Device deleted"}
@@ -442,11 +445,11 @@ async def archive_device(device_id: str, data: dict, current_user: dict = Depend
         "status": "archived",
         "updated_at": now,
     }
-    result = await db.devices.update_one({"id": device_id, "archived": {"$ne": True}}, {"$set": update})
+    result = await db.devices.update_one(tenant_scoped_query(current_user, {"id": device_id, "archived": {"$ne": True}}), {"$set": update})
     if not result.matched_count:
         raise HTTPException(status_code=409, detail="This asset changed before it could be archived. Refresh and try again.")
     if device.get("client_id"):
-        await db.clients.update_one({"id": device["client_id"], "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})
+        await db.clients.update_one(tenant_scoped_query(current_user, {"id": device["client_id"], "device_count": {"$gt": 0}}), {"$inc": {"device_count": -1}})
     await log_activity(
         current_user, "archived", "device", device_id, device.get("name", ""),
         f"Archived managed asset '{device.get('name', '')}'",
@@ -476,7 +479,7 @@ async def restore_device(device_id: str, current_user: dict = Depends(get_curren
 
     now = _now()
     result = await db.devices.update_one(
-        {"id": device_id, "archived": True},
+        tenant_scoped_query(current_user, {"id": device_id, "archived": True}),
         {
             "$set": {
                 "archived": False,
@@ -499,7 +502,7 @@ async def restore_device(device_id: str, current_user: dict = Depends(get_curren
     if not result.matched_count:
         raise HTTPException(status_code=409, detail="This asset changed before it could be restored. Refresh and try again.")
     if device.get("client_id"):
-        await db.clients.update_one({"id": device["client_id"]}, {"$inc": {"device_count": 1}})
+        await db.clients.update_one(tenant_scoped_query(current_user, {"id": device["client_id"]}), {"$inc": {"device_count": 1}})
     await log_activity(
         current_user, "restored", "device", device_id, device.get("name", ""),
         f"Restored managed asset '{device.get('name', '')}' to the active fleet",
@@ -517,7 +520,7 @@ async def get_device_merge_candidates(device_id: str, current_user: dict = Depen
     if source.get("archived"):
         return {"candidates": []}
     query = {"client_id": source.get("client_id"), "id": {"$ne": device_id}, "archived": {"$ne": True}}
-    candidates = await db.devices.find(scoped_query(current_user, query), {"_id": 0}).sort("name", 1).to_list(100)
+    candidates = await db.devices.find(tenant_scoped_query(current_user, scoped_query(current_user, query)), {"_id": 0}).sort("name", 1).to_list(100)
     source_agent = str(source.get("nexus_agent_id") or "").strip()
     visible = []
     for candidate in candidates:
@@ -553,7 +556,7 @@ async def get_device_merge_preview(
         operation="device.merge.preview", resource_name="Device",
     )
     _merge_compatibility(source, survivor)
-    return await _merge_plan(source, survivor)
+    return await _merge_plan(current_user, source, survivor)
 
 
 @router.post(
@@ -588,16 +591,16 @@ async def merge_device(device_id: str, data: dict, current_user: dict = Depends(
     if source.get("archived"):
         raise HTTPException(status_code=409, detail="Restore this asset before merging it, or review its existing archive history")
 
-    plan = await _merge_plan(source, survivor)
+    plan = await _merge_plan(current_user, source, survivor)
     now = _now()
     survivor_result = await db.devices.update_one(
-        {"id": survivor_id, "archived": {"$ne": True}},
+        tenant_scoped_query(current_user, {"id": survivor_id, "archived": {"$ne": True}}),
         {"$addToSet": {"merged_device_ids": device_id}, "$set": {"updated_at": now}},
     )
     if not survivor_result.matched_count:
         raise HTTPException(status_code=409, detail="The surviving asset changed before this merge could begin. Refresh and try again.")
     source_result = await db.devices.update_one(
-        {"id": device_id, "archived": {"$ne": True}, "merged_into_id": {"$in": [None, ""]}},
+        tenant_scoped_query(current_user, {"id": device_id, "archived": {"$ne": True}, "merged_into_id": {"$in": [None, ""]}}),
         {"$set": {
             "archived": True,
             "archived_at": now,
@@ -616,10 +619,10 @@ async def merge_device(device_id: str, data: dict, current_user: dict = Depends(
     if not source_result.matched_count:
         # Compensate the survivor-side alias if a concurrent change won the
         # source update. Historical records are otherwise untouched.
-        await db.devices.update_one({"id": survivor_id}, {"$pull": {"merged_device_ids": device_id}})
+        await db.devices.update_one(tenant_scoped_query(current_user, {"id": survivor_id}), {"$pull": {"merged_device_ids": device_id}})
         raise HTTPException(status_code=409, detail="The duplicate asset changed before it could be merged. Refresh and try again.")
     if source.get("client_id"):
-        await db.clients.update_one({"id": source["client_id"], "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})
+        await db.clients.update_one(tenant_scoped_query(current_user, {"id": source["client_id"], "device_count": {"$gt": 0}}), {"$inc": {"device_count": -1}})
     await log_activity(
         current_user, "merged", "device", device_id, source.get("name", ""),
         f"Merged duplicate managed asset into '{survivor.get('name', '')}'",
