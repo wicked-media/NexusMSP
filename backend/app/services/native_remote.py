@@ -20,7 +20,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import HTTPException
 
 from app.database import db
-from app.services.scope_permissions import platform_tenant_id
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from app.services.secret_store import decrypt_secret, encrypt_secret
 
 
@@ -148,13 +148,13 @@ async def device_readiness(device: dict[str, Any], tenant_id: str | None = None)
             "state": "not_enrolled",
             "detail": "Install and link the Nexus Agent before starting native remote access.",
         }
+    expected_tenant = str(tenant_id or "").strip()
     agent = await db.nexus_agents.find_one(
-        {"id": agent_id, "client_id": client_id, "is_active": True},
+        tenant_scoped_query({"tenant_id": expected_tenant or "nexus-local"}, {"id": agent_id, "client_id": client_id, "is_active": True}),
         {"_id": 0, "id": 1, "tenant_id": 1, "last_seen": 1, "nexus_shield_capabilities": 1, "agent_runtime_capabilities": 1},
     )
     if not agent:
         return {"ready": False, "state": "agent_unavailable", "detail": "The linked Nexus Agent is inactive."}
-    expected_tenant = str(tenant_id or "").strip()
     agent_tenant = str(agent.get("tenant_id") or "nexus-local").strip()
     if expected_tenant and agent_tenant != expected_tenant:
         return {

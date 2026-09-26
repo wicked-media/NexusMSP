@@ -19,7 +19,7 @@ from app.services.native_remote import (
     issue_grant,
     revoke_grant,
 )
-from app.services.scope_permissions import platform_tenant_id
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from app.services.ticket_time import create_canonical_ticket_time_entry, sync_ticket_time_cache
 
 
@@ -68,6 +68,7 @@ async def _record_ticket_remote_audit(
         return
     await collection.insert_one({
         "id": str(uuid.uuid4()),
+        "tenant_id": platform_tenant_id(user),
         "ticket_id": ticket_id,
         "user_id": user.get("id") or "",
         "user_name": user.get("name") or user.get("email") or "",
@@ -364,7 +365,7 @@ async def start_remote_session(
             )
             return {"session": existing, "provider": existing["provider"], "grant": grant, **handoff, "reused": True}
 
-    client = await db.clients.find_one({"id": device.get("client_id")}, {"_id": 0}) or {}
+    client = await db.clients.find_one(tenant_scoped_query(user, {"id": device.get("client_id")}), {"_id": 0}) or {}
     now = utc_now()
     session = {
         "id": str(uuid.uuid4()),
@@ -417,7 +418,7 @@ async def start_remote_session(
         )
     except Exception:
         await db.remote_sessions.update_one(
-            {"id": session["id"]},
+            tenant_scoped_query(user, {"id": session["id"]}),
             {"$set": {"status": "failed", "launch_status": "grant_failed", "ended_at": utc_now()}},
         )
         raise
@@ -513,7 +514,7 @@ async def mark_remote_session_opened(
         return session
     now = utc_now()
     await db.remote_sessions.update_one(
-        {"id": session["id"]},
+        tenant_scoped_query(user, {"id": session["id"]}),
         {"$set": {
             "status": "active",
             "launch_status": "launched",
@@ -588,7 +589,7 @@ async def heartbeat_remote_session(session: dict, user: dict) -> dict:
         raise HTTPException(status_code=403, detail="Only the session technician can update its heartbeat")
     now = utc_now()
     await db.remote_sessions.update_one(
-        {"id": session["id"]},
+        tenant_scoped_query(user, {"id": session["id"]}),
         {"$set": {"status": "active", "last_heartbeat_at": now}},
     )
     return {"id": session["id"], "status": "active", "last_heartbeat_at": now}
@@ -655,7 +656,7 @@ async def end_remote_session_record(
     ticket = None
     time_entry_doc = None
     if session.get("ticket_id"):
-        ticket = await db.tickets.find_one({"id": session["ticket_id"]}, {"_id": 0})
+        ticket = await db.tickets.find_one(tenant_scoped_query(user, {"id": session["ticket_id"]}), {"_id": 0})
     work_session_time_owner = await work_session_time_owner_for_remote(session, ticket)
     create_time_entry = bool(
         data.get(
@@ -676,7 +677,7 @@ async def end_remote_session_record(
         updates["time_entry_owner"] = "nexus_work_session"
     if ticket and create_time_entry:
         existing_entry = await db.time_entries.find_one(
-            {"remote_session_id": session["id"]},
+            tenant_scoped_query(user, {"remote_session_id": session["id"]}),
             {"_id": 0},
         )
         if existing_entry:
@@ -684,7 +685,7 @@ async def end_remote_session_record(
             await sync_ticket_time_cache(ticket["id"], database=db)
         else:
             technician = await db.users.find_one(
-                {"id": str(session.get("user_id") or user.get("id"))},
+                tenant_scoped_query(user, {"id": str(session.get("user_id") or user.get("id"))}),
                 {"_id": 0, "hourly_rate": 1},
             )
             try:
@@ -737,6 +738,7 @@ async def end_remote_session_record(
     if ticket and policy["auto_ticket_note"]:
         await db.ticket_notes.insert_one({
             "id": str(uuid.uuid4()),
+            "tenant_id": platform_tenant_id(user),
             "ticket_id": ticket["id"],
             "user_id": user.get("id"),
             "user_name": user.get("name") or user.get("email"),
@@ -747,7 +749,7 @@ async def end_remote_session_record(
             "created_at": now_dt.isoformat(),
         })
 
-    await db.remote_sessions.update_one({"id": session["id"]}, {"$set": updates})
+    await db.remote_sessions.update_one(tenant_scoped_query(user, {"id": session["id"]}), {"$set": updates})
     await _record_ticket_remote_audit(
         ticket_id=session.get("ticket_id"),
         user=user,
@@ -813,11 +815,12 @@ async def remote_health_for_device(device: dict) -> dict[str, Any]:
     policy = await remote_policy(str(device.get("tenant_id") or "nexus-local"))
     provider = "nexus"
     remote_id = await provider_device_id(device, provider)
-    readiness = await native_device_readiness(device)
+    device_tenant = str(device.get("tenant_id") or "nexus-local")
+    readiness = await native_device_readiness(device, device_tenant)
     agent = None
     if device.get("nexus_agent_id"):
         agent = await db.nexus_agents.find_one(
-            {"id": device["nexus_agent_id"], "is_active": True},
+            tenant_scoped_query({"tenant_id": device_tenant}, {"id": device["nexus_agent_id"], "is_active": True}),
             {"_id": 0, "id": 1, "last_seen": 1, "agent_version": 1, "self_repair": 1},
         )
     last_seen = parse_datetime((agent or {}).get("last_seen"))
@@ -871,7 +874,7 @@ async def remote_health_for_device(device: dict) -> dict[str, Any]:
         },
     }
     await db.devices.update_one(
-        {"id": device.get("id")},
+        tenant_scoped_query({"tenant_id": device_tenant}, {"id": device.get("id")}),
         {"$set": {
             "remote_health": status,
             "remote_health_checked_at": result["last_checked_at"],
