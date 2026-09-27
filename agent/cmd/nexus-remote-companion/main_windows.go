@@ -127,6 +127,9 @@ func serve(pipe *os.File) error {
 	if purpose == "" {
 		purpose = message.Grant.Purpose
 	}
+	if message.Grant.Mode == nexusremote.Control {
+		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID)
+	}
 	go activeSessionNotice(technicianName, purpose, cancel, &locallyStopped)
 	// Use the highest cadence the API accepts and a clearer bounded JPEG.  The
 	// relay still enforces sequence, size and per-frame rate limits; this only
@@ -141,6 +144,46 @@ func serve(pipe *os.File) error {
 		return nil
 	}
 	return err
+}
+
+// receiveControlEvents uses a separate verified Agent-owned pipe so inbound
+// input cannot race frame uploads or the grant-status request/response pipe.
+func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string) {
+	var lastSequence uint64
+	for ctx.Err() == nil {
+		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionControlPipeName), windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+		if err != nil {
+			time.Sleep(time.Second)
+			continue
+		}
+		pipe := os.NewFile(uintptr(handle), "nexus-remote-control")
+		for ctx.Err() == nil {
+			message, readErr := nexusremote.ReadIPCMessage(pipe)
+			if readErr != nil {
+				break
+			}
+			if message.Type != "input" || message.SessionID != sessionID || message.Control == nil {
+				continue
+			}
+			event, validErr := nexusremote.ValidateControlEvent(*message.Control)
+			if validErr != nil {
+				continue
+			}
+			if event.Sequence > lastSequence {
+				if injectErr := (nexusremote.WindowsInputInjector{}).Inject(session, event, time.Now().UTC()); injectErr != nil {
+					if session.Authorize(true, time.Now().UTC()) != nil {
+						cancel()
+						_ = pipe.Close()
+						return
+					}
+					continue
+				}
+				lastSequence = event.Sequence
+			}
+			_ = nexusremote.WriteIPCMessage(pipe, nexusremote.IPCMessage{Type: "input_ack", SessionID: sessionID, Control: &event})
+		}
+		_ = pipe.Close()
+	}
 }
 
 type lockedWriter struct {

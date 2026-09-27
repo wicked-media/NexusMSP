@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -107,7 +108,7 @@ func bridgeLoop(ctx context.Context, installDir string, policy CompanionPolicy, 
 		}
 		publishCompanionHealth(api, "ready", "A verified signed-in Remote Companion is connected and can present attended consent.")
 		file := os.NewFile(uintptr(pipe), "nexus-remote-bridge")
-		if err := serveCompanion(ctx, file, policy, api); err != nil && !errors.Is(err, io.EOF) {
+		if err := serveCompanion(ctx, file, installDir, policy, api); err != nil && !errors.Is(err, io.EOF) {
 			log.Printf("[native-remote] companion session ended: %v", err)
 		}
 		_ = file.Close()
@@ -118,12 +119,20 @@ func bridgeLoop(ctx context.Context, installDir string, policy CompanionPolicy, 
 }
 
 func createCompanionPipe() (windows.Handle, error) {
+	return createNamedCompanionPipe(CompanionPipeName)
+}
+
+func createCompanionControlPipe() (windows.Handle, error) {
+	return createNamedCompanionPipe(CompanionControlPipeName)
+}
+
+func createNamedCompanionPipe(name string) (windows.Handle, error) {
 	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
 	if err != nil {
 		return 0, err
 	}
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
-	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(CompanionPipeName), windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(name), windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
 }
 
 func verifyCompanionClient(pipe windows.Handle, expected, expectedSHA256 string) error {
@@ -161,7 +170,7 @@ func verifyCompanionClient(pipe windows.Handle, expected, expectedSHA256 string)
 	return nil
 }
 
-func serveCompanion(ctx context.Context, pipe *os.File, policy CompanionPolicy, api *AgentAPI) error {
+func serveCompanion(ctx context.Context, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI) error {
 	var grant *DeliveredGrant
 	for ctx.Err() == nil && grant == nil {
 		next, err := api.Pending()
@@ -181,6 +190,7 @@ func serveCompanion(ctx context.Context, pipe *os.File, policy CompanionPolicy, 
 		return err
 	}
 	transportConnected := false
+	controlStarted := false
 	defer func() {
 		// If a frame relay or pipe operation fails after the companion proved it
 		// was connected, remove the last desktop image at the control plane. A
@@ -207,6 +217,10 @@ func serveCompanion(ctx context.Context, pipe *os.File, policy CompanionPolicy, 
 			}
 			if err := api.Acknowledge(grant.SessionID, message.Outcome, message.Reason); err != nil {
 				return err
+			}
+			if message.Outcome == "accepted" && grant.Mode == Control && !controlStarted {
+				controlStarted = true
+				go serveControlPipe(ctx, installDir, policy, api, grant)
 			}
 		case "transport":
 			if err := api.Transport(grant.SessionID, message.State, message.Reason); err != nil {
@@ -240,4 +254,78 @@ func serveCompanion(ctx context.Context, pipe *os.File, policy CompanionPolicy, 
 			return errors.New("unsupported companion message")
 		}
 	}
+}
+
+// serveControlPipe is intentionally independent of the frame pipe. The
+// bridge polls only the signed control grant's delivery queue and deletes an
+// event only after the verified companion acknowledges its sequence.
+func serveControlPipe(ctx context.Context, installDir string, policy CompanionPolicy, api *AgentAPI, grant *DeliveredGrant) {
+	pipe, err := createCompanionControlPipe()
+	if err != nil {
+		log.Printf("[native-remote] control pipe unavailable: %v", err)
+		return
+	}
+	defer windows.CloseHandle(pipe)
+	if err := windows.ConnectNamedPipe(pipe, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		return
+	}
+	if err := verifyCompanionClient(pipe, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
+		// The existing verified main-pipe client is the authority; a second pipe
+		// must still have the pinned image digest before any control delivery.
+		log.Printf("[native-remote] rejected control pipe client: %v", err)
+		return
+	}
+	file := os.NewFile(uintptr(pipe), "nexus-remote-control-bridge")
+	defer file.Close()
+	writer := &lockedControlWriter{writer: file}
+	acked := make(chan uint64, 16)
+	go func() {
+		for {
+			message, readErr := ReadIPCMessage(file)
+			if readErr != nil || message.Type != "input_ack" || message.SessionID != grant.SessionID || message.Control == nil {
+				return
+			}
+			valid, validErr := ValidateControlEvent(*message.Control)
+			if validErr == nil {
+				acked <- valid.Sequence
+			}
+		}
+	}()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	sent := map[uint64]time.Time{}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case sequence := <-acked:
+			if err := api.AcknowledgeControl(grant.SessionID, sequence); err == nil {
+				delete(sent, sequence)
+			}
+		case <-ticker.C:
+			events, pollErr := api.ControlEvents(grant.SessionID)
+			if pollErr != nil {
+				continue
+			}
+			for _, event := range events {
+				if at, exists := sent[event.Sequence]; exists && time.Since(at) < 2*time.Second {
+					continue
+				}
+				if writer.send(IPCMessage{Type: "input", SessionID: grant.SessionID, Control: &event}) == nil {
+					sent[event.Sequence] = time.Now()
+				}
+			}
+		}
+	}
+}
+
+type lockedControlWriter struct {
+	mu     sync.Mutex
+	writer io.Writer
+}
+
+func (w *lockedControlWriter) send(message IPCMessage) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return WriteIPCMessage(w.writer, message)
 }

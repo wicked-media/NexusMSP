@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	CompanionPipeName = `\\.\pipe\NexusRemoteCompanion-v1`
-	maxIPCMessageSize = 6 * 1024 * 1024
+	CompanionPipeName        = `\\.\pipe\NexusRemoteCompanion-v1`
+	CompanionControlPipeName = `\\.\pipe\NexusRemoteCompanion-control-v1`
+	maxIPCMessageSize        = 6 * 1024 * 1024
 )
 
 type IPCMessage struct {
@@ -26,6 +27,7 @@ type IPCMessage struct {
 	State      string           `json:"state,omitempty"`
 	Active     bool             `json:"active,omitempty"`
 	JPEGBase64 string           `json:"jpeg_b64,omitempty"`
+	Control    *ControlEvent    `json:"control,omitempty"`
 }
 
 func WriteIPCMessage(writer io.Writer, message IPCMessage) error {
