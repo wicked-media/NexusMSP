@@ -51,6 +51,46 @@ func (a *AgentAPI) Status(sessionID string) (bool, error) {
 	return response.Active, nil
 }
 
+type PendingControlEvent struct {
+	Sequence uint64       `json:"sequence"`
+	Payload  ControlEvent `json:"payload"`
+}
+
+// ControlEvents reads queued envelopes only for the active signed control
+// grant bound to this protected Agent. It never exposes an endpoint path or
+// credential to the user-session companion.
+func (a *AgentAPI) ControlEvents(sessionID string) ([]ControlEvent, error) {
+	var response struct {
+		Events []PendingControlEvent `json:"events"`
+	}
+	path := "/api/nexus-agent/native-remote/grants/" + url.PathEscape(sessionID) + "/control-events"
+	if err := a.client.Do("GET", path, nil, &response); err != nil {
+		return nil, err
+	}
+	events := make([]ControlEvent, 0, len(response.Events))
+	for _, item := range response.Events {
+		item.Payload.Sequence = item.Sequence
+		valid, err := ValidateControlEvent(item.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("invalid control event from Nexus: %w", err)
+		}
+		events = append(events, valid)
+	}
+	return events, nil
+}
+
+// AcknowledgeControl removes a delivery row only after the user-session
+// companion has confirmed it. A failed acknowledgement is safe: the server
+// retains the event and the companion's sequence guard can acknowledge a
+// replay without injecting a duplicate action.
+func (a *AgentAPI) AcknowledgeControl(sessionID string, sequence uint64) error {
+	if sequence == 0 {
+		return fmt.Errorf("remote control sequence is required")
+	}
+	path := "/api/nexus-agent/native-remote/grants/" + url.PathEscape(sessionID) + "/control-events/" + fmt.Sprintf("%d", sequence) + "/ack"
+	return a.client.Do("POST", path, nil, nil)
+}
+
 // LocalStop records an attended endpoint user's terminal revocation. It is
 // exposed only through the agent-owned transport, never the browser viewer.
 func (a *AgentAPI) LocalStop(sessionID, reason string) error {

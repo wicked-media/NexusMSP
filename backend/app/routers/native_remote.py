@@ -439,6 +439,39 @@ async def pending_native_remote_control_events(
     return {"session_id": session_id, "events": events}
 
 
+@router.post("/nexus-agent/native-remote/grants/{session_id}/control-events/{sequence}/ack")
+async def acknowledge_native_remote_control_event(
+    session_id: str,
+    sequence: int,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None),
+):
+    """Remove an input event only after the verified companion acknowledges it."""
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    tenant_id = platform_tenant_id(agent)
+    now = datetime.now(timezone.utc).isoformat()
+    grant = await db.native_remote_grants.find_one(
+        {
+            "tenant_id": tenant_id, "session_id": session_id,
+            "agent_id": agent["id"], "client_id": agent.get("client_id"),
+            "mode": "control", "status": "acknowledged", "agent_outcome": "accepted",
+            "expires_at": {"$gt": now},
+        },
+        {"_id": 0, "device_id": 1, "client_id": 1},
+    )
+    if not grant:
+        raise HTTPException(status_code=409, detail="No active control grant is bound to this Agent")
+    removed = await db.native_remote_control_events.delete_one(
+        {
+            "tenant_id": tenant_id, "session_id": session_id, "sequence": sequence,
+            "agent_id": agent["id"], "client_id": grant["client_id"], "device_id": grant["device_id"],
+        }
+    )
+    if not removed.deleted_count:
+        raise HTTPException(status_code=404, detail="Remote control event was not pending")
+    return {"session_id": session_id, "sequence": sequence, "acknowledged": True}
+
+
 @router.post("/nexus-agent/native-remote/grants/{session_id}/stop")
 async def stop_native_remote_from_endpoint(
     session_id: str,
