@@ -14,6 +14,13 @@ type testFrameSink struct{ calls int }
 
 func (s *testFrameSink) SendFrame(context.Context, string, []byte) error { s.calls++; return nil }
 
+func TestStreamOptionsPreserveBoundedHighQualityProfile(t *testing.T) {
+	options := (StreamOptions{FrameInterval: 500 * time.Millisecond, StatusEvery: 5 * time.Second, JPEGQuality: 82}).normalized()
+	if options.FrameInterval != 500*time.Millisecond || options.StatusEvery != 5*time.Second || options.JPEGQuality != 82 {
+		t.Fatalf("unexpected stream options: %#v", options)
+	}
+}
+
 func TestViewStreamStopsOnRevocationAndReportsDisconnect(t *testing.T) {
 	now := time.Now().UTC()
 	session, err := New(Grant{SessionID: "session", TenantID: "tenant", DeviceID: "device", ActorID: "tech", Mode: View, ExpiresAt: now.Add(time.Minute)}, "tenant", "device", now)

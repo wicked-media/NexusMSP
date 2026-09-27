@@ -128,9 +128,12 @@ func serve(pipe *os.File) error {
 		purpose = message.Grant.Purpose
 	}
 	go activeSessionNotice(technicianName, purpose, cancel, &locallyStopped)
+	// Use the highest cadence the API accepts and a clearer bounded JPEG.  The
+	// relay still enforces sequence, size and per-frame rate limits; this only
+	// avoids making a technician enlarge a needlessly soft desktop frame.
 	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, statusChecker.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
-	}, nexusremote.StreamOptions{})
+	}, nexusremote.StreamOptions{FrameInterval: 500 * time.Millisecond, StatusEvery: 5 * time.Second, JPEGQuality: 82})
 	if locallyStopped.Load() {
 		if stopErr := writer.send(nexusremote.IPCMessage{Type: "stop", SessionID: message.Grant.SessionID, Reason: "Endpoint user used the local stop shortcut"}); stopErr != nil {
 			return stopErr
