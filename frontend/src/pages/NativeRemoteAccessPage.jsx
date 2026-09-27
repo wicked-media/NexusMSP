@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Activity, CheckCircle2, Clock3, History, Laptop, Loader2, Monitor,
-  MonitorUp, Network, RefreshCw, Search, ShieldCheck, Users, XCircle,
+  Activity, ArrowLeft, CheckCircle2, Clock3, ExternalLink, History, Laptop,
+  Loader2, Monitor, MonitorUp, Network, RefreshCw, Search, ShieldCheck,
+  Users, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -91,6 +92,30 @@ export default function NativeRemoteAccessPage() {
   const [viewerClock, setViewerClock] = useState(() => Date.now());
   const [endingSessionId, setEndingSessionId] = useState("");
 
+  const viewerUrl = useCallback((sessionId) => {
+    const params = new URLSearchParams();
+    params.set("viewer", sessionId);
+    return `/nexus-remote?${params.toString()}`;
+  }, []);
+
+  const closeViewer = useCallback(() => {
+    setViewerSession(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete("viewer");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const openViewer = useCallback((session, { popOut = false } = {}) => {
+    if (!session?.id) return;
+    const url = viewerUrl(session.id);
+    if (popOut) {
+      window.open(url, "nexus-remote-viewer", "popup=yes,width=1500,height=950,resizable=yes,scrollbars=no");
+      return;
+    }
+    setViewerSession(session);
+    navigate(url);
+  }, [navigate, viewerUrl]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -126,8 +151,10 @@ export default function NativeRemoteAccessPage() {
   );
   const viewerCaptureState = !viewerSessionRecord
     ? "unknown"
-    : viewerSessionRecord.status !== "active"
+    : viewerSessionRecord.status === "ended"
       ? "ended"
+      : viewerSessionRecord.status !== "active"
+        ? "awaiting_consent"
       : viewerSessionRecord.capture_freshness || "unknown";
   const viewerExpirySeconds = (() => {
     const expiry = Date.parse(viewerSessionRecord?.native_grant_expires_at || "");
@@ -139,6 +166,8 @@ export default function NativeRemoteAccessPage() {
   const viewerLimitReached = viewerExpirySeconds === 0;
   const viewerStatusLabel = viewerCaptureState === "ended"
     ? "Session no longer active"
+    : viewerCaptureState === "awaiting_consent"
+      ? "Waiting for endpoint consent"
     : viewerLimitReached
       ? "Signed session limit reached · closing protected capture"
     : viewerState === "disconnected"
@@ -209,10 +238,17 @@ export default function NativeRemoteAccessPage() {
   }, [devices, inspectDevice, loading, searchParams, setSearchParams]);
 
   useEffect(() => {
+    const requestedViewer = searchParams.get("viewer");
+    if (!requestedViewer || loading) return;
+    const session = sessions.find(item => item.id === requestedViewer && item.provider === "nexus");
+    if (session) setViewerSession(session);
+  }, [loading, searchParams, sessions]);
+
+  useEffect(() => {
     if (!viewerSession) return undefined;
     if (viewerLimitReached) return undefined;
-    if (viewerCaptureState === "stale" || viewerCaptureState === "ended") {
-      setViewerState(viewerCaptureState);
+    if (viewerCaptureState === "stale" || viewerCaptureState === "ended" || viewerCaptureState === "awaiting_consent") {
+      setViewerState(viewerCaptureState === "awaiting_consent" ? "waiting" : viewerCaptureState);
       setViewerFrame(previous => {
         if (previous) URL.revokeObjectURL(previous);
         return "";
@@ -289,6 +325,7 @@ export default function NativeRemoteAccessPage() {
       toast.success(response.data?.message || "Native session grant issued");
       setSelected(null);
       await fetchData();
+      openViewer(response.data?.session || { id: response.data?.session?.id });
     } catch (error) {
       toast.error(messageFor(error, "Native session could not be started"));
     } finally {
@@ -305,7 +342,7 @@ export default function NativeRemoteAccessPage() {
         notes: "Technician ended Nexus Remote session from the native viewer",
       }, { headers });
       toast.success("Nexus Remote session ended and its grant was revoked");
-      if (viewerSession?.id === session.id) setViewerSession(null);
+      if (viewerSession?.id === session.id) closeViewer();
       await fetchData();
     } catch (error) {
       toast.error(messageFor(error, "Nexus Remote session could not be ended"));
@@ -352,7 +389,7 @@ export default function NativeRemoteAccessPage() {
             {visibleDevices.map(device => { const agent = agentById.get(device.nexus_agent_id); const companionEvidence = agent?.native_remote_evidence || {}; const nativeReady = Boolean(agent?.online && [...(agent.agent_runtime_capabilities || []), ...(agent.nexus_shield_capabilities || [])].includes("native_remote_v1") && companionEvidence.status === "ready"); const sessionActive = activeSessionDeviceIds.has(device.id); return <Card key={device.id} className="border-border/60"><CardContent className="flex items-center gap-3 p-4"><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${nativeReady ? "bg-emerald-500/10 text-emerald-300" : "bg-muted text-muted-foreground"}`}><Monitor className="h-5 w-5" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{device.name || device.hostname}</p><p className="truncate text-xs text-muted-foreground">{device.client_name || "Managed client"} · {agent?.online ? "Agent online" : agent ? "Agent offline" : "Agent not linked"}</p><p className="truncate text-[11px] text-muted-foreground" title={companionEvidence.detail || companionStateLabel(companionEvidence)}>{agent ? companionStateLabel(companionEvidence) : "Companion needed"}</p></div><Badge variant="outline" className={sessionActive ? "border-amber-400/25 text-amber-300" : nativeReady ? "border-emerald-400/25 text-emerald-300" : "text-muted-foreground"}>{sessionActive ? "Session active" : nativeReady ? "Ready" : companionStateLabel(companionEvidence)}</Badge><Button size="sm" onClick={() => inspectDevice(device)} disabled={!nativeReady || sessionActive}>{sessionActive ? "In session" : "Connect"}</Button></CardContent></Card>; })}
           </div>
         </TabsContent>
-        <TabsContent value="sessions" className="mt-4"><Card><CardContent className="space-y-2 p-4">{sessions.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No Nexus Native sessions recorded yet.</p> : sessions.map(session => <div key={session.id} className="flex items-center gap-3 rounded-xl border border-border/60 p-3"><Clock3 className="h-4 w-4 text-cyan-300" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{session.device_name || session.device_id}</p><p className="text-xs text-muted-foreground">{session.user_name} · {session.client_name || session.client_id}</p>{lifecycleEvidence(session) && <p className="mt-0.5 truncate text-[11px] capitalize text-muted-foreground">{lifecycleEvidence(session)}</p>}</div>{session.status === "active" && session.transport_state === "connected" && <Button size="sm" variant="outline" onClick={() => setViewerSession(session)}><MonitorUp className="mr-1.5 h-3.5 w-3.5" />View</Button>}{["authorised", "active", "ending"].includes(session.status) && <Button size="sm" variant="outline" className="border-rose-500/30 text-rose-200 hover:bg-rose-500/10" onClick={() => endSession(session)} disabled={Boolean(endingSessionId)}>{endingSessionId === session.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "End"}</Button>}{session.status === "active" && <Badge variant="outline" className={session.capture_freshness === "fresh" ? "border-emerald-400/30 text-emerald-300" : session.capture_freshness === "stale" ? "border-amber-400/30 text-amber-200" : "text-muted-foreground"}>{session.capture_freshness === "fresh" ? "Live capture" : session.capture_freshness === "stale" ? "Capture stale" : "Capture unknown"}</Badge>}<Badge variant="outline" className="capitalize">{session.status}</Badge></div>)}</CardContent></Card></TabsContent>
+        <TabsContent value="sessions" className="mt-4"><Card><CardContent className="space-y-2 p-4">{sessions.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No Nexus Native sessions recorded yet.</p> : sessions.map(session => <div key={session.id} className="flex items-center gap-3 rounded-xl border border-border/60 p-3"><Clock3 className="h-4 w-4 text-cyan-300" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{session.device_name || session.device_id}</p><p className="text-xs text-muted-foreground">{session.user_name} · {session.client_name || session.client_id}</p>{lifecycleEvidence(session) && <p className="mt-0.5 truncate text-[11px] capitalize text-muted-foreground">{lifecycleEvidence(session)}</p>}</div>{session.status === "active" && session.transport_state === "connected" && <Button size="sm" variant="outline" onClick={() => openViewer(session)}><MonitorUp className="mr-1.5 h-3.5 w-3.5" />Open viewer</Button>}{["authorised", "active", "ending"].includes(session.status) && <Button size="sm" variant="outline" className="border-rose-500/30 text-rose-200 hover:bg-rose-500/10" onClick={() => endSession(session)} disabled={Boolean(endingSessionId)}>{endingSessionId === session.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "End"}</Button>}{session.status === "active" && <Badge variant="outline" className={session.capture_freshness === "fresh" ? "border-emerald-400/30 text-emerald-300" : session.capture_freshness === "stale" ? "border-amber-400/30 text-amber-200" : "text-muted-foreground"}>{session.capture_freshness === "fresh" ? "Live capture" : session.capture_freshness === "stale" ? "Capture stale" : "Capture unknown"}</Badge>}<Badge variant="outline" className="capitalize">{session.status}</Badge></div>)}</CardContent></Card></TabsContent>
         <TabsContent value="capabilities" className="mt-4"><Card><CardHeader><CardTitle className="text-sm">Production capability target</CardTitle></CardHeader><CardContent className="grid gap-2 md:grid-cols-2">{CAPABILITY_TARGETS.map(item => <div key={item} className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm"><CheckCircle2 className="h-4 w-4 text-cyan-300" />{item}</div>)}</CardContent></Card></TabsContent>
       </Tabs>
 
@@ -365,12 +402,16 @@ export default function NativeRemoteAccessPage() {
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/60 p-3"><Checkbox checked={consent} onCheckedChange={value => setConsent(Boolean(value))} /><span className="text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Customer consent is confirmed.</strong> The endpoint companion will still show the local attended prompt and can reject or revoke this session.</span></label>
         </NexusWorkflowDialog>
       </Dialog>
-      <Dialog open={Boolean(viewerSession)} onOpenChange={open => !open && setViewerSession(null)}>
-        <NexusWorkflowDialog eyebrow="Nexus Native Viewer" title={viewerSession?.device_name || viewerSession?.device_id || "Remote desktop"} description="Live view-only endpoint capture. The latest frame is held briefly in the Nexus relay and is never cached by the browser." icon={MonitorUp} tone="cyan" className="max-w-5xl" footer={<><Button variant="outline" onClick={() => setViewerSession(null)} disabled={Boolean(endingSessionId)}>Close viewer</Button><Button variant="destructive" onClick={() => endSession(viewerSession)} disabled={Boolean(endingSessionId)}>{endingSessionId === viewerSession?.id && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}End session</Button></>}>
-          <div className="overflow-hidden rounded-xl border border-border/60 bg-black"><div className="flex items-center justify-between border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" || viewerLimitReached ? "text-rose-200" : ""}`}>{viewerStatusLabel}</span><span>{viewerSession?.id}</span></div>{viewerFrame && !viewerLimitReached && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <img src={viewerFrame} alt="Live endpoint desktop" className="block max-h-[68vh] w-full object-contain" /> : <div role="status" aria-live="polite" className="flex min-h-80 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerLimitReached ? "The signed session limit has elapsed, so the browser has removed the desktop image. The endpoint companion is closing its protected capture." : viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
-          <div className="mt-3 rounded-xl border border-border/60 bg-muted/20 p-3"><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Session evidence</p><div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-2.5 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div>
-        </NexusWorkflowDialog>
-      </Dialog>
+      {viewerSession && <section className="fixed inset-0 z-[100] flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_right,rgba(8,145,178,0.16),transparent_32%),linear-gradient(135deg,#07121c,#020617_62%,#07131f)] text-foreground" data-testid="nexus-remote-viewer">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cyan-400/15 bg-black/20 px-4 py-3 backdrop-blur-xl sm:px-6">
+          <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><MonitorUp className="h-4 w-4 text-cyan-200" /></span><div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200">Nexus Remote · attended view</p><h2 className="truncate text-base font-semibold">{viewerSession?.device_name || viewerSession?.device_id || "Remote desktop"}</h2></div></div>
+          <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/5 text-cyan-100">View-only</Badge><Button variant="outline" size="sm" onClick={() => openViewer(viewerSession, { popOut: true })}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Pop out</Button><Button variant="outline" size="sm" onClick={closeViewer} disabled={Boolean(endingSessionId)}><ArrowLeft className="mr-1.5 h-3.5 w-3.5" />Return</Button><Button variant="destructive" size="sm" onClick={() => endSession(viewerSession)} disabled={Boolean(endingSessionId)}>{endingSessionId === viewerSession?.id && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}End session</Button></div>
+        </header>
+        <main className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_20rem] lg:p-5">
+          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" || viewerLimitReached ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && !viewerLimitReached && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <img src={viewerFrame} alt="Live endpoint desktop" className="block min-h-0 flex-1 object-contain" /> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerLimitReached ? "The signed session limit has elapsed, so the browser has removed the desktop image. The endpoint companion is closing its protected capture." : viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
+          <aside className="space-y-3"><div className="rounded-2xl border border-border/60 bg-background/65 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Safety boundary</p><p className="mt-1">This session is view-only. Input control, clipboard, file transfer and recording remain unavailable until their individual safety controls are implemented.</p></div></aside>
+        </main>
+      </section>}
     </div>
   );
 }

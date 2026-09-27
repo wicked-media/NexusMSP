@@ -83,6 +83,36 @@ def test_unaudited_session_cannot_deliver_grant(monkeypatch):
     assert database.native_remote_grants.rows[0]["status"] == "delivered"
 
 
+def test_disconnected_active_session_can_redeliver_only_the_same_accepted_grant(monkeypatch):
+    database = setup_endpoint(monkeypatch, status="acknowledged", session_status="active")
+    database.devices = Rows([{
+        "id": "device-1", "nexus_agent_id": "agent-1", "client_id": "client-1", "tenant_id": "tenant-1",
+    }])
+    database.remote_sessions.rows[0].update({"ended_at": None, "transport_state": "disconnected"})
+    database.native_remote_grants.rows[0].update({
+        "agent_outcome": "accepted", "mode": "view", "key_id": "key-1", "public_key_b64": "public",
+        "payload_b64": "payload", "signature_b64": "signature",
+    })
+
+    result = asyncio.run(routes.pending_native_remote_grant())
+
+    assert result["grant"]["session_id"] == "session-1"
+    assert database.native_remote_grants.rows[0]["status"] == "acknowledged"
+    assert database.native_remote_grants.rows[0]["redelivered_at"]
+
+
+def test_redelivered_accepted_grant_acknowledgement_is_idempotent(monkeypatch):
+    database = setup_endpoint(monkeypatch, status="acknowledged", session_status="active")
+    database.native_remote_grants.rows[0]["agent_outcome"] = "accepted"
+
+    result = asyncio.run(routes.acknowledge_native_remote_grant(
+        "session-1", routes.NativeGrantAck(outcome="accepted"),
+    ))
+
+    assert result == {"session_id": "session-1", "status": "acknowledged", "reconnected": True}
+    assert database.remote_sessions.rows[0]["status"] == "active"
+
+
 def test_native_session_end_rejects_other_tenant():
     with pytest.raises(HTTPException) as error:
         asyncio.run(remote_runtime.end_remote_session_record(

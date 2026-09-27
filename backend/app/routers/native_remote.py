@@ -101,18 +101,41 @@ async def pending_native_remote_grant(
         {"_id": 0},
         sort=[("issued_at", 1)],
     )
+    redelivery = False
+    if not grant:
+        # A bridge restart must not silently restore desktop capture.  It may
+        # re-deliver the same still-valid grant only after the server recorded
+        # the transport as disconnected; the companion will present consent
+        # again and the acknowledgement below remains bound to this session.
+        candidate = await db.native_remote_grants.find_one(
+            {
+                "tenant_id": platform_tenant_id(agent), "agent_id": agent["id"],
+                "device_id": device["id"], "client_id": device["client_id"],
+                "status": "acknowledged", "agent_outcome": "accepted", "expires_at": {"$gt": now},
+            },
+            {"_id": 0}, sort=[("acknowledged_at", -1)],
+        )
+        if candidate:
+            resumed = await db.remote_sessions.find_one({
+                "id": candidate["session_id"], "tenant_id": platform_tenant_id(agent),
+                "device_id": device["id"], "client_id": device["client_id"],
+                "status": "active", "transport_state": "disconnected", "ended_at": None,
+            })
+            if resumed:
+                grant = candidate
+                redelivery = True
     if not grant:
         return {"grant": None}
     session = await db.remote_sessions.find_one({
         "id": grant["session_id"], "tenant_id": platform_tenant_id(agent),
         "device_id": device["id"], "client_id": device["client_id"],
-        "status": "authorised", "authorisation_audited": True,
+        "status": {"$in": ["authorised", "active"]}, "authorisation_audited": True,
     })
     if not session:
         return {"grant": None}
     delivered = await db.native_remote_grants.update_one(
-        {"id": grant["id"], "tenant_id": platform_tenant_id(agent), "status": {"$in": ["issued", "delivered"]}, "expires_at": {"$gt": now}},
-        {"$set": {"status": "delivered", "delivered_at": now}, "$inc": {"delivery_count": 1}},
+        {"id": grant["id"], "tenant_id": platform_tenant_id(agent), "status": {"$in": ["issued", "delivered", "acknowledged"]}, "expires_at": {"$gt": now}},
+        {"$set": {"status": "delivered" if not redelivery else "acknowledged", "delivered_at": now, **({"redelivered_at": now} if redelivery else {})}, "$inc": {"delivery_count": 1, **({"redelivery_count": 1} if redelivery else {})}},
     )
     if not delivered.matched_count:
         return {"grant": None}
@@ -153,6 +176,8 @@ async def acknowledge_native_remote_grant(
             {"id": grant["id"], "status": {"$in": ["issued", "delivered", "acknowledged"]}}, {"$set": {"status": "expired", "expired_at": now}}
         )
         raise HTTPException(status_code=410, detail="Native remote grant has expired")
+    if grant.get("status") == "acknowledged" and grant.get("agent_outcome") == "accepted" and body.outcome == "accepted":
+        return {"session_id": session_id, "status": "acknowledged", "reconnected": True}
     status = "acknowledged" if body.outcome == "accepted" else "rejected"
     changed = await db.native_remote_grants.update_one(
         {"id": grant["id"], "tenant_id": platform_tenant_id(agent), "status": {"$in": ["issued", "delivered"]}, "expires_at": {"$gt": now}},
