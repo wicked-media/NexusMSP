@@ -325,7 +325,7 @@ export default function NativeRemoteAccessPage() {
       toast.success(response.data?.message || "Native session grant issued");
       setSelected(null);
       await fetchData();
-      openViewer(response.data?.session || { id: response.data?.session?.id });
+      if (response.data?.session?.id) openViewer(response.data.session);
     } catch (error) {
       toast.error(messageFor(error, "Native session could not be started"));
     } finally {
