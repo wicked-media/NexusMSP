@@ -52,9 +52,9 @@ class NativeControlEvent(BaseModel):
             if self.x is None or self.y is None or self.button is None or self.pressed is None or self.key is not None:
                 raise HTTPException(status_code=422, detail="Pointer button input requires coordinates, button and pressed state")
             return {"kind": self.kind, "x": self.x, "y": self.y, "button": self.button, "pressed": self.pressed}
-        if self.key is None or self.x is not None or self.y is not None or self.button is not None or self.pressed is not None:
-            raise HTTPException(status_code=422, detail="Key input requires only a bounded key value")
-        return {"kind": self.kind, "key": self.key}
+        if self.key is None or self.pressed is None or self.x is not None or self.y is not None or self.button is not None:
+            raise HTTPException(status_code=422, detail="Key input requires a bounded key value and pressed state")
+        return {"kind": self.kind, "key": self.key, "pressed": self.pressed}
 
 
 class NativeGrantAck(BaseModel):
