@@ -40,20 +40,33 @@ func StartCompanionBridge(ctx context.Context, cfg *config.Config, client *trans
 		reportCompanionHealth("api_unavailable", "The protected Agent bridge could not initialise its API client.")
 		return err
 	}
-	reportCompanionHealth("waiting_for_policy", "Waiting for a valid Native Remote policy and policy-pinned companion.")
+	publishCompanionHealth(api, "waiting_for_policy", "Waiting for a valid Native Remote policy and policy-pinned companion.")
 	go func() {
 		for ctx.Err() == nil {
 			policy, policyErr := companionPolicyFromConfig(cfg)
 			if policyErr == nil && policy.Enabled && cfg.NativeRemoteCompanionReady() {
-				reportCompanionHealth("waiting_for_user_session", "Waiting for a signed-in user session to start the verified Remote Companion.")
+				publishCompanionHealth(api, "waiting_for_user_session", "Waiting for a signed-in user session to start the verified Remote Companion.")
 				bridgeLoop(ctx, cfg.BaseDir(), policy, api)
 				return
 			}
-			reportCompanionHealth("waiting_for_policy", "Waiting for a valid Native Remote policy and policy-pinned companion.")
+			publishCompanionHealth(api, "waiting_for_policy", "Waiting for a valid Native Remote policy and policy-pinned companion.")
 			time.Sleep(10 * time.Second)
 		}
 	}()
 	return nil
+}
+
+func publishCompanionHealth(api *AgentAPI, status, detail string) {
+	reportCompanionHealth(status, detail)
+	if api == nil {
+		return
+	}
+	if err := api.CompanionHealth(status, detail); err != nil {
+		// Readiness reporting is observability, not an authority to start a
+		// remote session. Preserve the local fail-closed state and retry on the
+		// next bridge transition or normal heartbeat.
+		log.Printf("[native-remote] unable to publish companion health: %v", err)
+	}
 }
 
 func companionPolicyFromConfig(cfg *config.Config) (CompanionPolicy, error) {
@@ -92,14 +105,14 @@ func bridgeLoop(ctx context.Context, installDir string, policy CompanionPolicy, 
 			_ = windows.CloseHandle(pipe)
 			continue
 		}
-		reportCompanionHealth("ready", "A verified signed-in Remote Companion is connected and can present attended consent.")
+		publishCompanionHealth(api, "ready", "A verified signed-in Remote Companion is connected and can present attended consent.")
 		file := os.NewFile(uintptr(pipe), "nexus-remote-bridge")
 		if err := serveCompanion(ctx, file, policy, api); err != nil && !errors.Is(err, io.EOF) {
 			log.Printf("[native-remote] companion session ended: %v", err)
 		}
 		_ = file.Close()
 		if ctx.Err() == nil {
-			reportCompanionHealth("waiting_for_user_session", "The verified Remote Companion disconnected; waiting for the signed-in user session to recover it.")
+			publishCompanionHealth(api, "waiting_for_user_session", "The verified Remote Companion disconnected; waiting for the signed-in user session to recover it.")
 		}
 	}
 }

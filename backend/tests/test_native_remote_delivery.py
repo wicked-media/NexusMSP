@@ -72,6 +72,28 @@ def test_browser_cannot_activate_native_session():
     assert error.value.status_code == 409
 
 
+def test_authenticated_agent_can_publish_companion_readiness_without_a_session(monkeypatch):
+    database = SimpleNamespace(nexus_agents=Rows([{
+        "id": "agent-1", "tenant_id": "tenant-1", "client_id": "client-1", "is_active": True,
+    }]))
+
+    async def verify(*_args):
+        return {"id": "agent-1", "tenant_id": "tenant-1", "client_id": "client-1"}
+
+    monkeypatch.setattr(routes, "db", database)
+    monkeypatch.setattr(routes, "_verify_agent_token", verify)
+
+    result = asyncio.run(routes.report_native_remote_companion_health(
+        routes.NativeCompanionHealth(status="ready", detail="verified companion connected"),
+    ))
+
+    assert result["status"] == "ready"
+    evidence = database.nexus_agents.rows[0]["native_remote_evidence"]
+    assert evidence["status"] == "ready"
+    assert evidence["detail"] == "verified companion connected"
+    assert evidence["observed_at"]
+
+
 def test_unaudited_session_cannot_deliver_grant(monkeypatch):
     database = setup_endpoint(monkeypatch)
     database.remote_sessions.rows[0]["authorisation_audited"] = False

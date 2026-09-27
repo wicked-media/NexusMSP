@@ -68,6 +68,24 @@ func (a *AgentAPI) Transport(sessionID, state, detail string) error {
 	}, nil)
 }
 
+// CompanionHealth lets the protected service publish non-session readiness
+// immediately. It is deliberately separate from the full heartbeat so a
+// signed-in companion can become selectable without waiting for its next
+// telemetry cycle, and it never carries a grant, desktop frame or user data.
+func (a *AgentAPI) CompanionHealth(status, detail string) error {
+	allowed := map[string]bool{
+		"ready": true, "waiting_for_policy": true, "waiting_for_user_session": true,
+		"integrity_unverified": true, "unsupported_platform": true,
+		"configuration_unavailable": true, "api_unavailable": true,
+	}
+	if !allowed[status] {
+		return fmt.Errorf("invalid native remote companion health state")
+	}
+	return a.client.Do("POST", "/api/nexus-agent/native-remote/health", map[string]string{
+		"status": status, "detail": boundedReason(detail, ""),
+	}, nil)
+}
+
 // SendFrame provides the initial bounded HTTPS relay. The server retains only
 // the latest JPEG for an active session with a two-minute TTL; it is not a
 // recording or file-transfer channel.

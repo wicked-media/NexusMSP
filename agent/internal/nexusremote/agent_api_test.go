@@ -53,3 +53,28 @@ func TestAgentAPIReadsProtectedGrantStatus(t *testing.T) {
 		t.Fatalf("path=%q", path)
 	}
 }
+
+func TestAgentAPIPublishesOnlyAllowedCompanionHealth(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	}))
+	defer server.Close()
+	client := transport.New(server.URL, "test")
+	client.SetToken("agent-token")
+	api, err := NewAgentAPI(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := api.CompanionHealth("ready", "verified user-session companion connected"); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/nexus-agent/native-remote/health" {
+		t.Fatalf("path=%q", path)
+	}
+	if err := api.CompanionHealth("anything", ""); err == nil {
+		t.Fatal("unknown health state was accepted")
+	}
+}

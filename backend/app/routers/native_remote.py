@@ -36,6 +36,26 @@ class NativeTransportState(BaseModel):
     detail: str = Field(default="", max_length=500)
 
 
+class NativeCompanionHealth(BaseModel):
+    """Authenticated, non-session companion readiness evidence.
+
+    The service publishes this independently of the periodic full heartbeat so
+    a just-started signed-in companion does not look unavailable for up to one
+    heartbeat interval.  It carries no grant, session or desktop data.
+    """
+
+    status: Literal[
+        "ready",
+        "waiting_for_policy",
+        "waiting_for_user_session",
+        "integrity_unverified",
+        "unsupported_platform",
+        "configuration_unavailable",
+        "api_unavailable",
+    ]
+    detail: str = Field(default="", max_length=500)
+
+
 class NativeLocalStop(BaseModel):
     reason: str = Field(default="Endpoint user stopped view-only access", max_length=500)
 
@@ -73,6 +93,26 @@ async def native_remote_readiness(
         request=request,
     )
     return {"device_id": device_id, **await device_readiness(device, platform_tenant_id(current_user))}
+
+
+@router.post("/nexus-agent/native-remote/health")
+async def report_native_remote_companion_health(
+    body: NativeCompanionHealth,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None),
+):
+    """Persist current companion readiness from the protected Agent only."""
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    tenant_id = platform_tenant_id(agent)
+    now = datetime.now(timezone.utc).isoformat()
+    evidence = {"status": body.status, "detail": body.detail or None, "observed_at": now}
+    updated = await db.nexus_agents.update_one(
+        {"id": agent["id"], "tenant_id": tenant_id, "is_active": True},
+        {"$set": {"native_remote_evidence": evidence}},
+    )
+    if not updated.matched_count:
+        raise HTTPException(status_code=409, detail="Nexus Agent is no longer eligible to report Remote Companion health")
+    return {"status": body.status, "observed_at": now}
 
 
 @router.get("/nexus-agent/native-remote/grants/pending")
