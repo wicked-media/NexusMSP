@@ -25,7 +25,7 @@ def setup_endpoint(monkeypatch, *, status="delivered", session_status="authorise
     }
     database = SimpleNamespace(
         native_remote_grants=Rows([grant]), remote_sessions=Rows([session]),
-        native_remote_frames=Rows(), settings=Rows(),
+        native_remote_frames=Rows(), native_remote_control_events=Rows(), settings=Rows(),
     )
 
     async def verify(*_args):

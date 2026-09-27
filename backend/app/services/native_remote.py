@@ -29,6 +29,7 @@ RUNTIME_CAPABILITY = "native_remote_v1"
 UNATTENDED_RUNTIME_CAPABILITY = "native_remote_v2"
 GRANT_TTL_MINUTES = 10
 ONLINE_WINDOW_SECONDS = 300
+CONTROL_EVENT_TTL_SECONDS = 20
 
 
 def _now() -> datetime:
@@ -80,6 +81,16 @@ async def ensure_native_remote_indexes() -> None:
         "purge_at",
         expireAfterSeconds=0,
         name="native_remote_grant_retention",
+    )
+    await db.native_remote_control_events.create_index(
+        [("tenant_id", 1), ("session_id", 1), ("sequence", 1)],
+        unique=True,
+        name="native_remote_control_event_sequence",
+    )
+    await db.native_remote_control_events.create_index(
+        "purge_at",
+        expireAfterSeconds=0,
+        name="native_remote_control_event_retention",
     )
     await db.settings.create_index(
         [("type", 1), ("tenant_id", 1)],

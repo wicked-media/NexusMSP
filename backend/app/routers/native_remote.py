@@ -14,7 +14,8 @@ from pymongo.errors import DuplicateKeyError
 from app.auth import get_current_user
 from app.database import db
 from app.routers.nexus_agent import _verify_agent_token
-from app.services.native_remote import device_readiness, ensure_native_remote_indexes
+from app.services.action_permissions import require_action
+from app.services.native_remote import CONTROL_EVENT_TTL_SECONDS, device_readiness, ensure_native_remote_indexes
 from app.services.scope_permissions import assert_client_scope, platform_tenant_id, tenant_scoped_query
 
 
@@ -24,6 +25,36 @@ router = APIRouter(tags=["Nexus Native Remote"])
 # A current transport status alone cannot make an older desktop image safe to show.
 NATIVE_REMOTE_FRAME_STALE_SECONDS = 20
 NATIVE_REMOTE_MIN_FRAME_INTERVAL_SECONDS = 0.5
+
+
+class NativeControlEvent(BaseModel):
+    """One deliberately small, typed remote-input envelope.
+
+    This is not a command, macro, clipboard or file-transfer channel. The
+    endpoint companion independently enforces the signed control grant before
+    it can inject any event.
+    """
+
+    sequence: int = Field(ge=1, le=2_147_483_647)
+    kind: Literal["pointer_move", "pointer_button", "key"]
+    x: float | None = Field(default=None, ge=0, le=1)
+    y: float | None = Field(default=None, ge=0, le=1)
+    button: Literal["left", "right", "middle"] | None = None
+    pressed: bool | None = None
+    key: str | None = Field(default=None, min_length=1, max_length=64)
+
+    def validated_payload(self) -> dict[str, object]:
+        if self.kind == "pointer_move":
+            if self.x is None or self.y is None or self.button is not None or self.pressed is not None or self.key is not None:
+                raise HTTPException(status_code=422, detail="Pointer movement requires only normalised x and y coordinates")
+            return {"kind": self.kind, "x": self.x, "y": self.y}
+        if self.kind == "pointer_button":
+            if self.x is None or self.y is None or self.button is None or self.pressed is None or self.key is not None:
+                raise HTTPException(status_code=422, detail="Pointer button input requires coordinates, button and pressed state")
+            return {"kind": self.kind, "x": self.x, "y": self.y, "button": self.button, "pressed": self.pressed}
+        if self.key is None or self.x is not None or self.y is not None or self.button is not None or self.pressed is not None:
+            raise HTTPException(status_code=422, detail="Key input requires only a bounded key value")
+        return {"kind": self.kind, "key": self.key}
 
 
 class NativeGrantAck(BaseModel):
@@ -297,6 +328,115 @@ async def native_remote_grant_status(
         "expires_at": grant.get("expires_at"),
         "revoked_at": grant.get("revoked_at"),
     }
+
+
+@router.post(
+    "/remote/sessions/{session_id}/native-input",
+    dependencies=[Depends(require_action("device.remote.control"))],
+)
+async def queue_native_remote_input(
+    session_id: str,
+    body: NativeControlEvent,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Queue one bounded attended-control event for its verified endpoint.
+
+    The browser cannot reach the companion directly. A delivery row is useful
+    only while its signed control grant is acknowledged; the Agent still has to
+    authenticate, retrieve the row and the companion must independently accept
+    it under the locally-consented grant.
+    """
+    tenant_id = platform_tenant_id(current_user)
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
+    session = await db.remote_sessions.find_one(
+        tenant_scoped_query(current_user, {"id": session_id, "status": "active", "ended_at": None}),
+        {"_id": 0},
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Active remote session not found")
+    await assert_client_scope(
+        current_user,
+        session.get("client_id"),
+        site_id=session.get("site_id"),
+        operation="device.remote.control",
+        request=request,
+    )
+    grant = await db.native_remote_grants.find_one(
+        {
+            "tenant_id": tenant_id,
+            "session_id": session_id,
+            "device_id": session.get("device_id"),
+            "client_id": session.get("client_id"),
+            "actor_id": current_user.get("id"),
+            "mode": "control",
+            "status": "acknowledged",
+            "agent_outcome": "accepted",
+            "expires_at": {"$gt": now},
+        },
+        {"_id": 0, "id": 1, "agent_id": 1, "expires_at": 1},
+    )
+    if not grant:
+        raise HTTPException(status_code=409, detail="The endpoint has not accepted an active control session")
+    payload = body.validated_payload()
+    expires_at = min(
+        datetime.fromisoformat(str(grant["expires_at"]).replace("Z", "+00:00")),
+        now_dt + timedelta(seconds=CONTROL_EVENT_TTL_SECONDS),
+    )
+    record = {
+        "tenant_id": tenant_id,
+        "session_id": session_id,
+        "client_id": session["client_id"],
+        "site_id": session.get("site_id"),
+        "device_id": session["device_id"],
+        "agent_id": grant["agent_id"],
+        "actor_id": current_user["id"],
+        "sequence": body.sequence,
+        "payload": payload,
+        "created_at": now,
+        "expires_at": expires_at.isoformat(),
+        "purge_at": expires_at,
+    }
+    await ensure_native_remote_indexes()
+    try:
+        await db.native_remote_control_events.insert_one(record)
+    except DuplicateKeyError as exc:
+        raise HTTPException(status_code=409, detail="Remote control event sequence was already received") from exc
+    return {"session_id": session_id, "sequence": body.sequence, "expires_at": record["expires_at"]}
+
+
+@router.get("/nexus-agent/native-remote/grants/{session_id}/control-events")
+async def pending_native_remote_control_events(
+    session_id: str,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None),
+):
+    """Return a bounded event batch to the one Agent bound to this grant."""
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    tenant_id = platform_tenant_id(agent)
+    now = datetime.now(timezone.utc).isoformat()
+    grant = await db.native_remote_grants.find_one(
+        {
+            "tenant_id": tenant_id, "session_id": session_id,
+            "agent_id": agent["id"], "client_id": agent.get("client_id"),
+            "mode": "control", "status": "acknowledged", "agent_outcome": "accepted",
+            "expires_at": {"$gt": now},
+        },
+        {"_id": 0, "device_id": 1, "client_id": 1},
+    )
+    if not grant:
+        raise HTTPException(status_code=409, detail="No active control grant is bound to this Agent")
+    events = await db.native_remote_control_events.find(
+        {
+            "tenant_id": tenant_id, "session_id": session_id,
+            "agent_id": agent["id"], "client_id": grant["client_id"],
+            "device_id": grant["device_id"], "expires_at": {"$gt": now},
+        },
+        {"_id": 0, "sequence": 1, "payload": 1, "expires_at": 1},
+        sort=[("sequence", 1)],
+    ).to_list(100)
+    return {"session_id": session_id, "events": events}
 
 
 @router.post("/nexus-agent/native-remote/grants/{session_id}/stop")

@@ -200,6 +200,15 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("agent_commands", "execute"),
     },
     {
+        "id": "device.remote.control",
+        "category": "Remote & devices",
+        "label": "Control remote session",
+        "description": "Send attended, endpoint-consented mouse and keyboard input during a Nexus Remote session.",
+        "impact": "critical",
+        "approval_required": False,
+        "legacy": ("agent_commands", "execute"),
+    },
+    {
         "id": "device.remote.end",
         "category": "Remote & devices",
         "label": "End remote session",

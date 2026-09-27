@@ -103,6 +103,7 @@ def test_native_grant_is_signed_bound_and_idempotent(monkeypatch):
     database = SimpleNamespace(
         settings=Rows(),
         native_remote_grants=Rows(),
+        native_remote_control_events=Rows(),
         native_remote_frames=Rows(),
         nexus_agents=Rows(),
     )
@@ -134,7 +135,7 @@ def test_native_grant_is_signed_bound_and_idempotent(monkeypatch):
 
 
 def test_native_grant_rejects_control_until_input_is_explicitly_designed(monkeypatch):
-    database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
+    database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_control_events=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
     monkeypatch.setattr(native_remote, "db", database)
     with pytest.raises(HTTPException) as error:
         asyncio.run(native_remote.issue_grant(
@@ -157,6 +158,7 @@ def test_expired_grants_close_abandoned_sessions_and_remove_relay_frame(monkeypa
             "device_id": "device-2", "client_id": "client-2", "status": "acknowledged",
             "expires_at": native_remote._iso(native_remote._now()),
         }]),
+        native_remote_control_events=Rows(),
         remote_sessions=Rows([{
             "id": "session-1", "tenant_id": "tenant-1", "device_id": "device-1",
             "client_id": "client-1", "status": "active", "ended_at": None,
@@ -176,7 +178,7 @@ def test_expired_grants_close_abandoned_sessions_and_remove_relay_frame(monkeypa
 
 
 def test_native_grants_are_single_active_session_per_endpoint(monkeypatch):
-    database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
+    database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_control_events=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
     monkeypatch.setattr(native_remote, "db", database)
     user = {"id": "tech-1", "tenant_id": "tenant-1"}
     first = {"id": "session-1", "device_id": "device-1", "client_id": "client-1", "provider_device_id": "agent-1"}
@@ -191,7 +193,7 @@ def test_native_grants_are_single_active_session_per_endpoint(monkeypatch):
 
 
 def test_revoked_native_grant_releases_endpoint_for_new_authorisation(monkeypatch):
-    database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
+    database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_control_events=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
     monkeypatch.setattr(native_remote, "db", database)
     user = {"id": "tech-1", "tenant_id": "tenant-1"}
     first = {"id": "session-1", "device_id": "device-1", "client_id": "client-1", "provider_device_id": "agent-1"}
