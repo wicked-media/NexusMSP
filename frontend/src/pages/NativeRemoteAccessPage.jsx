@@ -376,7 +376,6 @@ export default function NativeRemoteAccessPage() {
 
   const endSession = async (session) => {
     if (!session?.id || endingSessionId) return;
-    if (!window.confirm("End this Nexus Remote session? The endpoint companion will stop on its next protected status check.")) return;
     setEndingSessionId(session.id);
     try {
       await axios.put(`${API}/remote/sessions/${encodeURIComponent(session.id)}/end`, {
