@@ -68,7 +68,7 @@ func TestCoordinatorAcceptsSignedStandingAuthorisationWithoutPrompt(t *testing.T
 	}
 }
 
-func TestCoordinatorRejectsSignedControlGrantUntilAnInputTransportExists(t *testing.T) {
+func TestCoordinatorAcceptsSignedAttendedControlGrant(t *testing.T) {
 	pub, private, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Now().UTC()
 	payload, _ := json.Marshal(grantPayload{Version: 1, SessionID: "session-control", TenantID: "tenant-1", DeviceID: "device-1", ActorID: "tech-1", Mode: Control, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
@@ -77,7 +77,11 @@ func TestCoordinatorRejectsSignedControlGrantUntilAnInputTransportExists(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coordinator.Process(delivered, now); err == nil {
-		t.Fatal("control grant was accepted by a view-only companion")
+	session, err := coordinator.Process(delivered, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Authorize(true, now); err != nil {
+		t.Fatal(err)
 	}
 }

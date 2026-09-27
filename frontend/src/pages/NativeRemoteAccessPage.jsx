@@ -82,7 +82,7 @@ export default function NativeRemoteAccessPage() {
   const [readiness, setReadiness] = useState(null);
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
-  const mode = "view";
+  const [mode, setMode] = useState("view");
   const [purpose, setPurpose] = useState("");
   const [consent, setConsent] = useState(false);
   const [viewerSession, setViewerSession] = useState(null);
@@ -357,6 +357,7 @@ export default function NativeRemoteAccessPage() {
         session_type: "remote_desktop",
         purpose: purpose.trim() || "Technician support session",
         consent_confirmed: true,
+        control_consent_confirmed: mode === "control",
         consent_method: "attended_prompt",
         ticket_id: searchParams.get("ticket"),
         work_session_id: searchParams.get("workSession"),
@@ -440,6 +441,7 @@ export default function NativeRemoteAccessPage() {
           <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-3"><p className="text-sm font-medium">View-only access</p><p className="mt-1 text-xs text-muted-foreground">Input control, clipboard and file transfer remain disabled until their separate safety boundaries are implemented.</p></div>
           <div className="space-y-2"><Label>Purpose</Label><Textarea value={purpose} onChange={event => setPurpose(event.target.value)} placeholder="What will this session be used to diagnose or repair?" maxLength={500} /></div>
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border/60 p-3"><Checkbox checked={consent} onCheckedChange={value => setConsent(Boolean(value))} /><span className="text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Customer consent is confirmed.</strong> The endpoint companion will still show the local attended prompt and can reject or revoke this session.</span></label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.04] p-3"><Checkbox checked={mode === "control"} onCheckedChange={value => setMode(value ? "control" : "view")} /><span className="text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Request interactive control.</strong> This starts a fresh, attended session. The endpoint user must explicitly approve mouse and keyboard control and can stop it locally at any time.</span></label>
         </NexusWorkflowDialog>
       </Dialog>
       {viewerSession && <section className="fixed inset-0 z-[100] flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_right,rgba(8,145,178,0.16),transparent_32%),linear-gradient(135deg,#07121c,#020617_62%,#07131f)] text-foreground" data-testid="nexus-remote-viewer">

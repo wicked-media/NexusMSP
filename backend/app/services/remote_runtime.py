@@ -287,11 +287,8 @@ async def start_remote_session(
             detail="Third-party remote transports are retired. Use Nexus Native Remote.",
         )
     requested_mode = str(data.get("mode") or "view").strip().lower()
-    if requested_mode != "view":
-        raise HTTPException(
-            status_code=422,
-            detail="Nexus Native Remote is currently limited to attended view-only access",
-        )
+    if requested_mode not in {"view", "control"}:
+        raise HTTPException(status_code=422, detail="Choose a supported Nexus Native Remote access mode")
 
     ticket_id = str(data.get("ticket_id") or "").strip() or None
     ticket = await validate_ticket_for_remote(ticket_id, device) if ticket_id else None
@@ -331,6 +328,11 @@ async def start_remote_session(
             status_code=422,
             detail="Confirm the applicable endpoint authorisation before starting a remote session",
         )
+    control_consent_confirmed = bool(data.get("control_consent_confirmed"))
+    if requested_mode == "control" and not control_consent_confirmed:
+        raise HTTPException(status_code=422, detail="Confirm that interactive control requires fresh endpoint approval")
+    if requested_mode == "control" and standing_authorisation:
+        raise HTTPException(status_code=422, detail="Interactive control cannot use standing authorisation")
     remote_id = await provider_device_id(device, provider)
     if not remote_id:
         raise HTTPException(
@@ -390,6 +392,7 @@ async def start_remote_session(
         "consent_confirmed": consent_confirmed,
         "consent_method": consent_method if consent_confirmed else None,
         "consent_confirmed_at": now if consent_confirmed else None,
+        "control_consent_confirmed": control_consent_confirmed if requested_mode == "control" else False,
         "local_prompt_required": not standing_authorisation,
         "standing_authorisation": standing_authorisation,
         "launch_status": "awaiting_agent",

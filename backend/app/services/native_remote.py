@@ -223,8 +223,10 @@ async def device_readiness(device: dict[str, Any], tenant_id: str | None = None)
 
 async def issue_grant(*, session: dict[str, Any], user: dict[str, Any], mode: str, consent_required: bool = True) -> dict[str, Any]:
     """Issue one short-lived, device-bound, signed grant for an authorised session."""
-    if mode != "view":
-        raise HTTPException(status_code=422, detail="Nexus Native Remote is currently limited to attended view-only access")
+    if mode not in {"view", "control"}:
+        raise HTTPException(status_code=422, detail="Choose a supported Nexus Native Remote access mode")
+    if mode == "control" and not consent_required:
+        raise HTTPException(status_code=422, detail="Interactive control always requires fresh endpoint consent")
     tenant_id = platform_tenant_id(user)
     session_id = str(session.get("id") or "").strip()
     device_id = str(session.get("device_id") or "").strip()

@@ -134,17 +134,23 @@ def test_native_grant_is_signed_bound_and_idempotent(monkeypatch):
     assert b'"actor_id":"tech-1"' in payload
 
 
-def test_native_grant_rejects_control_until_input_is_explicitly_designed(monkeypatch):
+def test_native_grant_allows_only_attended_control(monkeypatch):
     database = SimpleNamespace(settings=Rows(), native_remote_grants=Rows(), native_remote_control_events=Rows(), native_remote_frames=Rows(), nexus_agents=Rows())
     monkeypatch.setattr(native_remote, "db", database)
+    grant = asyncio.run(native_remote.issue_grant(
+        session={"id": "session-1", "device_id": "device-1", "client_id": "client-1", "provider_device_id": "agent-1"},
+        user={"id": "tech-1", "tenant_id": "tenant-1"},
+        mode="control",
+    ))
+    assert grant["mode"] == "control"
     with pytest.raises(HTTPException) as error:
         asyncio.run(native_remote.issue_grant(
-            session={"id": "session-1", "device_id": "device-1", "client_id": "client-1", "provider_device_id": "agent-1"},
+            session={"id": "session-2", "device_id": "device-2", "client_id": "client-1", "provider_device_id": "agent-2"},
             user={"id": "tech-1", "tenant_id": "tenant-1"},
-            mode="control",
+            mode="control", consent_required=False,
         ))
     assert error.value.status_code == 422
-    assert database.native_remote_grants.rows == []
+    assert len(database.native_remote_grants.rows) == 1
 
 
 def test_expired_grants_close_abandoned_sessions_and_remove_relay_frame(monkeypatch):

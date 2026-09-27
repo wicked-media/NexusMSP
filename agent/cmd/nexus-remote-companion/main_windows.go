@@ -237,20 +237,27 @@ func consentPrompt(sessionID string, mode nexusremote.Mode, expiresAt time.Time,
 	if purpose == "" {
 		purpose = "Technician support session"
 	}
+	access := "VIEW-ONLY SUPPORT REQUEST"
+	capability := "They cannot control your mouse or keyboard."
+	prompt := "Allow view-only screen sharing now?"
+	if mode == nexusremote.Control {
+		access = "INTERACTIVE SUPPORT REQUEST"
+		capability = "They will be able to use your mouse and keyboard while this session is active."
+		prompt = "Allow interactive remote support now?"
+	}
 	text, _ := windows.UTF16PtrFromString(
-		"VIEW-ONLY SUPPORT REQUEST\r\n\r\n" +
-			technicianName + " would like to view this desktop to assist you. " +
-			"They cannot control your mouse or keyboard.\r\n\r\n" +
+		access + "\r\n\r\n" +
+			technicianName + " would like to assist you on this desktop. " + capability + "\r\n\r\n" +
 			"Purpose: " + purpose + "\r\n\r\n" +
 			"Session reference: " + sessionID + "\r\n" +
 			"Automatically ends: " + expiresAt.Local().Format("Mon 2 Jan, 3:04 PM") + "\r\n\r\n" +
 			"You remain in control. Press Ctrl + Shift + F12 at any time to stop sharing immediately.\r\n\r\n" +
-			"Allow view-only screen sharing now?",
+			prompt,
 	)
 	caption, _ := windows.UTF16PtrFromString("Nexus Remote · Your approval is required")
 	result, err := windows.MessageBox(0, text, caption, windows.MB_YESNO|windows.MB_ICONINFORMATION|windows.MB_TOPMOST|windows.MB_DEFBUTTON2)
 	if err != nil || result != messageBoxYes {
-		return false, "The endpoint user declined view-only remote access"
+		return false, "The endpoint user declined remote access"
 	}
 	return true, ""
 }
