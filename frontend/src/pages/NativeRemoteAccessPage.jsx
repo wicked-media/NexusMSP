@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -34,6 +34,21 @@ const CAPABILITY_TARGETS = [
   "Multi-technician collaboration", "Secure clipboard and file exchange", "Session recording and playback",
   "Background diagnostics", "Credential-safe elevation", "In-session chat", "Ticket, time and billing evidence",
 ];
+
+const REMOTE_KEY_NAMES = {
+  " ": "SPACE", Escape: "ESC", Control: "CTRL", AltGraph: "ALT",
+  ArrowUp: "UP", ArrowDown: "DOWN", ArrowLeft: "LEFT", ArrowRight: "RIGHT",
+};
+const REMOTE_ALLOWED_KEYS = new Set([
+  "ENTER", "ESC", "TAB", "BACKSPACE", "DELETE", "SPACE", "UP", "DOWN", "LEFT", "RIGHT",
+  "HOME", "END", "PAGEUP", "PAGEDOWN", "SHIFT", "CTRL", "ALT",
+  "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+]);
+
+function normaliseViewerKey(value) {
+  const key = REMOTE_KEY_NAMES[value] || String(value || "").trim().toUpperCase();
+  return (/^[A-Z0-9]$/.test(key) || REMOTE_ALLOWED_KEYS.has(key)) ? key : "";
+}
 
 function messageFor(error, fallback) {
   const detail = error?.response?.data?.detail;
@@ -95,6 +110,8 @@ export default function NativeRemoteAccessPage() {
   const [viewerFit, setViewerFit] = useState(true);
   const [viewerFocus, setViewerFocus] = useState(false);
   const [viewerFullscreen, setViewerFullscreen] = useState(false);
+  const viewerInputSequence = useRef(0);
+  const lastPointerMoveAt = useRef(0);
   const viewerSessionId = viewerSession?.id || "";
 
   const viewerUrl = useCallback((sessionId) => {
@@ -191,6 +208,10 @@ export default function NativeRemoteAccessPage() {
     ? " · session limit reached"
     : ` · limit ${Math.floor(viewerExpirySeconds / 60)}m ${viewerExpirySeconds % 60}s`;
   const viewerLimitReached = viewerExpirySeconds === 0;
+  const viewerCanControl = viewerSession?.access_mode === "control"
+    && viewerState === "live"
+    && viewerCaptureState === "fresh"
+    && !viewerLimitReached;
   const viewerStatusLabel = viewerCaptureState === "ended"
     ? "Session no longer active"
     : viewerCaptureState === "awaiting_consent"
@@ -204,7 +225,7 @@ export default function NativeRemoteAccessPage() {
       : viewerCaptureState === "stale"
         ? `Capture stale${Number.isFinite(viewerSessionRecord?.capture_age_seconds) ? ` · last verified ${viewerSessionRecord.capture_age_seconds}s ago` : ""}`
       : viewerState === "live"
-        ? `Live view-only${viewerFrameCapturedAt ? ` · server capture ${new Date(viewerFrameCapturedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}${viewerExpiryLabel}`
+        ? `Live ${viewerSession?.access_mode === "control" ? "interactive control" : "view-only"}${viewerFrameCapturedAt ? ` · server capture ${new Date(viewerFrameCapturedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}${viewerExpiryLabel}`
         : viewerState === "reconnecting"
           ? "Reconnecting"
           : "Waiting for endpoint capture";
@@ -337,8 +358,65 @@ export default function NativeRemoteAccessPage() {
     if (viewerSessionId) {
       resetViewerCanvas();
       setViewerFocus(false);
+      viewerInputSequence.current = 0;
+      lastPointerMoveAt.current = 0;
     }
   }, [viewerSessionId, resetViewerCanvas]);
+
+  const normalisedPointer = useCallback((event) => {
+    const image = event.currentTarget;
+    const bounds = image.getBoundingClientRect();
+    const naturalWidth = image.naturalWidth || bounds.width;
+    const naturalHeight = image.naturalHeight || bounds.height;
+    const scale = Math.min(bounds.width / naturalWidth, bounds.height / naturalHeight);
+    const renderedWidth = naturalWidth * scale;
+    const renderedHeight = naturalHeight * scale;
+    const left = bounds.left + (bounds.width - renderedWidth) / 2;
+    const top = bounds.top + (bounds.height - renderedHeight) / 2;
+    const x = (event.clientX - left) / renderedWidth;
+    const y = (event.clientY - top) / renderedHeight;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return { x, y };
+  }, []);
+
+  const sendViewerInput = useCallback(async (payload) => {
+    if (!viewerCanControl || !viewerSession?.id) return;
+    const sequence = ++viewerInputSequence.current;
+    try {
+      await axios.post(`${API}/remote/sessions/${encodeURIComponent(viewerSession.id)}/native-input`, {
+        sequence,
+        ...payload,
+      }, { headers });
+    } catch (error) {
+      if (error?.response?.status === 403 || error?.response?.status === 409) {
+        toast.error(messageFor(error, "Interactive control is no longer available"));
+      }
+    }
+  }, [headers, viewerCanControl, viewerSession?.id]);
+
+  const handleViewerPointerMove = useCallback((event) => {
+    if (!viewerCanControl || Date.now() - lastPointerMoveAt.current < 80) return;
+    const point = normalisedPointer(event);
+    if (!point) return;
+    lastPointerMoveAt.current = Date.now();
+    void sendViewerInput({ kind: "pointer_move", ...point });
+  }, [normalisedPointer, sendViewerInput, viewerCanControl]);
+
+  const handleViewerPointerButton = useCallback((event, pressed) => {
+    if (!viewerCanControl) return;
+    const point = normalisedPointer(event);
+    const button = ["left", "middle", "right"][event.button];
+    if (!point || !button) return;
+    void sendViewerInput({ kind: "pointer_button", ...point, button, pressed });
+  }, [normalisedPointer, sendViewerInput, viewerCanControl]);
+
+  const handleViewerKey = useCallback((event, pressed) => {
+    if (!viewerCanControl || event.repeat) return;
+    const key = normaliseViewerKey(event.key);
+    if (!key) return;
+    event.preventDefault();
+    void sendViewerInput({ kind: "key", key, pressed });
+  }, [sendViewerInput, viewerCanControl]);
 
   useEffect(() => {
     if (!viewerLimitReached) return;
@@ -449,8 +527,8 @@ export default function NativeRemoteAccessPage() {
           <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/5 text-cyan-100">{viewerSession?.access_mode === "control" ? "Control consented" : "View-only"}</Badge><Button variant="outline" size="sm" onClick={toggleFullscreen} title="Use the entire display for the remote canvas">{viewerFullscreen ? <Minimize2 className="mr-1.5 h-3.5 w-3.5" /> : <Maximize2 className="mr-1.5 h-3.5 w-3.5" />}{viewerFullscreen ? "Exit full screen" : "Full screen"}</Button><Button variant="outline" size="sm" onClick={() => openViewer(viewerSession, { popOut: true })}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Pop out</Button><Button variant="outline" size="sm" onClick={closeViewer} disabled={Boolean(endingSessionId)}><ArrowLeft className="mr-1.5 h-3.5 w-3.5" />Return</Button><Button variant="destructive" size="sm" onClick={() => endSession(viewerSession)} disabled={Boolean(endingSessionId)}>{endingSessionId === viewerSession?.id && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}End session</Button></div>
         </header>
         <main className={`grid min-h-0 flex-1 gap-3 p-3 ${viewerFocus ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_20rem]"} lg:p-5`}>
-          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" || viewerLimitReached ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span><div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom - 0.25)} disabled={viewerFit || viewerZoom <= 0.5} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={resetViewerCanvas} title="Fit desktop to available space">{viewerFit ? "Fit" : `${Math.round(viewerZoom * 100)}%`}</Button><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom + 0.25)} disabled={!viewerFit && viewerZoom >= 3} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerFocus(value => !value)} title="Hide or show session evidence">{viewerFocus ? "Show evidence" : "Focus desktop"}</Button></div><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && !viewerLimitReached && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <div className={`flex min-h-0 flex-1 items-center justify-center ${viewerFit ? "overflow-hidden" : "overflow-auto p-6"}`}><img src={viewerFrame} alt="Live endpoint desktop" className={viewerFit ? "block h-full w-full object-contain" : "block h-auto max-w-none shadow-2xl"} style={viewerFit ? undefined : { width: `${Math.round(viewerZoom * 100)}%` }} /></div> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerLimitReached ? "The signed session limit has elapsed, so the browser has removed the desktop image. The endpoint companion is closing its protected capture." : viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
-          {!viewerFocus && <aside className="space-y-3"><div className="rounded-2xl border border-border/60 bg-background/65 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Control boundary</p><p className="mt-1">This session is view-only. Mouse, keyboard, clipboard and transfer controls remain locked until the endpoint presents a separate control-consent prompt and every action is auditable.</p></div></aside>}
+          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" || viewerLimitReached ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span><div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom - 0.25)} disabled={viewerFit || viewerZoom <= 0.5} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={resetViewerCanvas} title="Fit desktop to available space">{viewerFit ? "Fit" : `${Math.round(viewerZoom * 100)}%`}</Button><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom + 0.25)} disabled={!viewerFit && viewerZoom >= 3} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerFocus(value => !value)} title="Hide or show session evidence">{viewerFocus ? "Show evidence" : "Focus desktop"}</Button></div><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && !viewerLimitReached && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <div className={`flex min-h-0 flex-1 items-center justify-center ${viewerFit ? "overflow-hidden" : "overflow-auto p-6"}`}><img src={viewerFrame} alt="Live endpoint desktop" tabIndex={viewerCanControl ? 0 : -1} onPointerMove={handleViewerPointerMove} onPointerDown={event => handleViewerPointerButton(event, true)} onPointerUp={event => handleViewerPointerButton(event, false)} onContextMenu={event => { if (viewerCanControl) event.preventDefault(); }} onKeyDown={event => handleViewerKey(event, true)} onKeyUp={event => handleViewerKey(event, false)} className={`${viewerFit ? "block h-full w-full object-contain" : "block h-auto max-w-none shadow-2xl"} ${viewerCanControl ? "cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" : ""}`} style={viewerFit ? undefined : { width: `${Math.round(viewerZoom * 100)}%` }} /></div> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerLimitReached ? "The signed session limit has elapsed, so the browser has removed the desktop image. The endpoint companion is closing its protected capture." : viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
+          {!viewerFocus && <aside className="space-y-3"><div className="rounded-2xl border border-border/60 bg-background/65 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Control boundary</p><p className="mt-1">{viewerSession?.access_mode === "control" ? "Endpoint control is locally consented. Select the desktop to send bounded mouse and keyboard input; clipboard and file transfer stay unavailable, and every event is relayed through the agent for audit." : "This session is view-only. Mouse, keyboard, clipboard and transfer controls remain locked until the endpoint presents a separate control-consent prompt and every action is auditable."}</p></div></aside>}
         </main>
       </section>}
     </div>
