@@ -156,14 +156,15 @@ func serve(pipe *os.File) error {
 		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID)
 	}
 	go activeSessionNotice(technicianName, purpose, cancel, &locallyStopped)
-	// Leave scheduling headroom above the relay's 500 ms minimum. A ticker set
-	// at the exact server boundary can arrive a few milliseconds early under
-	// normal Windows scheduler jitter and fail closed with a rate-limit error.
-	// The 650 ms cadence remains responsive while preserving the bounded relay
-	// contract and keeping capture quality clear enough for technician use.
+	// Keep a wide margin above the relay's 500 ms minimum. Windows capture and
+	// scheduling can bunch timer wakeups after a busy period; a cadence close to
+	// the server boundary can then arrive too early and correctly fail closed.
+	// One second is deliberately conservative for this preview transport. It
+	// keeps the session durable while later transport work can safely improve
+	// frame pacing without weakening the relay's anti-flooding contract.
 	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, statusChecker.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
-	}, nexusremote.StreamOptions{FrameInterval: 650 * time.Millisecond, StatusEvery: 5 * time.Second, JPEGQuality: 82})
+	}, nexusremote.StreamOptions{FrameInterval: time.Second, StatusEvery: 5 * time.Second, JPEGQuality: 82})
 	if locallyStopped.Load() {
 		if stopErr := writer.send(nexusremote.IPCMessage{Type: "stop", SessionID: message.Grant.SessionID, Reason: "Endpoint user used the local stop shortcut"}); stopErr != nil {
 			return stopErr
