@@ -45,7 +45,7 @@ func New(grant Grant, tenantID, deviceID string, now time.Time) (*Session, error
 	if grant.Mode != View && grant.Mode != Control {
 		return nil, errors.New("unsupported remote mode")
 	}
-	if !grant.ExpiresAt.After(now) || grant.ExpiresAt.After(now.Add(time.Hour)) {
+	if !grant.ExpiresAt.After(now) || grant.ExpiresAt.After(now.Add(maxAttendedGrantLifetime)) {
 		return nil, errors.New("invalid remote expiry")
 	}
 	return &Session{grant: grant}, nil

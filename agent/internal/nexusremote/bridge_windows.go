@@ -190,7 +190,15 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 		return err
 	}
 	transportConnected := false
-	controlStarted := false
+	// Create the private control listener before the companion displays its
+	// consent dialog.  The server still refuses to return any control event
+	// until the companion has acknowledged the grant, so this never creates a
+	// pre-consent control capability.  It does remove a timing gap where the
+	// companion began its client retry loop before the agent had scheduled the
+	// listener after processing the acknowledgement.
+	if grant.Mode == Control {
+		go serveControlPipe(ctx, installDir, policy, api, grant)
+	}
 	defer func() {
 		// If a frame relay or pipe operation fails after the companion proved it
 		// was connected, remove the last desktop image at the control plane. A
@@ -225,10 +233,6 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 			}
 			if err := api.Acknowledge(grant.SessionID, message.Outcome, message.Reason); err != nil {
 				return err
-			}
-			if message.Outcome == "accepted" && grant.Mode == Control && !controlStarted {
-				controlStarted = true
-				go serveControlPipe(ctx, installDir, policy, api, grant)
 			}
 		case "transport":
 			if err := api.Transport(grant.SessionID, message.State, message.Reason); err != nil {
@@ -283,6 +287,9 @@ func serveControlPipe(ctx context.Context, installDir string, policy CompanionPo
 		log.Printf("[native-remote] rejected control pipe client: %v", err)
 		return
 	}
+	if err := api.Transport(grant.SessionID, "connected", "protected control channel attached"); err != nil {
+		log.Printf("[native-remote] unable to record control channel attachment: %v", err)
+	}
 	file := os.NewFile(uintptr(pipe), "nexus-remote-control-bridge")
 	defer file.Close()
 	writer := &lockedControlWriter{writer: file}
@@ -302,6 +309,8 @@ func serveControlPipe(ctx context.Context, installDir string, policy CompanionPo
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	sent := map[uint64]time.Time{}
+	observed := map[uint64]struct{}{}
+	var lastPollDiagnostic time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -313,14 +322,34 @@ func serveControlPipe(ctx context.Context, installDir string, policy CompanionPo
 		case <-ticker.C:
 			events, pollErr := api.ControlEvents(grant.SessionID)
 			if pollErr != nil {
+				if time.Since(lastPollDiagnostic) >= 10*time.Second {
+					log.Printf("[native-remote] control delivery poll failed: %v", pollErr)
+					_ = api.Transport(grant.SessionID, "connected", boundedReason("control delivery poll failed: "+pollErr.Error(), "control delivery poll failed"))
+					lastPollDiagnostic = time.Now()
+				}
 				continue
+			}
+			for _, event := range events {
+				if _, alreadyObserved := observed[event.Sequence]; alreadyObserved {
+					continue
+				}
+				observed[event.Sequence] = struct{}{}
+				// Surface bounded, server-side evidence for the delivery handoff.
+				// This lets the technician distinguish a browser queueing failure
+				// from an endpoint injection/acknowledgement failure without
+				// exposing the underlying key or pointer payload.
+				_ = api.Transport(grant.SessionID, "connected", fmt.Sprintf("protected control event %d received by Agent", event.Sequence))
 			}
 			for _, event := range events {
 				if at, exists := sent[event.Sequence]; exists && time.Since(at) < 2*time.Second {
 					continue
 				}
-				if writer.send(IPCMessage{Type: "input", SessionID: grant.SessionID, Control: &event}) == nil {
+				if writeErr := writer.send(IPCMessage{Type: "input", SessionID: grant.SessionID, Control: &event}); writeErr == nil {
 					sent[event.Sequence] = time.Now()
+					_ = api.Transport(grant.SessionID, "connected", fmt.Sprintf("protected control event %d delivered to endpoint companion", event.Sequence))
+				} else {
+					log.Printf("[native-remote] control delivery write failed: %v", writeErr)
+					_ = api.Transport(grant.SessionID, "connected", boundedReason("control delivery write failed: "+writeErr.Error(), "control delivery write failed"))
 				}
 			}
 		}

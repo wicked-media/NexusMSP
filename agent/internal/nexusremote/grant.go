@@ -11,6 +11,12 @@ import (
 
 const grantDomain = "nexus-remote-grant-v1\x00"
 
+// maxAttendedGrantLifetime matches the server-issued attended lease. It is
+// deliberately bounded: a session can run for a working day without a forced
+// mid-repair interruption, while explicit end, local stop, revocation and
+// stale transport still terminate access immediately.
+const maxAttendedGrantLifetime = 24 * time.Hour
+
 // SignedGrant is verified over the exact payload bytes, not reserialized JSON.
 type SignedGrant struct {
 	Payload   []byte
@@ -76,7 +82,7 @@ func (v *Verifier) Accept(envelope SignedGrant, tenantID, deviceID string, now t
 			return nil, errors.New("invalid remote display metadata")
 		}
 	}
-	if payload.IssuedAt.IsZero() || payload.IssuedAt.After(now) || !payload.ExpiresAt.After(payload.IssuedAt) || payload.ExpiresAt.Sub(payload.IssuedAt) > time.Hour {
+	if payload.IssuedAt.IsZero() || payload.IssuedAt.After(now) || !payload.ExpiresAt.After(payload.IssuedAt) || payload.ExpiresAt.Sub(payload.IssuedAt) > maxAttendedGrantLifetime {
 		return nil, errors.New("invalid remote lifetime")
 	}
 	session, err := New(Grant{SessionID: payload.SessionID, TenantID: payload.TenantID, DeviceID: payload.DeviceID, ActorID: payload.ActorID, Mode: payload.Mode, ExpiresAt: payload.ExpiresAt, ConsentRequired: consentRequired, TechnicianName: payload.TechnicianName, Purpose: payload.Purpose}, tenantID, deviceID, now)

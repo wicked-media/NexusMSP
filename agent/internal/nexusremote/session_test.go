@@ -47,7 +47,11 @@ func TestControlAndExpiry(t *testing.T) {
 	if err := s.Authorize(true, now); err != nil {
 		t.Fatal(err)
 	}
-	grant.ExpiresAt = now.Add(2 * time.Hour)
+	grant.ExpiresAt = now.Add(maxAttendedGrantLifetime)
+	if _, err := New(grant, "t", "d", now); err != nil {
+		t.Fatalf("working-day attended grant rejected: %v", err)
+	}
+	grant.ExpiresAt = now.Add(maxAttendedGrantLifetime + time.Minute)
 	if _, err := New(grant, "t", "d", now); err == nil {
 		t.Fatal("unbounded grant accepted")
 	}

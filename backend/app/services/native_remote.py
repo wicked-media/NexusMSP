@@ -27,7 +27,12 @@ from app.services.secret_store import decrypt_secret, encrypt_secret
 GRANT_DOMAIN = b"nexus-remote-grant-v1\x00"
 RUNTIME_CAPABILITY = "native_remote_v1"
 UNATTENDED_RUNTIME_CAPABILITY = "native_remote_v2"
-GRANT_TTL_MINUTES = 10
+# Attended support should not interrupt a technician in the middle of a real
+# repair.  This is deliberately a bounded day-long lease rather than an
+# indefinite credential: endpoint stop, technician end, revocation and stale
+# transport handling remain immediate, while an abandoned session still fails
+# closed without relying on a browser timer.
+ATTENDED_GRANT_TTL_HOURS = 24
 ONLINE_WINDOW_SECONDS = 300
 CONTROL_EVENT_TTL_SECONDS = 20
 
@@ -266,7 +271,7 @@ async def issue_grant(*, session: dict[str, Any], user: dict[str, Any], mode: st
         )
     key, identity = await signing_identity(tenant_id)
     issued_at = _now()
-    expires_at = issued_at + timedelta(minutes=GRANT_TTL_MINUTES)
+    expires_at = issued_at + timedelta(hours=ATTENDED_GRANT_TTL_HOURS)
     payload = {
         "version": 1 if consent_required else 2,
         "session_id": session_id,

@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from copy import deepcopy
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -132,6 +133,8 @@ def test_native_grant_is_signed_bound_and_idempotent(monkeypatch):
     assert b'"tenant_id":"tenant-1"' in payload
     assert b'"device_id":"device-1"' in payload
     assert b'"actor_id":"tech-1"' in payload
+    expires_at = datetime.fromisoformat(stored["expires_at"])
+    assert 23 * 60 * 60 <= (expires_at - datetime.now(timezone.utc)).total_seconds() <= 24 * 60 * 60
 
 
 def test_native_grant_allows_only_attended_control(monkeypatch):

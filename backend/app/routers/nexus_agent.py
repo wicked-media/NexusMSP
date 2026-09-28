@@ -129,7 +129,7 @@ async def _native_remote_policy(agent_id: str, client_id: str, tenant_id: str) -
         # advertise or broker Native Remote capability.
         "companion_sha256": companion["sha256"],
         "companion_size": companion["size"],
-        "maximum_grant_lifetime_seconds": 600,
+		"maximum_grant_lifetime_seconds": 24 * 60 * 60,
         "replay_store_required": True,
         "attended_only": True,
         "reason": reason,

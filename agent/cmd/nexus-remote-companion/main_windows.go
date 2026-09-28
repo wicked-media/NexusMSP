@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"io"
 	"log"
@@ -23,15 +24,25 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"nexusagent/internal/nexusremote"
 )
 
-const messageBoxYes = 6
+const (
+	messageBoxYes = 6
+	messageBoxNo  = 7
+)
 
 const (
+	taskDialogYesButton               = 0x0002
+	taskDialogNoButton                = 0x0004
+	taskDialogAllowCancellation       = 0x0008
+	taskDialogPositionRelativeToOwner = 0x1000
+	taskDialogSizeToContent           = 0x01000000
+
 	remoteStopHotkeyID = 0x4E5852
 	modControl         = 0x0002
 	modShift           = 0x0004
@@ -49,7 +60,39 @@ var (
 	peekMessage        = user32.NewProc("PeekMessageW")
 	postThreadMessage  = user32.NewProc("PostThreadMessageW")
 	getCurrentThreadID = syscall.NewLazyDLL("kernel32.dll").NewProc("GetCurrentThreadId")
+	comctl32           = syscall.NewLazyDLL("comctl32.dll")
+	taskDialogIndirect = comctl32.NewProc("TaskDialogIndirect")
 )
+
+// taskDialogConfig mirrors TASKDIALOGCONFIG. Using the native Task Dialog
+// keeps the consent decision entirely local while giving endpoint users a
+// first-class, accessible Windows surface instead of an ambiguous message box.
+type taskDialogConfig struct {
+	cbSize               uint32
+	hwndParent           windows.Handle
+	hInstance            windows.Handle
+	flags                uint32
+	commonButtons        uint32
+	windowTitle          *uint16
+	mainIcon             uintptr
+	mainInstruction      *uint16
+	content              *uint16
+	buttonCount          uint32
+	buttons              uintptr
+	defaultButton        int32
+	radioButtonCount     uint32
+	radioButtons         uintptr
+	defaultRadioButton   int32
+	verificationText     *uint16
+	expandedInformation  *uint16
+	expandedControlText  *uint16
+	collapsedControlText *uint16
+	footerIcon           uintptr
+	footer               *uint16
+	callback             uintptr
+	callbackData         uintptr
+	width                uint32
+}
 
 type point struct{ x, y int32 }
 type windowsMessage struct {
@@ -155,16 +198,15 @@ func serve(pipe *os.File) error {
 	if message.Grant.Mode == nexusremote.Control {
 		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID)
 	}
-	go activeSessionNotice(technicianName, purpose, cancel, &locallyStopped)
-	// Keep a wide margin above the relay's 500 ms minimum. Windows capture and
-	// scheduling can bunch timer wakeups after a busy period; a cadence close to
-	// the server boundary can then arrive too early and correctly fail closed.
-	// One second is deliberately conservative for this preview transport. It
-	// keeps the session durable while later transport work can safely improve
-	// frame pacing without weakening the relay's anti-flooding contract.
+	go activeSessionNotice(technicianName, purpose, message.Grant.Mode, cancel, &locallyStopped)
+	// Keep a substantial margin above the relay's 500 ms minimum. Windows
+	// scheduling, capture and request completion can bunch wakeups under load;
+	// a nominal one-second cadence still proved too close to the server boundary
+	// on a live endpoint. Two seconds keeps capture well inside the 20-second
+	// freshness window while preserving the relay's anti-flooding contract.
 	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, statusChecker.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
-	}, nexusremote.StreamOptions{FrameInterval: time.Second, StatusEvery: 5 * time.Second, JPEGQuality: 82})
+	}, nexusremote.StreamOptions{FrameInterval: 2 * time.Second, StatusEvery: 5 * time.Second, JPEGQuality: 82})
 	if locallyStopped.Load() {
 		if stopErr := writer.send(nexusremote.IPCMessage{Type: "stop", SessionID: message.Grant.SessionID, Reason: "Endpoint user used the local stop shortcut"}); stopErr != nil {
 			return stopErr
@@ -189,10 +231,14 @@ func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, sessio
 			time.Sleep(time.Second)
 			continue
 		}
+		log.Printf("remote companion: protected control channel connected")
 		pipe := os.NewFile(uintptr(handle), "nexus-remote-control")
 		for ctx.Err() == nil {
 			message, readErr := nexusremote.ReadIPCMessage(pipe)
 			if readErr != nil {
+				if ctx.Err() == nil {
+					log.Printf("remote companion: protected control channel closed: %s", boundedDiagnostic(readErr.Error()))
+				}
 				break
 			}
 			if message.Type != "input" || message.SessionID != sessionID || message.Control == nil {
@@ -203,6 +249,7 @@ func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, sessio
 				continue
 			}
 			if event.Sequence > lastSequence {
+				log.Printf("remote companion: control input %d received", event.Sequence)
 				if injectErr := (nexusremote.WindowsInputInjector{}).Inject(session, event, time.Now().UTC()); injectErr != nil {
 					// Preserve only bounded local delivery diagnostics.  The browser
 					// receives compact queue/acknowledgement evidence; it must never
@@ -217,7 +264,11 @@ func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, sessio
 				}
 				lastSequence = event.Sequence
 			}
-			_ = nexusremote.WriteIPCMessage(pipe, nexusremote.IPCMessage{Type: "input_ack", SessionID: sessionID, Control: &event})
+			if ackErr := nexusremote.WriteIPCMessage(pipe, nexusremote.IPCMessage{Type: "input_ack", SessionID: sessionID, Control: &event}); ackErr != nil {
+				log.Printf("remote companion: control acknowledgement %d failed: %s", event.Sequence, boundedDiagnostic(ackErr.Error()))
+			} else {
+				log.Printf("remote companion: control input %d acknowledged locally", event.Sequence)
+			}
 		}
 		_ = pipe.Close()
 	}
@@ -268,35 +319,141 @@ func (s *pipeFrameSink) SendFrame(_ context.Context, sessionID string, jpeg []by
 }
 
 func consentPrompt(sessionID string, mode nexusremote.Mode, expiresAt time.Time, technicianName, purpose string) (bool, string) {
+	log.Printf("remote companion: presenting endpoint consent prompt")
 	if technicianName == "" {
 		technicianName = "Nexus Support"
 	}
 	if purpose == "" {
 		purpose = "Technician support session"
 	}
-	access := "VIEW-ONLY SUPPORT REQUEST"
-	capability := "They cannot control your mouse or keyboard."
-	prompt := "Allow view-only screen sharing now?"
+	access := "View-only support is requested"
+	capability := "The technician can view your screen but cannot control your mouse or keyboard."
+	prompt := "Allow view-only support for this session?"
 	if mode == nexusremote.Control {
-		access = "INTERACTIVE SUPPORT REQUEST"
-		capability = "They will be able to use your mouse and keyboard while this session is active."
-		prompt = "Allow interactive remote support now?"
+		access = "Interactive support is requested"
+		capability = "The technician can view your screen and use your mouse and keyboard while this session is active."
+		prompt = "Allow interactive support for this session?"
 	}
-	text, _ := windows.UTF16PtrFromString(
-		access + "\r\n\r\n" +
-			technicianName + " would like to assist you on this desktop. " + capability + "\r\n\r\n" +
-			"Purpose: " + purpose + "\r\n\r\n" +
-			"Session reference: " + sessionID + "\r\n" +
-			"Automatically ends: " + expiresAt.Local().Format("Mon 2 Jan, 3:04 PM") + "\r\n\r\n" +
-			"You remain in control. Press Ctrl + Shift + F12 at any time to stop sharing immediately.\r\n\r\n" +
-			prompt,
-	)
-	caption, _ := windows.UTF16PtrFromString("Nexus Remote · Your approval is required")
+	if approved, displayed := showPremiumConsentWindow(access, capability, prompt, sessionID, expiresAt, technicianName, purpose); displayed {
+		log.Printf("remote companion: premium endpoint consent prompt completed")
+		if approved {
+			return true, ""
+		}
+		return false, "The endpoint user declined remote access"
+	}
+	// An attended request must always present a working local decision. Keep a
+	// native fallback for Windows installations without the WPF desktop stack.
+	log.Printf("remote companion: premium consent window unavailable; using Windows compatibility prompt")
+
+	// A modern Task Dialog is available on supported Windows builds. Keep this
+	// conservative MessageBox fallback for reduced Windows environments rather
+	// than ever silently accepting an attended-control request.
+	text, _ := windows.UTF16PtrFromString(access + "\r\n\r\n" + technicianName + " would like to assist you. " + capability + "\r\n\r\nPurpose: " + purpose + "\r\n\r\n" + prompt)
+	caption, _ := windows.UTF16PtrFromString("Nexus Remote · Approval required")
 	result, err := windows.MessageBox(0, text, caption, windows.MB_YESNO|windows.MB_ICONINFORMATION|windows.MB_TOPMOST|windows.MB_DEFBUTTON2)
+	if err != nil {
+		log.Printf("remote companion: compatibility consent prompt failed: %s", boundedDiagnostic(err.Error()))
+	}
 	if err != nil || result != messageBoxYes {
 		return false, "The endpoint user declined remote access"
 	}
 	return true, ""
+}
+
+// showPremiumConsentWindow hosts a purpose-built consent surface in the
+// signed-in user's desktop session. The PowerShell payload is static; the
+// signed, display-only values are supplied through process environment values
+// rather than interpolated into script source.
+func showPremiumConsentWindow(access, capability, prompt, sessionID string, expiresAt time.Time, technicianName, purpose string) (approved bool, displayed bool) {
+	const script = `Add-Type -AssemblyName PresentationFramework
+$brush = { param([string]$value) return (New-Object System.Windows.Media.BrushConverter).ConvertFromString($value) }
+$tech = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_TECHNICIAN')
+$purpose = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_PURPOSE')
+$access = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_ACCESS')
+$capability = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_CAPABILITY')
+$prompt = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_PROMPT')
+$session = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_SESSION')
+$ends = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_ENDS')
+$window = New-Object System.Windows.Window
+$window.Title = 'Nexus Remote · Approval required'; $window.Width = 620; $window.SizeToContent = 'Height'
+$window.WindowStartupLocation = 'CenterScreen'; $window.ResizeMode = 'NoResize'; $window.Topmost = $true
+$window.Background = & $brush '#0B1220'; $window.Foreground = [System.Windows.Media.Brushes]::White
+$root = New-Object System.Windows.Controls.StackPanel; $root.Margin = '28'; $root.Orientation = 'Vertical'
+$window.Content = $root
+$badge = New-Object System.Windows.Controls.TextBlock; $badge.Text = 'NEXUS REMOTE  ·  ATTENDED SUPPORT'; $badge.FontSize = 12; $badge.FontWeight = 'SemiBold'; $badge.Foreground = & $brush '#5EEAD4'; $badge.Margin = '0,0,0,12'; $root.Children.Add($badge) | Out-Null
+$heading = New-Object System.Windows.Controls.TextBlock; $heading.Text = $access; $heading.FontSize = 25; $heading.FontWeight = 'SemiBold'; $heading.TextWrapping = 'Wrap'; $root.Children.Add($heading) | Out-Null
+$summary = New-Object System.Windows.Controls.TextBlock; $summary.Text = $capability; $summary.FontSize = 14; $summary.Foreground = & $brush '#CBD5E1'; $summary.TextWrapping = 'Wrap'; $summary.Margin = '0,8,0,18'; $root.Children.Add($summary) | Out-Null
+function Add-Detail([string]$label, [string]$value) { $card = New-Object System.Windows.Controls.Border; $card.Background = & $brush '#162033'; $card.CornerRadius = '8'; $card.Padding = '14,10'; $card.Margin = '0,0,0,8'; $stack = New-Object System.Windows.Controls.StackPanel; $card.Child = $stack; $small = New-Object System.Windows.Controls.TextBlock; $small.Text = $label; $small.FontSize = 11; $small.FontWeight = 'SemiBold'; $small.Foreground = & $brush '#94A3B8'; $stack.Children.Add($small) | Out-Null; $body = New-Object System.Windows.Controls.TextBlock; $body.Text = $value; $body.FontSize = 14; $body.TextWrapping = 'Wrap'; $body.Margin = '0,3,0,0'; $stack.Children.Add($body) | Out-Null; $root.Children.Add($card) | Out-Null }
+Add-Detail 'TECHNICIAN' $tech; Add-Detail 'PURPOSE' $purpose; Add-Detail 'SESSION' ('ID ' + $session + '  ·  Ends ' + $ends)
+$notice = New-Object System.Windows.Controls.TextBlock; $notice.Text = $prompt + ' You can stop sharing at any time with Ctrl + Shift + F12.'; $notice.FontSize = 13; $notice.TextWrapping = 'Wrap'; $notice.Foreground = & $brush '#CBD5E1'; $notice.Margin = '0,12,0,18'; $root.Children.Add($notice) | Out-Null
+$actions = New-Object System.Windows.Controls.StackPanel; $actions.Orientation = 'Horizontal'; $actions.HorizontalAlignment = 'Right'; $root.Children.Add($actions) | Out-Null
+$decline = New-Object System.Windows.Controls.Button; $decline.Content = 'Decline'; $decline.MinWidth = 112; $decline.Height = 38; $decline.Margin = '0,0,10,0'; $decline.Background = & $brush '#243247'; $decline.Foreground = [System.Windows.Media.Brushes]::White; $decline.BorderThickness = 0; $decline.IsDefault = $true; $decline.IsCancel = $true; $actions.Children.Add($decline) | Out-Null
+$allow = New-Object System.Windows.Controls.Button; $allow.Content = 'Allow support'; $allow.MinWidth = 132; $allow.Height = 38; $allow.Background = & $brush '#14B8A6'; $allow.Foreground = & $brush '#062925'; $allow.FontWeight = 'SemiBold'; $allow.BorderThickness = 0; $actions.Children.Add($allow) | Out-Null
+$script:decision = 'declined'; $decline.Add_Click({ $script:decision = 'declined'; $window.Close() }); $allow.Add_Click({ $script:decision = 'approved'; $window.Close() }); [void]$window.ShowDialog(); Write-Output $script:decision`
+	command := exec.Command("powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShellCommand(script))
+	command.Env = append(os.Environ(),
+		"NEXUS_REMOTE_TECHNICIAN="+technicianName,
+		"NEXUS_REMOTE_PURPOSE="+purpose,
+		"NEXUS_REMOTE_ACCESS="+access,
+		"NEXUS_REMOTE_CAPABILITY="+capability,
+		"NEXUS_REMOTE_PROMPT="+prompt,
+		"NEXUS_REMOTE_SESSION="+sessionID,
+		"NEXUS_REMOTE_ENDS="+expiresAt.Local().Format("Mon 2 Jan, 3:04 PM"),
+	)
+	// Do not use CREATE_NO_WINDOW/HideWindow here: WPF consent is the visible
+	// endpoint surface and Windows applies that flag to the child window too.
+	output, err := command.Output()
+	if err != nil {
+		log.Printf("remote companion: premium consent window failed: %s", boundedDiagnostic(err.Error()))
+		return false, false
+	}
+	decision := strings.TrimSpace(strings.ToLower(string(output)))
+	if decision != "approved" && decision != "declined" {
+		log.Printf("remote companion: premium consent window returned no decision")
+		return false, false
+	}
+	return decision == "approved", true
+}
+
+func encodePowerShellCommand(script string) string {
+	characters := utf16.Encode([]rune(script))
+	encoded := make([]byte, len(characters)*2)
+	for index, character := range characters {
+		binary.LittleEndian.PutUint16(encoded[index*2:], character)
+	}
+	return base64.StdEncoding.EncodeToString(encoded)
+}
+
+func showConsentTaskDialog(access, capability, prompt, sessionID string, expiresAt time.Time, technicianName, purpose string) (approved bool, displayed bool) {
+	title, titleErr := windows.UTF16PtrFromString("Nexus Remote · Approval required")
+	main, mainErr := windows.UTF16PtrFromString(access)
+	content, contentErr := windows.UTF16PtrFromString(
+		"TECHNICIAN\r\n" + technicianName + "\r\n\r\n" +
+			"ACCESS\r\n" + capability + "\r\n\r\n" +
+			"PURPOSE\r\n" + purpose + "\r\n\r\n" +
+			"SESSION\r\n" + sessionID + "\r\nEnds automatically: " + expiresAt.Local().Format("Mon 2 Jan, 3:04 PM") + "\r\n\r\n" +
+			prompt,
+	)
+	footer, footerErr := windows.UTF16PtrFromString("You remain in control. Select No to decline, or press Ctrl + Shift + F12 at any time to stop sharing.")
+	if titleErr != nil || mainErr != nil || contentErr != nil || footerErr != nil {
+		return false, false
+	}
+	config := taskDialogConfig{
+		cbSize:          uint32(unsafe.Sizeof(taskDialogConfig{})),
+		flags:           taskDialogAllowCancellation | taskDialogPositionRelativeToOwner | taskDialogSizeToContent,
+		commonButtons:   taskDialogYesButton | taskDialogNoButton,
+		windowTitle:     title,
+		mainInstruction: main,
+		content:         content,
+		defaultButton:   messageBoxNo,
+		footer:          footer,
+	}
+	var selected int32
+	result, _, callErr := taskDialogIndirect.Call(uintptr(unsafe.Pointer(&config)), uintptr(unsafe.Pointer(&selected)), 0, 0)
+	if callErr != syscall.Errno(0) || result != 0 {
+		return false, false
+	}
+	return selected == messageBoxYes, true
 }
 
 // activeSessionNotice is independent of capture. It makes the technician's
@@ -304,13 +461,26 @@ func consentPrompt(sessionID string, mode nexusremote.Mode, expiresAt time.Time,
 // consented remote stream. Yes opens the endpoint's local Nexus Client Chat;
 // No stops the session through the same endpoint-owned revoke path as the
 // hotkey. Closing the notice simply leaves the session visible in the tray.
-func activeSessionNotice(technicianName, purpose string, cancel context.CancelFunc, stopped *atomic.Bool) {
+func activeSessionNotice(technicianName, purpose string, mode nexusremote.Mode, cancel context.CancelFunc, stopped *atomic.Bool) {
 	if technicianName == "" {
 		technicianName = "Nexus Support"
 	}
 	if purpose == "" {
 		purpose = "Technician support session"
 	}
+	if outcome, displayed := showPremiumActiveSessionWindow(technicianName, purpose, mode); displayed {
+		switch outcome {
+		case "chat":
+			openClientChat()
+		case "stop":
+			stopped.Store(true)
+			cancel()
+		}
+		return
+	}
+
+	// Keep the legacy message box only for Windows installations without WPF.
+	// The primary active-session notice above is the matching Nexus surface.
 	text, _ := windows.UTF16PtrFromString(
 		"NEXUS REMOTE IS ACTIVE\r\n\r\n" +
 			"Connected technician: " + technicianName + "\r\n" +
@@ -333,6 +503,48 @@ func activeSessionNotice(technicianName, purpose string, cancel context.CancelFu
 		stopped.Store(true)
 		cancel()
 	}
+}
+
+func showPremiumActiveSessionWindow(technicianName, purpose string, mode nexusremote.Mode) (outcome string, displayed bool) {
+	access := "View-only support"
+	capability := "The technician can see your screen. Your mouse and keyboard stay under your control."
+	if mode == nexusremote.Control {
+		access = "Interactive support"
+		capability = "The technician can view your screen and use your mouse and keyboard while this session is active."
+	}
+	const script = `Add-Type -AssemblyName PresentationFramework
+$brush = { param([string]$value) return (New-Object System.Windows.Media.BrushConverter).ConvertFromString($value) }
+$tech = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_TECHNICIAN'); $purpose = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_PURPOSE'); $access = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_ACCESS'); $capability = [Environment]::GetEnvironmentVariable('NEXUS_REMOTE_CAPABILITY')
+$window = New-Object System.Windows.Window; $window.Title = 'Nexus Remote · Support session active'; $window.Width = 590; $window.SizeToContent = 'Height'; $window.WindowStartupLocation = 'CenterScreen'; $window.ResizeMode = 'NoResize'; $window.Topmost = $true; $window.Background = & $brush '#0B1220'; $window.Foreground = [System.Windows.Media.Brushes]::White
+$root = New-Object System.Windows.Controls.StackPanel; $root.Margin = '28'; $window.Content = $root
+$badge = New-Object System.Windows.Controls.TextBlock; $badge.Text = 'NEXUS REMOTE  ·  LIVE SESSION'; $badge.FontSize = 12; $badge.FontWeight = 'SemiBold'; $badge.Foreground = & $brush '#5EEAD4'; $badge.Margin = '0,0,0,12'; $root.Children.Add($badge) | Out-Null
+$heading = New-Object System.Windows.Controls.TextBlock; $heading.Text = 'Support session is active'; $heading.FontSize = 25; $heading.FontWeight = 'SemiBold'; $root.Children.Add($heading) | Out-Null
+$summary = New-Object System.Windows.Controls.TextBlock; $summary.Text = $capability; $summary.FontSize = 14; $summary.Foreground = & $brush '#CBD5E1'; $summary.TextWrapping = 'Wrap'; $summary.Margin = '0,8,0,18'; $root.Children.Add($summary) | Out-Null
+function Add-Detail([string]$label, [string]$value) { $card = New-Object System.Windows.Controls.Border; $card.Background = & $brush '#162033'; $card.CornerRadius = '8'; $card.Padding = '14,10'; $card.Margin = '0,0,0,8'; $stack = New-Object System.Windows.Controls.StackPanel; $card.Child = $stack; $small = New-Object System.Windows.Controls.TextBlock; $small.Text = $label; $small.FontSize = 11; $small.FontWeight = 'SemiBold'; $small.Foreground = & $brush '#94A3B8'; $stack.Children.Add($small) | Out-Null; $body = New-Object System.Windows.Controls.TextBlock; $body.Text = $value; $body.FontSize = 14; $body.TextWrapping = 'Wrap'; $body.Margin = '0,3,0,0'; $stack.Children.Add($body) | Out-Null; $root.Children.Add($card) | Out-Null }
+Add-Detail 'CONNECTED TECHNICIAN' $tech; Add-Detail 'SESSION PURPOSE' $purpose; Add-Detail 'ACCESS' $access
+$notice = New-Object System.Windows.Controls.TextBlock; $notice.Text = 'Open chat to contact the technician, or stop access immediately. You can also stop sharing at any time with Ctrl + Shift + F12.'; $notice.FontSize = 13; $notice.TextWrapping = 'Wrap'; $notice.Foreground = & $brush '#CBD5E1'; $notice.Margin = '0,12,0,18'; $root.Children.Add($notice) | Out-Null
+$actions = New-Object System.Windows.Controls.StackPanel; $actions.Orientation = 'Horizontal'; $actions.HorizontalAlignment = 'Right'; $root.Children.Add($actions) | Out-Null
+$stop = New-Object System.Windows.Controls.Button; $stop.Content = 'Stop access'; $stop.MinWidth = 110; $stop.Height = 38; $stop.Margin = '0,0,10,0'; $stop.Background = & $brush '#7F1D1D'; $stop.Foreground = [System.Windows.Media.Brushes]::White; $stop.BorderThickness = 0; $actions.Children.Add($stop) | Out-Null
+$dismiss = New-Object System.Windows.Controls.Button; $dismiss.Content = 'Keep open'; $dismiss.MinWidth = 110; $dismiss.Height = 38; $dismiss.Margin = '0,0,10,0'; $dismiss.Background = & $brush '#243247'; $dismiss.Foreground = [System.Windows.Media.Brushes]::White; $dismiss.BorderThickness = 0; $dismiss.IsDefault = $true; $dismiss.IsCancel = $true; $actions.Children.Add($dismiss) | Out-Null
+$chat = New-Object System.Windows.Controls.Button; $chat.Content = 'Open chat'; $chat.MinWidth = 110; $chat.Height = 38; $chat.Background = & $brush '#14B8A6'; $chat.Foreground = & $brush '#062925'; $chat.FontWeight = 'SemiBold'; $chat.BorderThickness = 0; $actions.Children.Add($chat) | Out-Null
+$script:outcome = 'dismiss'; $stop.Add_Click({ $script:outcome = 'stop'; $window.Close() }); $dismiss.Add_Click({ $script:outcome = 'dismiss'; $window.Close() }); $chat.Add_Click({ $script:outcome = 'chat'; $window.Close() }); [void]$window.ShowDialog(); Write-Output $script:outcome`
+	command := exec.Command("powershell.exe", "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShellCommand(script))
+	command.Env = append(os.Environ(),
+		"NEXUS_REMOTE_TECHNICIAN="+technicianName,
+		"NEXUS_REMOTE_PURPOSE="+purpose,
+		"NEXUS_REMOTE_ACCESS="+access,
+		"NEXUS_REMOTE_CAPABILITY="+capability,
+	)
+	output, err := command.Output()
+	if err != nil {
+		log.Printf("remote companion: premium active-session window failed: %s", boundedDiagnostic(err.Error()))
+		return "", false
+	}
+	value := strings.TrimSpace(strings.ToLower(string(output)))
+	if value != "chat" && value != "stop" && value != "dismiss" {
+		return "", false
+	}
+	return value, true
 }
 
 func openClientChat() {
