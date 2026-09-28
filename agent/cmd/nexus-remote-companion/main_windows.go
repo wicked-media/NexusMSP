@@ -199,6 +199,10 @@ func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, sessio
 			}
 			if event.Sequence > lastSequence {
 				if injectErr := (nexusremote.WindowsInputInjector{}).Inject(session, event, time.Now().UTC()); injectErr != nil {
+					// Preserve only bounded local delivery diagnostics.  The browser
+					// receives compact queue/acknowledgement evidence; it must never
+					// receive endpoint screen data or a Windows error verbatim.
+					log.Printf("remote companion: control input %d rejected: %s", event.Sequence, boundedDiagnostic(injectErr.Error()))
 					if session.Authorize(true, time.Now().UTC()) != nil {
 						cancel()
 						_ = pipe.Close()
