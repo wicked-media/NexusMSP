@@ -178,9 +178,14 @@ func serve(pipe *os.File) error {
 // input cannot race frame uploads or the grant-status request/response pipe.
 func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string) {
 	var lastSequence uint64
+	var lastConnectDiagnostic time.Time
 	for ctx.Err() == nil {
 		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionControlPipeName), windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 		if err != nil {
+			if time.Since(lastConnectDiagnostic) >= 10*time.Second {
+				log.Printf("remote companion: control pipe unavailable: %s", boundedDiagnostic(err.Error()))
+				lastConnectDiagnostic = time.Now()
+			}
 			time.Sleep(time.Second)
 			continue
 		}
