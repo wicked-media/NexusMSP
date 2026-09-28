@@ -170,7 +170,7 @@ func verifyCompanionClient(pipe windows.Handle, expected, expectedSHA256 string)
 	return nil
 }
 
-func serveCompanion(ctx context.Context, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI) error {
+func serveCompanion(ctx context.Context, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI) (serveErr error) {
 	var grant *DeliveredGrant
 	for ctx.Err() == nil && grant == nil {
 		next, err := api.Pending()
@@ -197,7 +197,15 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 		// best-effort report is intentionally ignored here: the agent may itself
 		// be offline, in which case the server freshness window still fails closed.
 		if transportConnected {
-			if err := api.Transport(grant.SessionID, "disconnected", "agent bridge ended before companion disconnect confirmation"); err != nil {
+			detail := "agent bridge ended before companion disconnect confirmation"
+			if serveErr != nil && !errors.Is(serveErr, io.EOF) {
+				// Preserve the bounded local failure in the audited session record.
+				// Previously this final safeguard hid an actionable relay or capture
+				// failure behind a generic disconnect message, which made a fail-closed
+				// native session impossible to diagnose from its evidence trail.
+				detail = boundedReason("agent bridge ended: "+serveErr.Error(), detail)
+			}
+			if err := api.Transport(grant.SessionID, "disconnected", detail); err != nil {
 				log.Printf("[native-remote] unable to report bridge disconnect: %v", err)
 			}
 		}

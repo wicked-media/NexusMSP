@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -62,6 +63,7 @@ type windowsMessage struct {
 }
 
 func main() {
+	configureDiagnosticLog()
 	for {
 		pipe, err := connectPipe()
 		if err != nil {
@@ -72,10 +74,33 @@ func main() {
 		err = serve(pipe)
 		_ = pipe.Close()
 		if err != nil && !errors.Is(err, io.EOF) {
-			log.Printf("remote companion: bridge disconnected: %v", err)
+			// This is deliberately local and contains only the bounded failure
+			// returned by the protected bridge; it gives support a diagnostic trail
+			// without putting grants, credentials, or desktop content on disk.
+			log.Printf("remote companion: bridge disconnected: %s", boundedDiagnostic(err.Error()))
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func configureDiagnosticLog() {
+	dir := userStateDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	file, err := os.OpenFile(filepath.Join(dir, "remote-companion.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	log.SetOutput(file)
+}
+
+func boundedDiagnostic(detail string) string {
+	detail = strings.Join(strings.Fields(detail), " ")
+	if len(detail) > 320 {
+		return detail[:320]
+	}
+	return detail
 }
 
 func connectPipe() (*os.File, error) {
@@ -131,12 +156,14 @@ func serve(pipe *os.File) error {
 		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID)
 	}
 	go activeSessionNotice(technicianName, purpose, cancel, &locallyStopped)
-	// Use the highest cadence the API accepts and a clearer bounded JPEG.  The
-	// relay still enforces sequence, size and per-frame rate limits; this only
-	// avoids making a technician enlarge a needlessly soft desktop frame.
+	// Leave scheduling headroom above the relay's 500 ms minimum. A ticker set
+	// at the exact server boundary can arrive a few milliseconds early under
+	// normal Windows scheduler jitter and fail closed with a rate-limit error.
+	// The 650 ms cadence remains responsive while preserving the bounded relay
+	// contract and keeping capture quality clear enough for technician use.
 	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, statusChecker.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
-	}, nexusremote.StreamOptions{FrameInterval: 500 * time.Millisecond, StatusEvery: 5 * time.Second, JPEGQuality: 82})
+	}, nexusremote.StreamOptions{FrameInterval: 650 * time.Millisecond, StatusEvery: 5 * time.Second, JPEGQuality: 82})
 	if locallyStopped.Load() {
 		if stopErr := writer.send(nexusremote.IPCMessage{Type: "stop", SessionID: message.Grant.SessionID, Reason: "Endpoint user used the local stop shortcut"}); stopErr != nil {
 			return stopErr
