@@ -172,29 +172,6 @@ async def pending_native_remote_grant(
         {"_id": 0},
         sort=[("issued_at", 1)],
     )
-    redelivery = False
-    if not grant:
-        # A bridge restart must not silently restore desktop capture.  It may
-        # re-deliver the same still-valid grant only after the server recorded
-        # the transport as disconnected; the companion will present consent
-        # again and the acknowledgement below remains bound to this session.
-        candidate = await db.native_remote_grants.find_one(
-            {
-                "tenant_id": platform_tenant_id(agent), "agent_id": agent["id"],
-                "device_id": device["id"], "client_id": device["client_id"],
-                "status": "acknowledged", "agent_outcome": "accepted", "expires_at": {"$gt": now},
-            },
-            {"_id": 0}, sort=[("acknowledged_at", -1)],
-        )
-        if candidate:
-            resumed = await db.remote_sessions.find_one({
-                "id": candidate["session_id"], "tenant_id": platform_tenant_id(agent),
-                "device_id": device["id"], "client_id": device["client_id"],
-                "status": "active", "transport_state": "disconnected", "ended_at": None,
-            })
-            if resumed:
-                grant = candidate
-                redelivery = True
     if not grant:
         return {"grant": None}
     session = await db.remote_sessions.find_one({
@@ -205,8 +182,8 @@ async def pending_native_remote_grant(
     if not session:
         return {"grant": None}
     delivered = await db.native_remote_grants.update_one(
-        {"id": grant["id"], "tenant_id": platform_tenant_id(agent), "status": {"$in": ["issued", "delivered", "acknowledged"]}, "expires_at": {"$gt": now}},
-        {"$set": {"status": "delivered" if not redelivery else "acknowledged", "delivered_at": now, **({"redelivered_at": now} if redelivery else {})}, "$inc": {"delivery_count": 1, **({"redelivery_count": 1} if redelivery else {})}},
+        {"id": grant["id"], "tenant_id": platform_tenant_id(agent), "status": {"$in": ["issued", "delivered"]}, "expires_at": {"$gt": now}},
+        {"$set": {"status": "delivered", "delivered_at": now}, "$inc": {"delivery_count": 1}},
     )
     if not delivered.matched_count:
         return {"grant": None}
@@ -403,6 +380,17 @@ async def queue_native_remote_input(
         await db.native_remote_control_events.insert_one(record)
     except DuplicateKeyError as exc:
         raise HTTPException(status_code=409, detail="Remote control event sequence was already received") from exc
+    # Keep compact, session-level delivery evidence rather than retaining a
+    # high-volume audit record for every pointer movement.  This lets the
+    # viewer distinguish an input handler failure from a relay/endpoint
+    # delivery failure without exposing the input itself.
+    await db.remote_sessions.update_one(
+        {"tenant_id": tenant_id, "id": session_id},
+        {"$set": {
+            "last_control_input_queued_at": now,
+            "last_control_input_sequence": body.sequence,
+        }},
+    )
     return {"session_id": session_id, "sequence": body.sequence, "expires_at": record["expires_at"]}
 
 
@@ -469,6 +457,13 @@ async def acknowledge_native_remote_control_event(
     )
     if not removed.deleted_count:
         raise HTTPException(status_code=404, detail="Remote control event was not pending")
+    await db.remote_sessions.update_one(
+        {"tenant_id": tenant_id, "id": session_id},
+        {"$set": {
+            "last_control_input_acknowledged_at": datetime.now(timezone.utc).isoformat(),
+            "last_control_input_acknowledged_sequence": sequence,
+        }},
+    )
     return {"session_id": session_id, "sequence": sequence, "acknowledged": True}
 
 
@@ -547,7 +542,17 @@ async def native_remote_transport_state(
     if body.state == "connected":
         update.update({"status": "active", "opened_at": now, "last_heartbeat_at": now, "launch_status": "transport_connected"})
     else:
-        update.update({"launch_status": "transport_disconnected", "last_transport_disconnect_at": now})
+        # A signed grant is intentionally one-time.  Leaving this session
+        # active would cause the bridge to offer the same grant again, which
+        # the companion correctly rejects as replay.  Close it explicitly so
+        # the technician sees an honest terminal state and can request a new
+        # locally-consented session rather than being stranded in a stale view.
+        update.update({
+            "status": "ended",
+            "ended_at": now,
+            "launch_status": "transport_disconnected",
+            "last_transport_disconnect_at": now,
+        })
     changed = await db.remote_sessions.update_one(
         {
             "id": session_id,
@@ -568,6 +573,10 @@ async def native_remote_transport_state(
             "tenant_id": platform_tenant_id(agent), "session_id": session_id,
             "client_id": grant["client_id"],
         })
+        await db.native_remote_grants.update_one(
+            {"id": grant["id"], "tenant_id": platform_tenant_id(agent), "status": "acknowledged"},
+            {"$set": {"status": "revoked", "revoked_at": now, "revocation_reason": "companion_transport_disconnected"}},
+        )
     return {"session_id": session_id, "transport_state": body.state, "reported_at": now}
 
 

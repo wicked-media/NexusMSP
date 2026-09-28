@@ -105,7 +105,7 @@ def test_unaudited_session_cannot_deliver_grant(monkeypatch):
     assert database.native_remote_grants.rows[0]["status"] == "delivered"
 
 
-def test_disconnected_active_session_can_redeliver_only_the_same_accepted_grant(monkeypatch):
+def test_disconnected_active_session_does_not_redeliver_a_consumed_grant(monkeypatch):
     database = setup_endpoint(monkeypatch, status="acknowledged", session_status="active")
     database.devices = Rows([{
         "id": "device-1", "nexus_agent_id": "agent-1", "client_id": "client-1", "tenant_id": "tenant-1",
@@ -118,9 +118,8 @@ def test_disconnected_active_session_can_redeliver_only_the_same_accepted_grant(
 
     result = asyncio.run(routes.pending_native_remote_grant())
 
-    assert result["grant"]["session_id"] == "session-1"
+    assert result == {"grant": None}
     assert database.native_remote_grants.rows[0]["status"] == "acknowledged"
-    assert database.native_remote_grants.rows[0]["redelivered_at"]
 
 
 def test_redelivered_accepted_grant_acknowledgement_is_idempotent(monkeypatch):
@@ -299,6 +298,8 @@ def test_transport_disconnect_removes_last_desktop_frame(monkeypatch):
     ))
 
     assert database.remote_sessions.rows[0]["transport_state"] == "disconnected"
+    assert database.remote_sessions.rows[0]["status"] == "ended"
+    assert database.native_remote_grants.rows[0]["status"] == "revoked"
     assert database.native_remote_frames.rows == []
 
 
