@@ -37,7 +37,9 @@ $backup = Join-Path $AgentHome ("backup-" + (Get-Date -Format "yyyyMMdd-HHmmss")
 $service = Get-Service -Name $AgentServiceName
 $wasRunning = $service.Status -eq "Running"
 $agentProcesses = @(Get-Process -Name "nexus-agent" -ErrorAction SilentlyContinue)
-$remoteCompanions = @(Get-Process -Name "nexus-remote-companion" -ErrorAction SilentlyContinue)
+$userSessionProcesses = @(
+  Get-Process -Name "nexus-remote-companion", "nexus-client-chat", "nexus-agent-tray" -ErrorAction SilentlyContinue
+)
 
 if (-not $PSCmdlet.ShouldProcess($AgentHome, "Replace Nexus Agent release binaries while preserving config.json")) {
   return
@@ -62,12 +64,20 @@ try {
     }
   }
 
-  # The user-session Remote Companion is a separately registered executable.
-  # Stop only this verified component before replacement so its open image
-  # handle cannot leave the signed release partially upgraded. The caller
-  # restarts it in the active user session after the protected service is up.
-  foreach ($companion in $remoteCompanions) {
-    Stop-Process -Id $companion.Id -Force -ErrorAction Stop
+  # Every user-session companion is an independently running executable. Stop
+  # and wait for all of them before any copy so a locked chat or tray binary
+  # cannot strand the endpoint in a mixed release.
+  foreach ($process in $userSessionProcesses) {
+    Stop-Process -Id $process.Id -Force -ErrorAction Stop
+  }
+  foreach ($process in $userSessionProcesses) {
+    if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
+      try {
+        Wait-Process -Id $process.Id -Timeout 15 -ErrorAction Stop
+      } catch {
+        throw "Nexus user-session process $($process.Id) did not exit. Aborting the release upgrade."
+      }
+    }
   }
 
   foreach ($name in $required) {
