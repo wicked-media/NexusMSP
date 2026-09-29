@@ -110,12 +110,18 @@ async def _native_remote_policy(agent_id: str, client_id: str, tenant_id: str) -
     device_tenant = str((device or {}).get("tenant_id") or "nexus-local")
     binding_valid = bool(managed_device_id and device_tenant == tenant_id)
     companion = _remote_companion_binary_info()
-    enabled = binding_valid and bool(companion["exists"] and companion["sha256"])
+    agent_release = _binary_info()
+    enabled = binding_valid and bool(
+        companion["exists"] and companion["sha256"]
+        and agent_release["exists"] and agent_release["sha256"]
+    )
     reason = None
     if not binding_valid:
         reason = "A canonical tenant-bound managed device is required before Native Remote can be enabled."
     elif not companion["exists"]:
         reason = "The signed Nexus Remote Companion artifact is unavailable on the server."
+    elif not agent_release["exists"]:
+        reason = "The signed Nexus Agent artifact is unavailable on the server."
     return {
         "enabled": enabled,
         "schema_version": 1,
@@ -129,6 +135,11 @@ async def _native_remote_policy(agent_id: str, client_id: str, tenant_id: str) -
         # advertise or broker Native Remote capability.
         "companion_sha256": companion["sha256"],
         "companion_size": companion["size"],
+		# Native Remote is a release pair, not two independently compatible
+		# executables. The endpoint must verify the privileged service image as
+		# well as the user-session companion before opening a local bridge.
+		"agent_release_sha256": agent_release["sha256"],
+		"agent_release_size": agent_release["size"],
 		"maximum_grant_lifetime_seconds": 24 * 60 * 60,
         "replay_store_required": True,
         "attended_only": True,

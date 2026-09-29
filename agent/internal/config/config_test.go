@@ -59,11 +59,17 @@ func TestNativeRemoteCompanionReadyRequiresPinnedDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(payload)
+	agentPayload := []byte("trusted nexus agent")
+	if err := os.WriteFile(filepath.Join(dir, "nexus-agent.exe"), agentPayload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentDigest := sha256.Sum256(agentPayload)
 	cfg := &Config{
 		configPath: filepath.Join(dir, "config.json"),
 		PlatformPolicy: &PlatformPolicy{NativeRemote: map[string]any{
-			"enabled":          true,
-			"companion_sha256": fmt.Sprintf("%x", digest),
+			"enabled":              true,
+			"companion_sha256":     fmt.Sprintf("%x", digest),
+			"agent_release_sha256": fmt.Sprintf("%x", agentDigest),
 		}},
 	}
 	if !cfg.NativeRemoteCompanionReady() {
@@ -73,6 +79,11 @@ func TestNativeRemoteCompanionReadyRequiresPinnedDigest(t *testing.T) {
 	if cfg.NativeRemoteCompanionReady() {
 		t.Fatal("mismatched companion digest must fail closed")
 	}
+	cfg.PlatformPolicy.NativeRemote["companion_sha256"] = fmt.Sprintf("%x", digest)
+	cfg.PlatformPolicy.NativeRemote["agent_release_sha256"] = "0000000000000000000000000000000000000000000000000000000000000000"
+	if cfg.NativeRemoteCompanionReady() {
+		t.Fatal("mismatched agent release digest must fail closed")
+	}
 }
 
 func TestRuntimeCapabilitiesAdvertiseNativeRemoteOnlyForPinnedCompanion(t *testing.T) {
@@ -80,8 +91,9 @@ func TestRuntimeCapabilitiesAdvertiseNativeRemoteOnlyForPinnedCompanion(t *testi
 	cfg := &Config{
 		configPath: filepath.Join(dir, "config.json"),
 		PlatformPolicy: &PlatformPolicy{NativeRemote: map[string]any{
-			"enabled":          true,
-			"companion_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+			"enabled":              true,
+			"companion_sha256":     "0000000000000000000000000000000000000000000000000000000000000000",
+			"agent_release_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
 		}},
 	}
 	for _, capability := range cfg.RuntimeCapabilities() {
@@ -94,7 +106,13 @@ func TestRuntimeCapabilitiesAdvertiseNativeRemoteOnlyForPinnedCompanion(t *testi
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(payload)
+	agentPayload := []byte("pinned nexus agent")
+	if err := os.WriteFile(filepath.Join(dir, "nexus-agent.exe"), agentPayload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentDigest := sha256.Sum256(agentPayload)
 	cfg.PlatformPolicy.NativeRemote["companion_sha256"] = fmt.Sprintf("%x", digest)
+	cfg.PlatformPolicy.NativeRemote["agent_release_sha256"] = fmt.Sprintf("%x", agentDigest)
 	capabilities := cfg.RuntimeCapabilities()
 	foundV1, foundV2 := false, false
 	for _, capability := range capabilities {

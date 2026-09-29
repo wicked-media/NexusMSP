@@ -288,19 +288,26 @@ func (c *Config) NativeRemoteCompanionReady() bool {
 	enabled, _ := c.PlatformPolicy.NativeRemote["enabled"].(bool)
 	expected, _ := c.PlatformPolicy.NativeRemote["companion_sha256"].(string)
 	expected = strings.ToLower(strings.TrimSpace(expected))
-	if !enabled || len(expected) != sha256.Size*2 {
+	expectedAgent, _ := c.PlatformPolicy.NativeRemote["agent_release_sha256"].(string)
+	expectedAgent = strings.ToLower(strings.TrimSpace(expectedAgent))
+	if !enabled || len(expected) != sha256.Size*2 || len(expectedAgent) != sha256.Size*2 {
 		return false
 	}
-	file, err := os.Open(filepath.Join(c.BaseDir(), "nexus-remote-companion.exe"))
+	return fileSHA256(filepath.Join(c.BaseDir(), "nexus-agent.exe")) == expectedAgent &&
+		fileSHA256(filepath.Join(c.BaseDir(), "nexus-remote-companion.exe")) == expected
+}
+
+func fileSHA256(path string) string {
+	file, err := os.Open(path)
 	if err != nil {
-		return false
+		return ""
 	}
 	defer file.Close()
 	digest := sha256.New()
 	if _, err := io.Copy(digest, file); err != nil {
-		return false
+		return ""
 	}
-	return fmt.Sprintf("%x", digest.Sum(nil)) == expected
+	return fmt.Sprintf("%x", digest.Sum(nil))
 }
 
 // ApplyPlatformPolicy persists the service-controlled cadence alongside the
