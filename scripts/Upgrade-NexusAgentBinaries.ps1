@@ -36,6 +36,7 @@ if (-not (Get-Service -Name $AgentServiceName -ErrorAction SilentlyContinue)) {
 $backup = Join-Path $AgentHome ("backup-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $service = Get-Service -Name $AgentServiceName
 $wasRunning = $service.Status -eq "Running"
+$agentProcesses = @(Get-Process -Name "nexus-agent" -ErrorAction SilentlyContinue)
 $remoteCompanions = @(Get-Process -Name "nexus-remote-companion" -ErrorAction SilentlyContinue)
 
 if (-not $PSCmdlet.ShouldProcess($AgentHome, "Replace Nexus Agent release binaries while preserving config.json")) {
@@ -47,6 +48,18 @@ try {
   if ($wasRunning) {
     Stop-Service -Name $AgentServiceName -Force
     (Get-Service -Name $AgentServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+    # Service Control Manager can report Stopped before the Go process has
+    # released its executable handle. Do not create a mixed Agent/Companion
+    # release by copying while that handle is still open.
+    foreach ($agentProcess in $agentProcesses) {
+      if (Get-Process -Id $agentProcess.Id -ErrorAction SilentlyContinue) {
+        try {
+          Wait-Process -Id $agentProcess.Id -Timeout 30 -ErrorAction Stop
+        } catch {
+          throw "Nexus Agent process $($agentProcess.Id) did not exit after the service stopped. Aborting the release upgrade."
+        }
+      }
+    }
   }
 
   # The user-session Remote Companion is a separately registered executable.
