@@ -638,6 +638,15 @@ def test_installer_records_the_configured_agent_intervals():
     assert release_manifest["bundled_components"] == {"client_chat": True, "agent_tray": True, "native_remote": True}
 
 
+def test_newer_agent_build_remains_eligible_for_signed_remote_companion(monkeypatch):
+    monkeypatch.setattr(nexus_agent, "AGENT_VERSION", "0.1.11-endpoint-readiness")
+
+    assert nexus_agent._agent_supports_remote_companion("0.1.11-endpoint-readiness") is True
+    assert nexus_agent._agent_supports_remote_companion("0.1.13-companion-health") is True
+    assert nexus_agent._agent_supports_remote_companion("0.1.10") is False
+    assert nexus_agent._agent_supports_remote_companion("unparseable") is False
+
+
 def test_public_registration_cannot_request_an_elevated_role():
     registration = UserCreate(
         name="Untrusted User",

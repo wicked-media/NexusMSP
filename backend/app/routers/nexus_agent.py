@@ -326,7 +326,12 @@ async def _ensure_native_remote_companion_for_agent(agent: dict) -> str:
     """Queue a hash-pinned Remote Companion only for an eligible current agent."""
     if not agent.get("id") or not agent.get("is_active", True) or not _is_windows_agent(agent):
         return "not_eligible"
-    if agent.get("agent_version") != AGENT_VERSION:
+    # A companion may be delivered to a newer compatible agent build.  Exact
+    # label comparison incorrectly treated a newer vendor-suffixed build as
+    # stale when the control plane was serving an older release, leaving the
+    # endpoint permanently unable to reconcile its signed companion.  Only a
+    # parseable version below the server minimum must be upgraded first.
+    if not _agent_supports_remote_companion(str(agent.get("agent_version") or "")):
         return "requires_agent_update"
     tenant_id = str(agent.get("tenant_id") or "nexus-local")
     policy = await _native_remote_policy(str(agent["id"]), str(agent.get("client_id") or ""), tenant_id)
@@ -473,6 +478,17 @@ def _agent_release_state(current_version: str, target_version: str = AGENT_VERSI
     if current == target:
         return "current"
     return "ahead_or_unmanaged"
+
+
+def _agent_supports_remote_companion(agent_version: str) -> bool:
+    """Return whether an agent meets the server's minimum companion contract.
+
+    The release label may differ when a compatible agent has been rebuilt with
+    a newer vendor suffix.  Treating that as an exact-version mismatch blocks
+    the signed companion reconciler indefinitely, even though the endpoint is
+    newer than the control-plane minimum.
+    """
+    return _agent_release_state(agent_version, AGENT_VERSION) in {"current", "ahead_or_unmanaged"}
 
 
 def _validate_agent_server_url(value: str, *, allow_empty: bool = True) -> str:

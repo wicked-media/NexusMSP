@@ -167,7 +167,6 @@ func serve(pipe *os.File) error {
 		return err
 	}
 	writer := &lockedWriter{writer: pipe}
-	statusChecker := &pipeGrantStatus{reader: pipe, writer: writer}
 	coordinator, err := nexusremote.NewCoordinator(*message.Policy, replay, func(sessionID string, mode nexusremote.Mode, expiresAt time.Time) (bool, string) {
 		return consentPrompt(sessionID, mode, expiresAt, message.Grant.TechnicianName, message.Grant.Purpose)
 	}, func(sessionID, outcome, reason string) error {
@@ -195,16 +194,19 @@ func serve(pipe *os.File) error {
 	if purpose == "" {
 		purpose = message.Grant.Purpose
 	}
-	if message.Grant.Mode == nexusremote.Control {
-		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID, writer)
-	}
+	// The Agent and companion share one authenticated, duplex bridge.  A single
+	// reader owns that bridge and routes status replies and signed control events;
+	// this prevents the separate control pipe from stalling delivery while keeping
+	// frame uploads and acknowledgements serialised through writer.
+	inbox := newBridgeInbox(ctx, cancel, session, message.Grant.SessionID, writer)
+	go inbox.run(pipe)
 	go activeSessionNotice(technicianName, purpose, message.Grant.Mode, cancel, &locallyStopped)
 	// Keep a substantial margin above the relay's 500 ms minimum. Windows
 	// scheduling, capture and request completion can bunch wakeups under load;
 	// a nominal one-second cadence still proved too close to the server boundary
 	// on a live endpoint. Two seconds keeps capture well inside the 20-second
 	// freshness window while preserving the relay's anti-flooding contract.
-	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, statusChecker.Active, func(sessionID, state, detail string) error {
+	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, inbox.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
 	}, nexusremote.StreamOptions{FrameInterval: 2 * time.Second, StatusEvery: 5 * time.Second, JPEGQuality: 82})
 	if locallyStopped.Load() {
@@ -216,94 +218,103 @@ func serve(pipe *os.File) error {
 	return err
 }
 
-// receiveControlEvents uses a separate verified Agent-owned pipe so inbound
-// input cannot race frame uploads or the grant-status request/response pipe.
-func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string, mainBridge *lockedWriter) {
-	var lastSequence uint64
-	var lastConnectDiagnostic time.Time
-	for ctx.Err() == nil {
-		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionControlPipeName), windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
-		if err != nil {
-			if time.Since(lastConnectDiagnostic) >= 10*time.Second {
-				log.Printf("remote companion: control pipe unavailable: %s", boundedDiagnostic(err.Error()))
-				lastConnectDiagnostic = time.Now()
-			}
-			time.Sleep(time.Second)
-			continue
-		}
-		log.Printf("remote companion: protected control channel connected")
-		pipe := os.NewFile(uintptr(handle), "nexus-remote-control")
-		for ctx.Err() == nil {
-			message, readErr := nexusremote.ReadIPCMessage(pipe)
-			if readErr != nil {
-				if ctx.Err() == nil {
-					log.Printf("remote companion: protected control channel closed: %s", boundedDiagnostic(readErr.Error()))
-				}
-				break
-			}
-			if message.Type != "input" || message.SessionID != sessionID || message.Control == nil {
-				continue
-			}
-			event, validErr := nexusremote.ValidateControlEvent(*message.Control)
-			if validErr != nil {
-				continue
-			}
-			if event.Sequence > lastSequence {
-				log.Printf("remote companion: control input %d received", event.Sequence)
-				if injectErr := (nexusremote.WindowsInputInjector{}).Inject(session, event, time.Now().UTC()); injectErr != nil {
-					// Preserve only bounded local delivery diagnostics.  The browser
-					// receives compact queue/acknowledgement evidence; it must never
-					// receive endpoint screen data or a Windows error verbatim.
-					log.Printf("remote companion: control input %d rejected: %s", event.Sequence, boundedDiagnostic(injectErr.Error()))
-					if session.Authorize(true, time.Now().UTC()) != nil {
-						cancel()
-						_ = pipe.Close()
-						return
-					}
-					continue
-				}
-				lastSequence = event.Sequence
-			}
-			if ackErr := mainBridge.send(nexusremote.IPCMessage{Type: "input_ack", SessionID: sessionID, Control: &event}); ackErr != nil {
-				log.Printf("remote companion: control acknowledgement %d failed: %s", event.Sequence, boundedDiagnostic(ackErr.Error()))
-			} else {
-				log.Printf("remote companion: control input %d acknowledged locally", event.Sequence)
-			}
-		}
-		_ = pipe.Close()
-	}
-}
-
 type lockedWriter struct {
 	mu     sync.Mutex
 	writer io.Writer
 }
 
-// pipeGrantStatus serializes request/response status checks over the same
-// credential-free pipe. The Agent service, not the companion, contacts Nexus.
-type pipeGrantStatus struct {
-	mu     sync.Mutex
-	reader io.Reader
-	writer *lockedWriter
+// bridgeInbox is the sole reader for the protected companion bridge.  The
+// user-session companion never receives an API credential; it can only ask the
+// verified Agent to check status, and it accepts input only for this grant.
+type bridgeInbox struct {
+	ctx          context.Context
+	cancel       context.CancelFunc
+	session      *nexusremote.Session
+	sessionID    string
+	writer       *lockedWriter
+	statusMu     sync.Mutex
+	statusReply  chan bool
+	done         chan struct{}
+	lastSequence uint64
 }
 
-func (s *pipeGrantStatus) Active(sessionID string) (bool, error) {
-	if s == nil || s.reader == nil || s.writer == nil || sessionID == "" {
-		return false, errors.New("native remote status pipe is unavailable")
+func newBridgeInbox(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string, writer *lockedWriter) *bridgeInbox {
+	return &bridgeInbox{ctx: ctx, cancel: cancel, session: session, sessionID: sessionID, writer: writer, statusReply: make(chan bool, 1), done: make(chan struct{})}
+}
+
+func (b *bridgeInbox) Active(sessionID string) (bool, error) {
+	if b == nil || b.writer == nil || sessionID == "" || sessionID != b.sessionID {
+		return false, errors.New("native remote status bridge is unavailable")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.writer.send(nexusremote.IPCMessage{Type: "status", SessionID: sessionID}); err != nil {
+	b.statusMu.Lock()
+	defer b.statusMu.Unlock()
+	if err := b.writer.send(nexusremote.IPCMessage{Type: "status", SessionID: sessionID}); err != nil {
 		return false, err
 	}
-	response, err := nexusremote.ReadIPCMessage(s.reader)
+	select {
+	case active := <-b.statusReply:
+		return active, nil
+	case <-b.done:
+		return false, errors.New("native remote status bridge closed")
+	case <-b.ctx.Done():
+		return false, b.ctx.Err()
+	}
+}
+
+func (b *bridgeInbox) run(reader io.Reader) {
+	defer close(b.done)
+	for b.ctx.Err() == nil {
+		message, err := nexusremote.ReadIPCMessage(reader)
+		if err != nil {
+			if b.ctx.Err() == nil {
+				log.Printf("remote companion: protected bridge closed: %s", boundedDiagnostic(err.Error()))
+				b.cancel()
+			}
+			return
+		}
+		if message.SessionID != b.sessionID {
+			log.Printf("remote companion: protected bridge rejected a mismatched session message")
+			b.cancel()
+			return
+		}
+		switch message.Type {
+		case "status":
+			select {
+			case b.statusReply <- message.Active:
+			case <-b.ctx.Done():
+				return
+			}
+		case "input":
+			b.handleInput(message)
+		default:
+			log.Printf("remote companion: protected bridge rejected unsupported message type")
+			b.cancel()
+			return
+		}
+	}
+}
+
+func (b *bridgeInbox) handleInput(message nexusremote.IPCMessage) {
+	if message.Control == nil || b.session == nil {
+		return
+	}
+	event, err := nexusremote.ValidateControlEvent(*message.Control)
 	if err != nil {
-		return false, err
+		return
 	}
-	if response.Type != "status" || response.SessionID != sessionID {
-		return false, errors.New("invalid native remote status response")
+	if event.Sequence > b.lastSequence {
+		log.Printf("remote companion: control input %d received", event.Sequence)
+		if injectErr := (nexusremote.WindowsInputInjector{}).Inject(b.session, event, time.Now().UTC()); injectErr != nil {
+			log.Printf("remote companion: control input %d rejected: %s", event.Sequence, boundedDiagnostic(injectErr.Error()))
+			return
+		}
+		b.lastSequence = event.Sequence
 	}
-	return response.Active, nil
+	if ackErr := b.writer.send(nexusremote.IPCMessage{Type: "input_ack", SessionID: b.sessionID, Control: &event}); ackErr != nil {
+		log.Printf("remote companion: control acknowledgement %d failed: %s", event.Sequence, boundedDiagnostic(ackErr.Error()))
+	} else {
+		log.Printf("remote companion: control input %d acknowledged locally", event.Sequence)
+	}
 }
 
 func (w *lockedWriter) send(message nexusremote.IPCMessage) error {

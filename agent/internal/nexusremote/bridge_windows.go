@@ -199,15 +199,12 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy}); err != nil {
 		return err
 	}
+	writer := &lockedControlWriter{writer: pipe}
 	transportConnected := false
-	// Create the private control listener before the companion displays its
-	// consent dialog.  The server still refuses to return any control event
-	// until the companion has acknowledged the grant, so this never creates a
-	// pre-consent control capability.  It does remove a timing gap where the
-	// companion began its client retry loop before the agent had scheduled the
-	// listener after processing the acknowledgement.
+	// The authenticated duplex bridge is the only control transport. The server
+	// returns no control event until the companion has acknowledged consent.
 	if grant.Mode == Control {
-		go serveControlPipe(sessionCtx, installDir, policy, api, grant)
+		go serveControlDelivery(sessionCtx, api, grant, writer)
 	}
 	defer func() {
 		// If a frame relay or pipe operation fails after the companion proved it
@@ -267,7 +264,7 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 			if err != nil {
 				return err
 			}
-			if err := WriteIPCMessage(pipe, IPCMessage{Type: "status", SessionID: grant.SessionID, Active: active}); err != nil {
+			if err := writer.send(IPCMessage{Type: "status", SessionID: grant.SessionID, Active: active}); err != nil {
 				return err
 			}
 		case "stop":
@@ -289,31 +286,13 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	}
 }
 
-// serveControlPipe is intentionally independent of the frame pipe. The
-// bridge polls only the signed control grant's delivery queue and deletes an
-// event only after the verified companion acknowledges its sequence.
-func serveControlPipe(ctx context.Context, installDir string, policy CompanionPolicy, api *AgentAPI, grant *DeliveredGrant) {
-	pipe, err := createCompanionControlPipe()
-	if err != nil {
-		log.Printf("[native-remote] control pipe unavailable: %v", err)
+// serveControlDelivery polls only the signed control grant's delivery queue
+// and sends events over the already verified primary bridge. Events are deleted
+// only after the companion acknowledges their sequence.
+func serveControlDelivery(ctx context.Context, api *AgentAPI, grant *DeliveredGrant, writer *lockedControlWriter) {
+	if api == nil || grant == nil || writer == nil {
 		return
 	}
-	defer windows.CloseHandle(pipe)
-	if err := windows.ConnectNamedPipe(pipe, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
-		return
-	}
-	if err := verifyCompanionClient(pipe, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
-		// The existing verified main-pipe client is the authority; a second pipe
-		// must still have the pinned image digest before any control delivery.
-		log.Printf("[native-remote] rejected control pipe client: %v", err)
-		return
-	}
-	if err := api.Transport(grant.SessionID, "connected", "protected control channel attached"); err != nil {
-		log.Printf("[native-remote] unable to record control channel attachment: %v", err)
-	}
-	file := os.NewFile(uintptr(pipe), "nexus-remote-control-bridge")
-	defer file.Close()
-	writer := &lockedControlWriter{writer: file}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	sent := map[uint64]time.Time{}
