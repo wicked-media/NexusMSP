@@ -232,32 +232,31 @@ type bridgeInbox struct {
 	session      *nexusremote.Session
 	sessionID    string
 	writer       *lockedWriter
-	statusMu     sync.Mutex
-	statusReply  chan bool
 	done         chan struct{}
 	lastSequence uint64
+	active       atomic.Bool
 }
 
 func newBridgeInbox(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string, writer *lockedWriter) *bridgeInbox {
-	return &bridgeInbox{ctx: ctx, cancel: cancel, session: session, sessionID: sessionID, writer: writer, statusReply: make(chan bool, 1), done: make(chan struct{})}
+	inbox := &bridgeInbox{ctx: ctx, cancel: cancel, session: session, sessionID: sessionID, writer: writer, done: make(chan struct{})}
+	// The signed grant has already passed local verification and consent. The
+	// Agent immediately replaces this provisional state with its authenticated
+	// liveness feed; a negative or failed feed cancels capture fail-closed.
+	inbox.active.Store(true)
+	return inbox
 }
 
 func (b *bridgeInbox) Active(sessionID string) (bool, error) {
 	if b == nil || b.writer == nil || sessionID == "" || sessionID != b.sessionID {
 		return false, errors.New("native remote status bridge is unavailable")
 	}
-	b.statusMu.Lock()
-	defer b.statusMu.Unlock()
-	if err := b.writer.send(nexusremote.IPCMessage{Type: "status", SessionID: sessionID}); err != nil {
-		return false, err
-	}
 	select {
-	case active := <-b.statusReply:
-		return active, nil
 	case <-b.done:
 		return false, errors.New("native remote status bridge closed")
 	case <-b.ctx.Done():
 		return false, b.ctx.Err()
+	default:
+		return b.active.Load(), nil
 	}
 }
 
@@ -279,9 +278,10 @@ func (b *bridgeInbox) run(reader io.Reader) {
 		}
 		switch message.Type {
 		case "status":
-			select {
-			case b.statusReply <- message.Active:
-			case <-b.ctx.Done():
+			b.active.Store(message.Active)
+			if !message.Active {
+				log.Printf("remote companion: Agent revoked the signed session liveness")
+				b.cancel()
 				return
 			}
 		case "input":

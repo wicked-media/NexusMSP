@@ -201,6 +201,10 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	}
 	writer := &lockedControlWriter{writer: pipe}
 	transportConnected := false
+	// Liveness flows from the authenticated Agent to the user-session
+	// companion. This avoids a synchronous status request sharing the capture
+	// bridge while still making server revocation fail closed within one poll.
+	go serveGrantLiveness(sessionCtx, api, grant, writer)
 	// The authenticated duplex bridge is the only control transport. The server
 	// returns no control event until the companion has acknowledged consent.
 	if grant.Mode == Control {
@@ -334,6 +338,39 @@ func serveControlDelivery(ctx context.Context, api *AgentAPI, grant *DeliveredGr
 					log.Printf("[native-remote] control delivery write failed: %v", writeErr)
 					_ = api.Transport(grant.SessionID, "connected", boundedReason("control delivery write failed: "+writeErr.Error(), "control delivery write failed"))
 				}
+			}
+		}
+	}
+}
+
+func serveGrantLiveness(ctx context.Context, api *AgentAPI, grant *DeliveredGrant, writer *lockedControlWriter) {
+	if api == nil || grant == nil || writer == nil {
+		return
+	}
+	publish := func() bool {
+		active, err := api.Status(grant.SessionID)
+		if err != nil {
+			log.Printf("[native-remote] grant liveness check failed: %v", err)
+			active = false
+		}
+		if err := writer.send(IPCMessage{Type: "status", SessionID: grant.SessionID, Active: active}); err != nil {
+			log.Printf("[native-remote] grant liveness delivery failed: %v", err)
+			return false
+		}
+		return active
+	}
+	if !publish() {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !publish() {
+				return
 			}
 		}
 	}
