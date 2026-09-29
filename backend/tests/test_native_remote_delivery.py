@@ -156,6 +156,17 @@ def test_agent_can_read_revocation_status_without_reactivating(monkeypatch):
     assert database.native_remote_frames.rows == []
 
 
+def test_liveness_keeps_a_delivered_grant_available_for_endpoint_consent(monkeypatch):
+    database = setup_endpoint(monkeypatch, status="delivered")
+
+    result = asyncio.run(routes.native_remote_grant_status("session-1"))
+
+    assert result["active"] is True
+    assert result["status"] == "pending_consent"
+    assert database.remote_sessions.rows[0]["status"] == "authorised"
+    assert "launch_status" not in database.remote_sessions.rows[0]
+
+
 def test_status_check_expires_and_closes_an_elapsed_grant(monkeypatch):
     database = setup_endpoint(monkeypatch, status="acknowledged")
     database.native_remote_grants.rows[0]["expires_at"] = native_remote._iso(native_remote._now() - timedelta(seconds=1))

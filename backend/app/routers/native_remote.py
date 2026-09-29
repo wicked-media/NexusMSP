@@ -277,7 +277,17 @@ async def native_remote_grant_status(
             {"$set": {"status": "expired", "expired_at": now}},
         )
         status = "expired"
-    active = status == "acknowledged" and str(grant.get("expires_at") or "") > now
+    # A delivered grant is deliberately still live while the interactive
+    # companion shows its attended-consent prompt.  Treating that short
+    # pending-consent interval as terminal races the companion: the agent's
+    # first liveness report can arrive before the companion acknowledgement
+    # and revoke the very session the user is being asked to approve.
+    #
+    # Delivery is not authority to capture or control: those operations still
+    # require an acknowledged grant in their own endpoint routes.  It only
+    # keeps the signed one-time grant available until it is accepted, rejected,
+    # revoked, or expires.
+    active = status in {"delivered", "acknowledged"} and str(grant.get("expires_at") or "") > now
     if not active:
         terminal_status = "grant_expired" if status == "expired" else "grant_revoked" if status == "revoked" else "grant_inactive"
         # The same protected status check that stops the companion also closes
@@ -301,7 +311,7 @@ async def native_remote_grant_status(
     return {
         "session_id": session_id,
         "active": active,
-        "status": status if not active else "active",
+        "status": "pending_consent" if status == "delivered" else status if not active else "active",
         "expires_at": grant.get("expires_at"),
         "revoked_at": grant.get("revoked_at"),
     }

@@ -217,6 +217,24 @@ def test_revoked_native_grant_releases_endpoint_for_new_authorisation(monkeypatc
     assert database.native_remote_grants.rows[1]["status"] == "issued"
 
 
+def test_terminal_session_grant_is_reconciled_before_new_endpoint_authorisation(monkeypatch):
+    database = SimpleNamespace(
+        settings=Rows(), native_remote_grants=Rows(), native_remote_control_events=Rows(),
+        native_remote_frames=Rows(), nexus_agents=Rows(),
+        remote_sessions=Rows([{"id": "session-1", "tenant_id": "tenant-1", "status": "ended"}]),
+    )
+    monkeypatch.setattr(native_remote, "db", database)
+    user = {"id": "tech-1", "tenant_id": "tenant-1"}
+    first = {"id": "session-1", "device_id": "device-1", "client_id": "client-1", "provider_device_id": "agent-1"}
+    second = {**first, "id": "session-2"}
+
+    asyncio.run(native_remote.issue_grant(session=first, user=user, mode="view"))
+    replacement = asyncio.run(native_remote.issue_grant(session=second, user=user, mode="view"))
+
+    assert replacement["session_id"] == "session-2"
+    assert database.native_remote_grants.rows[0]["status"] == "revoked"
+
+
 def test_native_readiness_requires_online_capable_linked_agent(monkeypatch):
     database = SimpleNamespace(
         nexus_agents=ProjectionRows([{

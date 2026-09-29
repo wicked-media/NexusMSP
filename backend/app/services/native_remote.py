@@ -264,6 +264,24 @@ async def issue_grant(*, session: dict[str, Any], user: dict[str, Any], mode: st
         },
         {"_id": 0, "session_id": 1},
     )
+    # A request can be closed by the server while the endpoint is still
+    # presenting consent (for example after a transport restart). Reconcile
+    # that terminal session before enforcing the one-grant-per-endpoint rule;
+    # otherwise its delivered grant would strand the endpoint for the rest of
+    # the lease. This remains fail-closed for every non-terminal session.
+    if active_for_endpoint and getattr(db, "remote_sessions", None) is not None:
+        prior_session = await db.remote_sessions.find_one(
+            {"tenant_id": tenant_id, "id": active_for_endpoint["session_id"]},
+            {"_id": 0, "status": 1},
+        )
+        if prior_session and prior_session.get("status") == "ended":
+            await revoke_grant(
+                tenant_id=tenant_id,
+                session_id=active_for_endpoint["session_id"],
+                actor_id=actor_id,
+                reason="Reconciled stale grant from a terminal remote session",
+            )
+            active_for_endpoint = None
     if active_for_endpoint:
         raise HTTPException(
             status_code=409,
