@@ -196,7 +196,7 @@ func serve(pipe *os.File) error {
 		purpose = message.Grant.Purpose
 	}
 	if message.Grant.Mode == nexusremote.Control {
-		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID)
+		go receiveControlEvents(ctx, cancel, session, message.Grant.SessionID, writer)
 	}
 	go activeSessionNotice(technicianName, purpose, message.Grant.Mode, cancel, &locallyStopped)
 	// Keep a substantial margin above the relay's 500 ms minimum. Windows
@@ -218,11 +218,11 @@ func serve(pipe *os.File) error {
 
 // receiveControlEvents uses a separate verified Agent-owned pipe so inbound
 // input cannot race frame uploads or the grant-status request/response pipe.
-func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string) {
+func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, session *nexusremote.Session, sessionID string, mainBridge *lockedWriter) {
 	var lastSequence uint64
 	var lastConnectDiagnostic time.Time
 	for ctx.Err() == nil {
-		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionControlPipeName), windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionControlPipeName), windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 		if err != nil {
 			if time.Since(lastConnectDiagnostic) >= 10*time.Second {
 				log.Printf("remote companion: control pipe unavailable: %s", boundedDiagnostic(err.Error()))
@@ -264,7 +264,7 @@ func receiveControlEvents(ctx context.Context, cancel context.CancelFunc, sessio
 				}
 				lastSequence = event.Sequence
 			}
-			if ackErr := nexusremote.WriteIPCMessage(pipe, nexusremote.IPCMessage{Type: "input_ack", SessionID: sessionID, Control: &event}); ackErr != nil {
+			if ackErr := mainBridge.send(nexusremote.IPCMessage{Type: "input_ack", SessionID: sessionID, Control: &event}); ackErr != nil {
 				log.Printf("remote companion: control acknowledgement %d failed: %s", event.Sequence, boundedDiagnostic(ackErr.Error()))
 			} else {
 				log.Printf("remote companion: control input %d acknowledged locally", event.Sequence)

@@ -123,7 +123,15 @@ func createCompanionPipe() (windows.Handle, error) {
 }
 
 func createCompanionControlPipe() (windows.Handle, error) {
-	return createNamedCompanionPipe(CompanionControlPipeName)
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
+	if err != nil {
+		return 0, err
+	}
+	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	// Control travels only from the privileged Agent to the user-session
+	// companion. Acknowledgements return on the already verified main bridge,
+	// avoiding bidirectional pipe contention during capture and input.
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(CompanionControlPipeName), windows.PIPE_ACCESS_OUTBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
 }
 
 func createNamedCompanionPipe(name string) (windows.Handle, error) {
@@ -171,6 +179,8 @@ func verifyCompanionClient(pipe windows.Handle, expected, expectedSHA256 string)
 }
 
 func serveCompanion(ctx context.Context, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI) (serveErr error) {
+	sessionCtx, cancelSession := context.WithCancel(ctx)
+	defer cancelSession()
 	var grant *DeliveredGrant
 	for ctx.Err() == nil && grant == nil {
 		next, err := api.Pending()
@@ -197,7 +207,7 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	// companion began its client retry loop before the agent had scheduled the
 	// listener after processing the acknowledgement.
 	if grant.Mode == Control {
-		go serveControlPipe(ctx, installDir, policy, api, grant)
+		go serveControlPipe(sessionCtx, installDir, policy, api, grant)
 	}
 	defer func() {
 		// If a frame relay or pipe operation fails after the companion proved it
@@ -232,6 +242,17 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 				return errors.New("invalid companion acknowledgement")
 			}
 			if err := api.Acknowledge(grant.SessionID, message.Outcome, message.Reason); err != nil {
+				return err
+			}
+		case "input_ack":
+			if message.Control == nil {
+				return errors.New("missing companion control acknowledgement")
+			}
+			event, validateErr := ValidateControlEvent(*message.Control)
+			if validateErr != nil {
+				return validateErr
+			}
+			if err := api.AcknowledgeControl(grant.SessionID, event.Sequence); err != nil {
 				return err
 			}
 		case "transport":
@@ -293,19 +314,6 @@ func serveControlPipe(ctx context.Context, installDir string, policy CompanionPo
 	file := os.NewFile(uintptr(pipe), "nexus-remote-control-bridge")
 	defer file.Close()
 	writer := &lockedControlWriter{writer: file}
-	acked := make(chan uint64, 16)
-	go func() {
-		for {
-			message, readErr := ReadIPCMessage(file)
-			if readErr != nil || message.Type != "input_ack" || message.SessionID != grant.SessionID || message.Control == nil {
-				return
-			}
-			valid, validErr := ValidateControlEvent(*message.Control)
-			if validErr == nil {
-				acked <- valid.Sequence
-			}
-		}
-	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	sent := map[uint64]time.Time{}
@@ -315,10 +323,6 @@ func serveControlPipe(ctx context.Context, installDir string, policy CompanionPo
 		select {
 		case <-ctx.Done():
 			return
-		case sequence := <-acked:
-			if err := api.AcknowledgeControl(grant.SessionID, sequence); err == nil {
-				delete(sent, sequence)
-			}
 		case <-ticker.C:
 			events, pollErr := api.ControlEvents(grant.SessionID)
 			if pollErr != nil {
