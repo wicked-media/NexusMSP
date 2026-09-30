@@ -119,22 +119,27 @@ func bridgeLoop(ctx context.Context, installDir string, policy CompanionPolicy, 
 }
 
 func createCompanionPipe() (windows.Handle, error) {
-	return createNamedCompanionPipe(CompanionPipeName)
+	return createCompanionOutboundPipe(CompanionPipeName)
 }
 
-func createCompanionControlPipe() (windows.Handle, error) {
+func createCompanionEventPipe() (windows.Handle, error) {
+	return createCompanionInboundPipe(CompanionEventPipeName)
+}
+
+func createCompanionOutboundPipe(name string) (windows.Handle, error) {
 	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
 	if err != nil {
 		return 0, err
 	}
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
-	// Control travels only from the privileged Agent to the user-session
-	// companion. Acknowledgements return on the already verified main bridge,
-	// avoiding bidirectional pipe contention during capture and input.
-	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(CompanionControlPipeName), windows.PIPE_ACCESS_OUTBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(name), windows.PIPE_ACCESS_OUTBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
 }
 
 func createCompanionFramePipe() (windows.Handle, error) {
+	return createCompanionInboundPipe(CompanionFramePipeName)
+}
+
+func createCompanionInboundPipe(name string) (windows.Handle, error) {
 	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
 	if err != nil {
 		return 0, err
@@ -143,16 +148,7 @@ func createCompanionFramePipe() (windows.Handle, error) {
 	// Frames travel only from the user-session companion to the protected
 	// Agent.  This keeps multi-megabyte JPEG writes away from the lifecycle
 	// pipe, which remains available for consent, liveness, and control.
-	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(CompanionFramePipeName), windows.PIPE_ACCESS_INBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
-}
-
-func createNamedCompanionPipe(name string) (windows.Handle, error) {
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
-	if err != nil {
-		return 0, err
-	}
-	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
-	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(name), windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(name), windows.PIPE_ACCESS_INBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
 }
 
 func verifyCompanionClient(pipe windows.Handle, expected, expectedSHA256 string) error {
@@ -208,15 +204,29 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	if grant == nil {
 		return context.Canceled
 	}
+	eventPipe, err := createCompanionEventPipe()
+	if err != nil {
+		return fmt.Errorf("create protected event pipe: %w", err)
+	}
+	eventFile := os.NewFile(uintptr(eventPipe), "nexus-remote-events")
+	defer eventFile.Close()
 	framePipe, err := createCompanionFramePipe()
 	if err != nil {
 		return fmt.Errorf("create isolated frame pipe: %w", err)
 	}
 	frameFile := os.NewFile(uintptr(framePipe), "nexus-remote-frames")
 	defer frameFile.Close()
-	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy, FramePipeReady: true}); err != nil {
+	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy, FramePipeReady: true, EventPipeReady: true}); err != nil {
 		return err
 	}
+	log.Printf("[native-remote] waiting for protected event pipe client")
+	if err := windows.ConnectNamedPipe(eventPipe, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		return fmt.Errorf("connect protected event pipe: %w", err)
+	}
+	if err := verifyCompanionClient(eventPipe, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
+		return fmt.Errorf("verify protected event pipe client: %w", err)
+	}
+	log.Printf("[native-remote] protected event pipe client verified")
 	go relayCompanionFrames(sessionCtx, framePipe, frameFile, installDir, policy, api, grant)
 	writer := &lockedControlWriter{writer: pipe}
 	transportConnected := false
@@ -224,8 +234,9 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	// companion. This avoids a synchronous status request sharing the capture
 	// bridge while still making server revocation fail closed within one poll.
 	go serveGrantLiveness(sessionCtx, api, grant, writer)
-	// The authenticated duplex bridge is the only control transport. The server
-	// returns no control event until the companion has acknowledged consent.
+	// The protected control pipe carries only Agent-to-companion instructions.
+	// The server returns no control event until the companion has acknowledged
+	// consent through its separate event uplink.
 	if grant.Mode == Control {
 		go serveControlDelivery(sessionCtx, api, grant, writer)
 	}
@@ -249,7 +260,7 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 		}
 	}()
 	for {
-		message, err := ReadIPCMessage(pipe)
+		message, err := ReadIPCMessage(eventFile)
 		if err != nil {
 			return err
 		}
@@ -280,23 +291,13 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 				return err
 			}
 			transportConnected = message.State == "connected"
-		case "status":
-			// The user-session companion never receives the agent credential. It
-			// can only ask this verified bridge to check a grant's current status.
-			active, err := api.Status(grant.SessionID)
-			if err != nil {
-				return err
-			}
-			if err := writer.send(IPCMessage{Type: "status", SessionID: grant.SessionID, Active: active}); err != nil {
-				return err
-			}
 		case "stop":
 			if err := api.LocalStop(grant.SessionID, boundedReason(message.Reason, "Endpoint user stopped view-only access")); err != nil {
 				return err
 			}
 			return nil
-		case "frame":
-			return errors.New("desktop frame arrived on the control bridge")
+		case "frame", "status", "input":
+			return errors.New("message arrived on the protected event pipe with an invalid direction")
 		default:
 			return errors.New("unsupported companion message")
 		}
@@ -351,7 +352,10 @@ func serveControlDelivery(ctx context.Context, api *AgentAPI, grant *DeliveredGr
 	if api == nil || grant == nil || writer == nil {
 		return
 	}
-	ticker := time.NewTicker(250 * time.Millisecond)
+	// Pointer movement is coalesced in the viewer. A 100 ms delivery cadence
+	// keeps interactive input responsive while remaining bounded per active
+	// control session and independent from the frame relay.
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	sent := map[uint64]time.Time{}
 	observed := map[uint64]struct{}{}

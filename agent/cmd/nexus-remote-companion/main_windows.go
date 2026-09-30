@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -31,6 +32,10 @@ import (
 	"golang.org/x/sys/windows"
 	"nexusagent/internal/nexusremote"
 )
+
+// Version is injected at build time.  Health and release tooling may execute
+// the companion with --version; that must never start a second IPC client.
+var Version = "0.1.18-oneway-relay"
 
 const (
 	messageBoxYes = 6
@@ -107,7 +112,24 @@ type windowsMessage struct {
 }
 
 func main() {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("nexus-remote-companion %s\n", Version)
+		return
+	}
 	configureDiagnosticLog()
+	instance, err := windows.CreateMutex(nil, false, windows.StringToUTF16Ptr(`Local\NexusRemoteCompanion-v1`))
+	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		log.Printf("remote companion: unable to acquire single-instance guard: %s", boundedDiagnostic(err.Error()))
+		return
+	}
+	if errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		_ = windows.CloseHandle(instance)
+		log.Printf("remote companion: another signed-in companion instance is already active")
+		return
+	}
+	defer windows.CloseHandle(instance)
 	for {
 		pipe, err := connectPipe()
 		if err != nil {
@@ -148,11 +170,31 @@ func boundedDiagnostic(detail string) string {
 }
 
 func connectPipe() (*os.File, error) {
-	handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionPipeName), windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionPipeName), windows.GENERIC_READ, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		return nil, err
 	}
 	return os.NewFile(uintptr(handle), "nexus-remote-companion"), nil
+}
+
+func connectEventPipe(ctx context.Context) (*os.File, error) {
+	deadline := time.Now().Add(15 * time.Second)
+	log.Printf("remote companion: connecting protected event uplink")
+	for {
+		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionEventPipeName), windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+		if err == nil {
+			log.Printf("remote companion: protected event uplink connected")
+			return os.NewFile(uintptr(handle), "nexus-remote-event-uplink"), nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			log.Printf("remote companion: protected event uplink unavailable: %s", boundedDiagnostic(err.Error()))
+			return nil, err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
 }
 
 func connectFramePipe(ctx context.Context) (*os.File, error) {
@@ -183,14 +225,21 @@ func serve(pipe *os.File) error {
 	if message.Type != "grant" || message.Grant == nil || message.Policy == nil {
 		return errors.New("protected bridge did not provide a signed native grant")
 	}
-	if !message.FramePipeReady {
-		return errors.New("protected bridge did not prepare the isolated frame uplink")
+	if !message.FramePipeReady || !message.EventPipeReady {
+		return errors.New("protected bridge did not prepare the required one-way uplinks")
 	}
 	replay, err := nexusremote.NewFileReplayStore(filepath.Join(userStateDir(), "remote-replay.jsonl"), 4096)
 	if err != nil {
 		return err
 	}
-	writer := &lockedWriter{writer: pipe}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eventPipe, err := connectEventPipe(ctx)
+	if err != nil {
+		return fmt.Errorf("connect protected event uplink: %w", err)
+	}
+	defer eventPipe.Close()
+	writer := &lockedWriter{writer: eventPipe}
 	coordinator, err := nexusremote.NewCoordinator(*message.Policy, replay, func(sessionID string, mode nexusremote.Mode, expiresAt time.Time) (bool, string) {
 		return consentPrompt(sessionID, mode, expiresAt, message.Grant.TechnicianName, message.Grant.Purpose)
 	}, func(sessionID, outcome, reason string) error {
@@ -203,8 +252,6 @@ func serve(pipe *os.File) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	framePipe, err := connectFramePipe(ctx)
 	if err != nil {
 		return fmt.Errorf("connect isolated frame uplink: %w", err)
@@ -223,10 +270,9 @@ func serve(pipe *os.File) error {
 	if purpose == "" {
 		purpose = message.Grant.Purpose
 	}
-	// The Agent and companion share one authenticated, duplex bridge.  A single
-	// reader owns that bridge and routes status replies and signed control events;
-	// this prevents the separate control pipe from stalling delivery while keeping
-	// frame uploads and acknowledgements serialised through writer.
+	// Agent control is a one-way protected pipe. The companion is its sole
+	// reader; acknowledgements and transport evidence return through the separate
+	// event uplink, while frames use their own dedicated uplink.
 	inbox := newBridgeInbox(ctx, cancel, session, message.Grant.SessionID, writer)
 	go inbox.run(pipe)
 	go activeSessionNotice(technicianName, purpose, message.Grant.Mode, cancel, &locallyStopped)

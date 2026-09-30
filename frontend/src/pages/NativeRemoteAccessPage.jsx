@@ -122,6 +122,8 @@ export default function NativeRemoteAccessPage() {
   const [viewerFullscreen, setViewerFullscreen] = useState(false);
   const viewerInputSequence = useRef(0);
   const lastPointerMoveAt = useRef(0);
+  const pendingPointerMove = useRef(null);
+  const pointerMoveTimer = useRef(null);
   const lastViewerInputErrorAt = useRef(0);
   const viewerSessionId = viewerSession?.id || "";
 
@@ -365,6 +367,11 @@ export default function NativeRemoteAccessPage() {
       viewerInputSequence.current = 0;
       lastPointerMoveAt.current = 0;
     }
+    return () => {
+      if (pointerMoveTimer.current !== null) window.clearTimeout(pointerMoveTimer.current);
+      pointerMoveTimer.current = null;
+      pendingPointerMove.current = null;
+    };
   }, [viewerSessionId, resetViewerCanvas]);
 
   const normalisedPointer = useCallback((event) => {
@@ -401,13 +408,27 @@ export default function NativeRemoteAccessPage() {
     }
   }, [headers, viewerCanControl, viewerSession?.id]);
 
-  const handleViewerPointerMove = useCallback((event) => {
-    if (!viewerCanControl || Date.now() - lastPointerMoveAt.current < 80) return;
-    const point = normalisedPointer(event);
+  const flushPointerMove = useCallback(() => {
+    pointerMoveTimer.current = null;
+    const point = pendingPointerMove.current;
+    pendingPointerMove.current = null;
     if (!point) return;
     lastPointerMoveAt.current = Date.now();
     void sendViewerInput({ kind: "pointer_move", ...point });
-  }, [normalisedPointer, sendViewerInput, viewerCanControl]);
+  }, [sendViewerInput]);
+
+  const handleViewerPointerMove = useCallback((event) => {
+    if (!viewerCanControl) return;
+    const point = normalisedPointer(event);
+    if (!point) return;
+    pendingPointerMove.current = point;
+    if (pointerMoveTimer.current !== null) return;
+    // The Agent polls signed control envelopes independently of frame relay.
+    // Coalesce noisy browser mousemove events to the newest position so remote
+    // control stays responsive without growing an obsolete input backlog.
+    const delay = Math.max(0, 125 - (Date.now() - lastPointerMoveAt.current));
+    pointerMoveTimer.current = window.setTimeout(flushPointerMove, delay);
+  }, [flushPointerMove, normalisedPointer, viewerCanControl]);
 
   const handleViewerPointerButton = useCallback((event, pressed) => {
     if (!viewerCanControl) return;

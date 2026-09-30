@@ -12,13 +12,13 @@ import (
 )
 
 const (
-	CompanionPipeName = `\\.\pipe\NexusRemoteCompanion-v1`
-	// Desktop frames deliberately use their own one-way pipe.  Large frame
-	// writes must never contend with consent, liveness, or control messages on
-	// the small duplex bridge.
-	CompanionFramePipeName   = `\\.\pipe\NexusRemoteCompanion-frames-v1`
-	CompanionControlPipeName = `\\.\pipe\NexusRemoteCompanion-control-v1`
-	maxIPCMessageSize        = 6 * 1024 * 1024
+	// Every pipe is one-way. A native remote session must never use one duplex
+	// stream for endpoint events, Agent control, and desktop frames: Windows can
+	// block a writer behind an unread message in the opposite direction.
+	CompanionPipeName      = `\\.\pipe\NexusRemoteCompanion-v1`        // Agent -> companion control
+	CompanionEventPipeName = `\\.\pipe\NexusRemoteCompanion-events-v1` // companion -> Agent lifecycle events
+	CompanionFramePipeName = `\\.\pipe\NexusRemoteCompanion-frames-v1` // companion -> Agent desktop frames
+	maxIPCMessageSize      = 6 * 1024 * 1024
 )
 
 type IPCMessage struct {
@@ -35,6 +35,9 @@ type IPCMessage struct {
 	// FramePipeReady is a lifecycle-only acknowledgement that the protected
 	// Agent has created the isolated frame endpoint for this grant.
 	FramePipeReady bool `json:"frame_pipe_ready,omitempty"`
+	// EventPipeReady confirms that endpoint acknowledgements and transport
+	// evidence have a separate protected uplink before consent is shown.
+	EventPipeReady bool `json:"event_pipe_ready,omitempty"`
 }
 
 func WriteIPCMessage(writer io.Writer, message IPCMessage) error {

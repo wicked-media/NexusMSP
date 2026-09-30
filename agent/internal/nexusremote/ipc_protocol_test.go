@@ -29,3 +29,22 @@ func TestIPCStatusResponseRoundTrip(t *testing.T) {
 		t.Fatalf("message=%+v err=%v", message, err)
 	}
 }
+
+func TestIPCGrantPreservesOneWayUplinkReadiness(t *testing.T) {
+	var buffer bytes.Buffer
+	if err := WriteIPCMessage(&buffer, IPCMessage{
+		Type:           "grant",
+		SessionID:      "session-one-way",
+		FramePipeReady: true,
+		EventPipeReady: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	message, err := ReadIPCMessage(&buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !message.FramePipeReady || !message.EventPipeReady {
+		t.Fatalf("one-way uplink readiness was lost: %+v", message)
+	}
+}
