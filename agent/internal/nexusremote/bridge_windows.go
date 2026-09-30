@@ -134,6 +134,18 @@ func createCompanionControlPipe() (windows.Handle, error) {
 	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(CompanionControlPipeName), windows.PIPE_ACCESS_OUTBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
 }
 
+func createCompanionFramePipe() (windows.Handle, error) {
+	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
+	if err != nil {
+		return 0, err
+	}
+	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	// Frames travel only from the user-session companion to the protected
+	// Agent.  This keeps multi-megabyte JPEG writes away from the lifecycle
+	// pipe, which remains available for consent, liveness, and control.
+	return windows.CreateNamedPipe(windows.StringToUTF16Ptr(CompanionFramePipeName), windows.PIPE_ACCESS_INBOUND|windows.FILE_FLAG_FIRST_PIPE_INSTANCE, windows.PIPE_TYPE_BYTE|windows.PIPE_READMODE_BYTE|windows.PIPE_WAIT|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, maxIPCMessageSize, maxIPCMessageSize, 0, &sa)
+}
+
 func createNamedCompanionPipe(name string) (windows.Handle, error) {
 	sd, err := windows.SecurityDescriptorFromString("D:P(A;;GA;;;SY)(A;;GRGW;;;AU)")
 	if err != nil {
@@ -199,6 +211,13 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy}); err != nil {
 		return err
 	}
+	framePipe, err := createCompanionFramePipe()
+	if err != nil {
+		return fmt.Errorf("create isolated frame pipe: %w", err)
+	}
+	frameFile := os.NewFile(uintptr(framePipe), "nexus-remote-frames")
+	defer frameFile.Close()
+	go relayCompanionFrames(sessionCtx, framePipe, frameFile, installDir, policy, api, grant)
 	writer := &lockedControlWriter{writer: pipe}
 	transportConnected := false
 	// Liveness flows from the authenticated Agent to the user-session
@@ -277,15 +296,48 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 			}
 			return nil
 		case "frame":
-			jpeg, err := base64.StdEncoding.Strict().DecodeString(message.JPEGBase64)
-			if err != nil {
-				return errors.New("invalid companion frame")
-			}
-			if err := api.SendFrame(context.Background(), grant.SessionID, jpeg); err != nil {
-				return err
-			}
+			return errors.New("desktop frame arrived on the control bridge")
 		default:
 			return errors.New("unsupported companion message")
+		}
+	}
+}
+
+// relayCompanionFrames accepts exactly one separately verified, one-way frame
+// connection for the active bridge.  A compromised user-session process cannot
+// inject frames: its executable path and policy-pinned digest are checked again
+// before any payload reaches the authenticated Agent API.
+func relayCompanionFrames(ctx context.Context, handle windows.Handle, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI, grant *DeliveredGrant) {
+	if err := windows.ConnectNamedPipe(handle, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		if ctx.Err() == nil {
+			log.Printf("[native-remote] frame pipe connection failed: %v", err)
+		}
+		return
+	}
+	if err := verifyCompanionClient(handle, filepath.Join(installDir, "nexus-remote-companion.exe"), policy.CompanionSHA256); err != nil {
+		log.Printf("[native-remote] rejected frame pipe client: %v", err)
+		return
+	}
+	for ctx.Err() == nil {
+		message, err := ReadIPCMessage(pipe)
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, io.EOF) {
+				log.Printf("[native-remote] frame pipe ended: %v", err)
+			}
+			return
+		}
+		if message.Type != "frame" || message.SessionID != grant.SessionID {
+			log.Printf("[native-remote] rejected invalid frame pipe message")
+			return
+		}
+		jpeg, err := base64.StdEncoding.Strict().DecodeString(message.JPEGBase64)
+		if err != nil {
+			log.Printf("[native-remote] rejected malformed companion frame")
+			return
+		}
+		if err := api.SendFrame(context.Background(), grant.SessionID, jpeg); err != nil {
+			log.Printf("[native-remote] frame relay failed: %v", err)
+			return
 		}
 	}
 }

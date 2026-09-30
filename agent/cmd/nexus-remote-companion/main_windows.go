@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -154,6 +155,23 @@ func connectPipe() (*os.File, error) {
 	return os.NewFile(uintptr(handle), "nexus-remote-companion"), nil
 }
 
+func connectFramePipe(ctx context.Context) (*os.File, error) {
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionFramePipeName), windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+		if err == nil {
+			return os.NewFile(uintptr(handle), "nexus-remote-frame-uplink"), nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
 func serve(pipe *os.File) error {
 	message, err := nexusremote.ReadIPCMessage(pipe)
 	if err != nil {
@@ -181,6 +199,11 @@ func serve(pipe *os.File) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	framePipe, err := connectFramePipe(ctx)
+	if err != nil {
+		return fmt.Errorf("connect isolated frame uplink: %w", err)
+	}
+	defer framePipe.Close()
 	var locallyStopped atomic.Bool
 	stopHotkey := watchLocalStopHotkey(cancel, &locallyStopped)
 	defer stopHotkey()
@@ -206,7 +229,7 @@ func serve(pipe *os.File) error {
 	// a nominal one-second cadence still proved too close to the server boundary
 	// on a live endpoint. Two seconds keeps capture well inside the 20-second
 	// freshness window while preserving the relay's anti-flooding contract.
-	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, inbox.Active, func(sessionID, state, detail string) error {
+	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: &lockedWriter{writer: framePipe}}, inbox.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
 	}, nexusremote.StreamOptions{FrameInterval: 2 * time.Second, StatusEvery: 5 * time.Second, JPEGQuality: 82})
 	if err != nil && !errors.Is(err, context.Canceled) {
@@ -329,10 +352,21 @@ func (w *lockedWriter) send(message nexusremote.IPCMessage) error {
 	return nexusremote.WriteIPCMessage(w.writer, message)
 }
 
-type pipeFrameSink struct{ writer *lockedWriter }
+type pipeFrameSink struct {
+	writer    *lockedWriter
+	firstSent atomic.Bool
+}
 
 func (s *pipeFrameSink) SendFrame(_ context.Context, sessionID string, jpeg []byte) error {
-	return s.writer.send(nexusremote.IPCMessage{Type: "frame", SessionID: sessionID, JPEGBase64: base64.StdEncoding.EncodeToString(jpeg)})
+	first := s.firstSent.CompareAndSwap(false, true)
+	if first {
+		log.Printf("remote companion: relaying first desktop frame (%d bytes)", len(jpeg))
+	}
+	err := s.writer.send(nexusremote.IPCMessage{Type: "frame", SessionID: sessionID, JPEGBase64: base64.StdEncoding.EncodeToString(jpeg)})
+	if err == nil && first {
+		log.Printf("remote companion: first desktop frame relayed to protected Agent")
+	}
+	return err
 }
 
 func consentPrompt(sessionID string, mode nexusremote.Mode, expiresAt time.Time, technicianName, purpose string) (bool, string) {

@@ -12,7 +12,11 @@ import (
 )
 
 const (
-	CompanionPipeName        = `\\.\pipe\NexusRemoteCompanion-v1`
+	CompanionPipeName = `\\.\pipe\NexusRemoteCompanion-v1`
+	// Desktop frames deliberately use their own one-way pipe.  Large frame
+	// writes must never contend with consent, liveness, or control messages on
+	// the small duplex bridge.
+	CompanionFramePipeName   = `\\.\pipe\NexusRemoteCompanion-frames-v1`
 	CompanionControlPipeName = `\\.\pipe\NexusRemoteCompanion-control-v1`
 	maxIPCMessageSize        = 6 * 1024 * 1024
 )
