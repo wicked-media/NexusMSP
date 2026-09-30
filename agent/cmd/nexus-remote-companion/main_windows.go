@@ -157,15 +157,18 @@ func connectPipe() (*os.File, error) {
 
 func connectFramePipe(ctx context.Context) (*os.File, error) {
 	deadline := time.Now().Add(15 * time.Second)
+	log.Printf("remote companion: connecting isolated frame uplink")
 	for {
 		handle, err := windows.CreateFile(windows.StringToUTF16Ptr(nexusremote.CompanionFramePipeName), windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
 		if err == nil {
+			log.Printf("remote companion: isolated frame uplink connected")
 			return os.NewFile(uintptr(handle), "nexus-remote-frame-uplink"), nil
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		if time.Now().After(deadline) {
+			log.Printf("remote companion: isolated frame uplink unavailable: %s", boundedDiagnostic(err.Error()))
 			return nil, err
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -179,6 +182,9 @@ func serve(pipe *os.File) error {
 	}
 	if message.Type != "grant" || message.Grant == nil || message.Policy == nil {
 		return errors.New("protected bridge did not provide a signed native grant")
+	}
+	if !message.FramePipeReady {
+		return errors.New("protected bridge did not prepare the isolated frame uplink")
 	}
 	replay, err := nexusremote.NewFileReplayStore(filepath.Join(userStateDir(), "remote-replay.jsonl"), 4096)
 	if err != nil {

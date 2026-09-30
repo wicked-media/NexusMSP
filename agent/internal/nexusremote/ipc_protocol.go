@@ -32,6 +32,9 @@ type IPCMessage struct {
 	Active     bool             `json:"active,omitempty"`
 	JPEGBase64 string           `json:"jpeg_b64,omitempty"`
 	Control    *ControlEvent    `json:"control,omitempty"`
+	// FramePipeReady is a lifecycle-only acknowledgement that the protected
+	// Agent has created the isolated frame endpoint for this grant.
+	FramePipeReady bool `json:"frame_pipe_ready,omitempty"`
 }
 
 func WriteIPCMessage(writer io.Writer, message IPCMessage) error {

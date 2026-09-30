@@ -68,15 +68,21 @@ try {
   # and wait for all of them before any copy so a locked chat or tray binary
   # cannot strand the endpoint in a mixed release.
   foreach ($process in $userSessionProcesses) {
-    Stop-Process -Id $process.Id -Force -ErrorAction Stop
+    # The Remote Companion can be waiting on its visible WPF approval child.
+    # Stopping only the parent leaves that child attached and can keep the
+    # executable handle open.  Terminate the bounded process tree before a
+    # paired release swap so an upgrade either completes atomically or aborts.
+    & taskkill.exe /PID $process.Id /T /F | Out-Null
   }
   foreach ($process in $userSessionProcesses) {
     if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
-      try {
-        Wait-Process -Id $process.Id -Timeout 15 -ErrorAction Stop
-      } catch {
-        throw "Nexus user-session process $($process.Id) did not exit. Aborting the release upgrade."
-      }
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        while ((Get-Process -Id $process.Id -ErrorAction SilentlyContinue) -and [DateTime]::UtcNow -lt $deadline) {
+          Start-Sleep -Milliseconds 200
+        }
+        if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
+          throw "Nexus user-session process $($process.Id) did not exit. Aborting the release upgrade."
+        }
     }
   }
 

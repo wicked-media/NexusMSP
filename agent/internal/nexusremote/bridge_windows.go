@@ -208,15 +208,15 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 	if grant == nil {
 		return context.Canceled
 	}
-	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy}); err != nil {
-		return err
-	}
 	framePipe, err := createCompanionFramePipe()
 	if err != nil {
 		return fmt.Errorf("create isolated frame pipe: %w", err)
 	}
 	frameFile := os.NewFile(uintptr(framePipe), "nexus-remote-frames")
 	defer frameFile.Close()
+	if err := WriteIPCMessage(pipe, IPCMessage{Type: "grant", Grant: grant, Policy: &policy, FramePipeReady: true}); err != nil {
+		return err
+	}
 	go relayCompanionFrames(sessionCtx, framePipe, frameFile, installDir, policy, api, grant)
 	writer := &lockedControlWriter{writer: pipe}
 	transportConnected := false
@@ -308,6 +308,7 @@ func serveCompanion(ctx context.Context, pipe *os.File, installDir string, polic
 // inject frames: its executable path and policy-pinned digest are checked again
 // before any payload reaches the authenticated Agent API.
 func relayCompanionFrames(ctx context.Context, handle windows.Handle, pipe *os.File, installDir string, policy CompanionPolicy, api *AgentAPI, grant *DeliveredGrant) {
+	log.Printf("[native-remote] waiting for isolated frame pipe client")
 	if err := windows.ConnectNamedPipe(handle, nil); err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
 		if ctx.Err() == nil {
 			log.Printf("[native-remote] frame pipe connection failed: %v", err)
@@ -318,6 +319,7 @@ func relayCompanionFrames(ctx context.Context, handle windows.Handle, pipe *os.F
 		log.Printf("[native-remote] rejected frame pipe client: %v", err)
 		return
 	}
+	log.Printf("[native-remote] isolated frame pipe client verified")
 	for ctx.Err() == nil {
 		message, err := ReadIPCMessage(pipe)
 		if err != nil {
