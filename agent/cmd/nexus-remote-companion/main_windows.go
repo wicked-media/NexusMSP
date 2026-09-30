@@ -209,6 +209,12 @@ func serve(pipe *os.File) error {
 	err = nexusremote.StreamViewOnly(ctx, session, nexusremote.WindowsDesktopCapture{}, &pipeFrameSink{writer: writer}, inbox.Active, func(sessionID, state, detail string) error {
 		return writer.send(nexusremote.IPCMessage{Type: "transport", SessionID: sessionID, State: state, Reason: detail})
 	}, nexusremote.StreamOptions{FrameInterval: 2 * time.Second, StatusEvery: 5 * time.Second, JPEGQuality: 82})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		// Keep the endpoint log bounded and actionable. The protected Agent
+		// reports the same failure to the server lifecycle, while this local
+		// evidence distinguishes capture failure from relay delivery failure.
+		log.Printf("remote companion: desktop capture stream ended: %s", boundedDiagnostic(err.Error()))
+	}
 	if locallyStopped.Load() {
 		if stopErr := writer.send(nexusremote.IPCMessage{Type: "stop", SessionID: message.Grant.SessionID, Reason: "Endpoint user used the local stop shortcut"}); stopErr != nil {
 			return stopErr
