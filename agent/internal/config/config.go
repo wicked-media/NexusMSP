@@ -47,18 +47,37 @@ type DeviceIdentity struct {
 }
 
 type PlatformPolicy struct {
-	SchemaVersion  int             `json:"schema_version,omitempty"`
-	Version        string          `json:"version,omitempty"`
-	ChecksumSHA256 string          `json:"checksum_sha256,omitempty"`
-	IssuedAt       string          `json:"issued_at,omitempty"`
-	HeartbeatSecs  int             `json:"heartbeat_secs,omitempty"`
-	PollSecs       int             `json:"poll_secs,omitempty"`
-	Modules        map[string]bool `json:"modules,omitempty"`
-	Updates        map[string]any  `json:"updates,omitempty"`
-	Commands       map[string]any  `json:"commands,omitempty"`
-	SelfRepair     map[string]any  `json:"self_repair,omitempty"`
-	DNS            map[string]any  `json:"dns,omitempty"`
-	NativeRemote   map[string]any  `json:"native_remote,omitempty"`
+	SchemaVersion  int                `json:"schema_version,omitempty"`
+	Version        string             `json:"version,omitempty"`
+	ChecksumSHA256 string             `json:"checksum_sha256,omitempty"`
+	IssuedAt       string             `json:"issued_at,omitempty"`
+	HeartbeatSecs  int                `json:"heartbeat_secs,omitempty"`
+	PollSecs       int                `json:"poll_secs,omitempty"`
+	Modules        map[string]bool    `json:"modules,omitempty"`
+	Updates        map[string]any     `json:"updates,omitempty"`
+	Commands       map[string]any     `json:"commands,omitempty"`
+	SelfRepair     map[string]any     `json:"self_repair,omitempty"`
+	DNS            map[string]any     `json:"dns,omitempty"`
+	NativeRemote   map[string]any     `json:"native_remote,omitempty"`
+	NexusBackup    *NexusBackupPolicy `json:"nexus_backup,omitempty"`
+}
+
+// NexusBackupPolicy is intentionally capability-inventory only in the first
+// native Backup release. It cannot grant endpoint file access, snapshots,
+// uploads, or restore work merely because a technician enables a policy.
+type NexusBackupPolicy struct {
+	SchemaVersion         int            `json:"schema_version,omitempty"`
+	Enabled               bool           `json:"enabled"`
+	Mode                  string         `json:"mode,omitempty"`
+	ReportIntervalSeconds int            `json:"report_interval_seconds,omitempty"`
+	PreflightAllowed      bool           `json:"preflight_allowed"`
+	CaptureLease          map[string]any `json:"capture_lease,omitempty"`
+	EnvelopeKey           map[string]any `json:"envelope_key,omitempty"`
+	ExecutionAllowed      bool           `json:"execution_allowed"`
+	FileAccessAllowed     bool           `json:"file_access_allowed"`
+	SnapshotAllowed       bool           `json:"snapshot_allowed"`
+	UploadAllowed         bool           `json:"upload_allowed"`
+	RestoreAllowed        bool           `json:"restore_allowed"`
 }
 
 type UpdateEvidence struct {
@@ -274,8 +293,39 @@ func (c *Config) RuntimeCapabilities() []string {
 		if c.NativeRemoteCompanionReady() {
 			capabilities = append(capabilities, "native_remote_v1", "native_remote_v2")
 		}
+		if c.NexusBackupCapabilityInventoryEnabled() {
+			capabilities = append(capabilities, "nexus_backup_capability_v1")
+		}
+		if c.NexusBackupPreflightEnabled() {
+			capabilities = append(capabilities, "nexus_backup_preflight_v1")
+		}
 	}
 	return capabilities
+}
+
+// NexusBackupPreflightEnabled permits only the dedicated, no-file-access
+// worker to report a capability preflight. It is not permission to snapshot,
+// read customer data, upload data, or perform a restore.
+func (c *Config) NexusBackupPreflightEnabled() bool {
+	if !c.NexusBackupCapabilityInventoryEnabled() {
+		return false
+	}
+	if c == nil || c.PlatformPolicy == nil || c.PlatformPolicy.NexusBackup == nil {
+		return false
+	}
+	return c.PlatformPolicy.NexusBackup.PreflightAllowed
+}
+
+// NexusBackupCapabilityInventoryEnabled advertises only the non-executing
+// inventory contract. Future snapshot, incremental-transfer and restore IDs
+// must never appear here until their separately reviewed data plane exists.
+func (c *Config) NexusBackupCapabilityInventoryEnabled() bool {
+	if c == nil || c.PlatformPolicy == nil || c.PlatformPolicy.NexusBackup == nil || runtime.GOOS != "windows" {
+		return false
+	}
+	p := c.PlatformPolicy.NexusBackup
+	return p.SchemaVersion == 1 && p.Enabled && p.Mode == "capability_inventory" &&
+		!p.ExecutionAllowed && !p.FileAccessAllowed && !p.SnapshotAllowed && !p.UploadAllowed && !p.RestoreAllowed
 }
 
 // NativeRemoteCompanionReady fails closed unless the authenticated policy pins

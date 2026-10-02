@@ -172,6 +172,21 @@ NEXUS_DNS_AGENT_PROFILE = {
     "enforcement_ready": False,
 }
 
+# Native Backup v1 is a zero-side-effect capability inventory. It cannot grant
+# source-file access, VSS snapshots, data transport, or restores.
+NEXUS_BACKUP_AGENT_PROFILE = {
+    "schema_version": 1,
+    "enabled": True,
+    "mode": "capability_inventory",
+    "report_interval_seconds": 3600,
+    "preflight_allowed": True,
+    "execution_allowed": False,
+    "file_access_allowed": False,
+    "snapshot_allowed": False,
+    "upload_allowed": False,
+    "restore_allowed": False,
+}
+
 # Cached binary fingerprint (computed lazily; invalidated when mtime changes).
 _binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
 _companion_binary_cache: dict[str, Any] = {"mtime": 0, "sha256": "", "size": 0}
@@ -991,6 +1006,13 @@ class HeartbeatPayload(BaseModel):
     self_repair: dict = Field(default_factory=dict)
     update_evidence: dict = Field(default_factory=dict)
     native_remote_evidence: dict = Field(default_factory=dict)
+    backup_evidence: dict = Field(default_factory=dict)
+
+
+class BackupPreflightResult(BaseModel):
+    lease_id: str = Field(min_length=16, max_length=128)
+    status: Literal["inventory_only", "unsupported", "error"]
+    evidence: dict = Field(default_factory=dict)
 
 
 class IdentityRenewRequest(BaseModel):
@@ -1073,6 +1095,7 @@ async def enroll(req: EnrollRequest):
     policy = build_agent_policy(
         settings, dns_profile,
         await _native_remote_policy(str(initial_agent.get("id") or ""), client_id, tenant_id),
+        NEXUS_BACKUP_AGENT_PROFILE,
     )
 
     # Idempotency Ã¢â‚¬â€ try to find an existing agent for (hostname, client_id, mac)
@@ -1507,6 +1530,42 @@ async def heartbeat(
             "observed_at": str(p.native_remote_evidence.get("observed_at") or "")[:64],
             "reported_at": now,
         }
+    if p.backup_evidence:
+        allowed_states = {"not_configured", "inventory_only", "blocked", "unsupported"}
+        allowed_capabilities = {"nexus_backup_capability_v1", "nexus_backup_preflight_v1"}
+        reported_state = str(p.backup_evidence.get("state") or "unknown")[:80]
+        try:
+            upload_bytes = int(p.backup_evidence.get("upload_bytes") or 0)
+        except (TypeError, ValueError):
+            upload_bytes = 0
+        try:
+            schema_version = int(p.backup_evidence.get("schema_version") or 1)
+        except (TypeError, ValueError):
+            schema_version = 1
+        unsafe_execution_claim = any(bool(p.backup_evidence.get(field)) for field in (
+            "execution_enabled", "files_accessed", "snapshot_created", "restore_requested",
+        )) or upload_bytes > 0
+        update["nexus_backup_evidence"] = {
+            "schema_version": schema_version,
+            "state": "blocked" if unsafe_execution_claim else (reported_state if reported_state in allowed_states else "unknown"),
+            # Capability inventory is never capture or restore proof.
+            "execution_enabled": False,
+            "files_accessed": False,
+            "snapshot_created": False,
+            "upload_bytes": 0,
+            "restore_requested": False,
+            "capabilities": [
+                item for item in p.backup_evidence.get("capabilities", [])
+                if isinstance(item, str) and item in allowed_capabilities
+            ][:8],
+            "reason_codes": [
+                str(item)[:120] for item in p.backup_evidence.get("reason_codes", [])
+                if isinstance(item, str)
+            ][:12],
+            "unsafe_execution_claim_rejected": unsafe_execution_claim,
+            "observed_at": str(p.backup_evidence.get("observed_at") or "")[:64],
+            "reported_at": now,
+        }
     if p.nexus_dns:
         reported_deployment = str(p.nexus_dns.get("deployment_id") or "")
         expected_deployment = str((agent.get("nexus_dns") or {}).get("deployment_id") or "")
@@ -1562,6 +1621,7 @@ async def heartbeat(
                 "nexus_shield_capabilities": [item for item in p.capabilities if isinstance(item, str)][:20],
                 "agent_runtime_capabilities": [item for item in p.runtime_capabilities if isinstance(item, str)][:64],
                 "native_remote_evidence": update.get("native_remote_evidence", agent.get("native_remote_evidence", {})),
+                "nexus_backup_evidence": update.get("nexus_backup_evidence", agent.get("nexus_backup_evidence", {})),
                 **telemetry,
                 **patch_evidence,
             }},
@@ -1742,6 +1802,7 @@ async def heartbeat(
         await _native_remote_policy(
             agent["id"], str(agent.get("client_id") or ""), str(agent.get("tenant_id") or "nexus-local"),
         ),
+        NEXUS_BACKUP_AGENT_PROFILE,
     )
     reported_checksum = str(p.policy_evidence.get("checksum_sha256") or "").lower()
     policy_status = "acknowledged" if reported_checksum and secrets.compare_digest(
@@ -1776,6 +1837,150 @@ async def heartbeat(
             "spiffe_id": identity.get("spiffe_id"),
         },
     }
+
+
+async def _backup_preflight_device(agent: dict) -> dict | None:
+    """Resolve the enrolled endpoint without guessing a tenant or client."""
+
+    client_id = str(agent.get("client_id") or "").strip()
+    tenant_id = str(agent.get("tenant_id") or "nexus-local")
+    if not client_id:
+        return None
+    device = await db.devices.find_one(
+        {"nexus_agent_id": agent.get("id"), "client_id": client_id, "archived": {"$ne": True}},
+        {"_id": 0, "id": 1, "client_id": 1, "tenant_id": 1},
+    )
+    if not device or str(device.get("tenant_id") or "nexus-local") != tenant_id:
+        return None
+    return device
+
+
+def _safe_backup_preflight_evidence(value: object) -> tuple[dict[str, Any], bool]:
+    """Accept only a capability assertion; reject all data-plane claims."""
+
+    raw = value if isinstance(value, dict) else {}
+    requested_capabilities = raw.get("capabilities") if isinstance(raw.get("capabilities"), list) else []
+    allowed_capabilities = {"nexus_backup_capability_v1", "nexus_backup_preflight_v1"}
+    capabilities = [str(item) for item in requested_capabilities if str(item) in allowed_capabilities][:2]
+    try:
+        uploaded_bytes = int(raw.get("upload_bytes") or 0)
+    except (TypeError, ValueError):
+        uploaded_bytes = 1
+    unsafe = any((
+        bool(raw.get("execution_enabled")), bool(raw.get("files_accessed")),
+        bool(raw.get("snapshot_created")), bool(raw.get("restore_requested")),
+        uploaded_bytes > 0,
+    ))
+    platform = str(raw.get("platform") or "unknown").lower()
+    if platform not in {"windows", "darwin", "linux"}:
+        platform = "unknown"
+    vss_state = str(raw.get("vss_state") or "unknown").lower()
+    if vss_state not in {"ready", "attention", "unavailable", "unsupported", "unknown"}:
+        vss_state = "unknown"
+    volume_capacity_state = str(raw.get("volume_capacity_state") or "unknown").lower()
+    if volume_capacity_state not in {"observed", "unknown"}:
+        volume_capacity_state = "unknown"
+    return {
+        "schema_version": 1,
+        "state": "inventory_only",
+        "platform": platform,
+        "vss_state": vss_state,
+        "volume_capacity_state": volume_capacity_state,
+        "capabilities": capabilities,
+        "execution_enabled": False,
+        "files_accessed": False,
+        "snapshot_created": False,
+        "upload_bytes": 0,
+        "restore_requested": False,
+        "observed_at": str(raw.get("observed_at") or "")[:64],
+    }, unsafe
+
+
+@router.get("/nexus-agent/backup/preflight/poll")
+async def backup_preflight_poll(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    """Lease one non-executing Backup preflight for the enrolled endpoint."""
+
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    device = await _backup_preflight_device(agent)
+    if not device:
+        return {"jobs": []}
+    now = _now()
+    lease_expires = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    tenant_id = str(agent.get("tenant_id") or "nexus-local")
+    candidate = await db.nexus_backup_jobs.find_one({
+        "tenant_id": tenant_id,
+        "client_id": device["client_id"],
+        "device_id": device["id"],
+        "$or": [
+            {"state": "preflight_queued"},
+            {"state": "preflight_leased", "preflight_lease_expires_at": {"$lt": now}},
+        ],
+    })
+    if not candidate:
+        return {"jobs": []}
+    lease_id = secrets.token_urlsafe(24)
+    claimed = await db.nexus_backup_jobs.update_one(
+        {"_id": candidate["_id"], "version": int(candidate.get("version") or 1), "$or": [
+            {"state": "preflight_queued"},
+            {"state": "preflight_leased", "preflight_lease_expires_at": {"$lt": now}},
+        ]},
+        {"$set": {
+            "state": "preflight_leased", "preflight_agent_id": agent["id"],
+            "preflight_lease_id": lease_id, "preflight_lease_expires_at": lease_expires,
+            "updated_at": now,
+        }, "$inc": {"version": 1}},
+    )
+    if not claimed.modified_count:
+        return {"jobs": []}
+    return {"jobs": [{"id": candidate["id"], "lease_id": lease_id}]}
+
+
+@router.post("/nexus-agent/backup/preflight/{job_id}/result")
+async def backup_preflight_result(
+    job_id: str,
+    result: BackupPreflightResult,
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    """Record the lease-bound capability result without accepting data-plane evidence."""
+
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    device = await _backup_preflight_device(agent)
+    if not device:
+        raise HTTPException(403, "agent is not bound to an active endpoint")
+    now = _now()
+    job = await db.nexus_backup_jobs.find_one({
+        "id": job_id, "tenant_id": str(agent.get("tenant_id") or "nexus-local"),
+        "client_id": device["client_id"], "device_id": device["id"],
+        "state": "preflight_leased", "preflight_agent_id": agent["id"],
+        "preflight_lease_id": result.lease_id, "preflight_lease_expires_at": {"$gt": now},
+    })
+    if not job:
+        raise HTTPException(409, "backup preflight lease is invalid or expired")
+    evidence, unsafe = _safe_backup_preflight_evidence(result.evidence)
+    accepted = result.status == "inventory_only" and not unsafe
+    state = "preflight_complete" if accepted else "blocked"
+    update = await db.nexus_backup_jobs.update_one(
+        {"_id": job["_id"], "version": int(job.get("version") or 1), "preflight_lease_id": result.lease_id},
+        {"$set": {
+            "state": state, "execution_allowed": False, "last_preflight_at": now,
+            "preflight_result": {"status": "inventory_only" if accepted else "rejected", "evidence": evidence},
+            "updated_at": now,
+        }, "$unset": {"preflight_lease_id": "", "preflight_lease_expires_at": ""}, "$inc": {"version": 1}},
+    )
+    if not update.modified_count:
+        raise HTTPException(409, "backup preflight changed before its result was recorded")
+    await db.nexus_backup_events.insert_one({
+        "id": f"nbe-{uuid.uuid4().hex}", "tenant_id": job["tenant_id"], "client_id": job["client_id"],
+        "device_id": job["device_id"], "entity_type": "nexus_backup_job", "entity_id": job_id,
+        "event_type": "agent_preflight_completed" if accepted else "agent_preflight_rejected",
+        "actor_type": "agent", "actor_id": agent["id"], "created_at": now,
+        "detail": "Recorded non-executing Backup capability preflight.",
+    })
+    return {"ok": True, "state": state, "execution_allowed": False}
 
 
 @router.get("/nexus-agent/commands/poll")

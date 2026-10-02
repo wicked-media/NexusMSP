@@ -108,6 +108,20 @@ Acceptance criteria:
 
 Gate: product-specific security/recovery reviews, signed artifacts, staged updates/rollback and controlled design-partner pilots pass.
 
+### Nexus Backup build sequence
+
+1. **Implemented control plane:** tenant/client-scoped non-secret destination attestation, backup profile and protected-workload intent; the agent reports capability inventory only and execution fails closed.
+2. **Implemented safe capability preflight:** a dedicated, lease-bound Nexus Agent protocol reports operating-system and Backup capability state plus bounded Windows VSS service/writer and fixed-volume availability posture. It is isolated from the generic command queue and cannot enumerate source paths, read files, invoke VSS snapshots, transfer bytes or restore. Capacity values and volume identities remain intentionally excluded.
+   The signed-worker source planner now resolves only narrow local Windows known-folder profiles and keeps roots local; full-device and application-aware sources remain blocked pending their dedicated engines.
+   The agent now has a tested AES-256-GCM chunk primitive with stable-ID associated-data binding and fail-closed integrity checks. Data keys remain ephemeral and no capture path may use it until tenant envelope-key wrapping, signed capture leases, resumable transfer and isolated restore-worker review are complete.
+   Resumable-manifest mechanics now validate scoped encrypted chunk descriptors and compute only unacknowledged chunk ordinals; they do not interpret a local artifact as a completed backup or call storage.
+   A future capture requires a dedicated short-lived Ed25519-signed lease pinned by Backup policy and bound to tenant, client, endpoint, job, capture ID and expiry. The lease contains no source path, vault credential or data key and does not itself enable capture.
+   The server-only S3 adapter can now write an already-encrypted chunk only under a scoped Nexus object key with AES256 and Object Lock governance retention. It issues no presigned URL and is not connected to a live capture API until the capture worker and envelope-key release are complete.
+   The agent can now RSA-OAEP-wrap an ephemeral AES data key to the dedicated Backup public envelope key pinned in policy; the private unwrap authority stays server-side. Capture-key receipt persistence and isolated restore-worker use remain unreleased.
+   The agent now has a bounded in-memory streaming encryptor that zeroes plaintext buffers after chunk encryption. It remains a library primitive until a reviewed source reader, signed capture lifecycle and immutable-transfer receipts are connected.
+3. **Narrow design-partner pilot:** one Windows file-level source, a separately approved S3-compatible Object Lock destination, envelope encryption, resumable chunk manifests/checkpoints, and isolated sandbox restore verification.
+4. **Production expansion:** signed helper release, agent update/rollback coverage, durable scheduler leases, retention/immutability verification, recovery evidence, billing reconciliation, and pilot-ring evidence before VM, database, SaaS or broad workload support.
+
 ## Immediate work queue
 
 1. [Completed 2026-08-07] Add and verify public authentication abuse protection with privacy-safe counters and proxy trust controls.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -121,5 +122,29 @@ func TestRuntimeCapabilitiesAdvertiseNativeRemoteOnlyForPinnedCompanion(t *testi
 	}
 	if !foundV1 || !foundV2 {
 		t.Fatalf("pinned companion must advertise the native remote capabilities: %v", capabilities)
+	}
+}
+
+func TestNexusBackupCapabilityInventoryFailsClosed(t *testing.T) {
+	cfg := &Config{PlatformPolicy: &PlatformPolicy{NexusBackup: &NexusBackupPolicy{
+		SchemaVersion:     1,
+		Enabled:           true,
+		Mode:              "capability_inventory",
+		PreflightAllowed:  true,
+		ExecutionAllowed:  false,
+		FileAccessAllowed: false,
+		SnapshotAllowed:   false,
+		UploadAllowed:     false,
+		RestoreAllowed:    false,
+	}}}
+	if runtime.GOOS == "windows" && !cfg.NexusBackupCapabilityInventoryEnabled() {
+		t.Fatal("safe Windows capability-inventory policy should be accepted")
+	}
+	if runtime.GOOS == "windows" && !cfg.NexusBackupPreflightEnabled() {
+		t.Fatal("safe Windows capability preflight policy should be accepted")
+	}
+	cfg.PlatformPolicy.NexusBackup.UploadAllowed = true
+	if cfg.NexusBackupCapabilityInventoryEnabled() {
+		t.Fatal("backup policy that grants upload must fail closed")
 	}
 }

@@ -24,6 +24,7 @@ import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
 import TenantsTab from "@/components/backups/TenantsTab";
 import BackupStatusTab from "@/components/backups/BackupStatusTab";
 import BillingTab from "@/components/backups/BillingTab";
+import NexusBackupTab from "@/components/backups/NexusBackupTab";
 import BackupWorkspaceNav from "@/components/backups/BackupWorkspaceNav";
 import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
@@ -158,7 +159,55 @@ function RunningBackupCard({ activity, onCancel }) {
 function HeroMetric(props) { return <HeroTile {...props} />; }
 /* legacy local impl preserved below for reference, no longer used */
 
-const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis", "orphans", "compliance", "billing", "verify"]);
+/**
+ * A missing provider is an onboarding state, not an outage.  Keep the
+ * recovery workspace usable and explain the shortest path to live evidence
+ * instead of presenting a wall of empty failure metrics.
+ */
+function BackupProviderSetup({ detail, recoveryTests = 0, onConfigure, onReviewRecovery }) {
+  return (
+    <Card className="overflow-hidden border-amber-400/25 bg-[linear-gradient(135deg,rgba(245,158,11,0.09),rgba(6,182,212,0.045)_48%,rgba(15,23,42,0.58))]" data-testid="backup-provider-setup">
+      <CardContent className="p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3.5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-400/25 bg-amber-400/[0.10] shadow-[0_0_28px_rgba(251,191,36,0.08)]">
+              <Cloud className="h-5 w-5 text-amber-200" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-200">Backup monitoring setup</p>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight">Connect Acronis before relying on live protection status</h2>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">{detail || "Nexus has not received a configured Acronis source yet. It will never treat missing provider data as protected, healthy, or recoverable."}</p>
+            </div>
+          </div>
+          <Badge variant="outline" className="w-fit shrink-0 border-amber-400/25 bg-amber-400/[0.08] px-2.5 py-1 text-amber-100">Configuration required</Badge>
+        </div>
+
+        <ol className="mt-5 grid gap-3 md:grid-cols-3" aria-label="Acronis connection steps">
+          {[
+            ["1", "Add the provider credential", "Enter the Acronis data-centre URL, API client ID and secret in Integrations."],
+            ["2", "Test before enabling", "Verify the connection from Settings, then save the confirmed configuration."],
+            ["3", "Return to live evidence", "Refresh this workspace once Acronis can return protected workloads and jobs."],
+          ].map(([step, title, description]) => (
+            <li key={step} className="flex gap-3 rounded-xl border border-white/[0.08] bg-black/[0.12] p-3.5">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] text-[11px] font-semibold text-cyan-200">{step}</span>
+              <div><p className="text-xs font-semibold">{title}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{description}</p></div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-white/[0.08] pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">{recoveryTests ? `${recoveryTests} recorded recovery test${recoveryTests === 1 ? " is" : "s are"} still available while live monitoring is configured.` : "Recovery tests can be scheduled and recorded independently of a live provider connection."}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={onReviewRecovery} data-testid="review-recovery-evidence"><Shield className="mr-1.5 h-3.5 w-3.5" />Review recovery evidence</Button>
+            <Button size="sm" onClick={onConfigure} data-testid="configure-backup-provider"><Settings className="mr-1.5 h-3.5 w-3.5" />Configure Acronis</Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis", "orphans", "compliance", "billing", "verify", "native"]);
 const BACKUP_STATUS_FILTERS = new Set(["all", "success", "failed", "running"]);
 
 export default function BackupCenterPage() {
@@ -207,6 +256,9 @@ export default function BackupCenterPage() {
   const [simulationResult, setSimulationResult] = useState(null);
   const [dismissAlertTarget, setDismissAlertTarget] = useState(null);
   const [dismissingAlert, setDismissingAlert] = useState(false);
+  const [nativeBackupData, setNativeBackupData] = useState(null);
+  const [nativeBackupLoading, setNativeBackupLoading] = useState(false);
+  const [nativeBackupError, setNativeBackupError] = useState("");
 
   useEffect(() => {
     if (requestedTab && BACKUP_TABS.has(requestedTab)) setTab(requestedTab);
@@ -317,7 +369,23 @@ export default function BackupCenterPage() {
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchNativeBackup = useCallback(async () => {
+    setNativeBackupLoading(true);
+    setNativeBackupError("");
+    try {
+      const response = await axios.get(`${API}/nexus-backup/overview`, { headers });
+      setNativeBackupData(response.data || null);
+    } catch (error) {
+      setNativeBackupError(error.response?.data?.detail || "Nexus Backup control-plane evidence could not be loaded.");
+    } finally {
+      setNativeBackupLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { fetchData(); fetchLive(); }, [fetchData, fetchLive]);
+  useEffect(() => {
+    if (tab === "native") fetchNativeBackup();
+  }, [tab, fetchNativeBackup]);
   useEffect(() => {
     if (tab !== "live") return;
     const id = setInterval(fetchLive, 5000);
@@ -556,12 +624,17 @@ export default function BackupCenterPage() {
   const simulations = assuranceData?.simulations || [];
   const ah = agentsHealth?.summary || {};
   const liveCount = liveActivities.running?.length || 0;
-  const sourceIssues = [
-    !acronisConfig?.configured ? acronisConfig?.error || "Acronis API credentials have not been configured." : null,
+  const providerNeedsSetup = !acronisConfig?.configured;
+  const providerConnectionMessage = acronisConfig?.error || "Acronis API credentials have not been configured.";
+  const telemetryIssues = [
     agentsHealth?.error ? `Agent health: ${agentsHealth.error}` : null,
     liveActivities?.error ? `Live activity feed: ${liveActivities.error}` : null,
   ].filter(Boolean);
-  const backupSourceUnavailable = !loading && sourceIssues.length > 0;
+  const providerIssues = [providerNeedsSetup ? providerConnectionMessage : null, ...telemetryIssues].filter(Boolean);
+  const hasDashboardRecords = (dashData?.backups || []).length > 0;
+  const showProviderSetup = tab === "dashboard" && providerNeedsSetup && !hasDashboardRecords;
+  const providerDependentTab = ["dashboard", "live", "tenants", "status", "acronis", "orphans", "billing"].includes(tab);
+  const showProviderNotice = providerDependentTab && !showProviderSetup && providerIssues.length > 0;
   const normalizedBackupSearch = search.trim().toLowerCase();
   const filteredBackups = (dashData?.backups || []).filter((backup) => {
     const matchesStatus = statusFilter === "all" || backup.status === statusFilter;
@@ -591,8 +664,8 @@ export default function BackupCenterPage() {
         description="Monitor protected assets, investigate backup exceptions, validate recoverability, and retain auditable recovery evidence."
         icon={HardDrive}
         tone="sky"
-        signal={backupSourceUnavailable || ds.failed ? "attention" : "connected"}
-        meta={[backupSourceUnavailable ? "Provider unavailable" : `${ds.success_rate || 0}% successful`, `${vs.pending || 0} recovery test${vs.pending === 1 ? "" : "s"} pending`]}
+        signal={providerNeedsSetup || telemetryIssues.length || ds.failed ? "attention" : "connected"}
+        meta={[providerNeedsSetup ? "Provider setup required" : telemetryIssues.length ? "Live telemetry delayed" : `${ds.success_rate || 0}% successful`, `${vs.pending || 0} recovery test${vs.pending === 1 ? "" : "s"} pending`]}
         actions={<>
           <Button variant="outline" size="sm" onClick={() => { fetchData(); fetchLive(); }}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
           <Button size="sm" onClick={openVerificationRequest} data-testid="header-schedule-recovery-test"><Play className="mr-1.5 h-4 w-4" />Recovery test</Button>
@@ -608,33 +681,40 @@ export default function BackupCenterPage() {
         onOpenSettings={openAcronisSettings}
       />
 
-      {backupSourceUnavailable && (
-        <Card className="border-rose-500/30 bg-rose-500/[0.045]" data-testid="backup-source-warning">
+      {showProviderNotice && (
+        <Card className={providerNeedsSetup ? "border-amber-400/25 bg-amber-500/[0.045]" : "border-sky-400/25 bg-sky-500/[0.035]"} data-testid="backup-source-warning">
           <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-2.5">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
-              <div><p className="text-sm font-semibold text-rose-100">Backup source unavailable</p><p className="mt-0.5 text-xs text-muted-foreground">{sourceIssues[0]}</p></div>
+              <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${providerNeedsSetup ? "text-amber-300" : "text-sky-300"}`} />
+              <div><p className={`text-sm font-semibold ${providerNeedsSetup ? "text-amber-100" : "text-sky-100"}`}>{providerNeedsSetup ? "Live provider setup is incomplete" : "Backup telemetry needs attention"}</p><p className="mt-0.5 text-xs text-muted-foreground">{providerIssues.join(" · ")}</p></div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Button size="sm" variant="ghost" className="text-rose-100 hover:bg-rose-500/10" onClick={() => { fetchData(); fetchLive(); }}>Retry connection</Button>
-              <Button size="sm" variant="outline" className="border-rose-400/35 text-rose-100 hover:bg-rose-500/10" onClick={openAcronisSettings}>Open Acronis settings</Button>
+              <Button size="sm" variant="ghost" className={providerNeedsSetup ? "text-amber-100 hover:bg-amber-500/10" : "text-sky-100 hover:bg-sky-500/10"} onClick={() => { fetchData(); fetchLive(); }}>Refresh workspace</Button>
+              {providerNeedsSetup && <Button size="sm" variant="outline" className="border-amber-400/35 text-amber-100 hover:bg-amber-500/10" onClick={openAcronisSettings}>Open Acronis settings</Button>}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Hero metric strip */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <HeroMetric label="Protected workloads" value={backupSourceUnavailable ? "—" : ds.total_jobs || 0} icon={Database} glow={backupSourceUnavailable ? "rose" : "cyan"} subtitle={backupSourceUnavailable ? "Provider unavailable" : "In active backup scope"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : openDashboardFilter("all")} />
-        <HeroMetric label="Success rate" value={backupSourceUnavailable ? "—" : ds.success_rate || 0} suffix={backupSourceUnavailable ? undefined : "%"} icon={CheckCircle} glow={backupSourceUnavailable ? "rose" : "emerald"} subtitle={backupSourceUnavailable ? "Awaiting source" : `${ds.successful || 0} successful`} onClick={() => backupSourceUnavailable ? openAcronisSettings() : openDashboardFilter("success")} />
-        <HeroMetric label="Failed" value={backupSourceUnavailable ? "—" : ds.failed || 0} icon={XCircle} glow="rose" subtitle={backupSourceUnavailable ? "Awaiting source" : ds.failed ? "Needs attention" : "All healthy"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : openDashboardFilter("failed")} />
-        <HeroMetric label="Running now" value={backupSourceUnavailable ? "—" : liveCount} icon={Activity} glow={backupSourceUnavailable ? "rose" : "violet"} subtitle={backupSourceUnavailable ? "Feed unavailable" : "Live operations"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("live")} />
+      {/* Keep overview signals in the overview. Other operational tabs have their own
+          focused metrics; repeating this strip was pushing their actual work below the fold. */}
+      {tab === "dashboard" && !showProviderSetup && <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <HeroMetric label="Protected workloads" value={ds.total_jobs || 0} icon={Database} glow="cyan" subtitle={providerNeedsSetup ? "Last recorded workload state" : "In active backup scope"} onClick={() => openDashboardFilter("all")} />
+        <HeroMetric label="Success rate" value={ds.success_rate || 0} suffix="%" icon={CheckCircle} glow="emerald" subtitle={providerNeedsSetup ? "Last recorded evidence" : `${ds.successful || 0} successful`} onClick={() => openDashboardFilter("success")} />
+        <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle={ds.failed ? "Needs attention" : providerNeedsSetup ? "No current provider feed" : "All healthy"} onClick={() => openDashboardFilter("failed")} />
+        <HeroMetric label="Running now" value={liveCount} icon={Activity} glow="violet" subtitle={telemetryIssues.length ? "Live feed delayed" : "Live operations"} onClick={() => selectTab("live")} />
         <HeroMetric label="Recovery pending" value={vs.pending || 0} icon={Shield} glow={vs.pending ? "amber" : "sky"} subtitle={vs.pending ? "Tests need completion" : "Recovery evidence current"} onClick={() => selectTab("verify")} />
-      </div>
+      </div>}
 
       <Tabs value={tab} onValueChange={selectTab}>
         {/* DASHBOARD */}
         <TabsContent value="dashboard" className="mt-4 space-y-4">
+          {showProviderSetup ? <BackupProviderSetup
+            detail={providerConnectionMessage}
+            recoveryTests={vs.total_tests || 0}
+            onConfigure={openAcronisSettings}
+            onReviewRecovery={() => selectTab("verify")}
+          /> : <>
           <div className="flex flex-col gap-3 sm:flex-row">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -726,12 +806,18 @@ export default function BackupCenterPage() {
               </div>
             </CardContent>
           </Card>
+          </>}
         </TabsContent>
 
         {/* LIVE */}
         <TabsContent value="live" className="mt-4 space-y-4">
-          <Card className="border-cyan-500/30 bg-cyan-500/[0.02]">
-            <CardContent className="py-3 px-4 flex items-center gap-3">
+          {liveActivities.error ? <Card className="border-amber-400/25 bg-amber-500/[0.045]" data-testid="backup-live-feed-unavailable">
+            <CardContent className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3"><span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/[0.10]"><WifiOff className="h-4 w-4 text-amber-200" /></span><div><p className="text-sm font-semibold text-amber-100">Live backup activity is unavailable</p><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{liveActivities.error} Nexus cannot infer that no backups are running while the provider feed is unavailable.</p></div></div>
+              <Button size="sm" variant="outline" className="w-fit border-amber-400/25 text-amber-100 hover:bg-amber-500/10" onClick={fetchLive} data-testid="retry-backup-live-feed"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry live feed</Button>
+            </CardContent>
+          </Card> : <Card className="border-cyan-500/30 bg-cyan-500/[0.02]">
+            <CardContent className="py-3 px-4 flex items-center gap-3" role="status" aria-live="polite">
               <div className="relative">
                 <Zap className="w-5 h-5 text-cyan-400" />
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
@@ -746,10 +832,10 @@ export default function BackupCenterPage() {
                 LIVE
               </Badge>
             </CardContent>
-          </Card>
+          </Card>}
 
           {/* Running */}
-          {liveCount === 0 ? (
+          {!liveActivities.error && (liveCount === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
@@ -761,10 +847,10 @@ export default function BackupCenterPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {liveActivities.running.map(a => <RunningBackupCard key={a.id} activity={a} onCancel={handleCancelBackup} />)}
             </div>
-          )}
+          ))}
 
           {/* Recent */}
-          <div>
+          {!liveActivities.error && <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Recent (last 30)</p>
             <Card>
               <CardContent className="p-0">
@@ -801,7 +887,7 @@ export default function BackupCenterPage() {
                 </ScrollArea>
               </CardContent>
             </Card>
-          </div>
+          </div>}
         </TabsContent>
 
         {/* TENANTS */}
@@ -1277,6 +1363,19 @@ export default function BackupCenterPage() {
         {/* BILLING */}
         <TabsContent value="billing" className="mt-4">
           <BillingTab token={token} onOpenTenants={() => selectTab("tenants")} />
+        </TabsContent>
+
+        {/* NEXUS BACKUP — native control plane, intentionally non-executing */}
+        <TabsContent value="native" className="mt-4 space-y-4">
+          <NexusBackupTab
+            data={nativeBackupData}
+            loading={nativeBackupLoading}
+            error={nativeBackupError}
+            clients={clients}
+            api={API}
+            headers={headers}
+            onChanged={fetchNativeBackup}
+          />
         </TabsContent>
 
         {/* VERIFICATION */}

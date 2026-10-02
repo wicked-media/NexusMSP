@@ -21,6 +21,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+from app.services.nexus_backup_envelope import public_material as backup_envelope_public_material
+
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PKI_DIR = Path(os.environ.get("NEXUS_AGENT_PKI_DIR", _PROJECT_ROOT / "data" / "agent-pki"))
@@ -226,8 +228,28 @@ def build_agent_policy(
     settings: dict[str, Any],
     dns_profile: dict[str, Any],
     native_remote: dict[str, Any] | None = None,
+    nexus_backup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a deterministic, cacheable policy document for every heartbeat."""
+    backup_policy = dict(nexus_backup or {
+        "schema_version": 1,
+        "enabled": False,
+        "mode": "disabled",
+        "execution_allowed": False,
+        "file_access_allowed": False,
+        "snapshot_allowed": False,
+        "upload_allowed": False,
+        "restore_allowed": False,
+    })
+    # Pinned for a future dedicated capture lease only. These fields do not
+    # change the fail-closed Backup execution flags above.
+    backup_policy["capture_lease"] = agent_command_signing_metadata()
+    try:
+        backup_policy["envelope_key"] = backup_envelope_public_material()
+    except RuntimeError:
+        # Production without explicitly managed envelope keys remains unable to
+        # release capture; never substitute an unrelated application secret.
+        backup_policy["envelope_key"] = {"state": "not_configured"}
     document = {
         "schema_version": 1,
         "heartbeat_secs": min(max(int(settings.get("heartbeat_secs") or 60), 15), 3600),
@@ -241,6 +263,7 @@ def build_agent_policy(
             "nexus_elevate": True,
             "client_chat": True,
             "nexus_remote": bool(native_remote),
+            "nexus_backup": bool((nexus_backup or {}).get("enabled")),
         },
         "updates": {
             "enabled": bool(settings.get("auto_update_enabled", True)),
@@ -270,6 +293,7 @@ def build_agent_policy(
             "enabled": False,
             "reason": "trust_identity_unavailable",
         },
+        "nexus_backup": backup_policy,
     }
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":"))
     checksum = hashlib.sha256(canonical.encode("utf-8")).hexdigest()

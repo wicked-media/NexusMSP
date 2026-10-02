@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronLeft, ChevronRight, Loader2, Link2, RefreshCw, Search, Users } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Link2, RefreshCw, Search, Users } from "lucide-react";
 import { toast } from "sonner";
 
 export default function TenantsTab({ token, backupStatuses }) {
@@ -17,6 +17,7 @@ export default function TenantsTab({ token, backupStatuses }) {
   const [customers, setCustomers] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [search, setSearch] = useState("");
   const [mappingFilter, setMappingFilter] = useState("all");
@@ -27,13 +28,34 @@ export default function TenantsTab({ token, backupStatuses }) {
   const fetchAll = useCallback(async () => {
     const requestHeaders = { Authorization: `Bearer ${token}` };
     setLoading(true);
+    setLoadError("");
     try {
-      const [custRes, clientsRes] = await Promise.all([
-        axios.get(`${API}/acronis/customers`, { headers: requestHeaders }).catch(() => ({ data: [] })),
-        axios.get(`${API}/clients`, { headers: requestHeaders }).catch(() => ({ data: [] })),
+      const [custResult, clientsResult] = await Promise.allSettled([
+        axios.get(`${API}/acronis/customers`, { headers: requestHeaders }),
+        axios.get(`${API}/clients`, { headers: requestHeaders }),
       ]);
-      setCustomers(Array.isArray(custRes.data) ? custRes.data : []);
-      setClients(clientsRes.data || []);
+
+      const failures = [];
+      if (custResult.status === "fulfilled") {
+        setCustomers(Array.isArray(custResult.value.data) ? custResult.value.data : []);
+      } else {
+        failures.push("Acronis tenant mapping");
+      }
+      if (clientsResult.status === "fulfilled") {
+        setClients(Array.isArray(clientsResult.value.data) ? clientsResult.value.data : []);
+      } else {
+        failures.push("NexusMSP client directory");
+      }
+
+      if (failures.length) {
+        const message = `Could not load ${failures.join(" and ")}. Existing results have been kept where available.`;
+        setLoadError(message);
+        toast.error(message);
+      }
+    } catch {
+      const message = "Could not load tenant mapping. Existing results have been kept where available.";
+      setLoadError(message);
+      toast.error(message);
     } finally { setLoading(false); }
   }, [token]);
 
@@ -45,8 +67,8 @@ export default function TenantsTab({ token, backupStatuses }) {
     try {
       const res = await axios.post(`${API}/acronis/sync`, {}, { headers });
       toast.success(`Synced ${res.data.tenants_synced} tenants · ${res.data.resources_synced} resources`);
-      fetchAll();
-    } catch { toast.error("Sync failed"); }
+      await fetchAll();
+    } catch (error) { toast.error(error.response?.data?.detail || "Sync failed"); }
     finally { setSyncing(false); }
   };
 
@@ -61,8 +83,8 @@ export default function TenantsTab({ token, backupStatuses }) {
       toast.success(`Linked ${linkDialog.name}`);
       setLinkDialog(null);
       setLinkClientId("");
-      fetchAll();
-    } catch { toast.error("Link failed"); }
+      await fetchAll();
+    } catch (error) { toast.error(error.response?.data?.detail || "Link failed"); }
   };
 
   const normalizedSearch = search.trim().toLowerCase();
@@ -85,7 +107,9 @@ export default function TenantsTab({ token, backupStatuses }) {
 
   const tenantSummary = backupStatuses?.tenant_summary || {};
 
-  if (loading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin" /></div>;
+  if (loading && !customers.length && !clients.length) {
+    return <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground" role="status"><Loader2 className="h-5 w-5 animate-spin" />Loading Acronis tenant mapping…</div>;
+  }
 
   return (
     <div className="space-y-3" data-testid="bcc-tenants-tab">
@@ -114,6 +138,18 @@ export default function TenantsTab({ token, backupStatuses }) {
           Sync Acronis
         </Button>
       </div>
+
+      {loadError && (
+        <Card className="border-amber-400/25 bg-amber-400/[0.045]" data-testid="tenant-mapping-load-warning">
+          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-2.5">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-amber-400/20 bg-amber-400/10"><AlertTriangle className="h-3.5 w-3.5 text-amber-300" /></span>
+              <div><p className="text-xs font-semibold text-amber-100">Tenant mapping needs attention</p><p className="mt-0.5 text-xs leading-5 text-muted-foreground">{loadError}</p></div>
+            </div>
+            <Button size="sm" variant="outline" onClick={fetchAll} disabled={loading} className="shrink-0 border-amber-400/30 hover:bg-amber-400/10"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry</Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-0">
@@ -186,8 +222,8 @@ export default function TenantsTab({ token, backupStatuses }) {
           {filtered.length === 0 && (
             <div className="py-12 text-center text-muted-foreground">
               <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">{search ? "No matching tenants" : "No tenants found"}</p>
-              {!search && <p className="text-[11px] mt-1 opacity-70">Click "Sync Acronis" to pull from Cyber Cloud.</p>}
+              <p className="text-sm">{loadError && !customers.length ? "Tenant mapping is currently unavailable" : search ? "No matching tenants" : "No tenants found"}</p>
+              {!search && !loadError && <p className="text-[11px] mt-1 opacity-70">Click "Sync Acronis" to pull from Cyber Cloud.</p>}
             </div>
           )}
           {filtered.length > 0 && (

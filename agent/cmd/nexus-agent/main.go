@@ -19,6 +19,7 @@ import (
 	"nexusagent/internal/heartbeat"
 	"nexusagent/internal/identity"
 	"nexusagent/internal/localbroker"
+	"nexusagent/internal/nexusbackup"
 	"nexusagent/internal/nexusremote"
 	"nexusagent/internal/transport"
 )
@@ -157,10 +158,12 @@ func runAgentContext(ctx context.Context, cfg *config.Config) {
 	// Background loops
 	hb := heartbeat.NewLoop(tr, cfg, Version, 60*time.Second)
 	cmd := commands.NewLoop(tr, cfg, 10*time.Second)
+	backupPreflight := nexusbackup.NewPreflightLoop(tr, cfg, 30*time.Second)
 	canaryWatch := canary.NewLoop(tr, time.Duration(cfg.ShieldCanaryInterval())*time.Second)
 
 	go hb.Run(ctx)
 	go cmd.Run(ctx)
+	go backupPreflight.Run(ctx)
 	if cfg.ShieldCanaryEnabled() {
 		go canaryWatch.Run(ctx)
 		log.Printf("[shield] Nexus Canary integrity loop enabled (%ds interval)", cfg.ShieldCanaryInterval())

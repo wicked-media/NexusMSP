@@ -10,6 +10,7 @@ import (
 	"nexusagent/internal/config"
 	"nexusagent/internal/enroll"
 	"nexusagent/internal/identity"
+	"nexusagent/internal/nexusbackup"
 	"nexusagent/internal/nexusremote"
 	"nexusagent/internal/telemetry"
 	"nexusagent/internal/transport"
@@ -42,6 +43,7 @@ type payload struct {
 	SelfRepair          identity.Evidence      `json:"self_repair"`
 	Update              *config.UpdateEvidence `json:"update_evidence,omitempty"`
 	NativeRemote        map[string]any         `json:"native_remote_evidence,omitempty"`
+	Backup              map[string]any         `json:"backup_evidence,omitempty"`
 }
 
 type heartbeatResponse struct {
@@ -94,6 +96,7 @@ func (l *Loop) sendOnce() {
 		SelfRepair:          repairEvidence,
 		Update:              l.cfg.UpdateEvidence,
 		NativeRemote:        nexusremote.CompanionHealthEvidence(l.cfg),
+		Backup:              nexusbackup.Evidence(l.cfg),
 	}
 	var response heartbeatResponse
 	if err := l.tr.Do("POST", "/api/nexus-agent/heartbeat", request, &response); err != nil {

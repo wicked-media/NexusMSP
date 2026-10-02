@@ -10,6 +10,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  Shield,
   Users,
 } from "lucide-react";
 
@@ -36,6 +37,7 @@ const TOOL_TABS = [
   { value: "acronis", label: "Provider health", icon: Cloud },
   { value: "orphans", label: "Protection hygiene", icon: Ghost },
   { value: "billing", label: "Usage billing", icon: DollarSign },
+  { value: "native", label: "Nexus Backup", icon: Shield },
 ];
 
 export default function BackupWorkspaceNav({ activeTab, onSelect, orphanCount = 0, alertCount = 0, onOpenAcronis, onOpenSettings }) {
@@ -63,7 +65,7 @@ export default function BackupWorkspaceNav({ activeTab, onSelect, orphanCount = 
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant={activeTool ? "info" : "outline"} size="sm" className="h-8 shrink-0 px-2.5" data-testid="backup-tools-menu">
+          <Button variant={activeTool ? "info" : "outline"} size="sm" className="h-8 shrink-0 px-2.5" data-testid="backup-tools-menu" aria-label={`Open backup tools${activeTool ? `, current workspace ${activeTool.label}` : ""}`}>
             <MoreHorizontal className="h-4 w-4" />
             <span className="hidden sm:inline">{activeTool?.label || "Tools"}</span>
             {(orphanCount > 0 || alertCount > 0) && <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-amber-400" aria-label="Backup tools need attention" />}
