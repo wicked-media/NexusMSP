@@ -165,7 +165,10 @@ async def create_domain(domain_data: dict, current_user: dict = Depends(get_curr
     else:
         await assert_client_scope(current_user, None, operation="domain.create")
     
-    domain = DomainEntry(client_name=client_name, **domain_data)
+    try:
+        domain = DomainEntry(client_name=client_name, **domain_data)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid domain payload: {exc}")
     doc = domain.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.domains.insert_one(doc)
@@ -198,7 +201,10 @@ async def create_ssl_certificate(cert_data: dict, current_user: dict = Depends(g
     else:
         await assert_client_scope(current_user, None, operation="ssl_certificate.create")
     
-    cert = SSLCertificate(client_name=client_name, **cert_data)
+    try:
+        cert = SSLCertificate(client_name=client_name, **cert_data)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid certificate payload: {exc}")
     doc = cert.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.ssl_certificates.insert_one(doc)
