@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Response
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -171,11 +171,38 @@ async def upload_chat_attachment(device_id: str, file: UploadFile = File(...), c
         f.write(content)
 
     return {
-        "url": f"/api/uploads/chat_attachments/{filename}",
+        # Chat attachments are customer evidence; reference only the
+        # scope-checked download route, never the public upload mount.
+        "url": f"/api/devices/{device_id}/chat/attachments/{filename}",
         "filename": safe_original_filename(file.filename),
         "size": len(content),
         "content_type": file.content_type or "application/octet-stream",
     }
+
+
+@router.get("/devices/{device_id}/chat/attachments/{filename}")
+async def download_chat_attachment(device_id: str, filename: str, current_user: dict = Depends(get_current_user)):
+    """Serve a device chat attachment after device scope has been enforced.
+
+    The legacy public static path for chat attachments is rejected in
+    server.py, and the stored filename is bound to the scoped device so one
+    device chat cannot serve another device's evidence.
+    """
+    if safe_original_filename(filename, default="missing") != filename:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    if not filename.startswith(f"{device_id}_"):
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    filepath = UPLOAD_DIR / filename
+    if not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    return Response(
+        content=filepath.read_bytes(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.get("/devices/{device_id}/chat/export-pdf")

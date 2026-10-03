@@ -1,10 +1,18 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'HostDump')]
 param(
   # This is intentionally supplied at runtime. The script never writes the URI
   # (and therefore any credentials it contains) to output or to the manifest.
-  [Parameter(Mandatory = $true)]
+  [Parameter(Mandatory = $true, ParameterSetName = 'HostDump')]
   [ValidateNotNullOrEmpty()]
   [string]$MongoUri,
+
+  # An already-captured database archive. Backup-NexusDockerRecovery.ps1 uses
+  # this parameter set because the production Compose stack publishes no
+  # MongoDB host port: the dump is taken inside the container network instead.
+  # When it is supplied, no host-side mongodump runs and no URI is required.
+  [Parameter(Mandatory = $true, ParameterSetName = 'ArchiveFile')]
+  [ValidateNotNullOrEmpty()]
+  [string]$MongoArchivePath,
 
   [Parameter(Mandatory = $true)]
   [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$')]
@@ -107,7 +115,6 @@ function Get-NexusGitRevision {
   return $null
 }
 
-$mongodump = Get-NexusCommandPath -Name 'mongodump'
 $outputRoot = Get-NexusFullPath -Path $OutputDirectory
 $packageId = [guid]::NewGuid().ToString()
 $timestamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
@@ -128,10 +135,26 @@ try {
   New-Item -ItemType Directory -Path $mongoDirectory -Force | Out-Null
   $mongoArchive = Join-Path $mongoDirectory 'nexus-data.archive.gz'
 
-  Write-Host 'Exporting the Nexus application database. Credentials are not printed.'
-  & $mongodump "--uri=$MongoUri" "--db=$DatabaseName" "--archive=$mongoArchive" '--gzip' '--quiet'
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $mongoArchive -PathType Leaf)) {
-    throw 'mongodump did not create a valid database archive. No recovery package was produced.'
+  if ($MongoArchivePath) {
+    Write-Host 'Packaging the supplied Nexus database archive. Credentials are not printed.'
+    $sourceArchive = Get-NexusFullPath -Path $MongoArchivePath
+    if (-not (Test-Path -LiteralPath $sourceArchive -PathType Leaf)) {
+      throw 'The supplied database archive was not found. No recovery package was produced.'
+    }
+    Copy-Item -LiteralPath $sourceArchive -Destination $mongoArchive -Force
+    if ((Get-Item -LiteralPath $mongoArchive).Length -le 0) {
+      throw 'The supplied database archive is empty. No recovery package was produced.'
+    }
+    $captureMode = 'operator_supplied_archive'
+  }
+  else {
+    $mongodump = Get-NexusCommandPath -Name 'mongodump'
+    Write-Host 'Exporting the Nexus application database. Credentials are not printed.'
+    & $mongodump "--uri=$MongoUri" "--db=$DatabaseName" "--archive=$mongoArchive" '--gzip' '--quiet'
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $mongoArchive -PathType Leaf)) {
+      throw 'mongodump did not create a valid database archive. No recovery package was produced.'
+    }
+    $captureMode = 'host_mongodump'
   }
 
   $artifactsRoot = Join-Path $stagingPath 'artifacts'
@@ -156,6 +179,7 @@ try {
       name = $DatabaseName
       archive_path = 'mongo/nexus-data.archive.gz'
       format = 'mongodump archive with gzip compression'
+      capture = $captureMode
     }
     artifacts = $artifacts
     files = $files

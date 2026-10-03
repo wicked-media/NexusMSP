@@ -10,6 +10,16 @@ frontend/.env
 frontend/.env.*
 agent/dist
 
+# Never send retained customer uploads, private evidence, local agent installers,
+# or test fixtures in the root-context production API build.
+backend/uploads/
+backend/private_uploads/
+backend/data/
+backend/tests/
+uploads/
+private_uploads/
+data/
+
 # Local dependency/build/test output is regenerated inside the relevant stage.
 frontend/node_modules
 frontend/build

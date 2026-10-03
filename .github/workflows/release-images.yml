@@ -1,0 +1,135 @@
+name: NexusMSP container release
+
+# Publishes the application runtime images (API and web) with immutable release
+# tags for deployment and rollback-to-tag. The registry is parameterised; the
+# default matches the Nexus OS Edge workflow. Deployment hosts pin the exact
+# version tag or digest through NEXUS_API_IMAGE / NEXUS_WEB_IMAGE — see
+# docs/RELEASE_RUNBOOK.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example 1.4.0) used for the immutable version tag"
+        required: true
+        type: string
+      registry:
+        description: "Container registry host images are published under (<registry>/<owner>/nexusmsp-<component>)"
+        required: false
+        default: "ghcr.io"
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: nexus-container-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ${{ inputs.registry || 'ghcr.io' }}
+
+jobs:
+  release-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - component: api
+            image: nexusmsp-api
+            file: backend/Dockerfile.production
+            context: .
+          - component: web
+            image: nexusmsp-web
+            file: frontend/Dockerfile
+            context: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$'; then
+            echo "Release version '$VERSION' is not a valid semantic version." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate immutable image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=sha,prefix=sha-
+
+      - name: Authenticate to GitHub Container Registry
+        if: ${{ env.REGISTRY == 'ghcr.io' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Authenticate to configured registry
+        if: ${{ env.REGISTRY != 'ghcr.io' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.NEXUS_REGISTRY_USERNAME }}
+          password: ${{ secrets.NEXUS_REGISTRY_PASSWORD }}
+
+      - name: Build and publish ${{ matrix.component }} image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          # Cache upload is an optimisation, never a reason to fail a valid image.
+          cache-to: type=gha,mode=max,ignore-error=true
+          provenance: true
+          sbom: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign published image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Release evidence summary
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## NexusMSP container release ${VERSION}"
+            echo "- Component: \`${{ matrix.component }}\`"
+            echo "- Immutable tag: \`${IMAGE}:${VERSION}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Digest: \`${IMAGE}@${DIGEST}\`"
+            echo "- Supply-chain evidence: Buildx provenance + SBOM + keyless Cosign signature"
+            echo ""
+            echo "Rollback pins the previous version tag or digest through NEXUS_API_IMAGE / NEXUS_WEB_IMAGE (see docs/RELEASE_RUNBOOK.md)."
+          } >> "$GITHUB_STEP_SUMMARY"

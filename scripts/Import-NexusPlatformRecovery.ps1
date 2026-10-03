@@ -86,6 +86,10 @@ function Test-NexusManifest {
   if ([int]$manifest.schema_version -ne 1 -or -not $manifest.package_id -or -not $manifest.database.archive_path) {
     throw 'The recovery package manifest is unsupported or incomplete.'
   }
+  $declaredArchivePath = [string]$manifest.database.archive_path
+  if ($declaredArchivePath.StartsWith('/') -or $declaredArchivePath.Contains('\') -or $declaredArchivePath -match '(^|/)\.\.(/|$)') {
+    throw 'The recovery package manifest declares an unsafe database archive path.'
+  }
 
   $expectedPaths = @{}
   foreach ($file in @($manifest.files)) {

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import ScopedFileImage from "@/components/ScopedFileImage";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
@@ -3151,7 +3152,7 @@ export default function TicketsPage() {
                   <div className="grid grid-cols-3 gap-3">
                     {wsPhotos.map(p => (
                       <div key={p.id} className="relative group rounded-lg border overflow-hidden" data-testid={`ws-photo-${p.id}`}>
-                        <img src={`${API}/uploads/workshop_photos/${p.filename}`} alt={p.original_name} className="w-full h-40 object-cover" />
+                        <ScopedFileImage src={`${API}/workshop/jobs/${viewWsJob.id}/photos/${p.id}/file`} alt={p.original_name} className="w-full h-40 object-cover" />
                         <div className="absolute top-1 left-1"><Badge className="text-[9px] bg-black/60 text-white">{p.photo_type}</Badge></div>
                         <Button variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteWsPhoto(p.id)}><X className="w-3 h-3" /></Button>
                         <div className="p-1.5 text-[10px] text-muted-foreground truncate">{p.uploaded_by_name} - {p.created_at?.slice(0, 10)}</div>
@@ -3688,7 +3689,7 @@ export default function TicketsPage() {
                   <div className="grid grid-cols-3 gap-3">
                     {fjPhotos.map(p => (
                       <div key={p.id} className="relative group rounded-lg border overflow-hidden">
-                        <img src={`${API}/uploads/field_photos/${p.filename}`} alt={p.original_name} className="w-full h-40 object-cover" />
+                        <ScopedFileImage src={`${API}/field-jobs/${viewFjJob.id}/photos/${p.id}/file`} alt={p.original_name} className="w-full h-40 object-cover" />
                         <div className="absolute top-1 left-1"><Badge className="text-[9px] bg-black/60 text-white">{p.photo_type.replace("_", " ")}</Badge></div>
                         <Button variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteFjPhoto(p.id)}><X className="w-3 h-3" /></Button>
                         <div className="p-1.5 text-[10px] text-muted-foreground truncate">{p.uploaded_by_name} - {p.created_at?.slice(0, 10)}</div>

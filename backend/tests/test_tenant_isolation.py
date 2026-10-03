@@ -1762,7 +1762,20 @@ def test_time_entry_list_is_limited_to_the_technicians_clients(monkeypatch):
     }
 
     assert asyncio.run(time_entries.get_time_entries(current_user=user)) == []
-    assert captured["query"] == {"client_id": {"$in": ["client-a"]}}
+    # Time entries are bounded by the technician's client scope AND the tenant
+    # partition; the local partition also admits documents without an explicit
+    # tenant marker. Both bounds are part of the enforced contract.
+    assert captured["query"] == {
+        "$and": [
+            {"client_id": {"$in": ["client-a"]}},
+            {"$or": [
+                {"tenant_id": "nexus-local"},
+                {"tenant_id": {"$exists": False}},
+                {"tenant_id": None},
+                {"tenant_id": ""},
+            ]},
+        ]
+    }
 
 
 def test_restricted_technician_cannot_delete_a_foreign_time_entry(monkeypatch):

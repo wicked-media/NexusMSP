@@ -1,0 +1,39 @@
+# NexusMSP TLS ingress.
+#
+# This container terminates customer-facing TLS and proxies to the web tier on
+# the internal Compose network. It never touches business data and holds no
+# application secret.
+#
+# Automatic HTTPS (default): set NEXUS_TLS_DOMAIN to the public hostname and
+# NEXUS_TLS_ACME_EMAIL to an operational address on the edge service. Caddy
+# provisions and renews certificates automatically; host ports 443 and 80 must
+# be reachable from the Internet for issuance and the HTTP-to-HTTPS redirect.
+# With the default NEXUS_TLS_DOMAIN=localhost, Caddy serves an internal-CA
+# certificate for local smoke tests; browsers warn until that CA is trusted.
+#
+# Operator-supplied certificates (private CA or wildcard): mount them under
+# /etc/caddy/certs (the ./ingress/certs bind mount) and add inside the site
+# block below:
+#
+#	tls /etc/caddy/certs/fullchain.pem /etc/caddy/certs/privkey.pem
+
+{
+	email {$NEXUS_TLS_ACME_EMAIL:ops@replace.invalid}
+}
+
+{$NEXUS_TLS_DOMAIN} {
+	request_body {
+		max_size 30MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		X-Permitted-Cross-Domain-Policies "none"
+	}
+
+	reverse_proxy web:8080
+}

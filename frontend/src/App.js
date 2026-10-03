@@ -26,8 +26,11 @@ import WeatherStrip from "@/components/ambient/WeatherStrip";
 import { Bot, Menu, Search } from "lucide-react";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
+// Only the local dev server reaches a directly exposed API on :8000. A
+// production build (including the containerised web tier behind nginx) must use
+// same-origin /api/, which proxies to the API service without publishing it.
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || (
-  LOCAL_HOSTS.has(window.location.hostname)
+  process.env.NODE_ENV === "development" && LOCAL_HOSTS.has(window.location.hostname)
     ? `${window.location.protocol}//${window.location.hostname}:8000`
     : window.location.origin
 );
