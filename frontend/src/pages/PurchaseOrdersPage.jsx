@@ -53,6 +53,25 @@ const ITEM_STATUS_CONFIG = {
 
 const PO_DETAIL_TABS = new Set(["items", "notes", "audit"]);
 
+// Smart delivery countdown: "Due in 3 days" / "2 days overdue" instead of a raw date.
+function deliveryOutlook(expectedDelivery, status) {
+  if (!expectedDelivery || ["received", "cancelled"].includes(status)) return null;
+  const due = new Date(expectedDelivery);
+  if (Number.isNaN(due.getTime())) return null;
+  const days = Math.ceil((due.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  if (days < 0) return { label: `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`, tone: "text-red-400" };
+  if (days === 0) return { label: "Due today", tone: "text-amber-300" };
+  if (days === 1) return { label: "Due tomorrow", tone: "text-amber-300" };
+  return { label: `Due in ${days} days`, tone: days <= 3 ? "text-amber-200" : "text-muted-foreground" };
+}
+
+function receivingProgress(lineItems) {
+  const items = lineItems || [];
+  const ordered = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  const received = items.reduce((sum, item) => sum + Number(item.received_qty || 0), 0);
+  return { ordered, received, pct: ordered > 0 ? Math.min(100, Math.round((received / ordered) * 100)) : 0 };
+}
+
 function SearchableSelect({
   options,
   value,
@@ -1709,7 +1728,12 @@ export default function PurchaseOrdersPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">{(po.line_items || []).length} items</Badge>
-                        {totalRcvd > 0 && totalRcvd < totalOrdered && <span className="text-xs text-amber-400">{totalRcvd}/{totalOrdered} rcvd</span>}
+                        {totalRcvd > 0 && totalRcvd < totalOrdered && (
+                          <div className="flex items-center gap-1.5" title={`${totalRcvd} of ${totalOrdered} units received`}>
+                            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-white/[0.08]"><div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-emerald-400 transition-all" style={{ width: `${receivingProgress(po.line_items).pct}%` }} /></div>
+                            <span className="text-xs text-amber-400">{totalRcvd}/{totalOrdered}</span>
+                          </div>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-mono font-medium">${(po.total || 0).toFixed(2)}</TableCell>
@@ -1728,7 +1752,10 @@ export default function PurchaseOrdersPage() {
                     <TableCell>
                       <div className="flex items-center gap-1">
                         {isOverdue && <AlertTriangle className="w-3 h-3 text-red-400 animate-pulse" />}
-                        <span className={`text-sm ${isOverdue ? "text-red-400" : "text-muted-foreground"}`}>{po.expected_delivery || "-"}</span>
+                        <div>
+                          <span className={`text-sm ${(deliveryOutlook(po.expected_delivery, po.status) || {}).tone || "text-muted-foreground"}`}>{(deliveryOutlook(po.expected_delivery, po.status) || {}).label || "-"}</span>
+                          {po.expected_delivery && !isOverdue && deliveryOutlook(po.expected_delivery, po.status) && <p className="text-[9px] text-muted-foreground">{po.expected_delivery}</p>}
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>

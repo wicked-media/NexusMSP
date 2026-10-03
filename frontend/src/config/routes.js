@@ -253,6 +253,7 @@ export const routeConfig = [
   { path: "/zero-trust", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=security" },
   { path: "/webhook-builder", component: page("WebhookBuilderPage"), auth: true, layout: true },
   { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
+  { path: "/invoice-reminders", component: page("InvoiceRemindersPage"), auth: true, layout: true },
   { path: "/late-payment", component: page("LatePaymentPage"), auth: true, layout: true },
   { path: "/ransomware-tabletop", component: page("RansomwareTabletopPage"), auth: true, layout: true },
 

@@ -712,6 +712,15 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("invoices", "edit"),
     },
     {
+        "id": "billing.reminder.schedule.manage",
+        "category": "Billing",
+        "label": "Manage automated invoice reminders",
+        "description": "Configure and run the automated invoice reminder programme that follows up unpaid invoices.",
+        "impact": "high",
+        "approval_required": False,
+        "legacy": ("invoices", "edit"),
+    },
+    {
         "id": "synergy.wholesale.manage",
         "category": "Web & domains",
         "label": "Manage Synergy Wholesale services",
