@@ -20,6 +20,7 @@ import OperationalPageHeader from "@/components/OperationalPageHeader";
 import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import HeroTile from "@/components/HeroTile";
 import ElevatePolicyWorkspace from "@/components/nexus-elevate/ElevatePolicyWorkspace";
+import NexusAccessPanel from "@/components/roadmap-tools/NexusAccessPanel";
 
 const EMPTY_OVERVIEW = {
   settings: { native_enabled: true, max_duration_minutes: 15, approval_sla_minutes: 15, keeper_bridge_enabled: false },
@@ -337,6 +338,7 @@ export default function NexusElevatePage() {
 
       {ticketScope && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[0.05] px-4 py-3 text-sm" data-testid="nexus-elevate-ticket-scope"><div><span className="font-semibold text-cyan-100">Ticket-scoped Elevate view</span><span className="ml-2 text-muted-foreground">Showing governed privilege evidence for ticket {ticketScope}{endpointScope ? " and its linked endpoint" : ""}.</span></div><Button variant="ghost" size="sm" className="text-cyan-100 hover:bg-cyan-400/[0.10]" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(ticketScope)}`)}>Return to ticket</Button></div>}
 
+      <NexusAccessPanel />
       <Card className="border-sky-500/20 bg-sky-500/[0.025]" data-testid="nexus-secure-access-card">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><p className="font-semibold text-sky-100">Secure Microsoft access hand-offs</p><p className="mt-1 max-w-4xl text-sm text-muted-foreground">Record an Entra PIM activation or Windows LAPS retrieval against the exact endpoint and ticket. Nexus keeps the scope and audit trail; Microsoft remains the authentication and credential authority. No passkey, password, MFA response, token, or LAPS password is collected here.</p></div><div className="flex shrink-0 gap-2"><Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=nexus-elevate-settings-card")}>Connector setup</Button><Button variant="outline" size="sm" onClick={openSecureAccess}>New hand-off</Button></div></div>

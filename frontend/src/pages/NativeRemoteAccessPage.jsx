@@ -4,7 +4,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Activity, ArrowLeft, CheckCircle2, Clock3, ExternalLink, FileDown, FileUp,
   FolderOpen, History, Laptop, Loader2, Maximize2, Minimize2, Monitor, MonitorUp,
-  Network, RefreshCw, Search, ShieldCheck, Users, ZoomIn, ZoomOut, XCircle,
+  Network, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Sparkles, Users,
+  ZoomIn, ZoomOut, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -21,6 +22,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  DEFAULT_PREFERENCES, STUDIO_PRESETS, TOOL_LABELS, applyPreset, maturityLabel,
+  normalisePreferences, orderQuickActions,
+} from "@/lib/remoteSessionStudio";
 
 const BUILD_STAGES = [
   { name: "Trust & grants", detail: "Per-tenant signed attended-session leases, device binding, revocation and durable replay protection.", state: "ready", icon: ShieldCheck },
@@ -128,6 +133,10 @@ export default function NativeRemoteAccessPage() {
   const [sendDestination, setSendDestination] = useState("");
   const [transferBusy, setTransferBusy] = useState(false);
   const [transfers, setTransfers] = useState([]);
+  const [studioPrefs, setStudioPrefs] = useState(DEFAULT_PREFERENCES);
+  const [studioInsights, setStudioInsights] = useState(null);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studioSaving, setStudioSaving] = useState(false);
   const sendFileRef = useRef(null);
   const viewerInputSequence = useRef(0);
   const lastPointerMoveAt = useRef(0);
@@ -154,6 +163,46 @@ export default function NativeRemoteAccessPage() {
         },
       }
     : null;
+
+  const studioUsage = studioInsights?.usage_counts || {};
+  const studioMaturity = studioInsights?.maturity || maturityLabel(studioInsights?.event_total || 0);
+  const studioSuggestions = studioInsights?.suggestions || [];
+  const studioDensity = studioPrefs.density === "compact" ? "p-3" : "p-4";
+
+  const loadStudio = useCallback(async () => {
+    try {
+      const [prefsResponse, insightsResponse] = await Promise.all([
+        axios.get(`${API}/remote/studio/preferences`, { headers }),
+        axios.get(`${API}/remote/studio/insights`, { headers }),
+      ]);
+      setStudioPrefs(normalisePreferences(prefsResponse.data));
+      setStudioInsights(insightsResponse.data);
+    } catch {
+      // The studio degrades to catalogue defaults; viewing never depends on it.
+    }
+  }, [headers]);
+
+  useEffect(() => { loadStudio(); }, [loadStudio]);
+
+  const saveStudioPrefs = useCallback(async (next) => {
+    const normalised = normalisePreferences(next);
+    setStudioPrefs(normalised);
+    setStudioSaving(true);
+    try {
+      await axios.put(`${API}/remote/studio/preferences`, normalised, { headers });
+      const insightsResponse = await axios.get(`${API}/remote/studio/insights`, { headers });
+      setStudioInsights(insightsResponse.data);
+      toast.success("Session Studio saved — it keeps adapting as you work.");
+    } catch (error) {
+      toast.error(messageFor(error, "Studio preferences could not be saved"));
+    } finally {
+      setStudioSaving(false);
+    }
+  }, [headers]);
+
+  const recordStudioUsage = useCallback((tool, extra = {}) => {
+    axios.post(`${API}/remote/studio/usage`, { tool, session_id: viewerSessionId, ...extra }, { headers }).catch(() => {});
+  }, [headers, viewerSessionId]);
 
   const viewerUrl = useCallback((sessionId) => {
     const params = new URLSearchParams();
@@ -182,13 +231,14 @@ export default function NativeRemoteAccessPage() {
   }, []);
 
   const toggleFullscreen = useCallback(async () => {
+    recordStudioUsage("full_screen");
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
       else await document.documentElement.requestFullscreen();
     } catch {
       toast.error("Fullscreen is unavailable in this browser window");
     }
-  }, []);
+  }, [recordStudioUsage]);
 
   const openViewer = useCallback((session, { popOut = false } = {}) => {
     if (!session?.id) return;
@@ -299,6 +349,7 @@ export default function NativeRemoteAccessPage() {
     setReadiness(null);
     setConsent(false);
     setPurpose("");
+    setMode(studioPrefs.default_mode);
     setChecking(true);
     try {
       const response = await axios.get(`${API}/devices/${device.id}/native-remote/readiness`, { headers });
@@ -308,7 +359,7 @@ export default function NativeRemoteAccessPage() {
     } finally {
       setChecking(false);
     }
-  }, [headers]);
+  }, [headers, studioPrefs.default_mode]);
 
   useEffect(() => {
     const requested = searchParams.get("device");
@@ -390,6 +441,14 @@ export default function NativeRemoteAccessPage() {
     const interval = window.setInterval(() => setViewerClock(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [viewerSession]);
+
+  useEffect(() => {
+    // Smart default: technicians who habitually focus one display start there.
+    if (studioPrefs.default_display === "primary" && viewerDisplayIndex === "all" && viewerDisplays.length > 1) {
+      const primary = viewerDisplays.find((display) => display.primary);
+      if (primary) setViewerDisplayIndex(primary.index);
+    }
+  }, [studioPrefs.default_display, viewerDisplayIndex, viewerDisplays]);
 
   useEffect(() => {
     const updateFullscreen = () => setViewerFullscreen(Boolean(document.fullscreenElement));
@@ -499,6 +558,7 @@ export default function NativeRemoteAccessPage() {
     try {
       await axios.post(`${API}/devices/${viewerSession.device_id}/file-browser/list`, { directory: remotePath.trim() }, { headers });
       toast.success("Directory listing requested — the endpoint reports it back into this session.");
+      recordStudioUsage("file_browse");
     } catch (error) { toast.error(messageFor(error, "Directory listing could not be requested")); }
     finally { setTransferBusy(false); }
   };
@@ -511,6 +571,7 @@ export default function NativeRemoteAccessPage() {
       form.append("source_path", retrievalPath.trim());
       const response = await axios.post(`${API}/devices/${viewerSession.device_id}/file-retrievals`, form, { headers });
       toast.success(`Retrieval queued for ${response.data?.filename || "the requested file"}.`);
+      recordStudioUsage("file_retrieve");
       setRetrievalPath("");
       loadTransfers();
     } catch (error) { toast.error(messageFor(error, "File retrieval could not be queued")); }
@@ -530,6 +591,7 @@ export default function NativeRemoteAccessPage() {
       form.append("file", file);
       await axios.post(`${API}/devices/${viewerSession.device_id}/file-transfers`, form, { headers });
       toast.success("File staged — the agent scans and pulls it to the endpoint.");
+      recordStudioUsage("file_send");
       if (sendFileRef.current) sendFileRef.current.value = "";
       setSendDestination("");
       loadTransfers();
@@ -554,6 +616,7 @@ export default function NativeRemoteAccessPage() {
         idempotency_key: window.crypto?.randomUUID?.() || `${selected.id}-${Date.now()}`,
       }, { headers });
       toast.success(response.data?.message || "Native session grant issued");
+      recordStudioUsage(mode === "control" ? "start_control" : "start_view");
       setSelected(null);
       await fetchData();
       if (response.data?.session?.id) openViewer(response.data.session);
@@ -572,6 +635,7 @@ export default function NativeRemoteAccessPage() {
         notes: "Technician ended Nexus Remote session from the native viewer",
       }, { headers });
       toast.success("Nexus Remote session ended and its grant was revoked");
+      recordStudioUsage("end_session");
       if (viewerSession?.id === session.id) closeViewer();
       await fetchData();
     } catch (error) {
@@ -580,6 +644,16 @@ export default function NativeRemoteAccessPage() {
       setEndingSessionId("");
     }
   };
+
+  // Adaptive viewer toolbar: the studio reorders these by recorded usage so
+  // the tools a technician actually reaches for come first.
+  const viewerToolSpecs = {
+    zoom_out: { icon: ZoomOut, title: "Zoom out", disabled: viewerFit || viewerZoom <= 0.5, onClick: () => { updateViewerZoom(zoom => zoom - 0.25); recordStudioUsage("zoom_out"); } },
+    zoom_in: { icon: ZoomIn, title: "Zoom in", disabled: !viewerFit && viewerZoom >= 3, onClick: () => { updateViewerZoom(zoom => zoom + 0.25); recordStudioUsage("zoom_in"); } },
+    fit: { icon: RefreshCw, wide: true, title: "Fit desktop to available space", content: viewerFit ? "Fit" : `${Math.round(viewerZoom * 100)}%`, onClick: () => { resetViewerCanvas(); recordStudioUsage("fit"); } },
+    focus_desktop: { icon: Maximize2, wide: true, title: "Hide or show session evidence", content: viewerFocus ? "Show evidence" : "Focus desktop", onClick: () => { setViewerFocus(value => !value); recordStudioUsage(viewerFocus ? "show_evidence" : "focus_desktop"); } },
+  };
+  const orderedViewerTools = orderQuickActions(["zoom_out", "fit", "zoom_in", "focus_desktop"], studioUsage);
 
   if (loading) return <div className="flex h-72 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-cyan-300" /></div>;
 
@@ -594,7 +668,7 @@ export default function NativeRemoteAccessPage() {
         signal={capable.length ? "healthy" : "working"}
         signalLabel={capable.length ? `${capable.length} native-ready endpoints` : "Remote Companion build required"}
         signalDescription={capable.length ? "The native grant path is available on enrolled endpoints." : "Trust and grant infrastructure is ready; no endpoint advertises the capture companion yet."}
-        actions={<><Button variant="outline" size="sm" onClick={() => navigate("/nexus-agent")}><ShieldCheck className="mr-2 h-4 w-4" />Nexus Agent</Button><Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></>}
+        actions={<><Button variant="outline" size="sm" onClick={() => navigate("/nexus-agent")}><ShieldCheck className="mr-2 h-4 w-4" />Nexus Agent</Button><Button variant="outline" size="sm" onClick={() => setStudioOpen(true)} data-testid="session-studio-launch"><SlidersHorizontal className="mr-2 h-4 w-4" />Session Studio</Button><Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></>}
       />
 
       <MetricStrip columns={4}>
@@ -633,14 +707,26 @@ export default function NativeRemoteAccessPage() {
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.04] p-3"><Checkbox checked={mode === "control"} onCheckedChange={value => setMode(value ? "control" : "view")} /><span className="text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Request interactive control.</strong> This starts a fresh, attended session. The endpoint user must explicitly approve mouse and keyboard control and can stop it locally at any time.</span></label>
         </NexusWorkflowDialog>
       </Dialog>
+      <Dialog open={studioOpen} onOpenChange={open => setStudioOpen(Boolean(open))}>
+        <NexusWorkflowDialog eyebrow="Nexus Remote" title="Session Studio" description="Shape the session window around how you work — the studio reorders its tools around your recorded habits." icon={SlidersHorizontal} tone="cyan" className="max-w-2xl" footer={<Button variant="outline" onClick={() => setStudioOpen(false)} disabled={studioSaving}>Done</Button>}>
+          <div className="space-y-2"><p className="text-sm font-semibold">Layout preset</p><div className="grid gap-2 sm:grid-cols-2">{Object.entries(STUDIO_PRESETS).map(([key, preset]) => <button key={key} type="button" onClick={() => saveStudioPrefs(applyPreset(studioPrefs, key))} className={`rounded-xl border p-3 text-left transition-colors ${studioPrefs.preset === key ? "border-cyan-400/40 bg-cyan-400/10" : "border-border/60 hover:border-cyan-400/25"}`} data-testid={`studio-preset-${key}`}><p className="text-sm font-semibold">{preset.label}</p><p className="mt-1 text-[11px] leading-4 text-muted-foreground">{preset.detail}</p></button>)}</div></div>
+          <div className="space-y-2"><p className="text-sm font-semibold">Sidebar panels</p><div className="grid gap-2 sm:grid-cols-3">{[["evidence", "Session evidence"], ["timeline", "Session timeline"], ["files", "Files panel"]].map(([key, label]) => <label key={key} className="flex cursor-pointer items-center gap-2 rounded-xl border border-border/60 p-3"><Checkbox checked={studioPrefs.panels[key]} onCheckedChange={value => saveStudioPrefs({ ...studioPrefs, panels: { ...studioPrefs.panels, [key]: Boolean(value) } })} data-testid={`studio-panel-${key}`} /><span className="text-xs">{label}</span></label>)}</div></div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-2"><p className="text-sm font-semibold">Default session mode</p><div className="flex gap-2"><Button variant={studioPrefs.default_mode === "view" ? "secondary" : "outline"} size="sm" onClick={() => saveStudioPrefs({ ...studioPrefs, default_mode: "view" })}>View only</Button><Button variant={studioPrefs.default_mode === "control" ? "secondary" : "outline"} size="sm" onClick={() => saveStudioPrefs({ ...studioPrefs, default_mode: "control" })}>Control</Button></div></div>
+            <div className="space-y-2"><p className="text-sm font-semibold">Default display view</p><div className="flex gap-2"><Button variant={studioPrefs.default_display === "all" ? "secondary" : "outline"} size="sm" onClick={() => saveStudioPrefs({ ...studioPrefs, default_display: "all" })}>All displays</Button><Button variant={studioPrefs.default_display === "primary" ? "secondary" : "outline"} size="sm" onClick={() => saveStudioPrefs({ ...studioPrefs, default_display: "primary" })}>Primary display</Button></div></div>
+          </div>
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4" data-testid="studio-insights"><div className="flex items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 text-cyan-100"><Sparkles className="mr-1 h-3 w-3" />{studioMaturity.label}</Badge><span className="text-[11px] text-muted-foreground">{studioInsights ? `${studioInsights.event_total} recorded session actions` : "Adaptation starts once you work a session"}</span></div><p className="mt-2 text-[11px] leading-4 text-muted-foreground">{studioMaturity.detail}</p>{studioSuggestions.length > 0 && <ul className="mt-2 space-y-1">{studioSuggestions.map((item) => <li key={item.id} className="rounded-lg border border-border/50 px-2 py-1 text-[11px] text-muted-foreground">{item.text}</li>)}</ul>}{studioInsights && <div className="mt-2 flex flex-wrap gap-1">{orderQuickActions(studioInsights.quick_action_order || [], studioInsights.usage_counts || {}).slice(0, 5).map(tool => <Badge key={tool} variant="outline" className="text-[9px] uppercase">{TOOL_LABELS[tool] || tool} · {studioInsights.usage_counts?.[tool] || 0}</Badge>)}</div>}</div>
+          <p className="text-[11px] leading-4 text-muted-foreground">Adaptation is derived only from recorded studio-tool counters. No desktop content, credentials or endpoint paths are ever collected.</p>
+        </NexusWorkflowDialog>
+      </Dialog>
       {viewerSession && <section className="fixed inset-0 z-[100] flex min-h-screen flex-col bg-[radial-gradient(circle_at_top_right,rgba(8,145,178,0.16),transparent_32%),linear-gradient(135deg,#07121c,#020617_62%,#07131f)] text-foreground" data-testid="nexus-remote-viewer">
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-cyan-400/15 bg-black/20 px-4 py-3 backdrop-blur-xl sm:px-6">
           <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-400/25 bg-cyan-400/10"><MonitorUp className="h-4 w-4 text-cyan-200" /></span><div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200">Nexus Remote · attended {viewerSession?.access_mode === "control" ? "control" : "view"}</p><h2 className="truncate text-base font-semibold">{viewerSession?.device_name || viewerSession?.device_id || "Remote desktop"}</h2></div></div>
-          <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/5 text-cyan-100">{viewerSession?.access_mode === "control" ? "Control consented" : "View-only"}</Badge><Button variant="outline" size="sm" onClick={toggleFullscreen} title="Use the entire display for the remote canvas">{viewerFullscreen ? <Minimize2 className="mr-1.5 h-3.5 w-3.5" /> : <Maximize2 className="mr-1.5 h-3.5 w-3.5" />}{viewerFullscreen ? "Exit full screen" : "Full screen"}</Button><Button variant="outline" size="sm" onClick={() => openViewer(viewerSession, { popOut: true })}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Pop out</Button><Button variant="outline" size="sm" onClick={closeViewer} disabled={Boolean(endingSessionId)}><ArrowLeft className="mr-1.5 h-3.5 w-3.5" />Return</Button><Button variant="destructive" size="sm" onClick={() => endSession(viewerSession)} disabled={Boolean(endingSessionId)}>{endingSessionId === viewerSession?.id && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}End session</Button></div>
+          <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/5 text-cyan-100">{viewerSession?.access_mode === "control" ? "Control consented" : "View-only"}</Badge><Button variant="outline" size="sm" onClick={toggleFullscreen} title="Use the entire display for the remote canvas">{viewerFullscreen ? <Minimize2 className="mr-1.5 h-3.5 w-3.5" /> : <Maximize2 className="mr-1.5 h-3.5 w-3.5" />}{viewerFullscreen ? "Exit full screen" : "Full screen"}</Button><Button variant="outline" size="sm" onClick={() => { openViewer(viewerSession, { popOut: true }); recordStudioUsage("pop_out"); }}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Pop out</Button><Button variant="outline" size="sm" onClick={() => setStudioOpen(true)} data-testid="viewer-studio-open"><SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />Customise</Button><Button variant="outline" size="sm" onClick={closeViewer} disabled={Boolean(endingSessionId)}><ArrowLeft className="mr-1.5 h-3.5 w-3.5" />Return</Button><Button variant="destructive" size="sm" onClick={() => endSession(viewerSession)} disabled={Boolean(endingSessionId)}>{endingSessionId === viewerSession?.id && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}End session</Button></div>
         </header>
         <main className={`grid min-h-0 flex-1 gap-3 p-3 ${viewerFocus ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_20rem]"} lg:p-5`}>
-          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span>{viewerDisplays.length > 0 && <div className="flex items-center gap-1" data-testid="viewer-display-switcher"><Button variant={viewerDisplayIndex === "all" ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerDisplayIndex("all")} data-testid="viewer-display-all">All displays</Button>{viewerDisplays.map((display) => <Button key={display.index} variant={viewerDisplayIndex === display.index ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerDisplayIndex(display.index)} data-testid={`viewer-display-${display.index}`}>{display.name || `Display ${display.index + 1}`}{display.primary ? " · Primary" : ""}</Button>)}</div>}<div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom - 0.25)} disabled={viewerFit || viewerZoom <= 0.5} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={resetViewerCanvas} title="Fit desktop to available space">{viewerFit ? "Fit" : `${Math.round(viewerZoom * 100)}%`}</Button><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom + 0.25)} disabled={!viewerFit && viewerZoom >= 3} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerFocus(value => !value)} title="Hide or show session evidence">{viewerFocus ? "Show evidence" : "Focus desktop"}</Button></div><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <div className={`relative flex min-h-0 flex-1 items-center justify-center ${viewerFit || viewerActiveDisplay ? "overflow-hidden" : "overflow-auto p-6"}`} style={cropGeometry ? cropGeometry.box : undefined} data-testid="viewer-frame-area"><img src={viewerFrame} alt="Live endpoint desktop" aria-label={viewerCanControl ? "Live endpoint desktop. Click to send attended control input." : undefined} draggable={false} onLoad={(event) => setViewerFrameSize({ w: event.currentTarget.naturalWidth, h: event.currentTarget.naturalHeight })} tabIndex={viewerCanControl ? 0 : -1} onMouseMove={handleViewerPointerMove} onClick={event => { event.currentTarget.focus(); handleViewerPointerButton(event, true); handleViewerPointerButton(event, false); }} onContextMenu={event => { if (viewerCanControl) event.preventDefault(); }} onKeyDown={event => handleViewerKey(event, true)} onKeyUp={event => handleViewerKey(event, false)} className={`${viewerActiveDisplay ? "block" : viewerFit ? "block max-h-full max-w-full object-contain" : "block h-auto max-w-none shadow-2xl"} ${viewerCanControl ? "cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" : ""}`} style={cropGeometry ? cropGeometry.image : viewerFit ? undefined : { width: `${Math.round(viewerZoom * 100)}%` }} /></div> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
-          {!viewerFocus && <aside className="space-y-3"><div className="rounded-2xl border border-border/60 bg-background/65 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Control boundary</p><p className="mt-1">{viewerSession?.access_mode === "control" ? "Endpoint control is locally consented. Select the desktop to send bounded mouse and keyboard input; clipboard and file transfer stay unavailable, and every event is relayed through the agent for audit." : "This session is view-only. Mouse, keyboard, clipboard and transfer controls remain locked until the endpoint presents a separate control-consent prompt and every action is auditable."}</p></div><div className="rounded-2xl border border-border/60 bg-background/65 p-4" data-testid="session-file-panel"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Files in this session</p><p className="mt-1 text-[11px] text-muted-foreground">Move files over the Nexus Agent's audited channel without leaving the session window.</p><div className="mt-3 space-y-2"><div className="flex gap-1.5"><Input value={remotePath} onChange={(event) => setRemotePath(event.target.value)} placeholder="C:\Users\Public" className="h-8 text-xs" aria-label="Endpoint directory" data-testid="session-file-path" /><Button variant="outline" size="sm" className="h-8" onClick={browseRemoteDirectory} disabled={transferBusy} data-testid="session-file-browse"><FolderOpen className="h-3.5 w-3.5" /></Button></div><div className="flex gap-1.5"><Input value={retrievalPath} onChange={(event) => setRetrievalPath(event.target.value)} placeholder="Endpoint file to retrieve" className="h-8 text-xs" aria-label="Endpoint file to retrieve" data-testid="session-file-retrieve-path" /><Button variant="outline" size="sm" className="h-8" onClick={requestRemoteFile} disabled={transferBusy} data-testid="session-file-retrieve"><FileDown className="h-3.5 w-3.5" /></Button></div><div className="flex gap-1.5"><input ref={sendFileRef} type="file" className="min-w-0 flex-1 text-[11px] text-muted-foreground file:mr-2 file:h-7 file:rounded-md file:border file:border-border file:bg-muted/40 file:px-2 file:text-[11px]" aria-label="File to send to the endpoint" data-testid="session-file-send-input" /><Input value={sendDestination} onChange={(event) => setSendDestination(event.target.value)} placeholder="Destination path" className="h-8 w-32 text-xs" aria-label="Endpoint destination path" data-testid="session-file-destination" /><Button variant="outline" size="sm" className="h-8" onClick={sendRemoteFile} disabled={transferBusy} data-testid="session-file-send"><FileUp className="h-3.5 w-3.5" /></Button></div><div className="max-h-40 space-y-1 overflow-y-auto" data-testid="session-file-transfers">{transfers.length === 0 ? <p className="text-[11px] text-muted-foreground">No file transfers yet in this session.</p> : transfers.map((transfer) => <div key={transfer.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/50 px-2 py-1 text-[11px]"><span className="truncate" title={transfer.source_path || transfer.filename}>{transfer.filename || transfer.id}</span><Badge variant="outline" className="shrink-0 text-[9px] uppercase">{transfer.direction === "endpoint_to_technician" ? "Inbound" : "Outbound"} · {transfer.status}</Badge></div>)}</div></div></div></aside>}
+          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span>{viewerDisplays.length > 0 && <div className="flex items-center gap-1" data-testid="viewer-display-switcher"><Button variant={viewerDisplayIndex === "all" ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => { setViewerDisplayIndex("all"); recordStudioUsage("display_all"); }} data-testid="viewer-display-all">All displays</Button>{viewerDisplays.map((display) => <Button key={display.index} variant={viewerDisplayIndex === display.index ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => { setViewerDisplayIndex(display.index); recordStudioUsage("display_focus"); }} data-testid={`viewer-display-${display.index}`}>{display.name || `Display ${display.index + 1}`}{display.primary ? " · Primary" : ""}</Button>)}</div>}<div className="flex items-center gap-1" data-testid="viewer-adaptive-tools">{orderedViewerTools.map((key) => { const spec = viewerToolSpecs[key]; const Icon = spec.icon; return <Button key={key} variant="ghost" size="sm" className={`h-7 px-2 ${spec.wide ? "text-[11px]" : ""}`} onClick={spec.onClick} disabled={spec.disabled} title={spec.title} data-testid={`viewer-tool-${key}`}>{spec.content || <Icon className="h-3.5 w-3.5" />}</Button>; })}</div><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <div className={`relative flex min-h-0 flex-1 items-center justify-center ${viewerFit || viewerActiveDisplay ? "overflow-hidden" : "overflow-auto p-6"}`} style={cropGeometry ? cropGeometry.box : undefined} data-testid="viewer-frame-area"><img src={viewerFrame} alt="Live endpoint desktop" aria-label={viewerCanControl ? "Live endpoint desktop. Click to send attended control input." : undefined} draggable={false} onLoad={(event) => setViewerFrameSize({ w: event.currentTarget.naturalWidth, h: event.currentTarget.naturalHeight })} tabIndex={viewerCanControl ? 0 : -1} onMouseMove={handleViewerPointerMove} onClick={event => { event.currentTarget.focus(); handleViewerPointerButton(event, true); handleViewerPointerButton(event, false); }} onContextMenu={event => { if (viewerCanControl) event.preventDefault(); }} onKeyDown={event => handleViewerKey(event, true)} onKeyUp={event => handleViewerKey(event, false)} className={`${viewerActiveDisplay ? "block" : viewerFit ? "block max-h-full max-w-full object-contain" : "block h-auto max-w-none shadow-2xl"} ${viewerCanControl ? "cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" : ""}`} style={cropGeometry ? cropGeometry.image : viewerFit ? undefined : { width: `${Math.round(viewerZoom * 100)}%` }} /></div> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
+          {!viewerFocus && <aside className="space-y-3"><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4" data-testid="session-studio-card"><div className="flex items-center justify-between gap-2"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Session Studio</p><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setStudioOpen(true)} data-testid="session-studio-open"><SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />Customise</Button></div><div className="mt-2 flex items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 text-cyan-100"><Sparkles className="mr-1 h-3 w-3" />{studioMaturity.label}</Badge><span className="text-[11px] text-muted-foreground">{studioPrefs.preset} preset</span></div><p className="mt-2 text-[11px] leading-4 text-muted-foreground">{studioMaturity.detail}</p>{studioSuggestions.length > 0 && <ul className="mt-2 space-y-1">{studioSuggestions.slice(0, 2).map((item) => <li key={item.id} className="rounded-lg border border-border/50 px-2 py-1 text-[11px] text-muted-foreground">{item.text}</li>)}</ul>}</div>{studioPrefs.panels.evidence && <div className={`rounded-2xl border border-border/60 bg-background/65 ${studioDensity}`}><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{!studioPrefs.panels.timeline ? null : sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div>}<div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Control boundary</p><p className="mt-1">{viewerSession?.access_mode === "control" ? "Endpoint control is locally consented. Select the desktop to send bounded mouse and keyboard input, and use the Files panel for scanned, audited transfers; clipboard stays disabled and every event is relayed through the agent for audit." : "This session is view-only. Mouse, keyboard and clipboard stay locked until the endpoint presents a separate control-consent prompt; file transfer still runs through the audited Nexus Agent channel, and every action is auditable."}</p></div>{studioPrefs.panels.files && <div className={`rounded-2xl border border-border/60 bg-background/65 ${studioDensity}`} data-testid="session-file-panel"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Files in this session</p><p className="mt-1 text-[11px] text-muted-foreground">Move files over the Nexus Agent's audited channel without leaving the session window.</p><div className="mt-3 space-y-2"><div className="flex gap-1.5"><Input value={remotePath} onChange={(event) => setRemotePath(event.target.value)} placeholder="C:\Users\Public" className="h-8 text-xs" aria-label="Endpoint directory" data-testid="session-file-path" /><Button variant="outline" size="sm" className="h-8" onClick={browseRemoteDirectory} disabled={transferBusy} data-testid="session-file-browse"><FolderOpen className="h-3.5 w-3.5" /></Button></div><div className="flex gap-1.5"><Input value={retrievalPath} onChange={(event) => setRetrievalPath(event.target.value)} placeholder="Endpoint file to retrieve" className="h-8 text-xs" aria-label="Endpoint file to retrieve" data-testid="session-file-retrieve-path" /><Button variant="outline" size="sm" className="h-8" onClick={requestRemoteFile} disabled={transferBusy} data-testid="session-file-retrieve"><FileDown className="h-3.5 w-3.5" /></Button></div><div className="flex gap-1.5"><input ref={sendFileRef} type="file" className="min-w-0 flex-1 text-[11px] text-muted-foreground file:mr-2 file:h-7 file:rounded-md file:border file:border-border file:bg-muted/40 file:px-2 file:text-[11px]" aria-label="File to send to the endpoint" data-testid="session-file-send-input" /><Input value={sendDestination} onChange={(event) => setSendDestination(event.target.value)} placeholder="Destination path" className="h-8 w-32 text-xs" aria-label="Endpoint destination path" data-testid="session-file-destination" /><Button variant="outline" size="sm" className="h-8" onClick={sendRemoteFile} disabled={transferBusy} data-testid="session-file-send"><FileUp className="h-3.5 w-3.5" /></Button></div><div className="max-h-40 space-y-1 overflow-y-auto" data-testid="session-file-transfers">{transfers.length === 0 ? <p className="text-[11px] text-muted-foreground">No file transfers yet in this session.</p> : transfers.map((transfer) => <div key={transfer.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/50 px-2 py-1 text-[11px]"><span className="truncate" title={transfer.source_path || transfer.filename}>{transfer.filename || transfer.id}</span><Badge variant="outline" className="shrink-0 text-[9px] uppercase">{transfer.direction === "endpoint_to_technician" ? "Inbound" : "Outbound"} · {transfer.status}</Badge></div>)}</div></div></div>}</aside>}
         </main>
       </section>}
     </div>

@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Literal
+import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from app.auth import get_current_user
 from app.database import db
-from app.services.scope_permissions import scoped_query, tenant_scoped_query
+from app.services.activity import log_activity
+from app.services.action_permissions import require_action
+from app.services.roadmap_tools import revision_impact
+from app.services.scope_permissions import platform_tenant_id, scoped_query, tenant_scoped_query
 
 router = APIRouter(tags=["Nexus Expected State"])
 
@@ -203,3 +209,224 @@ async def expected_state_overview(current_user: dict = Depends(get_current_user)
         "summary": {"clients": len(clients), "findings": len(findings), "coverage_gaps": sum(1 for item in coverage if item["status"] == "gap"), "not_assessed": sum(1 for item in controls if item["status"] == "not_assessed"), "controls_assessed": sum(1 for item in controls if item["status"] != "not_assessed"), "control_gaps": sum(1 for item in controls if item["status"] == "gap")},
         "findings": findings, "coverage": coverage, "controls": controls,
     }
+
+
+# ── Standards as code (roadmap #501, Nexus Configuration as Code, merged tool) ──
+# Customer standards are versioned as reviewable revisions: every change keeps
+# the previous revision immutable, impact is calculated before adoption, and
+# remediation is always staged behind an approval. These are governance
+# records only; remediation execution stays in its owning workspace.
+
+
+class StandardControl(BaseModel):
+    ref: str = Field(min_length=1, max_length=60)
+    requirement: str = Field(min_length=1, max_length=500)
+
+
+class StandardCreatePayload(BaseModel):
+    name: str = Field(min_length=3, max_length=120)
+    description: str = Field(default="", max_length=500)
+    controls: list[StandardControl] = Field(min_length=1, max_length=100)
+    change_note: str = Field(default="Initial revision", max_length=500)
+
+
+class StandardRevisionPayload(BaseModel):
+    standard_id: str = Field(min_length=1, max_length=64)
+    controls: list[StandardControl] = Field(min_length=1, max_length=100)
+    change_note: str = Field(min_length=1, max_length=500)
+
+
+class ImpactPayload(BaseModel):
+    controls: list[StandardControl] = Field(min_length=1, max_length=100)
+
+
+class StagedRemediationPayload(BaseModel):
+    title: str = Field(min_length=3, max_length=120)
+    plan: str = Field(min_length=1, max_length=1000)
+    target: Literal["all_clients", "selected_clients"] = "all_clients"
+
+
+def _standard_public(row: dict) -> dict:
+    revisions = row.get("revisions") or []
+    current = revisions[-1] if revisions else None
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "description": row.get("description") or "",
+        "current_revision": current.get("number") if current else 0,
+        "change_note": current.get("change_note") if current else "",
+        "controls": current.get("controls") if current else [],
+        "revision_count": len(revisions),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+@router.get("/expected-state/standards")
+async def list_expected_state_standards(current_user: dict = Depends(get_current_user)):
+    """List versioned customer standards with their current revision."""
+    rows = await db.expected_state_standards.find(
+        tenant_scoped_query(current_user, {}), {"_id": 0}
+    ).sort([("name", 1)]).to_list(200)
+    return {
+        "standards": [_standard_public(row) for row in rows],
+        "policy": [
+            "Every standard change is retained as an immutable numbered revision.",
+            "Impact is calculated before a revision is adopted.",
+            "Remediation is always staged behind an approval in the owning workspace.",
+        ],
+    }
+
+
+@router.post(
+    "/expected-state/standards",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def create_or_revise_standard(
+    payload: StandardCreatePayload | StandardRevisionPayload,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a standard or append an immutable revision to an existing one."""
+    now = datetime.now(timezone.utc).isoformat()
+    actor = str(current_user.get("id") or current_user.get("email") or "Nexus operator")
+    standard_id = getattr(payload, "standard_id", None)
+    if standard_id:
+        row = await db.expected_state_standards.find_one(
+            tenant_scoped_query(current_user, {"id": standard_id}), {"_id": 0}
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Standard not found")
+        revisions = list(row.get("revisions") or [])
+        revisions.append({
+            "number": len(revisions) + 1,
+            "controls": [control.model_dump() for control in payload.controls],
+            "change_note": payload.change_note.strip(),
+            "created_at": now,
+            "created_by": actor,
+        })
+        await db.expected_state_standards.update_one(
+            tenant_scoped_query(current_user, {"id": standard_id}),
+            {"$set": {"revisions": revisions, "updated_at": now}},
+        )
+        await log_activity(
+            current_user, "expected_state.standard_revised", "expected_state_standard",
+            standard_id, str(row.get("name") or ""), details=payload.change_note.strip(),
+            metadata={"revision": len(revisions)},
+        )
+        return _standard_public({**row, "revisions": revisions, "updated_at": now})
+    document = {
+        "id": f"std-{uuid.uuid4().hex[:12]}",
+        "tenant_id": platform_tenant_id(current_user),
+        "name": payload.name.strip(),
+        "description": payload.description.strip(),
+        "revisions": [{
+            "number": 1,
+            "controls": [control.model_dump() for control in payload.controls],
+            "change_note": payload.change_note.strip(),
+            "created_at": now,
+            "created_by": actor,
+        }],
+        "created_at": now,
+        "updated_at": now,
+        "created_by": actor,
+    }
+    await db.expected_state_standards.insert_one(dict(document))
+    await log_activity(
+        current_user, "expected_state.standard_created", "expected_state_standard",
+        document["id"], document["name"], details=payload.change_note.strip(),
+    )
+    return _standard_public(document)
+
+
+@router.post("/expected-state/standards/{standard_id}/impact")
+async def standard_revision_impact(
+    standard_id: str,
+    payload: ImpactPayload,
+    current_user: dict = Depends(get_current_user),
+):
+    """Calculate what a proposed revision would change before it is adopted."""
+    row = await db.expected_state_standards.find_one(
+        tenant_scoped_query(current_user, {"id": standard_id}), {"_id": 0}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Standard not found")
+    revisions = row.get("revisions") or []
+    current_controls = (revisions[-1] if revisions else {}).get("controls") or []
+    impact = revision_impact(current_controls, [control.model_dump() for control in payload.controls])
+    return {
+        "standard_id": standard_id,
+        "current_revision": len(revisions),
+        "impact": impact,
+        "boundary": "Impact compares declared control text only. Live client posture evidence remains owned by the Expected State overview.",
+    }
+
+
+@router.post(
+    "/expected-state/standards/{standard_id}/staged-remediations",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def stage_standard_remediation(
+    standard_id: str,
+    payload: StagedRemediationPayload,
+    current_user: dict = Depends(get_current_user),
+):
+    """Stage remediation behind an approval; nothing executes here."""
+    row = await db.expected_state_standards.find_one(
+        tenant_scoped_query(current_user, {"id": standard_id}), {"_id": 0}
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Standard not found")
+    now = datetime.now(timezone.utc).isoformat()
+    remediation = {
+        "id": f"rem-{uuid.uuid4().hex[:12]}",
+        "tenant_id": platform_tenant_id(current_user),
+        "standard_id": standard_id,
+        "title": payload.title.strip(),
+        "plan": payload.plan.strip(),
+        "target": payload.target,
+        "status": "awaiting_approval",
+        "approval": None,
+        "created_at": now,
+        "created_by": str(current_user.get("id") or current_user.get("email") or "Nexus operator"),
+    }
+    await db.expected_state_remediations.insert_one(dict(remediation))
+    await log_activity(
+        current_user, "expected_state.remediation_staged", "expected_state_remediation",
+        remediation["id"], remediation["title"],
+        details="Remediation staged behind approval. No change was executed.",
+    )
+    return remediation
+
+
+@router.post(
+    "/expected-state/standards/{standard_id}/staged-remediations/{remediation_id}/approve",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def approve_standard_remediation(
+    standard_id: str,
+    remediation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Approve one staged remediation so its owning workspace may execute it."""
+    row = await db.expected_state_remediations.find_one(
+        tenant_scoped_query(current_user, {"id": remediation_id, "standard_id": standard_id}),
+        {"_id": 0},
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Staged remediation not found")
+    if row.get("status") != "awaiting_approval":
+        raise HTTPException(status_code=422, detail="Only remediation awaiting approval can be approved")
+    now = datetime.now(timezone.utc).isoformat()
+    approval = {
+        "approved_at": now,
+        "approved_by": str(current_user.get("id") or current_user.get("email") or "Nexus operator"),
+    }
+    await db.expected_state_remediations.update_one(
+        tenant_scoped_query(current_user, {"id": remediation_id}),
+        {"$set": {"status": "approved", "approval": approval}},
+    )
+    await log_activity(
+        current_user, "expected_state.remediation_approved", "expected_state_remediation",
+        remediation_id, str(row.get("title") or ""),
+        details="Staged remediation approved. Execution remains in the owning workspace.",
+    )
+    return {**row, "status": "approved", "approval": approval}

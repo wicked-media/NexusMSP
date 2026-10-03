@@ -1,0 +1,162 @@
+/**
+ * Nexus Remote Session Studio — client-side policy.
+ *
+ * Mirrors the server policy in backend/app/services/remote_studio.py so the
+ * viewer can react instantly while the API remains the source of truth. The
+ * adaptation is deliberately explainable: tools reorder by recorded usage with
+ * the catalogue order as a stable tiebreak, and every suggestion cites the
+ * counts that produced it.
+ */
+
+export const STUDIO_PRESETS = {
+  standard: {
+    label: "Standard",
+    detail: "Balanced session window with evidence, files and timeline visible.",
+    panels: { evidence: true, files: true, timeline: true },
+    density: "comfortable",
+    defaultDisplay: "all",
+  },
+  compact: {
+    label: "Compact",
+    detail: "Tighter chrome and one-display focus for quick fixes on small screens.",
+    panels: { evidence: false, files: true, timeline: false },
+    density: "compact",
+    defaultDisplay: "primary",
+  },
+  pro: {
+    label: "Pro",
+    detail: "Everything on with dense spacing for multi-session days.",
+    panels: { evidence: true, files: true, timeline: true },
+    density: "compact",
+    defaultDisplay: "all",
+  },
+  focus: {
+    label: "Focus",
+    detail: "Desktop-first: the sidebar is hidden until you ask for evidence.",
+    panels: { evidence: false, files: false, timeline: false },
+    density: "comfortable",
+    defaultDisplay: "all",
+  },
+};
+
+export const STUDIO_TOOLS = [
+  "start_view", "start_control", "display_all", "display_focus",
+  "zoom_in", "zoom_out", "fit", "focus_desktop", "show_evidence",
+  "full_screen", "pop_out", "file_browse", "file_retrieve", "file_send",
+  "end_session",
+];
+
+export const TOOL_LABELS = {
+  start_view: "Start view-only",
+  start_control: "Start control",
+  display_all: "All displays",
+  display_focus: "Focus a display",
+  zoom_in: "Zoom in",
+  zoom_out: "Zoom out",
+  fit: "Fit",
+  focus_desktop: "Focus desktop",
+  show_evidence: "Show evidence",
+  full_screen: "Full screen",
+  pop_out: "Pop out",
+  file_browse: "Browse files",
+  file_retrieve: "Retrieve file",
+  file_send: "Send file",
+  end_session: "End session",
+};
+
+export const DEFAULT_PREFERENCES = {
+  preset: "standard",
+  panels: { evidence: true, files: true, timeline: true },
+  density: "comfortable",
+  default_mode: "view",
+  default_display: "all",
+  quick_actions: [],
+};
+
+export function normalisePreferences(payload) {
+  const data = payload || {};
+  const preset = Object.prototype.hasOwnProperty.call(STUDIO_PRESETS, data.preset) ? data.preset : DEFAULT_PREFERENCES.preset;
+  const panels = { ...DEFAULT_PREFERENCES.panels };
+  Object.entries(data.panels || {}).forEach(([key, value]) => {
+    if (Object.prototype.hasOwnProperty.call(panels, key)) panels[key] = Boolean(value);
+  });
+  const density = ["comfortable", "compact"].includes(data.density) ? data.density : DEFAULT_PREFERENCES.density;
+  const defaultMode = ["view", "control"].includes(data.default_mode) ? data.default_mode : DEFAULT_PREFERENCES.default_mode;
+  const defaultDisplay = ["all", "primary"].includes(data.default_display) ? data.default_display : DEFAULT_PREFERENCES.default_display;
+  const quickActions = [];
+  (data.quick_actions || []).forEach((tool) => {
+    const name = String(tool || "").trim().toLowerCase();
+    if (STUDIO_TOOLS.includes(name) && !quickActions.includes(name)) quickActions.push(name);
+  });
+  return {
+    preset,
+    panels,
+    density,
+    default_mode: defaultMode,
+    default_display: defaultDisplay,
+    quick_actions: quickActions.slice(0, STUDIO_TOOLS.length),
+  };
+}
+
+export function applyPreset(preferences, presetKey) {
+  const preset = STUDIO_PRESETS[presetKey];
+  if (!preset) return normalisePreferences(preferences);
+  return normalisePreferences({
+    ...preferences,
+    preset: presetKey,
+    panels: { ...preset.panels },
+    density: preset.density,
+    default_display: preset.defaultDisplay,
+  });
+}
+
+export function orderQuickActions(tools, usageCounts = {}) {
+  const catalogueOrder = new Map(STUDIO_TOOLS.map((tool, index) => [tool, index]));
+  const seen = new Set();
+  const unique = [];
+  (tools || []).forEach((tool) => {
+    const name = String(tool || "").trim().toLowerCase();
+    if (catalogueOrder.has(name) && !seen.has(name)) {
+      seen.add(name);
+      unique.push(name);
+    }
+  });
+  return unique.sort((left, right) => {
+    const usage = (usageCounts[right] || 0) - (usageCounts[left] || 0);
+    return usage !== 0 ? usage : catalogueOrder.get(left) - catalogueOrder.get(right);
+  });
+}
+
+export function maturityLabel(eventTotal = 0) {
+  if (eventTotal >= 50) {
+    return { level: "tuned", label: "Tuned to you", detail: "The studio has enough session evidence to keep your tools where you expect them." };
+  }
+  if (eventTotal >= 10) {
+    return { level: "adapting", label: "Adapting", detail: "The studio is reordering your session tools around the work you actually do." };
+  }
+  return { level: "learning", label: "Learning", detail: "The studio starts in catalogue order and adapts as it records real session work." };
+}
+
+export function deriveSuggestions(usageCounts = {}, totals = {}) {
+  const counts = {};
+  STUDIO_TOOLS.forEach((tool) => { counts[tool] = Number(usageCounts[tool] || 0); });
+  const suggestions = [];
+  const fileMoves = counts.file_browse + counts.file_retrieve + counts.file_send;
+
+  if (fileMoves >= 5) {
+    suggestions.push({ id: "pin-files", text: `You used the Files panel ${fileMoves} times — keep it pinned even in Focus preset.`, action: "pin_files" });
+  }
+  if (counts.display_focus > counts.display_all && counts.display_focus >= 3) {
+    suggestions.push({ id: "default-primary", text: `You focused a single display ${counts.display_focus} times — default new sessions to one display.`, action: "default_primary" });
+  }
+  if (counts.start_control + counts.start_view >= 5 && counts.start_control > counts.start_view) {
+    suggestions.push({ id: "default-control", text: "Most of your sessions are interactive — default the authorise dialog to Control.", action: "default_control" });
+  }
+  if (counts.full_screen >= 5) {
+    suggestions.push({ id: "auto-fullscreen", text: `You go full screen often (${counts.full_screen} times) — offer it as the first viewer action.`, action: "promote_fullscreen" });
+  }
+  if (!suggestions.length && Number(totals.events || 0) > 0) {
+    suggestions.push({ id: "keep-going", text: "No strong habits yet — the studio keeps learning from every session action.", action: "none" });
+  }
+  return suggestions.slice(0, 4);
+}

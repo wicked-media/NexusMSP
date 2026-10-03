@@ -23,6 +23,7 @@ from app.services.application_manager import (
     public_action_plan,
     utc_now,
 )
+from app.services.roadmap_tools import promotion_gate
 from app.services.scope_permissions import (
     assert_client_scope,
     assert_global_scope,
@@ -405,3 +406,214 @@ async def create_application_action_plan(
         },
     )
     return {"plan": public_action_plan(plan), "idempotent": False}
+
+
+# ── Lifecycle rings (roadmap #500, Nexus Application Manager, merged tool) ──
+# Staged rollout evidence for one application version: test ring, canary,
+# pilot, broad. A ring may only be created when every earlier ring has
+# recorded verification evidence, and rollback evidence is always retained.
+# Rings are governance records only; no endpoint command is dispatched here.
+
+class LifecycleRingPayload(BaseModel):
+    application_name: str = Field(min_length=1, max_length=120)
+    version: str = Field(min_length=1, max_length=60)
+    kind: Literal["test", "canary", "pilot", "broad"]
+    cohort: str = Field(default="", max_length=120)
+    verification: str = Field(min_length=1, max_length=500)
+    rollback_plan: str = Field(min_length=1, max_length=500)
+
+
+class RingEvidencePayload(BaseModel):
+    evidence_note: str = Field(min_length=1, max_length=500)
+
+
+def _public_ring(row: dict) -> dict:
+    return {key: value for key, value in row.items() if key != "_id"}
+
+
+@router.get("/application-manager/lifecycle-rings")
+async def list_lifecycle_rings(
+    current_user: dict = Depends(get_current_user),
+):
+    """List retained staged-rollout rings grouped by application and version."""
+    rows = await db.application_manager_lifecycle_rings.find(
+        _tenant_scoped_query(current_user),
+        {"_id": 0},
+    ).sort([("application_name", 1), ("version", 1), ("created_at", 1)]).to_list(500)
+    plans: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        plans.setdefault((row.get("application_name"), row.get("version")), []).append(_public_ring(row))
+    return {
+        "plans": [
+            {
+                "application_name": application,
+                "version": version,
+                "rings": rings,
+                "rollout_complete": bool(rings) and all(ring.get("status") in {"verified", "completed"} for ring in rings),
+            }
+            for (application, version), rings in sorted(plans.items())
+        ],
+        "execution_boundary": "Lifecycle rings retain staged-rollout governance and verification evidence only. A connected execution provider is required before any endpoint deployment.",
+    }
+
+
+@router.post(
+    "/application-manager/lifecycle-rings",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def create_lifecycle_ring(
+    payload: LifecycleRingPayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Open one rollout ring once every earlier ring is verified."""
+    await assert_global_scope(
+        current_user,
+        operation="application_manager.lifecycle_ring.create",
+        request=request,
+    )
+    existing = await db.application_manager_lifecycle_rings.find(
+        {
+            "application_name": payload.application_name,
+            "version": payload.version,
+            "tenant_id": _tenant_id(current_user),
+        },
+        {"_id": 0},
+    ).to_list(16)
+    gate = promotion_gate(existing, payload.kind)
+    if not gate["allowed"]:
+        raise HTTPException(status_code=422, detail=gate["reason"])
+    now = utc_now()
+    ring = {
+        "id": f"app-ring-{uuid.uuid4().hex[:16]}",
+        "tenant_id": _tenant_id(current_user),
+        "application_name": clean_text(payload.application_name, limit=120),
+        "version": clean_text(payload.version, limit=60),
+        "kind": payload.kind,
+        "cohort": clean_text(payload.cohort, limit=120),
+        "verification": clean_text(payload.verification, limit=500),
+        "rollback_plan": clean_text(payload.rollback_plan, limit=500),
+        "status": "staging",
+        "verification_evidence": [],
+        "rollback_evidence": [],
+        "created_at": now,
+        "created_by": current_user.get("id") or current_user.get("email") or "Nexus operator",
+        "created_by_name": current_user.get("name") or current_user.get("email") or "Nexus operator",
+        "correlation_id": getattr(request.state, "correlation_id", None),
+    }
+    await db.application_manager_lifecycle_rings.insert_one(ring)
+    await log_activity(
+        current_user,
+        "application_lifecycle_ring_created",
+        "application_lifecycle_ring",
+        ring["id"],
+        f"{ring['application_name']} {ring['version']}",
+        f"Opened the {ring['kind']} rollout ring. No endpoint command or provider deployment was dispatched.",
+        metadata={
+            "kind": ring["kind"],
+            "gate": gate["reason"],
+            "execution_state": "not_configured",
+            "correlation_id": ring["correlation_id"],
+        },
+    )
+    return {"ring": _public_ring(ring), "gate": gate}
+
+
+@router.post(
+    "/application-manager/lifecycle-rings/{ring_id}/verify",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def verify_lifecycle_ring(
+    ring_id: str,
+    payload: RingEvidencePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Retain verification evidence that unblocks the next rollout ring."""
+    await assert_global_scope(
+        current_user,
+        operation="application_manager.lifecycle_ring.verify",
+        request=request,
+    )
+    existing = await db.application_manager_lifecycle_rings.find_one(
+        {"id": ring_id, "tenant_id": _tenant_id(current_user)},
+        {"_id": 0},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Lifecycle ring not found")
+    if existing.get("status") == "rolled_back":
+        raise HTTPException(status_code=422, detail="A rolled-back ring cannot be verified; create a replacement ring")
+    now = utc_now()
+    evidence = {
+        "note": clean_text(payload.evidence_note, limit=500),
+        "verified_at": now,
+        "verified_by": current_user.get("id") or current_user.get("email") or "Nexus operator",
+    }
+    update = {
+        "status": "verified",
+        "verification_evidence": [*existing.get("verification_evidence", []), evidence],
+        "updated_at": now,
+    }
+    await db.application_manager_lifecycle_rings.update_one(
+        {"id": ring_id, "tenant_id": _tenant_id(current_user)},
+        {"$set": update},
+    )
+    await log_activity(
+        current_user,
+        "application_lifecycle_ring_verified",
+        "application_lifecycle_ring",
+        ring_id,
+        f"{existing.get('application_name')} {existing.get('version')}",
+        payload.evidence_note.strip(),
+        metadata={"kind": existing.get("kind"), "correlation_id": getattr(request.state, "correlation_id", None)},
+    )
+    return {"ring": _public_ring({**existing, **update})}
+
+
+@router.post(
+    "/application-manager/lifecycle-rings/{ring_id}/rollback",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
+async def rollback_lifecycle_ring(
+    ring_id: str,
+    payload: RingEvidencePayload,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Record rollback evidence for one ring and stop its staged rollout."""
+    await assert_global_scope(
+        current_user,
+        operation="application_manager.lifecycle_ring.rollback",
+        request=request,
+    )
+    existing = await db.application_manager_lifecycle_rings.find_one(
+        {"id": ring_id, "tenant_id": _tenant_id(current_user)},
+        {"_id": 0},
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Lifecycle ring not found")
+    now = utc_now()
+    evidence = {
+        "note": clean_text(payload.evidence_note, limit=500),
+        "rolled_back_at": now,
+        "rolled_back_by": current_user.get("id") or current_user.get("email") or "Nexus operator",
+    }
+    update = {
+        "status": "rolled_back",
+        "rollback_evidence": [*existing.get("rollback_evidence", []), evidence],
+        "updated_at": now,
+    }
+    await db.application_manager_lifecycle_rings.update_one(
+        {"id": ring_id, "tenant_id": _tenant_id(current_user)},
+        {"$set": update},
+    )
+    await log_activity(
+        current_user,
+        "application_lifecycle_ring_rolled_back",
+        "application_lifecycle_ring",
+        ring_id,
+        f"{existing.get('application_name')} {existing.get('version')}",
+        payload.evidence_note.strip(),
+        metadata={"kind": existing.get("kind"), "correlation_id": getattr(request.state, "correlation_id", None)},
+    )
+    return {"ring": _public_ring({**existing, **update})}

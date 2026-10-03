@@ -16,6 +16,7 @@ import { API, useAuth } from "@/App";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import NexusVerifiedSequence from "@/components/NexusVerifiedSequence";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
+import PreRolloutBenchPanel from "@/components/roadmap-tools/PreRolloutBenchPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -107,6 +108,7 @@ export default function NexusProvingGroundPage() {
 
     <NexusVerifiedSequence stages={["Define", "Simulate", "Review gaps", "Approve", "Execute elsewhere"]} complete={stage} label="Nexus workflow proof" />
 
+    <PreRolloutBenchPanel />
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Workflow candidates" value={summary.workflows ?? workflows.length} detail={`${summary.workflows_ready ?? 0} enabled and approval-ready`} tone="cyan" /><Metric label="Simulation evidence" value={summary.simulations ?? simulations.length} detail={`${summary.safe_to_run ?? 0} with a retained safe outcome`} tone="emerald" /><Metric label="Approval boundaries" value={summary.approval_boundaries ?? approvalQueue.length} detail="Risky or governed work still needs review" tone="amber" /><Metric label="Configuration gaps" value={summary.configuration_gaps ?? 0} detail="Never hidden behind an apparent pass" tone={summary.configuration_gaps ? "rose" : "zinc"} /></div>
 
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.16fr)_minmax(340px,0.84fr)]">
