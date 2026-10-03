@@ -137,6 +137,8 @@ export const routeConfig = [
   // bookmarks working but take technicians to the single governed workflow studio.
   { path: "/runbooks", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/workflow-automation" },
   { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
+  { path: "/script-library", component: page("ScriptLibraryPage"), auth: true, layout: true },
+  { path: "/nexus-guardian", component: page("NexusGuardianPage"), auth: true, layout: true },
 
   // People & Scheduling — Team Command is the single workspace; retain old URLs as redirects.
   { path: "/tech-command", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=directory" },
