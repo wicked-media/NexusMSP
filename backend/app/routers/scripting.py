@@ -372,10 +372,26 @@ async def create_script(script_data: ScriptCreate, current_user: dict = Depends(
     await db.scripts.insert_one(doc)
     return script
 
+# Only technician-editable fields may be updated. Identity, authorship and
+# run-counter fields are server-owned and cannot be overwritten by a payload;
+# library provenance is editable because pack install/uninstall flows maintain
+# it through this endpoint.
+SCRIPT_EDITABLE_FIELDS = {
+    "name", "description", "script_type", "content", "category", "os_target",
+    "run_as_admin", "timeout_seconds", "parameters",
+    "library_pack_ids", "library_template_name",
+}
+
+
 @router.put("/scripts/{script_id}")
-async def update_script(script_id: str, script_data: dict, current_user: dict = Depends(get_current_user)):
-    script_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-    result = await db.scripts.update_one({"id": script_id}, {"$set": script_data})
+async def update_script(script_id: str, script_data: ScriptUpdate, current_user: dict = Depends(get_current_user)):
+    update = {key: value for key, value in script_data.model_dump(exclude_unset=True).items() if key in SCRIPT_EDITABLE_FIELDS}
+    if "name" in update and not str(update["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="Script name cannot be empty")
+    if not update:
+        raise HTTPException(status_code=422, detail="No editable fields supplied")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.scripts.update_one({"id": script_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Script not found")
     return {"message": "Script updated"}

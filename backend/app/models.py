@@ -1030,6 +1030,27 @@ class ScriptCreate(BaseModel):
     timeout_seconds: int = 300
     parameters: List[Dict[str, Any]] = []  # Script parameters
 
+class ScriptUpdate(BaseModel):
+    """Technician-editable script fields.
+
+    Identity, run counters and authorship are server-owned and cannot be sent.
+    Library provenance is included because the pack install/uninstall flows
+    legitimately maintain it through this endpoint.
+    """
+    model_config = ConfigDict(extra="forbid")
+    name: Optional[str] = None
+    description: Optional[str] = None
+    script_type: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+    os_target: Optional[str] = None
+    run_as_admin: Optional[bool] = None
+    timeout_seconds: Optional[int] = None
+    parameters: Optional[List[Dict[str, Any]]] = None
+    library_pack_ids: Optional[List[str]] = None
+    library_template_name: Optional[str] = None
+
+
 class Script(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
