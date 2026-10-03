@@ -11,13 +11,37 @@ from app.services import remote_runtime
 
 
 def _matches(row, query):
+    """Evaluate the Mongo query shapes the runtime actually issues.
+
+    ``tenant_scoped_query`` wraps every lookup in the caller's tenant
+    partition (``{"$and": [filter, {"$or": [...]}]}``), so the fake
+    collection must understand boolean operators, ``$exists`` and null
+    semantics instead of only flat equality.  The production code is the
+    security boundary under test; the double mirrors real MongoDB.
+    """
     for key, expected in query.items():
+        if key == "$and":
+            if not all(_matches(row, clause) for clause in expected):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches(row, clause) for clause in expected):
+                return False
+            continue
         actual = row.get(key)
-        if isinstance(expected, dict):
-            if "$ne" in expected and actual == expected["$ne"]:
-                return False
-            if "$in" in expected and actual not in expected["$in"]:
-                return False
+        if isinstance(expected, dict) and any(str(op).startswith("$") for op in expected):
+            for op, value in expected.items():
+                if op == "$ne":
+                    if actual == value:
+                        return False
+                elif op == "$in":
+                    if actual not in value:
+                        return False
+                elif op == "$exists":
+                    if bool(key in row) is not bool(value):
+                        return False
+                else:
+                    raise AssertionError(f"Unsupported fake-DB operator: {op}")
         elif actual != expected:
             return False
     return True
