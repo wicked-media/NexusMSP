@@ -9,11 +9,7 @@ from app.services.scope_permissions import assert_global_scope
 router = APIRouter()
 
 
-def _number(value, default=0.0):
-    try:
-        return float(value if value not in (None, "") else default)
-    except (TypeError, ValueError):
-        return float(default)
+from app.services.number_utils import float_or_blank_default as _number
 
 
 def _normalise_time_entry(entry: dict) -> dict:

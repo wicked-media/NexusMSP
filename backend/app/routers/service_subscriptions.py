@@ -26,11 +26,7 @@ router = APIRouter(prefix="/service-subscriptions", tags=["service-subscriptions
 M365_VERIFIED_SOURCES = frozenset({"m365_graph", "m365_partner_center"})
 
 
-def _number(value, default=0.0):
-    try:
-        return float(value if value not in (None, "") else default)
-    except (TypeError, ValueError):
-        return float(default)
+from app.services.number_utils import float_or_blank_default as _number
 
 
 def _integer(value, default=0):

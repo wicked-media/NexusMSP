@@ -38,8 +38,7 @@ _HELP_ICON_ALIASES = {
 }
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _slugify(s: str) -> str:

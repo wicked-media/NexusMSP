@@ -240,7 +240,4 @@ async def enrich_channels(channels: list[dict], user: dict) -> list[dict]:
     return result
 
 
-def _now_iso() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso

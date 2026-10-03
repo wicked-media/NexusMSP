@@ -20,11 +20,7 @@ router = APIRouter(prefix="/license-management", tags=["license-management"])
 TRUSTED_SOURCES = {"manual", "pax8", "cipp", "m365_graph", "billing_sync"}
 
 
-def _number(value, default=0.0):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+from app.services.number_utils import float_or_default as _number
 
 
 def _as_int(value, default=0):

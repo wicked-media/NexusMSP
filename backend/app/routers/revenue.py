@@ -17,11 +17,7 @@ from app.database import db
 router = APIRouter()
 
 
-def _number(value, default=0.0):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+from app.services.number_utils import float_or_default as _number
 
 
 def _contract_monthly_value(contract: dict) -> float:

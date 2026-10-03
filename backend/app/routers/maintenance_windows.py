@@ -38,8 +38,7 @@ router = APIRouter()
 VALID_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboot", "run-script"}
 
 
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _parse_dt(s):

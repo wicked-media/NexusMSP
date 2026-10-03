@@ -47,6 +47,27 @@ def parse_date(value) -> datetime | None:
     return parsed
 
 
+def parse_date_compact(value) -> datetime | None:
+    """Compact timestamp/date parse used by smart-invoice style routers.
+
+    ISO timestamps parse in full; bare dates parse as UTC midnight. Absent or
+    malformed input returns None. (Kept distinct from parse_date: this variant
+    drops trailing time on bare-dated strings and has no alternate formats.)
+    """
+    if not value:
+        return None
+    try:
+        if "T" in value:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            dt = datetime.strptime(value[:10], "%Y-%m-%d")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
 def iso_or_none(value: datetime | None) -> str | None:
     """ISO-format a datetime, passing None through unchanged."""
     return value.isoformat() if value else None

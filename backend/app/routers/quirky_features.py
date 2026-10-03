@@ -48,8 +48,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _now_iso() -> str:
-    return _now().isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _parse_iso(s):

@@ -41,8 +41,7 @@ from app.services.scope_permissions import (
 router = APIRouter()
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
