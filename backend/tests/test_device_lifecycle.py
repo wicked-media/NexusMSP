@@ -98,6 +98,41 @@ def _scope_map(records):
     return scoped
 
 
+def _operational(query):
+    """Return the operational part of a tenant-scoped filter.
+
+    ``tenant_scoped_query`` wraps every scoped read and write in
+    ``{"$and": [operational, tenant partition]}``; these lifecycle checks pin
+    the operational semantics and require the partition to be present.
+    """
+    fragments = []
+
+    def collect(fragment):
+        for key, value in fragment.items():
+            if key == "$and":
+                for option in value:
+                    collect(option)
+            else:
+                fragments.append({key: value})
+
+    collect(query)
+
+    def is_tenant_partition(fragment):
+        if set(fragment) == {"$or"}:
+            return all("tenant_id" in option for option in fragment["$or"])
+        return set(fragment) == {"tenant_id"}
+
+    assert any(is_tenant_partition(fragment) for fragment in fragments), (
+        f"tenant partition missing from filter {query!r}"
+    )
+    operational = {}
+    for fragment in fragments:
+        if is_tenant_partition(fragment):
+            continue
+        operational.update(fragment)
+    return operational
+
+
 def test_archive_retires_the_asset_without_deleting_endpoint_evidence(monkeypatch):
     fake_db = _db(evidence={"tickets": 3, "device_events": 5})
     activities = []
@@ -113,10 +148,12 @@ def test_archive_retires_the_asset_without_deleting_endpoint_evidence(monkeypatc
 
     assert result["device_id"] == "device-a"
     query, update = fake_db.devices.update_calls[0]
-    assert query == {"id": "device-a", "archived": {"$ne": True}}
+    assert _operational(query) == {"id": "device-a", "archived": {"$ne": True}}
     assert update["$set"]["archived"] is True
     assert update["$set"]["status"] == "archived"
-    assert fake_db.clients.update_calls == [({"id": "client-a", "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})]
+    assert [(_operational(call_query), call_update) for call_query, call_update in fake_db.clients.update_calls] == [
+        ({"id": "client-a", "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})
+    ]
     assert activities[0][0][1:5] == ("archived", "device", "device-a", "Reception PC")
     assert not fake_db.devices.delete_calls
 
@@ -192,7 +229,9 @@ def test_merge_archives_manual_duplicate_and_keeps_evidence_on_source(monkeypatc
     assert source_update["$set"]["archived"] is True
     assert source_update["$set"]["merged_into_id"] == "device-b"
     assert source_update["$set"]["lifecycle_state"] == "merged"
-    assert fake_db.clients.update_calls == [({"id": "client-a", "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})]
+    assert [(_operational(call_query), call_update) for call_query, call_update in fake_db.clients.update_calls] == [
+        ({"id": "client-a", "device_count": {"$gt": 0}}, {"$inc": {"device_count": -1}})
+    ]
     assert [call[0][1] for call in activities] == ["merged", "merge_received"]
 
 
@@ -215,7 +254,7 @@ def test_active_device_list_excludes_archived_records_by_default(monkeypatch):
 
     asyncio.run(devices.get_devices(current_user=_user()))
 
-    assert fake_db.devices.find_queries[0]["archived"] == {"$ne": True}
+    assert _operational(fake_db.devices.find_queries[0])["archived"] == {"$ne": True}
 
 
 def test_generic_device_edit_cannot_bypass_lifecycle_or_agent_identity(monkeypatch):

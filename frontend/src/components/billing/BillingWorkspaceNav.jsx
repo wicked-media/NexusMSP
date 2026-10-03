@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Receipt,
   Repeat2,
+  Settings2,
   ShoppingCart,
 } from "lucide-react";
 
@@ -49,6 +50,7 @@ const TOOL_GROUPS = [
   {
     label: "Configuration & insights",
     items: [
+      { path: "/billing-settings", label: "Billing settings", icon: Settings2 },
       { path: "/invoice-templates", label: "Document templates", icon: Receipt },
       { path: "/pricing-calc", label: "Pricing calculator", icon: Calculator },
       { path: "/finance-intel", label: "Finance intelligence", icon: BarChart3 },

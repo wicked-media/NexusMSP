@@ -247,12 +247,14 @@ def test_bandwidth_reads_and_alert_resolution_authorize_the_parent_site(monkeypa
     _install_database(monkeypatch, database)
 
     overview = asyncio.run(bandwidth_monitor.get_bandwidth_overview(current_user=_restricted_operator()))
-    alerts = asyncio.run(bandwidth_monitor.get_bandwidth_alerts(current_user=_restricted_operator()))
+    alerts_payload = asyncio.run(bandwidth_monitor.get_bandwidth_alerts(current_user=_restricted_operator()))
+    alerts = alerts_payload["alerts"]
 
     assert [site["id"] for site in overview["sites"]] == ["site-a"]
     assert not set(overview["sites"][0]).intersection({"username", "password", "api_key", "password_encrypted"})
     assert [entry["site_id"] for entry in overview["bandwidth_data"]] == ["site-a"]
     assert [alert["id"] for alert in alerts] == ["alert-a"]
+    assert alerts_payload["meta"]["source"] == "controller_telemetry"
 
     with pytest.raises(HTTPException) as foreign_data:
         asyncio.run(bandwidth_monitor.get_site_bandwidth("site-b", current_user=_restricted_operator()))

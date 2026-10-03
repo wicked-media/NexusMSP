@@ -195,30 +195,82 @@ def test_native_provider_identity_uses_only_the_linked_nexus_agent():
     assert asyncio.run(remote_runtime.provider_device_id({"rustdesk_id": "legacy-peer"}, "rustdesk")) == ""
 
 
-def test_native_session_rejects_control_mode_before_creating_any_record(monkeypatch):
+class _SpyCollection:
+    """Records writes so a test can prove no record was created."""
+
+    def __init__(self):
+        self.writes = []
+
+    async def find_one(self, *_args, **_kwargs):
+        return None
+
+    async def insert_one(self, row):
+        self.writes.append(("insert_one", dict(row)))
+
+    async def update_one(self, query, update, **_kwargs):
+        self.writes.append(("update_one", dict(query), dict(update)))
+
+
+def test_native_control_session_requires_confirmed_authorisation_before_creating_any_record(monkeypatch):
+    """Control sessions must fail closed before any record exists.
+
+    Since ``626f671`` (attended Nexus remote control sessions) native control
+    is no longer view-only: it is gated behind confirmed authorisation and
+    fresh endpoint approval instead.  The durable invariant is the ordering —
+    a control session without confirmed authorisation is rejected and nothing
+    is written.
+    """
+
     async def no_indexes():
         return None
 
     async def native_policy(*_args):
         return dict(remote_runtime.REMOTE_POLICY_DEFAULTS)
 
+    sessions = _SpyCollection()
+    repairs = _SpyCollection()
     monkeypatch.setattr(remote_runtime, "ensure_remote_runtime_indexes", no_indexes)
     monkeypatch.setattr(remote_runtime, "remote_policy", native_policy)
+    monkeypatch.setattr(
+        remote_runtime,
+        "db",
+        SimpleNamespace(remote_sessions=sessions, remote_repairs=repairs),
+    )
 
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(HTTPException) as unconfirmed:
         asyncio.run(remote_runtime.start_remote_session(
             device={"id": "device-1", "client_id": "client-1"},
             user={"id": "tech-1", "tenant_id": "tenant-1"},
             data={"provider": "nexus", "mode": "control"},
         ))
 
-    assert error.value.status_code == 422
-    assert "view-only" in error.value.detail
+    assert unconfirmed.value.status_code == 422
+    assert "Confirm the applicable endpoint authorisation" in unconfirmed.value.detail
+
+    with pytest.raises(HTTPException) as without_fresh_approval:
+        asyncio.run(remote_runtime.start_remote_session(
+            device={"id": "device-1", "client_id": "client-1"},
+            user={"id": "tech-1", "tenant_id": "tenant-1"},
+            data={"provider": "nexus", "mode": "control", "consent_confirmed": True},
+        ))
+
+    assert without_fresh_approval.value.status_code == 422
+    assert "fresh endpoint approval" in without_fresh_approval.value.detail
+    assert sessions.writes == []
+    assert repairs.writes == []
 
 
 def test_remote_session_list_is_partitioned_by_tenant(monkeypatch):
     sessions = _RemoteSessionQueries()
     monkeypatch.setattr(remote_routes, "db", SimpleNamespace(remote_sessions=sessions))
+
+    async def no_expiry(*_args, **_kwargs):
+        # Grant-expiry housekeeping does real database I/O and is covered in
+        # test_native_remote; this test pins only the tenant partition of the
+        # session list query.
+        return 0
+
+    monkeypatch.setattr(remote_routes, "expire_overdue_grants", no_expiry)
 
     result = asyncio.run(remote_routes.get_remote_sessions(
         current_user={"id": "admin-1", "tenant_id": "tenant-a", "is_admin": True},

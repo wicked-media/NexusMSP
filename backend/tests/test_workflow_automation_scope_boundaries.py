@@ -56,6 +56,36 @@ class _RunRows:
         self.rows.append(dict(row))
 
 
+def _matches(record, query):
+    """Evaluate a Mongo-style filter the way the production collection does.
+
+    ``tenant_scoped_query`` wraps lookups in ``{"$and": [operational, tenant
+    partition]}`` and partitions local records with ``{"$or": [...]}``; the
+    fixtures must understand those shapes or they silently stop matching.
+    """
+    for key, expected in query.items():
+        if key == "$and":
+            if not all(_matches(record, option) for option in expected):
+                return False
+            continue
+        if key == "$or":
+            if not any(_matches(record, option) for option in expected):
+                return False
+            continue
+        actual = record.get(key)
+        if isinstance(expected, dict):
+            if "$exists" in expected:
+                if (key in record) != bool(expected["$exists"]):
+                    return False
+            if "$ne" in expected and actual == expected["$ne"]:
+                return False
+            if "$in" in expected and actual not in expected["$in"]:
+                return False
+        elif actual != expected:
+            return False
+    return True
+
+
 class _TargetRows:
     def __init__(self, record):
         self.record = dict(record) if record else None
@@ -103,18 +133,7 @@ class _LockingTicketRows:
         self.update_queries = []
 
     def _matches(self, query):
-        for key, expected in query.items():
-            if key == "$or":
-                if not any(self._matches(option) for option in expected):
-                    return False
-                continue
-            actual = self.record.get(key)
-            if isinstance(expected, dict) and "$exists" in expected:
-                if (key in self.record) != bool(expected["$exists"]):
-                    return False
-            elif actual != expected:
-                return False
-        return True
+        return _matches(self.record, query)
 
     async def find_one(self, query, _projection):
         return dict(self.record) if self._matches(query) else None
@@ -157,9 +176,12 @@ class _NoteRows:
 
 
 class _ClientRows:
+    def __init__(self):
+        self.record = {"id": "client-b", "name": "Client B", "logo_url": None}
+
     async def find_one(self, query, _projection):
-        if query.get("id") == "client-b":
-            return {"id": "client-b", "name": "Client B", "logo_url": None}
+        if _matches(self.record, query):
+            return dict(self.record)
         return None
 
 

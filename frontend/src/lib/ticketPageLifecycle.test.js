@@ -5,9 +5,11 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const source = fs.readFileSync(path.join(__dirname, "../pages/TicketsPage.jsx"), "utf8");
-test("briefing and handover use distinct sibling identities", () => {
+test("handover briefing keeps a distinct per-ticket sibling identity", () => {
   const interpolation = String.fromCharCode(36);
-  expect(source).toContain(`key={\`briefing-${interpolation}{viewingTicket.id}\`}`);
+  // Briefing and handover are one merged dialog surface since fbc3c90. It
+  // keeps a per-ticket prefixed key, and no ticket-scoped sibling may fall
+  // back to the bare ticket id or same-render sibling keys would collide.
   expect(source).toContain(`key={\`handover-${interpolation}{viewingTicket.id}\`}`);
   expect(source).not.toContain('key={viewingTicket.id}');
 });

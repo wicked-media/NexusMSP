@@ -255,6 +255,7 @@ export const routeConfig = [
   { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
   { path: "/invoice-reminders", component: page("InvoiceRemindersPage"), auth: true, layout: true },
   { path: "/late-payment", component: page("LatePaymentPage"), auth: true, layout: true },
+  { path: "/billing-settings", component: page("BillingSettingsPage"), auth: true, layout: true },
   { path: "/ransomware-tabletop", component: page("RansomwareTabletopPage"), auth: true, layout: true },
 
   // Dashboard Builder was a duplicate cockpit. Preserve old bookmarks without exposing it.

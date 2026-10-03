@@ -6,7 +6,7 @@ describe("Nexus navigation registry", () => {
     const webStudioEntries = getAllNavItems().filter((item) => item.path === "/web-studio");
 
     expect(webStudioEntries).toHaveLength(1);
-    expect(webStudioEntries[0]).toMatchObject({ label: "Websites & domains", group: "Business", parentLabel: "Clients" });
+    expect(webStudioEntries[0]).toMatchObject({ label: "Websites & domains", group: "Clients & Revenue", parentLabel: "Clients" });
   });
 
   test("does not present the documentation workspace as two automation destinations", () => {
@@ -17,7 +17,7 @@ describe("Nexus navigation registry", () => {
   test("keeps Nexus Remote as the one discoverable remote-support workspace", () => {
     const remoteEntries = getAllNavItems().filter((item) => item.path === "/nexus-remote");
     expect(remoteEntries).toHaveLength(1);
-    expect(remoteEntries[0]).toMatchObject({ label: "Nexus Remote", group: "Infrastructure", parentLabel: "Devices & RMM" });
+    expect(remoteEntries[0]).toMatchObject({ label: "Nexus Remote", group: "Managed Operations", parentLabel: "Devices & RMM" });
   });
 
   test("keeps retained workshop records distinct from the live Service Desk queue", () => {
