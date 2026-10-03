@@ -712,6 +712,11 @@ export default function CustomerPortalWorkspace() {
               Everything your organisation needs from {mspName}: support, managed assets, billing, protection, documents, and service history in one secure workspace.
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
+              {canCreateTickets && (
+                <Button variant="success" onClick={() => setShowRequest(true)} className="h-10 rounded-xl px-4 font-semibold shadow-[0_16px_38px_-18px_rgba(16,185,129,0.7)]" data-testid="portal-hero-new-request">
+                  <MessageSquareText className="mr-2 h-4 w-4" />Start a conversation
+                </Button>
+              )}
               <Button variant="outline" onClick={() => selectView("knowledge")} className="h-10 rounded-xl border-white/10 bg-white/[0.035] text-slate-200 hover:bg-white/[0.07]">
                 <Search className="mr-2 h-4 w-4" />Find an answer
               </Button>

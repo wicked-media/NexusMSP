@@ -23,6 +23,9 @@ import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 
+const messageInitials = (name = "") =>
+  String(name).trim().split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
+
 export default function LiveChatPage() {
   const { token, user } = useAuth();
   const navigate = useNavigate();
@@ -295,7 +298,7 @@ export default function LiveChatPage() {
                       role="button"
                       tabIndex={0}
                       aria-current={activeSession?.id === s.id ? "page" : undefined}
-                      className={`cursor-pointer rounded-md border p-2.5 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${activeSession?.id === s.id ? "border-primary bg-primary/5" : ""} ${s.unread_count > 0 ? "border-l-2 border-l-emerald-400" : ""}`}
+                      className={`cursor-pointer rounded-xl border p-2.5 transition-all hover:-translate-y-px hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 ${activeSession?.id === s.id ? "border-primary/60 bg-primary/10 shadow-sm shadow-primary/10" : "border-border/60"} ${s.unread_count > 0 ? "border-l-2 border-l-emerald-400" : ""}`}
                       data-testid={`chat-session-${s.id}`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
@@ -360,14 +363,24 @@ export default function LiveChatPage() {
                   <div className="space-y-3">
                     {messages.map(m => (
                       m.sender_type === "system" ? (
-                        <div key={m.id} className="text-center text-[10px] text-muted-foreground italic py-1" data-testid={`msg-${m.id}`}>— {m.content} —</div>
+                        <div key={m.id} className="flex items-center gap-3 py-1.5" data-testid={`msg-${m.id}`}>
+                          <span className="h-px flex-1 bg-border/60" />
+                          <span className="text-[10px] italic text-muted-foreground">{m.content}</span>
+                          <span className="h-px flex-1 bg-border/60" />
+                        </div>
                       ) : (
-                        <div key={m.id} className={`flex ${m.sender_type === "agent" ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
-                          <div className={`max-w-[75%] p-2.5 rounded-lg ${m.sender_type === "agent" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
-                            <p className="text-[10px] font-medium mb-0.5 opacity-80">{m.sender_name}</p>
-                            <p className="text-sm whitespace-pre-wrap">{m.content}</p>
-                            <p className="text-[9px] opacity-60 mt-1">{new Date(m.sent_at).toLocaleTimeString()}</p>
+                        <div key={m.id} className={`flex items-end gap-2 ${m.sender_type === "agent" ? "justify-end" : "justify-start"}`} data-testid={`msg-${m.id}`}>
+                          {m.sender_type !== "agent" && (
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted text-[9px] font-bold text-muted-foreground">{messageInitials(m.sender_name || "C")}</span>
+                          )}
+                          <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-sm ${m.sender_type === "agent" ? "rounded-br-md border border-primary/20 bg-primary text-primary-foreground shadow-primary/10" : "rounded-bl-md border border-border/60 bg-muted/60 text-foreground"}`}>
+                            <p className={`mb-1 text-[10px] font-semibold ${m.sender_type === "agent" ? "opacity-80" : "text-muted-foreground"}`}>{m.sender_name}</p>
+                            <p className="whitespace-pre-wrap text-sm leading-6">{m.content}</p>
+                            <p className={`mt-1.5 text-[9px] ${m.sender_type === "agent" ? "opacity-70" : "text-muted-foreground"}`}>{new Date(m.sent_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
                           </div>
+                          {m.sender_type === "agent" && (
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[9px] font-bold text-primary">{messageInitials(m.sender_name || "Me")}</span>
+                          )}
                         </div>
                       )
                     ))}
