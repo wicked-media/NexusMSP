@@ -13,6 +13,9 @@ from app.services.academy import (
     SECURITY_AWARENESS_STARTER_TEMPLATE, assessment_result, course_snapshot,
     learner_course, stable_id, utc_now,
 )
+from app.services.academy_templates import (
+    template_as_course, template_catalogue, template_preview,
+)
 
 router = APIRouter(prefix="/academy", tags=["academy"])
 
@@ -106,6 +109,44 @@ async def list_courses(current_user: dict = Depends(get_current_user)):
     admin(current_user)
     rows = await db.academy_courses.find(scope(current_user), {"_id": 0}).sort("updated_at", -1).to_list(1000)
     return {"courses": [visible_course(row) for row in rows], "limit": 1000}
+
+
+# ============== TRAINING TEMPLATE LIBRARY ==============
+
+@router.get("/admin/templates")
+async def list_templates(current_user: dict = Depends(get_current_user)):
+    """Modelled MSP training programs (SAT episodes + capability tracks)."""
+    admin(current_user)
+    return {"templates": template_catalogue()}
+
+
+@router.get("/admin/templates/{template_id}")
+async def preview_template(template_id: str, current_user: dict = Depends(get_current_user)):
+    admin(current_user)
+    preview = template_preview(template_id)
+    if not preview:
+        raise HTTPException(404, "Training template not found")
+    return {"template": preview}
+
+
+@router.post("/admin/templates/{template_id}/instantiate")
+async def instantiate_template(
+    template_id: str,
+    data: dict | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create an editable draft course from a template (fully customisable)."""
+    admin(current_user)
+    course_data = template_as_course(template_id, data)
+    if not course_data:
+        raise HTTPException(404, "Training template not found")
+    validated = CourseInput(**course_data).model_dump(exclude={"expected_version"})
+    row = {**validated, "template_id": template_id}
+    row.update(id=stable_id("course"), tenant_id=platform_tenant_id(current_user), version=1,
+               created_at=utc_now(), updated_at=utc_now(),
+               audit=[event(current_user, "course_created_from_template")])
+    await db.academy_courses.insert_one(deepcopy(row))
+    return {"course": visible_course(row)}
 
 
 @router.post("/admin/courses")

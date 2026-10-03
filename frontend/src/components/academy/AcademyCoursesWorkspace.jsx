@@ -21,13 +21,17 @@ import {
   BookOpenCheck,
   CheckCircle2,
   Clock3,
+  Eye,
   FilePenLine,
   GraduationCap,
+  LayoutTemplate,
+  Library,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   UserRoundCheck,
   UsersRound,
 } from "lucide-react";
@@ -159,6 +163,10 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
   const [assignmentDueAt, setAssignmentDueAt] = useState("");
   const [assignmentRequired, setAssignmentRequired] = useState(true);
   const [savingAssignments, setSavingAssignments] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [previewTemplate, setPreviewTemplate] = useState(null);
+  const [previewingTemplate, setPreviewingTemplate] = useState(false);
+  const [instantiatingId, setInstantiatingId] = useState(null);
 
   const loadCourses = useCallback(async ({ background = false } = {}) => {
     if (background) setRefreshing(true); else setLoading(true);
@@ -184,6 +192,12 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
 
   useEffect(() => { loadCourses(); }, [loadCourses]);
   useEffect(() => { if (!isAdmin && tab === "studio") setTab("learning"); }, [isAdmin, tab]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    axios.get(`${API}/academy/admin/templates`, { headers })
+      .then((response) => setTemplates(response.data?.templates || []))
+      .catch(() => setTemplates([]));
+  }, [headers, isAdmin]);
 
   const securityCourses = useMemo(() => learnerCourses.filter(isSecurityCourse), [learnerCourses]);
   const academyCourses = useMemo(() => learnerCourses.filter((course) => !isSecurityCourse(course)), [learnerCourses]);
@@ -237,6 +251,35 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
       assessment: course.assessment || [],
       passing_score: course.passing_score || 100,
     });
+  };
+
+  const openTemplatePreview = async (templateId) => {
+    setPreviewingTemplate(true);
+    setPreviewTemplate(null);
+    try {
+      const response = await axios.get(`${API}/academy/admin/templates/${encodeURIComponent(templateId)}`, { headers });
+      setPreviewTemplate(response.data?.template || null);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Nexus could not load this training template");
+    } finally {
+      setPreviewingTemplate(false);
+    }
+  };
+
+  const createFromTemplate = async (templateId) => {
+    setInstantiatingId(templateId);
+    try {
+      const response = await axios.post(`${API}/academy/admin/templates/${encodeURIComponent(templateId)}/instantiate`, {}, { headers });
+      const course = response.data?.course;
+      if (course) {
+        beginEdit(course);
+        toast.success("Draft created from template — customise every detail, then publish");
+      }
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Nexus could not create a draft from this template");
+    } finally {
+      setInstantiatingId(null);
+    }
   };
 
   const saveCourse = async () => {
@@ -368,10 +411,93 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
 
       {isAdmin ? <TabsContent value="studio" className="mt-4 space-y-4">
         <Card className="border-violet-400/20 bg-violet-400/[0.035]"><CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Course studio</p><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Create a clear internal lesson, keep it in draft while it is reviewed, then publish and explicitly assign it to stable Nexus technician identities.</p></div><div className="flex shrink-0 flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => beginCreate("security_awareness")}><ShieldCheck className="mr-1.5 h-3.5 w-3.5" />Security course</Button><Button size="sm" onClick={() => beginCreate()} data-testid="academy-create-course"><Plus className="mr-1.5 h-3.5 w-3.5" />New course</Button></div></CardContent></Card>
+        <Card className="overflow-hidden border-cyan-400/20 bg-[radial-gradient(circle_at_92%_0%,rgba(34,211,238,0.12),transparent_38%),linear-gradient(125deg,rgba(10,20,28,0.92),rgba(15,19,33,0.88))]">
+          <CardContent className="p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Training template library</p>
+                <p className="mt-1 text-base font-semibold">Start from proven MSP training programs</p>
+                <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Modelled on how leading MSP tools structure training — story-driven security-awareness episodes with knowledge checks, and role-based capability tracks (client onboarding, service desk triage, patch management, billing reconciliation). Every template becomes a fully customisable draft.</p>
+              </div>
+              <Badge variant="outline" className="shrink-0 border-cyan-400/25 bg-cyan-400/[0.06] text-cyan-100"><Library className="mr-1.5 h-3 w-3" />{templates.length} templates</Badge>
+            </div>
+            {templates.length ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {templates.map((template) => (
+                  <div key={template.id} className="group flex flex-col rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 transition hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-white/[0.04]" data-testid={`academy-template-${template.id}`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <Badge variant="outline" className={template.track === "Security awareness" ? "border-emerald-400/25 bg-emerald-400/[0.07] text-[9px] text-emerald-200" : "border-violet-400/25 bg-violet-400/[0.07] text-[9px] text-violet-200"}>{template.track}</Badge>
+                      <span className="text-[9px] text-muted-foreground">{template.estimated_minutes} min · {template.difficulty}</span>
+                    </div>
+                    <p className="mt-2 text-sm font-semibold text-zinc-100">{template.name}</p>
+                    <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{template.tagline}</p>
+                    <p className="mt-2 text-[9px] text-muted-foreground">{template.module_count} modules · {template.assessment_count} knowledge checks · for {template.roles.slice(0, 2).join(", ")}</p>
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm" variant="outline" className="h-7 flex-1 border-white/[0.12] text-[11px]" onClick={() => openTemplatePreview(template.id)} data-testid={`academy-template-preview-${template.id}`}><Eye className="mr-1 h-3 w-3" />Preview</Button>
+                      <Button size="sm" className="h-7 flex-1 text-[11px]" onClick={() => createFromTemplate(template.id)} disabled={instantiatingId === template.id} data-testid={`academy-template-use-${template.id}`}>
+                        {instantiatingId === template.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Sparkles className="mr-1 h-3 w-3" />}Use template
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-4 text-xs text-muted-foreground">The template library is loading…</p>
+            )}
+          </CardContent>
+        </Card>
         {studioError ? <Card className="border-amber-400/25 bg-amber-400/[0.04]"><CardContent className="flex items-center justify-between gap-3 p-4"><p className="text-xs text-muted-foreground">{studioError}</p><Button size="sm" variant="outline" onClick={() => loadCourses({ background: true })}>Retry</Button></CardContent></Card> : null}
         {loading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading the course library…</CardContent></Card> : adminCourses.length ? <div className="grid gap-4 xl:grid-cols-3">{adminCourses.map((course) => <CourseCard key={course.id} course={course} admin onEdit={beginEdit} onAssign={openAssignments} />)}</div> : <EmptyState title="Your Academy library is ready for its first course" description="Start with an internal security-awareness lesson or a capability course. Publishing does not assign the course automatically." action={<Button size="sm" onClick={() => beginCreate()}><Plus className="mr-1.5 h-3.5 w-3.5" />Create the first course</Button>} />}
       </TabsContent> : null}
     </Tabs>
+
+    <Dialog open={Boolean(previewTemplate)} onOpenChange={(open) => { if (!open) setPreviewTemplate(null); }}>
+      <NexusWorkflowDialog
+        eyebrow="Training template · preview"
+        title={previewTemplate?.name || "Training template"}
+        description={previewTemplate?.tagline || ""}
+        icon={LayoutTemplate}
+        tone={previewTemplate?.track === "Security awareness" ? "emerald" : "violet"}
+        className="max-w-2xl"
+        contentClassName="space-y-4"
+        data-testid="academy-template-preview-dialog"
+        footer={<><Button variant="ghost" onClick={() => setPreviewTemplate(null)}>Close</Button><Button onClick={() => { const id = previewTemplate?.id; setPreviewTemplate(null); if (id) createFromTemplate(id); }} disabled={!previewTemplate || instantiatingId === previewTemplate?.id} data-testid="academy-template-use-from-preview"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Use this template</Button></>}
+      >
+        {previewingTemplate ? (
+          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div>
+        ) : previewTemplate ? (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline" className={previewTemplate.track === "Security awareness" ? "border-emerald-400/25 text-emerald-200" : "border-violet-400/25 text-violet-200"}>{previewTemplate.track}</Badge>
+              <Badge variant="outline">{previewTemplate.difficulty}</Badge>
+              <Badge variant="outline">{previewTemplate.estimated_minutes} minutes</Badge>
+              <Badge variant="outline">Pass mark {previewTemplate.passing_score}%</Badge>
+              {previewTemplate.required ? <Badge variant="outline" className="border-amber-400/30 text-amber-200">Required</Badge> : null}
+            </div>
+            <section>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Module outline</p>
+              <div className="mt-2 space-y-2">
+                {(previewTemplate.modules || []).map((module, index) => (
+                  <div key={`${module.title}-${index}`} className="rounded-xl border border-border/70 bg-muted/[0.12] p-3">
+                    <p className="text-xs font-semibold">{index + 1}. {module.title}</p>
+                    <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-muted-foreground">{module.body}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Knowledge check ({(previewTemplate.assessment_prompts || []).length} questions)</p>
+              <ul className="mt-2 space-y-1.5">
+                {(previewTemplate.assessment_prompts || []).map((prompt, index) => (
+                  <li key={index} className="rounded-lg border border-border/60 bg-muted/[0.08] px-3 py-2 text-[11px] leading-5">{prompt}</li>
+                ))}
+              </ul>
+            </section>
+            <p className="rounded-lg border border-cyan-400/20 bg-cyan-400/[0.04] px-3 py-2 text-[10px] leading-4 text-muted-foreground">Inspired by {previewTemplate.inspired_by}. Instantiating creates an editable draft course — rewrite any module, question, timing and pass mark before publishing.</p>
+          </>
+        ) : null}
+      </NexusWorkflowDialog>
+    </Dialog>
 
     <Dialog open={Boolean(openCourse)} onOpenChange={(open) => { if (!open) setOpenCourse(null); }}>
       {openCourse ? <NexusWorkflowDialog eyebrow={isSecurityCourse(openCourse) ? "Nexus security awareness" : "Nexus Academy"} title={openCourse.title || "Academy course"} description={openCourse.description || "Review the internal standard, then make a deliberate learning attestation."} icon={isSecurityCourse(openCourse) ? ShieldCheck : BookOpenCheck} tone={isSecurityCourse(openCourse) ? "emerald" : "violet"} className="max-w-3xl" contentClassName="space-y-5" data-testid="academy-course-player" footer={<><Button variant="ghost" onClick={() => setOpenCourse(null)}>Close</Button>{isCompleted(openCourse) ? <Button variant="outline" onClick={() => setOpenCourse(null)}><CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Attestation retained</Button> : <Button onClick={completeCourse} disabled={!acknowledged || completing}>{completing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserRoundCheck className="mr-2 h-4 w-4" />}Retain my attestation</Button>}</>}>

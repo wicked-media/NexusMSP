@@ -17,6 +17,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
@@ -58,6 +60,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  SlidersHorizontal,
   Smile,
   Sparkles,
   Quote,
@@ -90,6 +93,29 @@ import {
 } from "@/lib/chatConnections";
 import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 import { applyChatFormat, renderSafeChatMarkdown } from "@/lib/richChatMessage";
+
+const CHAT_SETTINGS_KEY = "nexus_chat_settings";
+const DEFAULT_CHAT_SETTINGS = { density: "comfy", enterToSend: true, showTimestamps: true, showAvatars: true, accent: "emerald" };
+const OWN_BUBBLE_ACCENT = {
+  emerald: "border-emerald-500/10 bg-emerald-500/[0.035]",
+  cyan: "border-cyan-500/10 bg-cyan-500/[0.035]",
+  violet: "border-violet-500/10 bg-violet-500/[0.035]",
+  amber: "border-amber-500/10 bg-amber-500/[0.035]",
+};
+const ACCENT_SWATCHES = [
+  { value: "emerald", label: "Emerald", className: "bg-emerald-400" },
+  { value: "cyan", label: "Cyan", className: "bg-cyan-400" },
+  { value: "violet", label: "Violet", className: "bg-violet-400" },
+  { value: "amber", label: "Amber", className: "bg-amber-400" },
+];
+
+function loadChatSettings() {
+  try {
+    return { ...DEFAULT_CHAT_SETTINGS, ...JSON.parse(window.localStorage.getItem(CHAT_SETTINGS_KEY) || "{}") };
+  } catch {
+    return { ...DEFAULT_CHAT_SETTINGS };
+  }
+}
 
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "🎉", "🔥", "🚀", "✅", "💯", "👏", "👀"];
 const EMOJI_GROUPS = [
@@ -194,6 +220,11 @@ export default function TeamChatPage() {
   const [thread, setThread] = useState(null);
   const [threadInput, setThreadInput] = useState("");
   const [emojiTarget, setEmojiTarget] = useState(null);
+  const [chatSettings, setChatSettings] = useState(loadChatSettings);
+  const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
+  useEffect(() => {
+    try { window.localStorage.setItem(CHAT_SETTINGS_KEY, JSON.stringify(chatSettings)); } catch { /* Cosmetic preference only. */ }
+  }, [chatSettings]);
   const [composerEmojiOpen, setComposerEmojiOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [gifQuery, setGifQuery] = useState("");
@@ -1098,6 +1129,7 @@ export default function TeamChatPage() {
                   </div>
                 )}
                 {typingUsers.length > 0 && <span className="hidden text-xs text-cyan-200 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => setChatSettingsOpen(true)} aria-label="Chat settings" title="Chat settings" data-testid="chat-settings-btn"><SlidersHorizontal className="h-4 w-4" /></Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" aria-label="Conversation options"><MoreHorizontal className="h-4 w-4" /></Button>
@@ -1172,6 +1204,7 @@ export default function TeamChatPage() {
                           message={group.message}
                           compact={group.compact}
                           own={group.message.user_id === user?.id}
+                          settings={chatSettings}
                            currentUserId={user?.id}
                            headers={headers}
                            presence={presence}
@@ -1265,7 +1298,7 @@ export default function TeamChatPage() {
                           else pickMention(mentionSuggestions[mentionIndex]);
                           return;
                         }
-                        if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); }
+                        if (event.key === "Enter" && !event.shiftKey && chatSettings.enterToSend) { event.preventDefault(); send(); }
                       }}
                       placeholder={`Message ${channelDisplayName(activeChannel)}`}
                       className="min-h-[52px] resize-none border-0 bg-transparent px-4 pb-1 pt-2.5 text-sm shadow-none focus-visible:ring-0"
@@ -1364,6 +1397,53 @@ export default function TeamChatPage() {
           setShowNewDialog(false);
         }}
       />
+      <Dialog open={chatSettingsOpen} onOpenChange={setChatSettingsOpen}>
+        <NexusWorkflowDialog
+          eyebrow="Make it yours"
+          title="Chat settings"
+          description="Personalise how team chat looks and behaves for you. These preferences are saved on this device."
+          icon={SlidersHorizontal}
+          tone="cyan"
+          className="max-w-lg"
+          data-testid="chat-settings-dialog"
+          footer={<Button onClick={() => setChatSettingsOpen(false)} data-testid="chat-settings-done">Done</Button>}
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+              <div><p className="text-sm font-medium">Compact message density</p><p className="text-[11px] text-muted-foreground">Tighter spacing for busy channels.</p></div>
+              <Switch checked={chatSettings.density === "compact"} onCheckedChange={value => setChatSettings(current => ({ ...current, density: value ? "compact" : "comfy" }))} data-testid="chat-setting-density" />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+              <div><p className="text-sm font-medium">Enter to send</p><p className="text-[11px] text-muted-foreground">When off, Enter starts a new line and you send with the Send button.</p></div>
+              <Switch checked={chatSettings.enterToSend} onCheckedChange={value => setChatSettings(current => ({ ...current, enterToSend: value }))} data-testid="chat-setting-enter" />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+              <div><p className="text-sm font-medium">Show timestamps</p><p className="text-[11px] text-muted-foreground">Display the send time beside each sender.</p></div>
+              <Switch checked={chatSettings.showTimestamps} onCheckedChange={value => setChatSettings(current => ({ ...current, showTimestamps: value }))} data-testid="chat-setting-timestamps" />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+              <div><p className="text-sm font-medium">Show avatars</p><p className="text-[11px] text-muted-foreground">Hide avatars for a text-first view.</p></div>
+              <Switch checked={chatSettings.showAvatars} onCheckedChange={value => setChatSettings(current => ({ ...current, showAvatars: value }))} data-testid="chat-setting-avatars" />
+            </div>
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
+              <p className="text-sm font-medium">Your message accent</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Tint applied to your own messages.</p>
+              <div className="mt-2.5 flex items-center gap-2">
+                {ACCENT_SWATCHES.map(swatch => (
+                  <button key={swatch.value} type="button" onClick={() => setChatSettings(current => ({ ...current, accent: swatch.value }))} aria-label={`${swatch.label} accent`} className={`flex h-9 w-9 items-center justify-center rounded-full transition hover:scale-110 ${swatch.className} ${chatSettings.accent === swatch.value ? "ring-2 ring-white/80 ring-offset-2 ring-offset-background" : "opacity-60"}`} data-testid={`chat-setting-accent-${swatch.value}`} />
+                ))}
+                <Select value={chatSettings.accent} onValueChange={value => setChatSettings(current => ({ ...current, accent: value }))}>
+                  <SelectTrigger className="h-9 w-36 text-xs" data-testid="chat-setting-accent-select"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ACCENT_SWATCHES.map(swatch => <SelectItem key={swatch.value} value={swatch.value}>{swatch.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
       <Dialog open={showArchived} onOpenChange={setShowArchived}>
         <NexusWorkflowDialog
           eyebrow="Recoverable channel archive"
@@ -1664,7 +1744,7 @@ function PresenceLabel({ status, detail }) {
   return <div><p className={`flex items-center gap-1.5 text-[11px] ${meta.text}`}><span className={`h-2 w-2 rounded-full ${meta.dot}`} />{meta.label}</p>{detail && detail !== "Available" && <p className="mt-0.5 truncate text-[10px] text-zinc-500">{detail}</p>}</div>;
 }
 
-function MessageRow({ message, compact, own, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload }) {
+function MessageRow({ message, compact, own, settings, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload }) {
   const [hovered, setHovered] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   if (message.is_system) {
@@ -1680,10 +1760,10 @@ function MessageRow({ message, compact, own, currentUserId, headers, presence, r
     );
   }
   return (
-    <div className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? "border border-emerald-500/10 bg-emerald-500/[0.035]" : "hover:bg-cyan-500/[0.025]"} ${compact ? "mt-0.5" : "mt-2"} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setActionsOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setActionsOpen(false); }}>
-      <div className="w-9 shrink-0">{!compact && <TechnicianAvatar name={message.user_name} avatarUrl={message.avatar_url || message.avatar} className="h-9 w-9" />}</div>
+    <div className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? `border ${OWN_BUBBLE_ACCENT[settings?.accent] || OWN_BUBBLE_ACCENT.emerald}` : "hover:bg-cyan-500/[0.025]"} ${settings?.density === "compact" ? (compact ? "mt-0" : "mt-1") : (compact ? "mt-0.5" : "mt-2")} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setActionsOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setActionsOpen(false); }}>
+      <div className="w-9 shrink-0">{!compact && settings?.showAvatars !== false && <TechnicianAvatar name={message.user_name} avatarUrl={message.avatar_url || message.avatar} className="h-9 w-9" />}</div>
       <div className="min-w-0 flex-1">
-        {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span><span className="text-[10px] text-zinc-500">{formatTime(message.ts)}</span>{message.edited && <span className="text-[9px] text-zinc-500">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
+        {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span>{settings?.showTimestamps !== false && <span className="text-[10px] text-zinc-500">{formatTime(message.ts)}</span>}{message.edited && <span className="text-[9px] text-zinc-500">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
         {editing ? (
           <div className="flex gap-2"><Input value={editingText} onChange={event => onEditingText(event.target.value)} onKeyDown={event => event.key === "Enter" && onSaveEdit()} autoFocus className="h-9 border-white/10 bg-black/20" /><Button size="sm" onClick={onSaveEdit}>Save</Button><Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button></div>
         ) : (
