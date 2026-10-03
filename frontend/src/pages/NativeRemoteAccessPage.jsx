@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Activity, ArrowLeft, CheckCircle2, Clock3, ExternalLink, History, Laptop,
-  Loader2, Maximize2, Minimize2, Monitor, MonitorUp, Network, RefreshCw,
-  Search, ShieldCheck, Users, ZoomIn, ZoomOut, XCircle,
+  Activity, ArrowLeft, CheckCircle2, Clock3, ExternalLink, FileDown, FileUp,
+  FolderOpen, History, Laptop, Loader2, Maximize2, Minimize2, Monitor, MonitorUp,
+  Network, RefreshCw, Search, ShieldCheck, Users, ZoomIn, ZoomOut, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -120,12 +120,40 @@ export default function NativeRemoteAccessPage() {
   const [viewerFit, setViewerFit] = useState(true);
   const [viewerFocus, setViewerFocus] = useState(false);
   const [viewerFullscreen, setViewerFullscreen] = useState(false);
+  const [viewerDisplays, setViewerDisplays] = useState([]);
+  const [viewerDisplayIndex, setViewerDisplayIndex] = useState("all");
+  const [viewerFrameSize, setViewerFrameSize] = useState({ w: 0, h: 0 });
+  const [remotePath, setRemotePath] = useState("C:\\");
+  const [retrievalPath, setRetrievalPath] = useState("");
+  const [sendDestination, setSendDestination] = useState("");
+  const [transferBusy, setTransferBusy] = useState(false);
+  const [transfers, setTransfers] = useState([]);
+  const sendFileRef = useRef(null);
   const viewerInputSequence = useRef(0);
   const lastPointerMoveAt = useRef(0);
   const pendingPointerMove = useRef(null);
   const pointerMoveTimer = useRef(null);
   const lastViewerInputErrorAt = useRef(0);
   const viewerSessionId = viewerSession?.id || "";
+  const viewerActiveDisplay = viewerDisplayIndex === "all"
+    ? null
+    : viewerDisplays.find((display) => display.index === viewerDisplayIndex) || null;
+  // Per-display views crop one monitor rectangle out of the virtual-desktop
+  // frame. Pointer coordinates keep working because they are read from the
+  // image's own rectangle, which always maps 1:1 onto the full frame.
+  const cropGeometry = viewerActiveDisplay && viewerFrameSize.w > 0 && viewerFrameSize.h > 0
+    ? {
+        box: { aspectRatio: `${viewerActiveDisplay.width} / ${viewerActiveDisplay.height}`, height: "100%", maxWidth: "100%" },
+        image: {
+          position: "absolute",
+          width: `${(viewerFrameSize.w / viewerActiveDisplay.width) * 100}%`,
+          height: `${(viewerFrameSize.h / viewerActiveDisplay.height) * 100}%`,
+          left: `${(-viewerActiveDisplay.x / viewerActiveDisplay.width) * 100}%`,
+          top: `${(-viewerActiveDisplay.y / viewerActiveDisplay.height) * 100}%`,
+          maxWidth: "none",
+        },
+      }
+    : null;
 
   const viewerUrl = useCallback((sessionId) => {
     const params = new URLSearchParams();
@@ -320,6 +348,15 @@ export default function NativeRemoteAccessPage() {
         setViewerFrame(previous => { if (previous) URL.revokeObjectURL(previous); return nextUrl; });
         currentUrl = nextUrl;
         setViewerFrameCapturedAt(response.headers["x-nexus-remote-captured-at"] || "");
+        const displaysHeader = response.headers["x-nexus-remote-displays"];
+        if (displaysHeader) {
+          try {
+            const parsed = JSON.parse(displaysHeader);
+            setViewerDisplays((previous) => (JSON.stringify(previous) === JSON.stringify(parsed) ? previous : parsed));
+          } catch { setViewerDisplays([]); }
+        } else {
+          setViewerDisplays([]);
+        }
         setViewerState("live");
       } catch (error) {
         if (!cancelled) {
@@ -446,6 +483,60 @@ export default function NativeRemoteAccessPage() {
     void sendViewerInput({ kind: "key", key, pressed });
   }, [sendViewerInput, viewerCanControl]);
 
+  const loadTransfers = useCallback(async () => {
+    if (!viewerSession?.device_id) return;
+    try {
+      const response = await axios.get(`${API}/devices/${viewerSession.device_id}/file-transfers`, { headers });
+      setTransfers(Array.isArray(response.data) ? response.data : []);
+    } catch { setTransfers([]); }
+  }, [viewerSession, headers]);
+
+  useEffect(() => { loadTransfers(); }, [loadTransfers]);
+
+  const browseRemoteDirectory = async () => {
+    if (!viewerSession?.device_id || !remotePath.trim()) return;
+    setTransferBusy(true);
+    try {
+      await axios.post(`${API}/devices/${viewerSession.device_id}/file-browser/list`, { directory: remotePath.trim() }, { headers });
+      toast.success("Directory listing requested — the endpoint reports it back into this session.");
+    } catch (error) { toast.error(messageFor(error, "Directory listing could not be requested")); }
+    finally { setTransferBusy(false); }
+  };
+
+  const requestRemoteFile = async () => {
+    if (!viewerSession?.device_id || !retrievalPath.trim()) return;
+    setTransferBusy(true);
+    try {
+      const form = new FormData();
+      form.append("source_path", retrievalPath.trim());
+      const response = await axios.post(`${API}/devices/${viewerSession.device_id}/file-retrievals`, form, { headers });
+      toast.success(`Retrieval queued for ${response.data?.filename || "the requested file"}.`);
+      setRetrievalPath("");
+      loadTransfers();
+    } catch (error) { toast.error(messageFor(error, "File retrieval could not be queued")); }
+    finally { setTransferBusy(false); }
+  };
+
+  const sendRemoteFile = async () => {
+    const file = sendFileRef.current?.files?.[0];
+    if (!viewerSession?.device_id || !file || !sendDestination.trim()) {
+      toast.error("Choose a file and an explicit endpoint destination first.");
+      return;
+    }
+    setTransferBusy(true);
+    try {
+      const form = new FormData();
+      form.append("destination", sendDestination.trim());
+      form.append("file", file);
+      await axios.post(`${API}/devices/${viewerSession.device_id}/file-transfers`, form, { headers });
+      toast.success("File staged — the agent scans and pulls it to the endpoint.");
+      if (sendFileRef.current) sendFileRef.current.value = "";
+      setSendDestination("");
+      loadTransfers();
+    } catch (error) { toast.error(messageFor(error, "File could not be staged for the endpoint")); }
+    finally { setTransferBusy(false); }
+  };
+
   const startSession = async () => {
     if (!selected || !readiness?.ready || !consent) return;
     setStarting(true);
@@ -548,8 +639,8 @@ export default function NativeRemoteAccessPage() {
           <div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/5 text-cyan-100">{viewerSession?.access_mode === "control" ? "Control consented" : "View-only"}</Badge><Button variant="outline" size="sm" onClick={toggleFullscreen} title="Use the entire display for the remote canvas">{viewerFullscreen ? <Minimize2 className="mr-1.5 h-3.5 w-3.5" /> : <Maximize2 className="mr-1.5 h-3.5 w-3.5" />}{viewerFullscreen ? "Exit full screen" : "Full screen"}</Button><Button variant="outline" size="sm" onClick={() => openViewer(viewerSession, { popOut: true })}><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Pop out</Button><Button variant="outline" size="sm" onClick={closeViewer} disabled={Boolean(endingSessionId)}><ArrowLeft className="mr-1.5 h-3.5 w-3.5" />Return</Button><Button variant="destructive" size="sm" onClick={() => endSession(viewerSession)} disabled={Boolean(endingSessionId)}>{endingSessionId === viewerSession?.id && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}End session</Button></div>
         </header>
         <main className={`grid min-h-0 flex-1 gap-3 p-3 ${viewerFocus ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_20rem]"} lg:p-5`}>
-          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span><div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom - 0.25)} disabled={viewerFit || viewerZoom <= 0.5} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={resetViewerCanvas} title="Fit desktop to available space">{viewerFit ? "Fit" : `${Math.round(viewerZoom * 100)}%`}</Button><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom + 0.25)} disabled={!viewerFit && viewerZoom >= 3} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerFocus(value => !value)} title="Hide or show session evidence">{viewerFocus ? "Show evidence" : "Focus desktop"}</Button></div><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <div className={`flex min-h-0 flex-1 items-center justify-center ${viewerFit ? "overflow-hidden" : "overflow-auto p-6"}`}><img src={viewerFrame} alt="Live endpoint desktop" aria-label={viewerCanControl ? "Live endpoint desktop. Click to send attended control input." : undefined} draggable={false} tabIndex={viewerCanControl ? 0 : -1} onMouseMove={handleViewerPointerMove} onClick={event => { event.currentTarget.focus(); handleViewerPointerButton(event, true); handleViewerPointerButton(event, false); }} onContextMenu={event => { if (viewerCanControl) event.preventDefault(); }} onKeyDown={event => handleViewerKey(event, true)} onKeyUp={event => handleViewerKey(event, false)} className={`${viewerFit ? "block max-h-full max-w-full object-contain" : "block h-auto max-w-none shadow-2xl"} ${viewerCanControl ? "cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" : ""}`} style={viewerFit ? undefined : { width: `${Math.round(viewerZoom * 100)}%` }} /></div> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
-          {!viewerFocus && <aside className="space-y-3"><div className="rounded-2xl border border-border/60 bg-background/65 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Control boundary</p><p className="mt-1">{viewerSession?.access_mode === "control" ? "Endpoint control is locally consented. Select the desktop to send bounded mouse and keyboard input; clipboard and file transfer stay unavailable, and every event is relayed through the agent for audit." : "This session is view-only. Mouse, keyboard, clipboard and transfer controls remain locked until the endpoint presents a separate control-consent prompt and every action is auditable."}</p></div></aside>}
+          <div className="flex min-h-[50vh] flex-col overflow-hidden rounded-2xl border border-cyan-400/20 bg-black shadow-2xl shadow-cyan-950/30"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-3 py-2 text-[11px] text-muted-foreground"><span role="status" aria-live="polite" className={`font-medium uppercase tracking-[0.14em] ${viewerCaptureState === "stale" || viewerState === "stale" ? "text-amber-200" : viewerCaptureState === "ended" || viewerState === "disconnected" ? "text-rose-200" : "text-emerald-200"}`}>{viewerStatusLabel}</span>{viewerDisplays.length > 0 && <div className="flex items-center gap-1" data-testid="viewer-display-switcher"><Button variant={viewerDisplayIndex === "all" ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerDisplayIndex("all")} data-testid="viewer-display-all">All displays</Button>{viewerDisplays.map((display) => <Button key={display.index} variant={viewerDisplayIndex === display.index ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerDisplayIndex(display.index)} data-testid={`viewer-display-${display.index}`}>{display.name || `Display ${display.index + 1}`}{display.primary ? " · Primary" : ""}</Button>)}</div>}<div className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom - 0.25)} disabled={viewerFit || viewerZoom <= 0.5} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={resetViewerCanvas} title="Fit desktop to available space">{viewerFit ? "Fit" : `${Math.round(viewerZoom * 100)}%`}</Button><Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => updateViewerZoom(zoom => zoom + 0.25)} disabled={!viewerFit && viewerZoom >= 3} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setViewerFocus(value => !value)} title="Hide or show session evidence">{viewerFocus ? "Show evidence" : "Focus desktop"}</Button></div><span className="hidden font-mono text-[10px] sm:inline">{viewerSession?.id}</span></div>{viewerFrame && viewerCaptureState !== "stale" && viewerCaptureState !== "ended" && viewerState !== "stale" && viewerState !== "disconnected" ? <div className={`relative flex min-h-0 flex-1 items-center justify-center ${viewerFit || viewerActiveDisplay ? "overflow-hidden" : "overflow-auto p-6"}`} style={cropGeometry ? cropGeometry.box : undefined} data-testid="viewer-frame-area"><img src={viewerFrame} alt="Live endpoint desktop" aria-label={viewerCanControl ? "Live endpoint desktop. Click to send attended control input." : undefined} draggable={false} onLoad={(event) => setViewerFrameSize({ w: event.currentTarget.naturalWidth, h: event.currentTarget.naturalHeight })} tabIndex={viewerCanControl ? 0 : -1} onMouseMove={handleViewerPointerMove} onClick={event => { event.currentTarget.focus(); handleViewerPointerButton(event, true); handleViewerPointerButton(event, false); }} onContextMenu={event => { if (viewerCanControl) event.preventDefault(); }} onKeyDown={event => handleViewerKey(event, true)} onKeyUp={event => handleViewerKey(event, false)} className={`${viewerActiveDisplay ? "block" : viewerFit ? "block max-h-full max-w-full object-contain" : "block h-auto max-w-none shadow-2xl"} ${viewerCanControl ? "cursor-crosshair outline-none focus-visible:ring-2 focus-visible:ring-cyan-300" : ""}`} style={cropGeometry ? cropGeometry.image : viewerFit ? undefined : { width: `${Math.round(viewerZoom * 100)}%` }} /></div> : <div role="status" aria-live="polite" className="flex min-h-80 flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">{viewerCaptureState === "stale" || viewerState === "stale" ? "The last desktop capture is no longer current, so it has been removed from view. Check the endpoint connection or end the session." : viewerCaptureState === "ended" ? "This session is no longer active. Start a new attended session when the endpoint user is ready." : viewerState === "disconnected" ? "The endpoint companion disconnected, so its desktop image has been removed. Waiting for a new protected connection." : <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{viewerCaptureState === "awaiting_consent" ? "Waiting for the endpoint user to accept…" : viewerState === "reconnecting" ? "Checking the secure relay…" : "Waiting for the attended companion to send its first frame…"}</>}</div>}</div>
+          {!viewerFocus && <aside className="space-y-3"><div className="rounded-2xl border border-border/60 bg-background/65 p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Session evidence</p><div className="mt-3 space-y-2">{sessionTimeline(viewerSessionRecord).length ? sessionTimeline(viewerSessionRecord).map(([label, at]) => <div key={`${label}-${at}`} className="rounded-lg border border-border/50 px-3 py-2"><p className="text-xs font-medium">{label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{displayEvidenceTime(at)}</p></div>) : <p className="text-xs text-muted-foreground">Waiting for protected endpoint evidence.</p>}</div></div><div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4 text-xs leading-5 text-muted-foreground"><p className="font-semibold text-foreground">Control boundary</p><p className="mt-1">{viewerSession?.access_mode === "control" ? "Endpoint control is locally consented. Select the desktop to send bounded mouse and keyboard input; clipboard and file transfer stay unavailable, and every event is relayed through the agent for audit." : "This session is view-only. Mouse, keyboard, clipboard and transfer controls remain locked until the endpoint presents a separate control-consent prompt and every action is auditable."}</p></div><div className="rounded-2xl border border-border/60 bg-background/65 p-4" data-testid="session-file-panel"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Files in this session</p><p className="mt-1 text-[11px] text-muted-foreground">Move files over the Nexus Agent's audited channel without leaving the session window.</p><div className="mt-3 space-y-2"><div className="flex gap-1.5"><Input value={remotePath} onChange={(event) => setRemotePath(event.target.value)} placeholder="C:\Users\Public" className="h-8 text-xs" aria-label="Endpoint directory" data-testid="session-file-path" /><Button variant="outline" size="sm" className="h-8" onClick={browseRemoteDirectory} disabled={transferBusy} data-testid="session-file-browse"><FolderOpen className="h-3.5 w-3.5" /></Button></div><div className="flex gap-1.5"><Input value={retrievalPath} onChange={(event) => setRetrievalPath(event.target.value)} placeholder="Endpoint file to retrieve" className="h-8 text-xs" aria-label="Endpoint file to retrieve" data-testid="session-file-retrieve-path" /><Button variant="outline" size="sm" className="h-8" onClick={requestRemoteFile} disabled={transferBusy} data-testid="session-file-retrieve"><FileDown className="h-3.5 w-3.5" /></Button></div><div className="flex gap-1.5"><input ref={sendFileRef} type="file" className="min-w-0 flex-1 text-[11px] text-muted-foreground file:mr-2 file:h-7 file:rounded-md file:border file:border-border file:bg-muted/40 file:px-2 file:text-[11px]" aria-label="File to send to the endpoint" data-testid="session-file-send-input" /><Input value={sendDestination} onChange={(event) => setSendDestination(event.target.value)} placeholder="Destination path" className="h-8 w-32 text-xs" aria-label="Endpoint destination path" data-testid="session-file-destination" /><Button variant="outline" size="sm" className="h-8" onClick={sendRemoteFile} disabled={transferBusy} data-testid="session-file-send"><FileUp className="h-3.5 w-3.5" /></Button></div><div className="max-h-40 space-y-1 overflow-y-auto" data-testid="session-file-transfers">{transfers.length === 0 ? <p className="text-[11px] text-muted-foreground">No file transfers yet in this session.</p> : transfers.map((transfer) => <div key={transfer.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/50 px-2 py-1 text-[11px]"><span className="truncate" title={transfer.source_path || transfer.filename}>{transfer.filename || transfer.id}</span><Badge variant="outline" className="shrink-0 text-[9px] uppercase">{transfer.direction === "endpoint_to_technician" ? "Inbound" : "Outbound"} · {transfer.status}</Badge></div>)}</div></div></div></aside>}
         </main>
       </section>}
     </div>

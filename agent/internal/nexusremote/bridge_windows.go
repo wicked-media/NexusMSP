@@ -338,7 +338,7 @@ func relayCompanionFrames(ctx context.Context, handle windows.Handle, pipe *os.F
 			log.Printf("[native-remote] rejected malformed companion frame")
 			return
 		}
-		if err := api.SendFrame(context.Background(), grant.SessionID, jpeg); err != nil {
+		if err := api.SendFrame(context.Background(), grant.SessionID, jpeg, message.Displays); err != nil {
 			log.Printf("[native-remote] frame relay failed: %v", err)
 			return
 		}

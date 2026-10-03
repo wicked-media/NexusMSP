@@ -28,6 +28,7 @@ const (
 	mouseMiddleDown = 0x0020
 	mouseMiddleUp   = 0x0040
 	mouseAbsolute   = 0x8000
+	mouseVirtualDesk = 0x4000
 
 	keyEventKeyUp = 0x0002
 )
@@ -74,7 +75,9 @@ func windowsInputFor(event ControlEvent) (windowsInput, error) {
 		result.typ = inputMouse
 		putU32(result.data[:], 0, uint32(math.Round(*event.X*65535)))
 		putU32(result.data[:], 4, uint32(math.Round(*event.Y*65535)))
-		flags := uint32(mouseMove | mouseAbsolute)
+		// Absolute coordinates map over the full virtual desktop so input
+		// lands on the monitor the technician clicked in the multi-display view.
+		flags := uint32(mouseMove | mouseAbsolute | mouseVirtualDesk)
 		if event.Kind == "pointer_button" {
 			flags |= pointerButtonFlag(event.Button, *event.Pressed)
 		}

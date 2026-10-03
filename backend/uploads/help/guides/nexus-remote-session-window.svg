@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 760" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101418"/>
+      <stop offset="1" stop-color="#0b0e12"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1200" height="760" fill="url(#canvas)"/>
+  <rect x="24" y="20" width="1152" height="720" rx="18" fill="#12161c" stroke="#22d3ee" stroke-opacity="0.25"/>
+
+  <!-- toolbar -->
+  <text x="52" y="62" fill="#e6f7fa" font-size="19" font-weight="600">Nexus Remote — attended session window</text>
+  <rect x="52" y="82" width="150" height="30" rx="15" fill="#10b981" fill-opacity="0.15" stroke="#10b981" stroke-opacity="0.5"/>
+  <text x="127" y="102" fill="#6ee7b7" font-size="13" text-anchor="middle">LIVE · CONTROL</text>
+
+  <!-- display switcher -->
+  <rect x="230" y="82" width="118" height="30" rx="8" fill="#22d3ee" fill-opacity="0.12" stroke="#22d3ee" stroke-opacity="0.45"/>
+  <text x="289" y="102" fill="#a5f3fc" font-size="13" text-anchor="middle">All displays</text>
+  <rect x="356" y="82" width="150" height="30" rx="8" fill="#0e7490" fill-opacity="0.35" stroke="#22d3ee"/>
+  <text x="431" y="102" fill="#cffafe" font-size="13" text-anchor="middle">DISPLAY1 · Primary</text>
+  <rect x="514" y="82" width="118" height="30" rx="8" fill="#181c22" stroke="#3f4a57"/>
+  <text x="573" y="102" fill="#9aa7b5" font-size="13" text-anchor="middle">DISPLAY2</text>
+  <circle cx="222" cy="97" r="13" fill="#22d3ee"/><text x="222" y="102" fill="#06222b" font-size="13" font-weight="700" text-anchor="middle">1</text>
+
+  <!-- window buttons -->
+  <rect x="880" y="82" width="86" height="30" rx="8" fill="#181c22" stroke="#3f4a57"/>
+  <text x="923" y="102" fill="#9aa7b5" font-size="13" text-anchor="middle">Zoom</text>
+  <rect x="974" y="82" width="86" height="30" rx="8" fill="#181c22" stroke="#3f4a57"/>
+  <text x="1017" y="102" fill="#9aa7b5" font-size="13" text-anchor="middle">Fit</text>
+  <rect x="1068" y="82" width="84" height="30" rx="8" fill="#e11d48" fill-opacity="0.2" stroke="#fb7185" stroke-opacity="0.6"/>
+  <text x="1110" y="102" fill="#fecdd3" font-size="13" text-anchor="middle">End</text>
+  <circle cx="872" cy="97" r="13" fill="#22d3ee"/><text x="872" y="102" fill="#06222b" font-size="13" font-weight="700" text-anchor="middle">2</text>
+
+  <!-- canvas: two monitors -->
+  <rect x="52" y="136" width="700" height="470" rx="12" fill="#06090d" stroke="#2b3542"/>
+  <text x="402" y="170" fill="#5c6b7a" font-size="14" text-anchor="middle">Remote desktop canvas — virtual-desktop frame</text>
+  <rect x="92" y="200" width="300" height="190" rx="8" fill="#131a22" stroke="#10b981" stroke-width="2"/>
+  <text x="242" y="300" fill="#6ee7b7" font-size="15" text-anchor="middle">DISPLAY1 (Primary)</text>
+  <rect x="412" y="200" width="300" height="190" rx="8" fill="#131a22" stroke="#22d3ee" stroke-width="3" stroke-dasharray="7 5"/>
+  <text x="562" y="300" fill="#a5f3fc" font-size="15" text-anchor="middle">DISPLAY2 — selected view</text>
+  <text x="402" y="430" fill="#8b98a6" font-size="13" text-anchor="middle">Click a display chip to crop one monitor · pointer and keyboard stay exact</text>
+  <text x="402" y="456" fill="#8b98a6" font-size="13" text-anchor="middle">All displays shows every monitor in one frame</text>
+  <circle cx="76" cy="160" r="13" fill="#22d3ee"/><text x="76" y="165" fill="#06222b" font-size="13" font-weight="700" text-anchor="middle">3</text>
+
+  <!-- sidebar -->
+  <rect x="772" y="136" width="380" height="140" rx="12" fill="#141a21" stroke="#2b3542"/>
+  <text x="796" y="166" fill="#e6f7fa" font-size="14" font-weight="600">Session evidence</text>
+  <text x="796" y="192" fill="#8b98a6" font-size="12">Consent recorded · input queued · endpoint acked</text>
+  <text x="796" y="216" fill="#8b98a6" font-size="12">Capture freshness · transport state · timeline</text>
+  <rect x="772" y="292" width="380" height="96" rx="12" fill="#141a21" stroke="#2b3542"/>
+  <text x="796" y="322" fill="#e6f7fa" font-size="14" font-weight="600">Control boundary</text>
+  <text x="796" y="348" fill="#8b98a6" font-size="12">Every mouse and keyboard event is relayed</text>
+  <text x="796" y="370" fill="#8b98a6" font-size="12">through the agent and recorded for audit.</text>
+
+  <rect x="772" y="404" width="380" height="202" rx="12" fill="#10202a" stroke="#22d3ee" stroke-opacity="0.35"/>
+  <text x="796" y="434" fill="#a5f3fc" font-size="14" font-weight="600">Files in this session</text>
+  <rect x="796" y="450" width="240" height="28" rx="6" fill="#0b1620" stroke="#2b3542"/>
+  <text x="808" y="469" fill="#6b7a89" font-size="12">C:\Users\Public</text>
+  <rect x="1044" y="450" width="84" height="28" rx="6" fill="#182430" stroke="#3f4a57"/>
+  <text x="1086" y="469" fill="#9aa7b5" font-size="12" text-anchor="middle">Browse</text>
+  <rect x="796" y="488" width="240" height="28" rx="6" fill="#0b1620" stroke="#2b3542"/>
+  <text x="808" y="507" fill="#6b7a89" font-size="12">Endpoint file to retrieve</text>
+  <rect x="1044" y="488" width="84" height="28" rx="6" fill="#182430" stroke="#3f4a57"/>
+  <text x="1086" y="507" fill="#9aa7b5" font-size="12" text-anchor="middle">Retrieve</text>
+  <rect x="796" y="526" width="240" height="28" rx="6" fill="#0b1620" stroke="#2b3542"/>
+  <text x="808" y="545" fill="#6b7a89" font-size="12">Choose file + destination path</text>
+  <rect x="1044" y="526" width="84" height="28" rx="6" fill="#182430" stroke="#3f4a57"/>
+  <text x="1086" y="545" fill="#9aa7b5" font-size="12" text-anchor="middle">Send</text>
+  <rect x="796" y="566" width="332" height="26" rx="6" fill="#0b1620" stroke="#22d3ee" stroke-opacity="0.25"/>
+  <text x="808" y="584" fill="#7dd3fc" font-size="11">inbound · firmware.zip — scanned · completed</text>
+  <circle cx="1136" cy="422" r="13" fill="#22d3ee"/><text x="1136" y="427" fill="#06222b" font-size="13" font-weight="700" text-anchor="middle">4</text>
+
+  <!-- legend -->
+  <rect x="52" y="626" width="1100" height="92" rx="12" fill="#0e1319" stroke="#2b3542"/>
+  <text x="72" y="656" fill="#e6f7fa" font-size="14" font-weight="600">Callouts</text>
+  <text x="72" y="682" fill="#9aa7b5" font-size="12.5">1 · Display switcher — All displays or one monitor per view</text>
+  <text x="72" y="704" fill="#9aa7b5" font-size="12.5">2 · Zoom, fit, focus and window controls</text>
+  <text x="420" y="682" fill="#9aa7b5" font-size="12.5">3 · Live canvas — click to send bounded mouse and keyboard input</text>
+  <text x="420" y="704" fill="#9aa7b5" font-size="12.5">4 · Files panel — browse, retrieve and send without leaving the session</text>
+  <text x="880" y="682" fill="#9aa7b5" font-size="12.5">5 · Session evidence — consent, input</text>
+  <text x="880" y="704" fill="#9aa7b5" font-size="12.5">and freshness timeline</text>
+</svg>

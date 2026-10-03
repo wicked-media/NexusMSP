@@ -128,13 +128,18 @@ func (a *AgentAPI) CompanionHealth(status, detail string) error {
 
 // SendFrame provides the initial bounded HTTPS relay. The server retains only
 // the latest JPEG for an active session with a two-minute TTL; it is not a
-// recording or file-transfer channel.
-func (a *AgentAPI) SendFrame(_ context.Context, sessionID string, jpeg []byte) error {
+// recording or file-transfer channel.  Display topology is geometry-only
+// metadata so the viewer can present per-display views of the frame.
+func (a *AgentAPI) SendFrame(_ context.Context, sessionID string, jpeg []byte, displays []DisplayInfo) error {
 	if len(jpeg) == 0 || len(jpeg) > 4*1024*1024 {
 		return fmt.Errorf("native remote frame size is invalid")
 	}
-	return a.client.Do("POST", "/api/nexus-agent/native-remote/grants/"+url.PathEscape(sessionID)+"/frame", map[string]any{
+	body := map[string]any{
 		"sequence": a.sequence.Add(1),
 		"jpeg_b64": base64.StdEncoding.EncodeToString(jpeg),
-	}, nil)
+	}
+	if len(displays) > 0 {
+		body["displays"] = displays
+	}
+	return a.client.Do("POST", "/api/nexus-agent/native-remote/grants/"+url.PathEscape(sessionID)+"/frame", body, nil)
 }

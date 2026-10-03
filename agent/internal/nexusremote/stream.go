@@ -15,7 +15,13 @@ type FrameSource interface {
 // FrameSink is the future authenticated relay/upload implementation. It must
 // not persist frames as general-purpose endpoint artefacts.
 type FrameSink interface {
-	SendFrame(context.Context, string, []byte) error
+	SendFrame(context.Context, string, []byte, []DisplayInfo) error
+}
+
+// DisplaySource optionally reports monitor geometry for a virtual-desktop
+capture so the relay can hand the viewer per-display views of each frame.
+type DisplaySource interface {
+	Displays() []DisplayInfo
 }
 
 type GrantStatus func(sessionID string) (bool, error)
@@ -88,7 +94,11 @@ func StreamViewOnly(ctx context.Context, session *Session, source FrameSource, s
 			if len(frame) == 0 || len(frame) > 4*1024*1024 {
 				return errors.New("native remote capture produced an invalid frame")
 			}
-			if err := sink.SendFrame(ctx, session.grant.SessionID, frame); err != nil {
+			var displays []DisplayInfo
+			if displaySource, ok := source.(DisplaySource); ok {
+				displays = displaySource.Displays()
+			}
+			if err := sink.SendFrame(ctx, session.grant.SessionID, frame, displays); err != nil {
 				return err
 			}
 		}

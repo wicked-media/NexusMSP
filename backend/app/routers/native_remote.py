@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -91,9 +92,28 @@ class NativeLocalStop(BaseModel):
     reason: str = Field(default="Endpoint user stopped view-only access", max_length=500)
 
 
+class NativeDisplayInfo(BaseModel):
+    """One monitor rectangle in virtual-desktop frame coordinates.
+
+    The companion captures the full virtual desktop, so every rectangle is
+    relative to the frame's top-left corner and stays stable for the viewer's
+    per-display views.  The list is display topology only: no window titles,
+    process names or desktop content ever travel through it.
+    """
+
+    index: int = Field(ge=0, le=15)
+    x: int = Field(ge=0, le=32767)
+    y: int = Field(ge=0, le=32767)
+    width: int = Field(ge=1, le=16384)
+    height: int = Field(ge=1, le=16384)
+    primary: bool = False
+    name: str = Field(default="", max_length=40)
+
+
 class NativeFrameUpload(BaseModel):
     sequence: int = Field(ge=1, le=2_147_483_647)
     jpeg_b64: str = Field(min_length=16, max_length=5_600_000)
+    displays: list[NativeDisplayInfo] | None = Field(default=None, max_length=16)
 
 
 def _frame_is_current(updated_at: object) -> bool:
@@ -654,6 +674,14 @@ async def native_remote_frame_upload(
         raise HTTPException(status_code=429, detail="Native remote frame rate limit exceeded")
     await ensure_native_remote_indexes()
     try:
+        frame_set = {
+            "tenant_id": tenant_id, "session_id": session_id,
+            "device_id": grant["device_id"], "client_id": grant["client_id"],
+            "sequence": body.sequence, "jpeg": jpeg, "updated_at": now,
+            "purge_at": now_dt + timedelta(minutes=2),
+        }
+        if body.displays:
+            frame_set["displays"] = [display.model_dump() for display in body.displays]
         updated = await db.native_remote_frames.update_one(
             {
                 "tenant_id": tenant_id,
@@ -663,12 +691,7 @@ async def native_remote_frame_upload(
                     {"sequence": {"$lt": body.sequence}},
                 ],
             },
-            {"$set": {
-                "tenant_id": tenant_id, "session_id": session_id,
-                "device_id": grant["device_id"], "client_id": grant["client_id"],
-                "sequence": body.sequence, "jpeg": jpeg, "updated_at": now,
-                "purge_at": now_dt + timedelta(minutes=2),
-            }},
+            {"$set": frame_set},
             upsert=True,
         )
     except DuplicateKeyError as exc:
@@ -714,19 +737,25 @@ async def native_remote_latest_frame(
         raise HTTPException(status_code=409, detail="Native remote transport is disconnected; awaiting endpoint reconnect")
     frame = await db.native_remote_frames.find_one(
         {"tenant_id": tenant_id, "session_id": session_id, "client_id": session.get("client_id")},
-        {"_id": 0, "jpeg": 1, "sequence": 1, "updated_at": 1},
+        {"_id": 0, "jpeg": 1, "sequence": 1, "updated_at": 1, "displays": 1},
     )
     if not frame or not isinstance(frame.get("jpeg"), (bytes, bytearray)):
         raise HTTPException(status_code=404, detail="No native remote frame is available yet")
     if not _frame_is_current(frame.get("updated_at")):
         raise HTTPException(status_code=409, detail="Native remote capture is stale; awaiting a newer endpoint frame")
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Nexus-Remote-Sequence": str(frame.get("sequence") or 0),
+        # This is server receipt time, not an endpoint-provided clock.  It
+        # lets the viewer label the exact capture evidence it received.
+        "X-Nexus-Remote-Captured-At": str(frame.get("updated_at") or ""),
+    }
+    displays = frame.get("displays") or []
+    if displays:
+        # Bounded, validated topology: the viewer renders per-display views
+        # and needs only rectangle geometry, never desktop content.
+        headers["X-Nexus-Remote-Displays"] = json.dumps(displays, separators=(",", ":"))
     return Response(
         content=bytes(frame["jpeg"]), media_type="image/jpeg",
-        headers={
-            "Cache-Control": "no-store",
-            "X-Nexus-Remote-Sequence": str(frame.get("sequence") or 0),
-            # This is server receipt time, not an endpoint-provided clock.  It
-            # lets the viewer label the exact capture evidence it received.
-            "X-Nexus-Remote-Captured-At": str(frame.get("updated_at") or ""),
-        },
+        headers=headers,
     )

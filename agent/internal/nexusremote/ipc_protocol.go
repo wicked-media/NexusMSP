@@ -21,6 +21,19 @@ const (
 	maxIPCMessageSize      = 6 * 1024 * 1024
 )
 
+// DisplayInfo is one monitor rectangle in virtual-desktop frame coordinates.
+// It carries geometry only so the viewer can present each monitor as its own
+// view; no window titles, process names or desktop content ever travel in it.
+type DisplayInfo struct {
+	Index   int    `json:"index"`
+	X       int    `json:"x"`
+	Y       int    `json:"y"`
+	Width   int    `json:"width"`
+	Height  int    `json:"height"`
+	Primary bool   `json:"primary,omitempty"`
+	Name    string `json:"name,omitempty"`
+}
+
 type IPCMessage struct {
 	Type       string           `json:"type"`
 	Grant      *DeliveredGrant  `json:"grant,omitempty"`
@@ -31,6 +44,7 @@ type IPCMessage struct {
 	State      string           `json:"state,omitempty"`
 	Active     bool             `json:"active,omitempty"`
 	JPEGBase64 string           `json:"jpeg_b64,omitempty"`
+	Displays   []DisplayInfo    `json:"displays,omitempty"`
 	Control    *ControlEvent    `json:"control,omitempty"`
 	// FramePipeReady is a lifecycle-only acknowledgement that the protected
 	// Agent has created the isolated frame endpoint for this grant.

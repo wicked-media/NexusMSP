@@ -409,12 +409,12 @@ type pipeFrameSink struct {
 	firstSent atomic.Bool
 }
 
-func (s *pipeFrameSink) SendFrame(_ context.Context, sessionID string, jpeg []byte) error {
+func (s *pipeFrameSink) SendFrame(_ context.Context, sessionID string, jpeg []byte, displays []nexusremote.DisplayInfo) error {
 	first := s.firstSent.CompareAndSwap(false, true)
 	if first {
 		log.Printf("remote companion: relaying first desktop frame (%d bytes)", len(jpeg))
 	}
-	err := s.writer.send(nexusremote.IPCMessage{Type: "frame", SessionID: sessionID, JPEGBase64: base64.StdEncoding.EncodeToString(jpeg)})
+	err := s.writer.send(nexusremote.IPCMessage{Type: "frame", SessionID: sessionID, JPEGBase64: base64.StdEncoding.EncodeToString(jpeg), Displays: displays})
 	if err == nil && first {
 		log.Printf("remote companion: first desktop frame relayed to protected Agent")
 	}

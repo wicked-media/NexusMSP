@@ -869,4 +869,144 @@ The bridge is for reconciling external Keeper approval events. It never removes 
 - **A technician cannot approve:** an administrator must grant the technician the Agent command execution permission or perform the approval themselves.
 """,
     },
+    {
+        "slug": "nexus-remote-sessions",
+        "title": "Nexus Remote: run an attended multi-display support session",
+        "category": "Remote support",
+        "icon": "🖥️",
+        "order": 37,
+        "summary": "Start an attended remote session, switch between multiple displays, and move files — all from one session window.",
+        "body_md": """# Nexus Remote session window
+
+Nexus Remote is NexusMSP's first-party remote viewing and control software. The session window combines the live desktop, per-display views, session evidence and file transfer in one place, so technicians never leave the session to fetch a log or push a tool.
+
+## What the controls do
+
+- **Display switcher (All displays / DISPLAY1 / DISPLAY2 …):** every attached monitor is captured in one virtual-desktop frame. Select a display chip to focus one monitor; select **All displays** to see the complete desktop. Mouse and keyboard input stay exact in both views.
+- **Zoom out / Fit / Zoom in:** scales the desktop canvas. **Fit** returns to the full view.
+- **Focus desktop / Show evidence:** hides or restores the session evidence sidebar for maximum desktop space.
+- **Full screen:** expands the session window to the entire local display.
+- **Pop out:** opens the session in its own browser window.
+- **End session:** closes the session immediately and stops all capture on the endpoint.
+- **Files in this session** panel: **Browse** requests a directory listing from the endpoint, **Retrieve** asks the agent to stage one endpoint file for download, and **Send** stages a scanned file for the agent to pull to an explicit destination path. Every transfer appears in the panel's transfer list with its direction and status.
+
+> **Boundary:** Nexus Remote is consent-driven. View-only is the default; interactive control requires the endpoint user to approve a separate control prompt for that session. Clipboard bridging is deliberately not included — use the Files panel, which is scanned and audited.
+
+## Run a session
+
+1. Open **Devices & RMM -> Nexus Remote**.
+2. Select the target endpoint and choose **Start session**.
+3. Pick **View only** or **Control**, write a specific purpose, tick the consent confirmation and start. The endpoint user sees the technician name, purpose and expiry and must accept.
+4. Once live, use the **display chips** to move between monitors. The status label shows the live capture time.
+5. For interactive work, click the desktop to send input; every event is relayed through the agent and recorded. Use the keys on the keyboard as normal — function keys, modifiers and navigation keys are supported.
+6. Transfer files from the **Files in this session** panel when the job needs a log pulled or a tool pushed.
+7. Choose **End session** when the work is finished. Capture stops immediately and the session evidence is retained.
+
+## Verify the result
+
+- The status label reads **Live** with a fresh server capture time.
+- The **Session evidence** panel shows consent recorded, input queued and endpoint acknowledgement for control sessions.
+- File transfers appear in the panel with a final **completed** or **failed** status; anything scanned unsafe is quarantined before delivery.
+
+## Troubleshooting
+
+- **Waiting for endpoint consent:** the endpoint user has not accepted yet. Confirm they are at the machine and can see the consent prompt.
+- **Capture is stale or disconnected:** the companion stopped sending frames. Ask the endpoint user to reopen the Nexus Remote Companion from the system tray, then start a new session.
+- **Control input does nothing:** the session is view-only, or the control consent prompt was declined. Restart the session with **Control** and have the user accept the second prompt.
+- **A file will not send:** transfers are limited to 25MB and are signature-checked. Use a direct destination path and confirm the agent is online.
+""",
+        "screenshots": [{"url": "/uploads/help/guides/nexus-remote-session-window.svg", "caption": "Nexus Remote session window — display switcher, live canvas, session evidence, and the Files panel."}],
+    },
+    {
+        "slug": "automated-invoice-reminders",
+        "title": "Invoice reminders: automate payment follow-up",
+        "category": "Billing",
+        "icon": "🔔",
+        "order": 38,
+        "summary": "Set up automatic payment reminders with custom messages, then review exactly what is scheduled and what was sent.",
+        "body_md": """# Automated invoice reminders
+
+NexusMSP sends due payment reminders automatically — including overdue escalation — so nobody has to chase invoices by hand. Every delivery is logged with the verified billing contact it used.
+
+## What the controls do
+
+- **Programme tab:** the reminder stage builder. Each stage has a kind (**Before due date / On due date / After due date**), a day offset, a tone (**Friendly / Professional / Firm**), and full subject and message templates.
+- **Variable chips:** insert merge fields such as the client name, invoice number, amount due and due date into your templates. The preview renders them with real values before anything is sent.
+- **Scheduled tab:** every reminder that is set up to fire, per invoice, with its planned stage and date.
+- **History tab:** every delivery with recipient, amount, status and who triggered it.
+- **Run now:** executes due reminders immediately without waiting for the hourly scheduler.
+- **Automation tiles:** show whether the programme is active, how many stages are enabled, and what is due in the next seven days.
+
+## Set up the programme
+
+1. Open **Billing -> Invoice reminders**.
+2. Turn the programme on and review the default stages. Add, edit or disable stages to match how your MSP follows up.
+3. For each stage, set the trigger day and write the message. Keep the tone progression gentle to firm across the sequence.
+4. Set a **minimum balance** so small invoices are not chased, and enable **business days only** if weekend sends are unwanted.
+5. Use the preview to confirm the rendered subject and message, then save. The hourly scheduler takes over.
+
+## Verify the result
+
+- The **Scheduled** tab lists the upcoming reminders with dates that match your stage rules.
+- After a send, the **History** tab shows the delivery record against the verified billing contact.
+- Re-running the scheduler never double-sends: one reminder fires once per invoice per stage per day.
+
+## Troubleshooting
+
+- **Nothing is scheduled:** the programme is paused, no invoices are open, or every open invoice is below the minimum balance.
+- **A reminder shows as mocked:** the Microsoft 365 mailbox is not connected. The delivery is recorded safely and will send for real once the mailbox is connected in Settings.
+- **Wrong recipient:** reminders only go to the billing contact verified in NexusMSP billing records. Update the client's billing contact rather than the template.
+""",
+        "screenshots": [{"url": "/uploads/help/guides/invoices-workspace.png", "caption": "Billing workspace — reminder outcomes and invoice status are reflected on the invoice list."}],
+    },
+    {
+        "slug": "billing-settings-workspace",
+        "title": "Billing settings: invoice numbering, approvals and tax compliance",
+        "category": "Billing",
+        "icon": "🧾",
+        "order": 39,
+        "summary": "Configure organisation-wide invoice numbering, the approval policy for high-value invoices, and AU/NZ tax invoice details.",
+        "body_md": """# Billing settings
+
+Billing settings define the identity of every document NexusMSP issues: how invoices are numbered, when a second pair of eyes is required, and which tax and payment details are printed on each invoice.
+
+## What the controls do
+
+- **Invoice numbering -> Number format:** the pattern used for new invoice numbers. Click a variable chip to insert a token: **{YYYY}** calendar year, **{YY}** short year, **{MM}** month, **{FY}** financial year, **{CLIENT}** client code, **{SEQ}** the sequence number. The live preview shows the next number as you type.
+- **Financial year starts:** the month used for the **{FY}** token and for yearly sequence resets. July is the AU default.
+- **Next sequence number:** the number the sequence continues from.
+- **Include client code / Reset sequence each financial year:** optional numbering behaviour.
+- **Approvals:** enable approval for high-value invoices, set the threshold, and choose which role may approve or reject. Requests and decisions are written to the audit log.
+- **Tax & compliance:** country, ABN or NZBN, GST registration and rate, the **Tax invoice** label, company contact details, and the remittance bank details printed on invoices and remittance advice.
+
+> **Boundary:** these settings are organisation-wide and administrator-only. NexusMSP never exposes bank details outside billing documents, and existing invoice numbers never change when you edit the format.
+
+## Configure numbering
+
+1. Open **Billing -> Configuration & insights -> Billing settings**.
+2. On **Invoice numbering**, build the format with the variable chips — for example **INV-{FY}-{SEQ:05d}**.
+3. Check the preview reads as you expect, including the zero-padded sequence.
+4. Set the financial year start month and confirm the next sequence number.
+5. Select **Save numbering**. The format applies to the next invoice created.
+
+## Configure approvals and tax
+
+1. On **Approvals**, enable high-value approval, set the threshold, and choose the approver role.
+2. On **Tax & compliance**, enter the country and business number, confirm the GST rate, and fill the company and remittance bank details.
+3. Select **Save** on each tab. Every change is recorded as an audited billing-configuration update.
+
+## Verify the result
+
+- Create a draft invoice and confirm its number matches the preview pattern.
+- An invoice at or above the approval threshold routes to **Awaiting approval** instead of sending.
+- Generate an invoice PDF and confirm the tax invoice label, business number and bank details appear correctly.
+
+## Troubleshooting
+
+- **The save button is disabled:** the format preview is showing an error. Formats must have balanced braces and should include **{SEQ}**.
+- **Numbers restarted unexpectedly:** the financial year reset is on and the year boundary passed. Set the next sequence number to continue the old run.
+- **An approval cannot be granted:** only the configured approver role (or an administrator) can decide approval requests.
+""",
+        "screenshots": [{"url": "/uploads/help/guides/invoices-workspace.png", "caption": "Billing workspace — new invoice numbers and approval state are reflected here."}],
+    },
 ]
