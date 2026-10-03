@@ -11,6 +11,7 @@ import pkgutil
 import re
 import time
 import uuid
+from pathlib import Path
 
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
@@ -132,7 +133,24 @@ async def block_public_chat_attachment(legacy_path: str):
     raise HTTPException(status_code=404, detail="Not found")
 
 # Static files for public uploads (avatars, branding and public help assets).
-app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+# Runtime uploads live under UPLOADS_DIR (NEXUS_UPLOADS_DIR), while the shipped
+# public assets — demo avatars, branding and help guide visuals — are committed
+# under backend/uploads. When the runtime directory is configured elsewhere
+# (preview and acceptance stacks), those shipped assets must still resolve, so
+# the mount falls back to the committed tree after the runtime directory. The
+# sensitive-evidence blocklist above applies to both roots.
+class _PublicUploadsStatic(StaticFiles):
+    """StaticFiles that serves runtime uploads first, then shipped public assets."""
+
+    def __init__(self, runtime_dir: Path, shipped_dir: Path):
+        super().__init__(directory=str(runtime_dir))
+        directories = [str(runtime_dir)]
+        if str(shipped_dir) != str(runtime_dir):
+            directories.append(str(shipped_dir))
+        self.all_directories = directories
+
+
+app.mount("/api/uploads", _PublicUploadsStatic(UPLOADS_DIR, Path(__file__).resolve().parent / "uploads"), name="uploads")
 
 # Auto-discover and register all routers from app/routers/
 # Priority ordering ensures specific routes are matched before dynamic ones

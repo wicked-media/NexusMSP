@@ -7,7 +7,7 @@ can stay useful in the moment of work rather than becoming an implementation
 archive.
 """
 
-HELP_CATALOG_VERSION = "2026-09-02-academy-exposure-v22"
+HELP_CATALOG_VERSION = "2026-10-03-remote-and-billing-v23"
 
 
 _WORKSPACE_VISUALS = {
@@ -1510,5 +1510,149 @@ CURATED_ARTICLES.extend([
         "| Open evidence is unavailable | Permissions and legacy source route | Escalate through the incident ticket and retain the path ID |",
         rollback="Security Graph itself is read-only. If a source remediation or containment action was incorrect, stop further work, use the owning workspace's rollback or release control, validate endpoint and identity state, and record the correction in the linked incident and change.",
         screenshots=[],
+    ),
+])
+
+
+# Focused guides for the newest delivered workspaces: Nexus Remote's
+# single-window multi-display support experience, automated invoice reminders,
+# and Billing settings. They follow the same task-first structure as the core
+# procedures above so the Help Centre stays consistent as new workspaces ship.
+CURATED_ARTICLES.extend([
+    _guide(
+        "nexus-remote-sessions",
+        "Nexus Remote: run an attended multi-display support session",
+        "Infrastructure & security",
+        "🖥️",
+        6,
+        "Start an attended remote session, switch between multiple displays, and move files — all from one session window.",
+        outcome="The technician has run an attended Nexus Remote session across one or more displays, moved the files the job needed through the audited **Files in this session** panel, and ended the session with capture stopped and evidence retained.",
+        before="- Confirm the endpoint is enrolled and online in **Managed Assets** and is running the Nexus Remote Companion.\n"
+        "- Confirm the endpoint user is at the machine — Nexus Remote is consent-driven and they must accept the session prompt.\n"
+        "- Agree a specific purpose for the session; it is shown to the endpoint user and stored in the evidence.\n"
+        "- For file movement, keep transfers under 25MB and know the exact destination path on the endpoint.\n"
+        "- Interactive control needs administrator access or the Agent command execution permission; view-only does not.",
+        steps="### What the controls do\n"
+        "- **Display switcher (All displays / DISPLAY1 / DISPLAY2 …):** every attached monitor is captured in one virtual-desktop frame. Select a display chip to focus a single monitor; select **All displays** to see the complete desktop. Mouse and keyboard input stays exact in both views.\n"
+        "- **Zoom out / Fit / Zoom in:** scales the desktop canvas; **Fit** returns to the full view.\n"
+        "- **Focus desktop / Show evidence:** hides or restores the session evidence sidebar when the desktop needs the space.\n"
+        "- **Full screen:** expands the session window to the whole local display. **Pop out** opens the session in its own browser window.\n"
+        "- **End session:** closes the session immediately and stops all capture on the endpoint.\n"
+        "- **Files in this session:** **Browse** requests a directory listing from the endpoint, **Retrieve** asks the agent to stage one endpoint file for download, and **Send** stages a scanned file for the agent to pull to an explicit destination path. Every transfer appears in the transfer list with its direction and status.\n"
+        "> **Boundary:** Nexus Remote is consent-driven. View-only is the default; interactive control needs the endpoint user to accept a separate control prompt for that session. Clipboard bridging is deliberately not included — use the scanned, audited Files panel instead.\n\n"
+        "### Run a session\n"
+        "1. Open **Devices & RMM -> Nexus Remote** and select the target endpoint.\n"
+        "2. Choose **Start session**, pick **View only** or **Control**, write a specific purpose, tick the consent confirmation, and start. The endpoint user sees the technician name, purpose, and expiry and must accept.\n"
+        "3. Once live, use the **display chips** to move between monitors; the status label shows the live capture time.\n"
+        "4. For interactive work, click the desktop to send input. Function keys, modifiers, and navigation keys are relayed through the agent and recorded.\n"
+        "5. Use the **Files in this session** panel when the job needs a log pulled or a tool pushed, and watch each transfer reach its final status.\n"
+        "6. Choose **End session** when the work is finished. Capture stops immediately and the session evidence is retained.",
+        verify="- The status label reads **Live** with a fresh server capture time.\n"
+        "- The **Session evidence** panel shows consent recorded, input queued, and endpoint acknowledgement for control sessions.\n"
+        "- File transfers reach a final **completed** or **failed** status; anything scanned unsafe is quarantined before delivery.",
+        audit="- Record the session purpose, technician, endpoint, consent decision, control approval, and start/stop times from the retained session evidence.\n"
+        "- Attach the transferred files and their scan results to the linked ticket or client history.\n"
+        "- Raise any refused consent or failed transfer as follow-up work with a named owner.",
+        at_a_glance="- **Expected time:** 5-15 minutes to start; the session length follows the job\n"
+        "- **Risk:** Medium — interactive control sends input to a live endpoint\n"
+        "- **Required access:** Agent command execution permission or administrator; the endpoint user must be present to consent\n"
+        "- **Evidence location:** Nexus Remote session evidence and device activity history",
+        troubleshooting="- **Waiting for endpoint consent:** the endpoint user has not accepted yet — confirm they are at the machine and can see the prompt.\n"
+        "- **Capture is stale or disconnected:** the companion stopped sending frames. Ask the endpoint user to reopen the Nexus Remote Companion from the system tray, then start a new session.\n"
+        "- **Control input does nothing:** the session is view-only, or the control prompt was declined. Restart with **Control** and have the user accept the second prompt.\n"
+        "- **A display shows the wrong area:** choose **All displays** first to see the full virtual desktop, then reselect the display chip.\n"
+        "- **A file will not send:** transfers are limited to 25MB and are signature-checked. Use a direct destination path and confirm the agent is online.",
+        rollback="End the session immediately if the endpoint user withdraws consent or the scope changes. Capture stops on end; if an interactive action was wrong, undo it on the endpoint within the session or hand over to the linked ticket with the session evidence.",
+        related="[Managed assets](/help/managed-assets) for endpoint health, and [Agent installer and enrolment](/help/agent-installer) when the companion is missing.",
+        screenshots=[{"url": "/uploads/help/guides/nexus-remote-session-window.svg", "caption": "Nexus Remote session window — display switcher, live canvas, session evidence, and the Files panel."}],
+    ),
+    _guide(
+        "automated-invoice-reminders",
+        "Invoice reminders: automate payment follow-up",
+        "Billing & commercial",
+        "🔔",
+        6,
+        "Set up automatic payment reminders with custom messages, then review exactly what is scheduled and what was sent.",
+        outcome="The technician has configured the invoice reminder programme, confirmed the schedule it produces, and verified a real delivery in the reminder history.",
+        before="- Confirm each client's verified billing contact — reminders only ever go to that address.\n"
+        "- Connect the Microsoft 365 mailbox in **Settings** if reminders must send for real; otherwise deliveries are recorded as mocked.\n"
+        "- Agree the tone progression (friendly to firm) and the minimum balance to chase with the account owner.\n"
+        "- Check open invoices and their due dates so the stage offsets make sense.",
+        steps="### What the controls do\n"
+        "- **Programme tab:** the reminder stage builder. Each stage has a kind (**Before due date / On due date / After due date**), a day offset, a tone (**Friendly / Professional / Firm**), and full subject and message templates.\n"
+        "- **Variable chips:** insert merge fields such as client name, invoice number, amount due, and due date. The preview renders them with real values before anything is sent.\n"
+        "- **Scheduled tab:** every reminder set up to fire, per invoice, with its planned stage and date.\n"
+        "- **History tab:** every delivery with recipient, amount, status, and who triggered it.\n"
+        "- **Run now:** executes due reminders immediately without waiting for the hourly scheduler.\n"
+        "- **Automation tiles:** show whether the programme is active, how many stages are enabled, and what is due in the next seven days.\n\n"
+        "### Set up the programme\n"
+        "1. Open **Billing -> Invoice reminders** and turn the programme on.\n"
+        "2. Review the default stages; add, edit, or disable stages to match how your MSP follows up.\n"
+        "3. For each stage, set the trigger day and write the message. Keep the tone progression gentle to firm across the sequence.\n"
+        "4. Set a **minimum balance** so small invoices are not chased, and enable **business days only** if weekend sends are unwanted.\n"
+        "5. Use the preview to confirm the rendered subject and message, then save. The hourly scheduler takes over.",
+        verify="- The **Scheduled** tab lists upcoming reminders with dates that match your stage rules.\n"
+        "- After a send, the **History** tab shows the delivery record against the verified billing contact.\n"
+        "- Re-running the scheduler never double-sends: one reminder fires once per invoice per stage per day.",
+        audit="- Every delivery records the invoice, stage, recipient, amount, status, and trigger source in the reminder history.\n"
+        "- Programme changes are recorded as audited billing-configuration updates.\n"
+        "- Keep the delivery record with the client's financial history when a dispute arises.",
+        at_a_glance="- **Expected time:** 10-20 minutes\n"
+        "- **Risk:** Medium — reminders are customer-facing emails on a schedule\n"
+        "- **Required access:** Billing or administrator permission\n"
+        "- **Evidence location:** Reminder history and the billing configuration audit",
+        troubleshooting="- **Nothing is scheduled:** the programme is paused, no invoices are open, or every open invoice is below the minimum balance.\n"
+        "- **A reminder shows as mocked:** the Microsoft 365 mailbox is not connected. The delivery is recorded safely and sends for real once the mailbox is connected in **Settings**.\n"
+        "- **Wrong recipient:** reminders only go to the verified billing contact. Update the client's billing contact rather than the template.\n"
+        "- **A reminder went out early or late:** check the stage day offset, the business-days-only setting, and the invoice due date.",
+        rollback="Pause the programme to stop all scheduled sends immediately. Already-sent reminders cannot be recalled, so follow up any incorrect reminder with the client directly and record it in the client's billing history.",
+        related="[Create an invoice from ticket work](/help/invoice-from-ticket) and [Recurring billing](/help/recurring-billing).",
+        screenshots=[{"url": "/uploads/help/guides/invoices-workspace.png", "caption": "Billing workspace — reminder outcomes and invoice status are reflected on the invoice list."}],
+    ),
+    _guide(
+        "billing-settings-workspace",
+        "Billing settings: invoice numbering, approvals and tax compliance",
+        "Billing & commercial",
+        "🧾",
+        7,
+        "Configure organisation-wide invoice numbering, the approval policy for high-value invoices, and AU/NZ tax invoice details.",
+        outcome="The technician has configured organisation-wide invoice numbering, the high-value approval policy, and AU/NZ tax details, and verified each one on a test invoice.",
+        before="- Decide the numbering pattern, the financial year start month, and the next sequence number before changing anything.\n"
+        "- Collect the business number (ABN or NZBN), GST registration and rate, company contact details, and remittance bank details.\n"
+        "- Confirm which role may approve high-value invoices and the approval threshold.\n"
+        "- Remember existing invoice numbers never change when you edit the format.",
+        steps="### What the controls do\n"
+        "- **Invoice numbering -> Number format:** the pattern used for new invoice numbers. Click a variable chip to insert a token: **{YYYY}** calendar year, **{YY}** short year, **{MM}** month, **{FY}** financial year, **{CLIENT}** client code, **{SEQ}** sequence number. The live preview shows the next number as you type.\n"
+        "- **Financial year starts:** the month used for the **{FY}** token and yearly sequence resets. July is the AU default.\n"
+        "- **Next sequence number / Include client code / Reset sequence each financial year:** optional numbering behaviour.\n"
+        "- **Approvals:** enable approval for high-value invoices, set the threshold, and choose which role may approve or reject. Requests and decisions are written to the audit log.\n"
+        "- **Tax & compliance:** country, ABN or NZBN, GST registration and rate, the **Tax invoice** label, company contact details, and the remittance bank details printed on invoices and remittance advice.\n"
+        "> **Boundary:** these settings are organisation-wide and administrator-only. Bank details never leave billing documents.\n\n"
+        "### Configure numbering\n"
+        "1. Open **Billing -> Configuration & insights -> Billing settings**.\n"
+        "2. On **Invoice numbering**, build the format with the variable chips — for example **INV-{FY}-{SEQ:05d}**.\n"
+        "3. Check the preview reads as expected, including the zero-padded sequence.\n"
+        "4. Set the financial year start month and confirm the next sequence number, then select **Save numbering**. The format applies to the next invoice created.\n\n"
+        "### Configure approvals and tax\n"
+        "1. On **Approvals**, enable high-value approval, set the threshold, and choose the approver role.\n"
+        "2. On **Tax & compliance**, enter the country and business number, confirm the GST rate, and fill the company and remittance bank details.\n"
+        "3. Select **Save** on each tab. Every change is recorded as an audited billing-configuration update.",
+        verify="- Create a draft invoice and confirm its number matches the preview pattern.\n"
+        "- An invoice at or above the approval threshold routes to **Awaiting approval** instead of sending.\n"
+        "- Generate an invoice PDF and confirm the tax invoice label, business number, and bank details appear correctly.",
+        audit="- Every numbering, approval, and tax change is written to the audit log with actor and timestamp.\n"
+        "- Approval requests and decisions retain requester, approver, amount, and outcome.\n"
+        "- Generated invoice PDFs are the evidence that the tax invoice details print correctly.",
+        at_a_glance="- **Expected time:** 15-25 minutes\n"
+        "- **Risk:** Medium — these settings affect every new invoice the organisation issues\n"
+        "- **Required access:** Administrator (organisation-wide billing configuration)\n"
+        "- **Evidence location:** Billing configuration audit log and generated invoice PDFs",
+        troubleshooting="- **The save button is disabled:** the format preview is showing an error. Formats must have balanced braces and should include **{SEQ}**.\n"
+        "- **Numbers restarted unexpectedly:** the financial year reset is on and the year boundary passed. Set the next sequence number to continue the old run.\n"
+        "- **An approval cannot be granted:** only the configured approver role (or an administrator) can decide approval requests.\n"
+        "- **Tax details are missing from the PDF:** confirm the country, GST registration, and that the billing settings saved successfully.",
+        rollback="Restore the previous format, sequence number, threshold, or tax details in the same Billing settings tab. Numbering applies only to invoices created after the change, so correct any mis-numbered drafts before sending and record the correction in the client's billing history.",
+        related="[Invoice reminders: automate payment follow-up](/help/automated-invoice-reminders) and [Create an invoice from ticket work](/help/invoice-from-ticket).",
+        screenshots=[{"url": "/uploads/help/guides/invoices-workspace.png", "caption": "Billing workspace — new invoice numbers and approval state are reflected here."}],
     ),
 ])

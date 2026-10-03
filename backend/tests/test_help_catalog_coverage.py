@@ -36,4 +36,4 @@ def test_platform_operation_guides_are_shipped_and_task_complete():
 
 
 def test_help_catalog_version_tracks_the_current_curated_release():
-    assert "academy-exposure-v22" in HELP_CATALOG_VERSION
+    assert "remote-and-billing-v23" in HELP_CATALOG_VERSION
