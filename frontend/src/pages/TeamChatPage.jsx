@@ -1344,7 +1344,7 @@ export default function TeamChatPage() {
                       <ComposerButton icon={Image} label="Share GIF" onClick={() => { setGifPickerOpen(true); if (gifState === "idle") loadGifs(""); }} />
                       <ComposerButton icon={Smile} label="Emoji" onClick={() => setComposerEmojiOpen(current => !current)} />
                       <ComposerButton icon={AtSign} label="Mention" onClick={() => setInput(current => `${current}@`)} />
-                      <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">Markdown · Shift+Enter for a new line</span>
+                      <span className="ml-1 hidden text-[10px] text-zinc-600 sm:inline">{chatSettings.enterToSend ? "Markdown · Enter to send · Shift+Enter for a new line" : "Markdown · Enter for a new line · use Send to send"}</span>
                       <span className="ml-auto hidden text-[10px] tabular-nums text-zinc-600 sm:inline">{input.length}/5000</span>
                       <Button onClick={send} disabled={!input.trim() || sending} className="h-8 rounded-lg bg-emerald-600 px-3 hover:bg-emerald-500" data-testid="chat-send">
                         {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

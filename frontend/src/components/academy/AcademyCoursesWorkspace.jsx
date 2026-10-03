@@ -166,6 +166,7 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
   const [templates, setTemplates] = useState([]);
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [previewingTemplate, setPreviewingTemplate] = useState(false);
+  const [templatesError, setTemplatesError] = useState(false);
   const [instantiatingId, setInstantiatingId] = useState(null);
 
   const loadCourses = useCallback(async ({ background = false } = {}) => {
@@ -195,8 +196,8 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
   useEffect(() => {
     if (!isAdmin) return;
     axios.get(`${API}/academy/admin/templates`, { headers })
-      .then((response) => setTemplates(response.data?.templates || []))
-      .catch(() => setTemplates([]));
+      .then((response) => { setTemplates(response.data?.templates || []); setTemplatesError(false); })
+      .catch(() => { setTemplates([]); setTemplatesError(true); });
   }, [headers, isAdmin]);
 
   const securityCourses = useMemo(() => learnerCourses.filter(isSecurityCourse), [learnerCourses]);
@@ -442,7 +443,7 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
                 ))}
               </div>
             ) : (
-              <p className="mt-4 text-xs text-muted-foreground">The template library is loading…</p>
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-4 py-3"><p className="text-xs text-muted-foreground">{templatesError ? "Nexus could not load the training template library. Your existing courses were not changed." : "The template library is loading…"}</p>{templatesError ? <Button size="sm" variant="outline" onClick={() => { setTemplatesError(false); axios.get(`${API}/academy/admin/templates`, { headers }).then((response) => setTemplates(response.data?.templates || [])).catch(() => setTemplatesError(true)); }}>Retry</Button> : null}</div>
             )}
           </CardContent>
         </Card>
