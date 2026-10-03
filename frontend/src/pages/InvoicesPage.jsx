@@ -29,7 +29,7 @@ import {
   Plus, Search, FileText, Loader2, Send, Check, ArrowLeft,
   AlertTriangle, Clock, XCircle, CheckCircle, Trash2, Edit,
   Receipt, TrendingUp, Eye, Banknote, RefreshCw, ArrowRightLeft, Ban,
-  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown, ChevronRight
+  Building2, Wallet, Printer, Download, Mail, Copy, BarChart3, Shield, Users, Smartphone, Zap, FileSpreadsheet, CheckSquare, PackagePlus, Ticket, ChevronsUpDown, ChevronRight, CreditCard
 } from "lucide-react";
 import LateRiskBadge from "@/components/invoices/LateRiskBadge";
 import { format, formatDistanceToNow, isPast, parseISO } from "date-fns";
@@ -64,6 +64,20 @@ const RECURRING_INTERVAL_OPTIONS = [
   { value: "annually", label: "Annually", detail: "Once each year" },
 ];
 
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "eftpos", label: "EFTPOS terminal", hint: "Card / payWave", icon: CreditCard, activeClass: "border-emerald-400/45 bg-emerald-500/[0.14] shadow-[0_12px_32px_-18px_rgba(16,185,129,0.9)]", iconWrapClass: "bg-emerald-500/15 text-emerald-300", textClass: "text-emerald-200" },
+  { value: "cash", label: "Cash", hint: "Till / cash-up", icon: Wallet, activeClass: "border-amber-400/45 bg-amber-500/[0.14] shadow-[0_12px_32px_-18px_rgba(245,158,11,0.9)]", iconWrapClass: "bg-amber-500/15 text-amber-300", textClass: "text-amber-200" },
+  { value: "bank_transfer", label: "Bank transfer", hint: "EFT / remittance", icon: ArrowRightLeft, activeClass: "border-cyan-400/45 bg-cyan-500/[0.14] shadow-[0_12px_32px_-18px_rgba(34,211,238,0.9)]", iconWrapClass: "bg-cyan-500/15 text-cyan-300", textClass: "text-cyan-100" },
+  { value: "xero_reconciled", label: "Xero reconciled", hint: "Already matched", icon: CheckCircle, activeClass: "border-sky-400/45 bg-sky-500/[0.14] shadow-[0_12px_32px_-18px_rgba(56,189,248,0.9)]", iconWrapClass: "bg-sky-500/15 text-sky-300", textClass: "text-sky-100" },
+  { value: "cheque", label: "Cheque", hint: "Posted cheque", icon: Receipt, activeClass: "border-violet-400/45 bg-violet-500/[0.14] shadow-[0_12px_32px_-18px_rgba(139,92,246,0.9)]", iconWrapClass: "bg-violet-500/15 text-violet-300", textClass: "text-violet-100" },
+  { value: "other", label: "Other", hint: "Manual reference", icon: FileText, activeClass: "border-white/25 bg-white/[0.08]", iconWrapClass: "bg-white/[0.08] text-zinc-200", textClass: "text-zinc-100" },
+];
+
+const SETTLEMENT_METHOD_OPTIONS = [
+  { value: "eftpos", label: "EFTPOS terminal", hint: "Card batch settlement", icon: CreditCard, activeClass: "border-emerald-400/45 bg-emerald-500/[0.14] shadow-[0_12px_32px_-18px_rgba(16,185,129,0.9)]", iconWrapClass: "bg-emerald-500/15 text-emerald-300", textClass: "text-emerald-200" },
+  { value: "cash", label: "Cash", hint: "Daily cash-up deposit", icon: Wallet, activeClass: "border-amber-400/45 bg-amber-500/[0.14] shadow-[0_12px_32px_-18px_rgba(245,158,11,0.9)]", iconWrapClass: "bg-amber-500/15 text-amber-300", textClass: "text-amber-200" },
+];
+
 const normaliseInvoice = (invoice) => ({
   ...invoice,
   line_items: (invoice?.line_items || []).map((line) => {
@@ -79,6 +93,23 @@ const normaliseInvoice = (invoice) => ({
     };
   }),
 });
+
+function PaymentMethodTile({ option, active, onSelect, testId }) {
+  const Icon = option.icon;
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onSelect}
+      data-testid={testId}
+      className={`flex items-center gap-2.5 rounded-xl border p-2.5 text-left transition-all duration-150 ${active ? option.activeClass : "border-white/[0.08] bg-black/[0.16] hover:-translate-y-px hover:border-white/[0.18] hover:bg-white/[0.05]"}`}
+    >
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${active ? option.iconWrapClass : "bg-white/[0.05] text-zinc-400"}`}><Icon className="h-4 w-4" /></span>
+      <span className="min-w-0"><span className={`block truncate text-xs font-semibold ${active ? option.textClass : "text-zinc-200"}`}>{option.label}</span><span className="block truncate text-[10px] text-muted-foreground">{option.hint}</span></span>
+    </button>
+  );
+}
 
 function ClientAutocomplete({
   clients,
@@ -1062,25 +1093,33 @@ export default function InvoicesPage() {
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {payingInvoice && <div className="grid gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 sm:grid-cols-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">Invoice</p><p className="mt-1 font-mono text-sm font-semibold">{payingInvoice.invoice_number}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Client</p><p className="mt-1 truncate text-sm font-medium">{payingInvoice.client_name || "Unassigned client"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Remaining balance</p><p className="mt-1 text-sm font-semibold text-emerald-300">${Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)).toFixed(2)}</p></div></div>}
-            <div className="grid gap-4 sm:grid-cols-2"><div><Label>Payment amount ($)</Label><Input className="mt-1" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" /></div><div><Label>Payment date</Label><Input className="mt-1" type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div></div>
-            <div><Label>Payment method</Label>
-              <Select value={paymentForm.method} onValueChange={v => setPaymentForm({ ...paymentForm, method: v })}>
-                <SelectTrigger className="mt-1" data-testid="payment-method"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="eftpos">EFTPOS terminal</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="bank_transfer">Bank transfer / EFT</SelectItem>
-                  <SelectItem value="xero_reconciled">Already reconciled in Xero</SelectItem>
-                  <SelectItem value="cheque">Cheque</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="flex items-center justify-between gap-2"><Label>Payment amount ($)</Label>
+                  {payingInvoice && (() => { const remaining = Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)); return (
+                    <div className="flex gap-1.5">
+                      <Button type="button" variant="outline" size="sm" className="h-6 rounded-full border-emerald-400/25 px-2.5 text-[10px] text-emerald-200 hover:bg-emerald-500/10" onClick={() => setPaymentForm({ ...paymentForm, amount: remaining.toFixed(2) })} data-testid="payment-amount-full">Full balance</Button>
+                      <Button type="button" variant="outline" size="sm" className="h-6 rounded-full border-white/[0.12] px-2.5 text-[10px] text-zinc-300 hover:bg-white/[0.06]" onClick={() => setPaymentForm({ ...paymentForm, amount: (remaining / 2).toFixed(2) })} data-testid="payment-amount-half">Half</Button>
+                    </div>
+                  ); })()}
+                </div>
+                <Input className="mt-1 h-11 font-mono text-lg" type="number" min="0.01" step="0.01" value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} data-testid="payment-amount" />
+              </div>
+              <div><Label>Payment date</Label><Input className="mt-1 h-11" type="date" value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></div>
+            </div>
+            <div>
+              <Label>Payment method</Label>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Payment method" data-testid="payment-method">
+                {PAYMENT_METHOD_OPTIONS.map(option => (
+                  <PaymentMethodTile key={option.value} option={option} active={paymentForm.method === option.value} onSelect={() => setPaymentForm({ ...paymentForm, method: option.value })} testId={`payment-method-${option.value}`} />
+                ))}
+              </div>
             </div>
             <p className="rounded-md border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">{paymentForm.method === "eftpos" ? "Record the EFTPOS terminal receipt or settlement reference so the payment can be matched in Xero." : paymentForm.method === "cash" ? "Record the receipt number or till reference. Cash payments should be reconciled with the daily cash-up." : paymentForm.method === "xero_reconciled" ? "Use this only after the payment is matched in Xero; include the Xero payment or bank-feed reference." : "Include the banking or remittance reference so finance can reconcile the payment in Xero."}</p>
             <div><Label>Reference{["eftpos", "xero_reconciled"].includes(paymentForm.method) ? " *" : ""}</Label><Input className="mt-1" value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} placeholder={paymentForm.method === "eftpos" ? "Terminal receipt / settlement ID" : "Payment or remittance reference"} data-testid="payment-reference" /></div>
             <div><Label>Internal notes</Label><Textarea className="mt-1" value={paymentForm.notes} onChange={e => setPaymentForm({ ...paymentForm, notes: e.target.value })} placeholder="Optional reconciliation, remittance, or customer notes" rows={3} /></div>
           </div>
-          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button onClick={handleManualPayment} disabled={["eftpos", "xero_reconciled"].includes(paymentForm.method) && !paymentForm.reference.trim()} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />Record audited payment</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/80 bg-muted/[0.12] px-6 py-4"><Button variant="outline" onClick={() => setIsPaymentOpen(false)}>Cancel</Button><Button variant="success" onClick={handleManualPayment} disabled={["eftpos", "xero_reconciled"].includes(paymentForm.method) && !paymentForm.reference.trim()} data-testid="confirm-payment-btn"><Check className="mr-1.5 h-4 w-4" />{paymentForm.method === "eftpos" ? "Record EFTPOS payment" : paymentForm.method === "cash" ? "Record cash payment" : paymentForm.method === "bank_transfer" ? "Record bank transfer" : paymentForm.method === "cheque" ? "Record cheque payment" : "Record audited payment"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1140,8 +1179,14 @@ export default function InvoicesPage() {
       </Dialog>
 
       <Dialog open={settlementOpen} onOpenChange={setSettlementOpen}>
-        <NexusWorkflowDialog eyebrow="Reconciliation workflow" title="Close payment settlement" description="Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero." icon={Check} tone="emerald" className="max-w-md" footer={<><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button onClick={closeSettlement}><Check className="mr-1 h-4 w-4" />Close settlement</Button></>}>
-          <div className="space-y-3"><div><Label>Method</Label><Select value={settlementForm.method} onValueChange={v => setSettlementForm({ ...settlementForm, method: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="eftpos">EFTPOS terminal</SelectItem><SelectItem value="cash">Cash</SelectItem></SelectContent></Select></div><div><Label>Settlement date</Label><Input type="date" value={settlementForm.date} onChange={e => setSettlementForm({ ...settlementForm, date: e.target.value })} /></div><div><Label>Settlement / deposit reference</Label><Input value={settlementForm.reference} onChange={e => setSettlementForm({ ...settlementForm, reference: e.target.value })} placeholder="Terminal batch or bank deposit ID" /></div></div>
+        <NexusWorkflowDialog eyebrow="Reconciliation workflow" title="Close payment settlement" description="Groups a day’s EFTPOS or cash records into an auditable settlement. It remains pending until matched in Xero." icon={Check} tone="emerald" className="max-w-md" footer={<><Button variant="outline" onClick={() => setSettlementOpen(false)}>Cancel</Button><Button variant="success" onClick={closeSettlement} disabled={!settlementForm.reference.trim()}><Check className="mr-1 h-4 w-4" />Close settlement</Button></>}>
+          <div className="space-y-3"><div><Label>Method</Label>
+            <div className="mt-2 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Settlement method" data-testid="settlement-method">
+              {SETTLEMENT_METHOD_OPTIONS.map(option => (
+                <PaymentMethodTile key={option.value} option={option} active={settlementForm.method === option.value} onSelect={() => setSettlementForm({ ...settlementForm, method: option.value })} testId={`settlement-method-${option.value}`} />
+              ))}
+            </div>
+          </div><div><Label>Settlement date</Label><Input type="date" value={settlementForm.date} onChange={e => setSettlementForm({ ...settlementForm, date: e.target.value })} /></div><div><Label>Settlement / deposit reference</Label><Input value={settlementForm.reference} onChange={e => setSettlementForm({ ...settlementForm, reference: e.target.value })} placeholder="Terminal batch or bank deposit ID" data-testid="settlement-reference" /></div></div>
         </NexusWorkflowDialog>
       </Dialog>
 
