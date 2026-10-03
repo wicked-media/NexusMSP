@@ -23,8 +23,7 @@ MAINTENANCE_ACTIONS = {"run-checks", "install-patches", "install-winget", "reboo
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _ticket_in_scope(ticket_id: str, user: dict, operation: str) -> dict:

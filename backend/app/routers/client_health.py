@@ -20,8 +20,7 @@ router = APIRouter()
 TRUSTED_DEVICE_SOURCES = {"nexus-agent", "rmm-agent", "agent", "api-agent", "provider"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _numeric(value: Any) -> float | None:

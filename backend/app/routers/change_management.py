@@ -13,8 +13,7 @@ VALID_CATEGORIES = {"standard", "normal", "emergency", "expedited"}
 VALID_RISKS = {"low", "medium", "high"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _get_change(change_id: str, user: dict) -> dict:

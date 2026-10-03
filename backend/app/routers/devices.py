@@ -39,8 +39,7 @@ _DEVICE_EVIDENCE_COLLECTIONS = (
 )
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _actor_name(current_user: dict) -> str:

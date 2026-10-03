@@ -473,8 +473,7 @@ def _storage_get(path: str) -> bytes | None:
 # Helpers
 # ----------------------------------------------------------------------
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 _AGENT_VERSION_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")

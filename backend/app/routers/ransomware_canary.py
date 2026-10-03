@@ -13,8 +13,7 @@ from app.services.scope_permissions import assert_client_scope, scoped_query
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _write_security_audit(

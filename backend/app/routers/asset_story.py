@@ -36,8 +36,7 @@ USEFUL_LIFE_MONTHS = {
 }
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _number(value: Any) -> float | None:

@@ -25,8 +25,7 @@ TRANSFER_DIR.mkdir(parents=True, exist_ok=True)
 MAX_TRANSFER_BYTES = 25 * 1024 * 1024
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _safe_transfer(transfer: dict) -> dict:

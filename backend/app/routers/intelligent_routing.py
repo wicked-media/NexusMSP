@@ -16,8 +16,7 @@ SKILL_CATEGORIES = ["networking", "security", "cloud", "hardware", "software", "
 _DAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _routing_availability(working_hours: dict) -> tuple[bool, bool]:

@@ -20,8 +20,7 @@ router = APIRouter()
 VALID_SHELLS = {"powershell", "cmd"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _is_admin(user: dict) -> bool:

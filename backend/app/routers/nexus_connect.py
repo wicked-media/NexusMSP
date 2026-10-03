@@ -48,8 +48,7 @@ class TicketPassDecision(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _clean_lines(values: list[str]) -> list[str]:

@@ -27,8 +27,7 @@ from app.services.scope_permissions import (
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _actor(user: dict) -> str:

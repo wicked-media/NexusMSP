@@ -25,8 +25,7 @@ from app.services.avatar_enrichment import attach_user_avatars
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def record_channel_event(channel: dict, actor: dict, event_type: str, details: dict | None = None) -> None:

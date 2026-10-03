@@ -31,8 +31,7 @@ CLOSED_INVOICE_STATES = {"cancelled", "voided"}
 OPEN_PO_STATES = {"draft", "submitted", "approved", "ordered", "partially_received", "open"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _number(value: Any, default: float = 0.0) -> float:

@@ -76,8 +76,7 @@ TOPICS = {
 }
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _stable_id(prefix: str, *parts: object) -> str:

@@ -42,8 +42,7 @@ SITE_MANAGER_TENANT_FIELD = "site_manager_tenant_id"
 SITE_MANAGER_ALLOWED_BASE_URLS = frozenset({"https://api.ui.com/v1", "https://api.ui.com/ea"})
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _payload(value: object) -> dict[str, Any]:

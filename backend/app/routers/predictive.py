@@ -24,8 +24,7 @@ router = APIRouter()
 TRUSTED_TELEMETRY_SOURCES = {"nexus-agent", "rmm-agent", "agent", "api-agent", "provider"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _number(value: Any, *, minimum: float = 0, maximum: float = 100) -> float | None:

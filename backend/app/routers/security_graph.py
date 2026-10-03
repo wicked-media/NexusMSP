@@ -19,8 +19,7 @@ OPEN_STATUSES = {"open", "active", "new", "detected", "investigating", "unresolv
 TRUSTED_VULNERABILITY_SOURCES = {"agent", "huntress", "defender", "vulnerability-provider"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _normal(value: Any) -> str:

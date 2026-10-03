@@ -91,8 +91,7 @@ class StakeholderUpdatePayload(BaseModel):
         return value
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _write_client_studio_audit(

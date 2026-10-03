@@ -34,8 +34,7 @@ TRUSTED_SOURCES = {"nexus-agent", "rmm-agent", "provider"}
 FRESH_OBSERVATION_SECONDS = 15 * 60
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _agent_source(device: dict) -> str | None:

@@ -29,8 +29,7 @@ _OPEN_FINDING_STATUSES = {"open", "active", "new", "detected", "investigating", 
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unclassified": 4}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _text(value: Any, fallback: str = "Not recorded") -> str:
