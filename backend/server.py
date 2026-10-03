@@ -115,6 +115,12 @@ async def block_public_ticket_attachment(legacy_path: str):
 async def block_public_client_document(legacy_path: str):
     raise HTTPException(status_code=404, detail="Not found")
 
+# Compliance evidence is customer-owned and must be retrieved only through the
+# authenticated, tenant/client-scoped compliance download endpoint.
+@app.api_route("/api/uploads/compliance-evidence/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_compliance_evidence(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
 # Field and workshop job photos and device chat attachments are customer
 # evidence. Serve them only through the authenticated, scope-checked download
 # routes in their routers; reject the historical public static locations before

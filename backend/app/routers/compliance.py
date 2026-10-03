@@ -1,16 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import Response
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import re
 import uuid
-from app.database import db, UPLOADS_DIR
+from app.database import db, ROOT_DIR, UPLOADS_DIR
 from app.auth import get_current_user
-from app.services.scope_permissions import platform_tenant_id, scoped_query, tenant_scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, effective_scope, platform_tenant_id, scoped_query, tenant_scoped_query
+from app.services.upload_quarantine import UploadQuarantineFailure, discard_upload, inspect_upload, release_upload
+from app.services.upload_security import safe_original_filename, safe_upload_extension, upload_is_releasable, validate_upload_signature
+from app.services.supabase_storage import archive_record_artifact, delete_artifact, read_artifact
 
 router = APIRouter()
 
-COMPLIANCE_EVIDENCE_DIR = UPLOADS_DIR / "compliance-evidence"
+COMPLIANCE_EVIDENCE_DIR = ROOT_DIR / "private_uploads" / "compliance_evidence"
 COMPLIANCE_EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-COMPLIANCE_EVIDENCE_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".md"}
+LEGACY_COMPLIANCE_EVIDENCE_DIR = UPLOADS_DIR / "compliance-evidence"
+COMPLIANCE_EVIDENCE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "csv", "doc", "docx", "xls", "xlsx", "txt", "md"}
+_STORED_EVIDENCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$")
 COMPLIANCE_ISSUE_STATUSES = {"open", "in_progress", "ready_for_review", "resolved", "accepted_risk"}
 COMPLIANCE_ISSUE_SEVERITIES = {"low", "medium", "high", "critical"}
 COMPLIANCE_POLICY_STATUSES = {"draft", "in_review", "approved", "retired"}
@@ -33,6 +40,7 @@ POLICY_TEMPLATES = {
 async def _write_compliance_audit(current_user: dict, action: str, entity_id: str, entity_name: str, metadata: dict | None = None, entity_type: str = "compliance_issue"):
     await db.audit_logs.insert_one({
         "id": f"audit-{uuid.uuid4().hex[:12]}",
+        "tenant_id": platform_tenant_id(current_user),
         "user_id": current_user.get("id"),
         "user_name": current_user.get("name") or current_user.get("email") or "Unknown user",
         "action": action,
@@ -42,6 +50,119 @@ async def _write_compliance_audit(current_user: dict, action: str, entity_id: st
         "metadata": metadata or {},
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
+
+
+def _compliance_scope_query(current_user: dict, query: dict) -> dict:
+    return tenant_scoped_query(current_user, scoped_query(current_user, query))
+
+
+def _record_matches_compliance_tenant(record: dict, current_user: dict) -> bool:
+    tenant_id = platform_tenant_id(current_user)
+    record_tenant = record.get("tenant_id")
+    return record_tenant == tenant_id if tenant_id != "nexus-local" else record_tenant in (None, "", "nexus-local")
+
+
+async def _get_scoped_compliance_client(client_id: str, current_user: dict, *, request: Request | None = None) -> dict:
+    client = await db.clients.find_one(
+        tenant_scoped_query(current_user, {"id": client_id}),
+        {"_id": 0, "id": 1, "tenant_id": 1, "name": 1, "site_id": 1},
+    )
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    await assert_client_scope(
+        current_user, client_id, site_id=client.get("site_id"),
+        operation="compliance:client_access", request=request, mask_not_found=True,
+    )
+    return client
+
+
+async def _get_scoped_compliance_issue(issue_id: str, current_user: dict, *, request: Request | None = None) -> dict:
+    issue = await db.compliance_issues.find_one(
+        tenant_scoped_query(current_user, {"id": issue_id, "archived": {"$ne": True}}),
+        {"_id": 0},
+    )
+    if not issue:
+        raise HTTPException(status_code=404, detail="Compliance issue not found")
+    await assert_client_scope(
+        current_user, issue.get("client_id"), site_id=issue.get("site_id"),
+        operation="compliance_issue:access", request=request, mask_not_found=True,
+    )
+    return issue
+
+
+def _compliance_policy_scope_query(current_user: dict, query: dict) -> dict:
+    scope = effective_scope(current_user)
+    operational = {key: value for key, value in query.items() if key != "client_id"}
+    requested_client = query.get("client_id")
+    if scope["mode"] == "all" and requested_client is None:
+        return tenant_scoped_query(current_user, operational)
+
+    global_policy = {"$or": [
+        {"client_id": None}, {"client_id": ""}, {"client_id": {"$exists": False}},
+    ]}
+    if scope["mode"] == "all":
+        client_policy = {"client_id": requested_client}
+    else:
+        client_ids = scope["client_ids"]
+        if requested_client is not None:
+            client_ids = [requested_client] if requested_client in client_ids else []
+        client_policy = {"client_id": {"$in": client_ids}}
+        if scope["site_ids"]:
+            client_policy = {"$and": [client_policy, {"site_id": {"$in": scope["site_ids"]}}]}
+    boundary = {"$or": [global_policy, client_policy]}
+    return tenant_scoped_query(current_user, {"$and": [operational, boundary]})
+
+
+async def _get_scoped_compliance_policy(
+    policy_id: str, current_user: dict, *, request: Request | None = None,
+    require_global_mutation: bool = False,
+) -> dict:
+    policy = await db.compliance_policies.find_one(
+        tenant_scoped_query(current_user, {"id": policy_id, "archived": {"$ne": True}}),
+        {"_id": 0},
+    )
+    if not policy or not _record_matches_compliance_tenant(policy, current_user):
+        raise HTTPException(status_code=404, detail="Compliance policy not found")
+    if policy.get("client_id"):
+        await assert_client_scope(
+            current_user, policy.get("client_id"), site_id=policy.get("site_id"),
+            operation="compliance_policy:access", request=request, mask_not_found=True,
+        )
+    elif require_global_mutation:
+        await assert_global_scope(current_user, operation="compliance_policy:global_mutation", request=request)
+    return policy
+
+
+def _compliance_policy_record_query(current_user: dict, policy: dict) -> dict:
+    query = {"id": policy.get("id"), "archived": {"$ne": True}}
+    if policy.get("client_id"):
+        query["client_id"] = policy["client_id"]
+        query["site_id"] = policy.get("site_id")
+    else:
+        query["$or"] = [
+            {"client_id": None}, {"client_id": ""}, {"client_id": {"$exists": False}},
+        ]
+    return tenant_scoped_query(current_user, query)
+
+
+def _evidence_filename(attachment: dict) -> str | None:
+    candidate = str(attachment.get("stored_filename") or "").strip()
+    if not candidate:
+        legacy_url = str(attachment.get("url") or "").strip()
+        legacy_prefix = "/api/uploads/compliance-evidence/"
+        if legacy_url.startswith(legacy_prefix):
+            candidate = legacy_url[len(legacy_prefix):]
+    candidate = safe_original_filename(candidate, default="")
+    return candidate if _STORED_EVIDENCE_NAME.fullmatch(candidate) else None
+
+
+def _compliance_attachment_response(issue_id: str, attachment: dict) -> dict:
+    safe = {
+        key: value for key, value in attachment.items()
+        if key not in {"_id", "url", "stored_filename", "artifact_storage"}
+    }
+    safe["download_url"] = f"/api/compliance/issues/{issue_id}/attachments/{attachment.get('id')}/download"
+    return safe
 
 
 def _policy_template_content(template: dict, organisation_name: str = "the organisation") -> str:
@@ -214,21 +335,36 @@ EVIDENCE_CHECKS = {
 }
 
 
-async def _custom_frameworks():
-    rows = await db.compliance_custom_frameworks.find({"archived": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(500)
-    return {row["id"]: row for row in rows if row.get("id")}
+async def _custom_frameworks(current_user: dict):
+    rows = await db.compliance_custom_frameworks.find(
+        tenant_scoped_query(current_user, {"archived": {"$ne": True}}), {"_id": 0}
+    ).sort("updated_at", -1).to_list(500)
+    return {
+        row["id"]: row for row in rows
+        if row.get("id") and _record_matches_compliance_tenant(row, current_user)
+    }
 
 
-async def _framework_definition(framework_id: str):
+async def _framework_definition(framework_id: str, current_user: dict):
     if framework_id in COMPLIANCE_FRAMEWORKS:
         return COMPLIANCE_FRAMEWORKS[framework_id]
-    return (await _custom_frameworks()).get(framework_id)
+    return (await _custom_frameworks(current_user)).get(framework_id)
+
+
+async def _validated_framework_ids(values, current_user: dict) -> list[str]:
+    framework_ids = [str(item).strip() for item in (values or []) if str(item).strip()]
+    available_ids = set(COMPLIANCE_FRAMEWORKS) | set(await _custom_frameworks(current_user))
+    unknown = [item for item in framework_ids if item not in available_ids]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown compliance framework: {unknown[0]}")
+    return framework_ids
 
 
 async def _sync_compliance_issues(report: dict, current_user: dict):
     """Turn scan gaps into owned work and verify them when evidence recovers."""
     now = datetime.now(timezone.utc)
     actor = current_user.get("name") or current_user.get("email") or "Nexus assurance engine"
+    tenant_id = platform_tenant_id(current_user)
     for control in report.get("controls") or []:
         key = {
             "client_id": report.get("client_id"),
@@ -236,10 +372,10 @@ async def _sync_compliance_issues(report: dict, current_user: dict):
             "control_id": control.get("id"),
             "source": "evidence_scan",
         }
-        existing = await db.compliance_issues.find_one(key, {"_id": 0})
+        existing = await db.compliance_issues.find_one(_compliance_scope_query(current_user, key), {"_id": 0})
         if control.get("status") == "pass":
             if existing and existing.get("status") not in {"resolved", "accepted_risk"}:
-                await db.compliance_issues.update_one({"id": existing["id"]}, {"$set": {
+                await db.compliance_issues.update_one(_compliance_scope_query(current_user, {**key, "id": existing["id"]}), {"$set": {
                     "status": "resolved",
                     "resolution": "Automatically verified by a later evidence scan.",
                     "resolved_at": now.isoformat(),
@@ -264,10 +400,10 @@ async def _sync_compliance_issues(report: dict, current_user: dict):
         if existing:
             if existing.get("status") == "resolved":
                 issue_data.update({"status": "open", "reopened_at": now.isoformat(), "resolution": None, "resolved_at": None})
-            await db.compliance_issues.update_one({"id": existing["id"]}, {"$set": issue_data})
+            await db.compliance_issues.update_one(_compliance_scope_query(current_user, {**key, "id": existing["id"]}), {"$set": issue_data})
         else:
             issue = {
-                "id": f"issue-{uuid.uuid4().hex[:12]}", **key, **issue_data,
+                "id": f"issue-{uuid.uuid4().hex[:12]}", "tenant_id": tenant_id, "site_id": report.get("site_id"), **key, **issue_data,
                 "status": "open", "owner": "Unassigned",
                 "due_date": (now + timedelta(days=due_days)).date().isoformat(),
                 "treatment": "remediate", "description": control.get("description") or "Close the observed control evidence gap.",
@@ -278,26 +414,24 @@ async def _sync_compliance_issues(report: dict, current_user: dict):
 
 
 @router.get("/compliance/scan/{client_id}")
-async def scan_compliance(client_id: str, framework: str = "cis", current_user: dict = Depends(get_current_user)):
+async def scan_compliance(client_id: str, request: Request, framework: str = "cis", current_user: dict = Depends(get_current_user)):
     """Scan a client's environment against a compliance framework."""
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
-    if not client:
-        return {"error": "Client not found"}
+    client = await _get_scoped_compliance_client(client_id, current_user, request=request)
 
-    fw = await _framework_definition(framework)
+    fw = await _framework_definition(framework, current_user)
     if not fw:
         raise HTTPException(status_code=404, detail="Unknown compliance framework")
 
     # Gather directly observable environment data. Controls without evidence stay
     # explicitly unassessed; they are never silently marked as compliant.
-    devices = await db.devices.find({"client_id": client_id}, {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(_compliance_scope_query(current_user, {"client_id": client_id}), {"_id": 0}).to_list(5000)
     device_count = len(devices)
     online = sum(1 for device in devices if device.get("status") == "online")
     assessed_devices = [device for device in devices if device.get("security_assessed_at")]
     device_ids = [device.get("id") for device in devices if device.get("id")]
-    software_count = await db.device_software.count_documents({"device_id": {"$in": device_ids}}) if device_ids else 0
-    activity_count = await db.activity_logs.count_documents({"device_id": {"$in": device_ids}}) if device_ids else 0
-    acronis_count = await db.acronis_devices.count_documents({"client_id": client_id})
+    software_count = await db.device_software.count_documents(tenant_scoped_query(current_user, {"device_id": {"$in": device_ids}})) if device_ids else 0
+    activity_count = await db.activity_logs.count_documents(tenant_scoped_query(current_user, {"device_id": {"$in": device_ids}})) if device_ids else 0
+    acronis_count = await db.acronis_devices.count_documents(_compliance_scope_query(current_user, {"client_id": client_id}))
     encrypted = lambda device: any(marker in str(device.get("encryption_status") or "").lower() for marker in ("encrypted", "bitlocker on", "protection on"))
     all_assessed = bool(assessed_devices) and len(assessed_devices) == device_count
     all_firewalls = all(device.get("firewall_enabled") for device in assessed_devices) if assessed_devices else False
@@ -350,7 +484,7 @@ async def scan_compliance(client_id: str, framework: str = "cis", current_user: 
     # Save report
     report_id = str(uuid.uuid4())[:8]
     report = {
-        "id": report_id, "client_id": client_id, "client_name": client.get("name", ""),
+        "id": report_id, "tenant_id": platform_tenant_id(current_user), "client_id": client_id, "site_id": client.get("site_id"), "client_name": client.get("name", ""),
         "framework": framework, "framework_name": fw["name"],
         "score": score, "evidence_score": score,
         "coverage_pct": round((evaluated / max(len(fw["controls"]), 1)) * 100),
@@ -368,12 +502,12 @@ async def scan_compliance(client_id: str, framework: str = "cis", current_user: 
 
 @router.get("/compliance/reports")
 async def get_compliance_reports(current_user: dict = Depends(get_current_user)):
-    return await db.compliance_reports.find({}, {"_id": 0}).sort("scanned_at", -1).to_list(100)
+    return await db.compliance_reports.find(_compliance_scope_query(current_user, {}), {"_id": 0}).sort("scanned_at", -1).to_list(100)
 
 
 @router.get("/compliance/frameworks")
 async def get_frameworks(current_user: dict = Depends(get_current_user)):
-    custom = await _custom_frameworks()
+    custom = await _custom_frameworks(current_user)
     combined = {**COMPLIANCE_FRAMEWORKS, **custom}
     return [{
         "id": framework_id,
@@ -394,11 +528,12 @@ async def get_evidence_checks(current_user: dict = Depends(get_current_user)):
 
 @router.get("/compliance/custom-frameworks")
 async def list_custom_frameworks(current_user: dict = Depends(get_current_user)):
-    return list((await _custom_frameworks()).values())
+    return list((await _custom_frameworks(current_user)).values())
 
 
 @router.post("/compliance/custom-frameworks")
-async def create_custom_framework(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_custom_framework(data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="compliance_framework:create", request=request)
     name = str(data.get("name") or "").strip()
     if len(name) < 3:
         raise HTTPException(status_code=400, detail="Framework name must be at least 3 characters")
@@ -406,6 +541,7 @@ async def create_custom_framework(data: dict, current_user: dict = Depends(get_c
     now = datetime.now(timezone.utc).isoformat()
     framework = {
         "id": framework_id,
+        "tenant_id": platform_tenant_id(current_user),
         "name": name,
         "description": str(data.get("description") or "").strip(),
         "category": str(data.get("category") or "Custom").strip() or "Custom",
@@ -421,18 +557,19 @@ async def create_custom_framework(data: dict, current_user: dict = Depends(get_c
     }
     await db.compliance_custom_frameworks.insert_one(framework)
     framework.pop("_id", None)
-    await db.audit_logs.insert_one({
-        "id": f"audit-{uuid.uuid4().hex[:12]}", "action": "compliance_framework_created",
-        "target_type": "compliance_framework", "target_id": framework_id, "target_name": name,
-        "actor_name": framework["created_by"], "timestamp": now,
-    })
+    await _write_compliance_audit(
+        current_user, "compliance_framework_created", framework_id, name,
+        {"category": framework["category"], "region": framework["region"]}, "compliance_framework",
+    )
     return framework
 
 
 @router.put("/compliance/custom-frameworks/{framework_id}")
-async def update_custom_framework(framework_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    existing = await db.compliance_custom_frameworks.find_one({"id": framework_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not existing:
+async def update_custom_framework(framework_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="compliance_framework:update", request=request)
+    framework_query = tenant_scoped_query(current_user, {"id": framework_id, "archived": {"$ne": True}})
+    existing = await db.compliance_custom_frameworks.find_one(framework_query, {"_id": 0})
+    if not existing or not _record_matches_compliance_tenant(existing, current_user):
         raise HTTPException(status_code=404, detail="Custom framework not found")
     update = {}
     for field in ("name", "description", "category", "region", "authority"):
@@ -442,14 +579,21 @@ async def update_custom_framework(framework_id: str, data: dict, current_user: d
         raise HTTPException(status_code=400, detail="Framework name must be at least 3 characters")
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     update["version"] = int(existing.get("version") or 1) + 1
-    await db.compliance_custom_frameworks.update_one({"id": framework_id}, {"$set": update})
-    return await db.compliance_custom_frameworks.find_one({"id": framework_id}, {"_id": 0})
+    await db.compliance_custom_frameworks.update_one(framework_query, {"$set": update})
+    await _write_compliance_audit(
+        current_user, "compliance_framework_updated", framework_id,
+        update.get("name") or existing.get("name") or framework_id,
+        {"changes": sorted(update.keys())}, "compliance_framework",
+    )
+    return await db.compliance_custom_frameworks.find_one(framework_query, {"_id": 0})
 
 
 @router.post("/compliance/custom-frameworks/{framework_id}/controls")
-async def add_custom_control(framework_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    framework = await db.compliance_custom_frameworks.find_one({"id": framework_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not framework:
+async def add_custom_control(framework_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+    await assert_global_scope(current_user, operation="compliance_framework:add_control", request=request)
+    framework_query = tenant_scoped_query(current_user, {"id": framework_id, "archived": {"$ne": True}})
+    framework = await db.compliance_custom_frameworks.find_one(framework_query, {"_id": 0})
+    if not framework or not _record_matches_compliance_tenant(framework, current_user):
         raise HTTPException(status_code=404, detail="Custom framework not found")
     name = str(data.get("name") or "").strip()
     if len(name) < 3:
@@ -457,6 +601,7 @@ async def add_custom_control(framework_id: str, data: dict, current_user: dict =
     evidence_check = str(data.get("check") or "manual")
     if evidence_check not in EVIDENCE_CHECKS:
         raise HTTPException(status_code=400, detail="Unknown evidence check")
+    mapped_frameworks = await _validated_framework_ids(data.get("mapped_frameworks"), current_user)
     control = {
         "id": str(data.get("reference") or f"CTRL-{len(framework.get('controls') or []) + 1:03d}").strip(),
         "name": name,
@@ -465,21 +610,28 @@ async def add_custom_control(framework_id: str, data: dict, current_user: dict =
         "evidence_guidance": str(data.get("evidence_guidance") or "").strip(),
         "owner_role": str(data.get("owner_role") or "Compliance owner").strip(),
         "frequency": str(data.get("frequency") or "continuous").strip(),
-        "mapped_frameworks": [str(item) for item in (data.get("mapped_frameworks") or []) if str(item).strip()],
+        "mapped_frameworks": mapped_frameworks,
     }
     controls = [*(framework.get("controls") or []), control]
     now = datetime.now(timezone.utc).isoformat()
-    await db.compliance_custom_frameworks.update_one({"id": framework_id}, {"$set": {"controls": controls, "updated_at": now}, "$inc": {"version": 1}})
+    await db.compliance_custom_frameworks.update_one(framework_query, {"$set": {"controls": controls, "updated_at": now}, "$inc": {"version": 1}})
+    await _write_compliance_audit(
+        current_user, "compliance_framework_control_added", framework_id,
+        framework.get("name") or framework_id,
+        {"control_id": control["id"], "control_name": name}, "compliance_framework",
+    )
     return control
 
 
 @router.get("/compliance/programs")
 async def list_compliance_programs(current_user: dict = Depends(get_current_user)):
-    programs = await db.compliance_programs.find({"archived": {"$ne": True}}, {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    programs = await db.compliance_programs.find(
+        _compliance_scope_query(current_user, {"archived": {"$ne": True}}), {"_id": 0}
+    ).sort("updated_at", -1).to_list(1000)
     for program in programs:
-        scans = await db.compliance_reports.find({
+        scans = await db.compliance_reports.find(_compliance_scope_query(current_user, {
             "client_id": program.get("client_id"), "framework": {"$in": program.get("framework_ids") or []},
-        }, {"_id": 0}).sort("scanned_at", -1).to_list(500)
+        }), {"_id": 0}).sort("scanned_at", -1).to_list(500)
         latest = {}
         for scan in scans:
             latest.setdefault(scan.get("framework"), scan)
@@ -496,21 +648,19 @@ async def list_compliance_programs(current_user: dict = Depends(get_current_user
 
 
 @router.post("/compliance/programs")
-async def create_compliance_program(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_compliance_program(data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     client_id = str(data.get("client_id") or "").strip()
     framework_ids = [str(item).strip() for item in (data.get("framework_ids") or []) if str(item).strip()]
     if not client_id or not framework_ids:
         raise HTTPException(status_code=400, detail="Choose a customer and at least one framework")
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
-    if not client:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    available = {**COMPLIANCE_FRAMEWORKS, **(await _custom_frameworks())}
+    client = await _get_scoped_compliance_client(client_id, current_user, request=request)
+    available = {**COMPLIANCE_FRAMEWORKS, **(await _custom_frameworks(current_user))}
     unknown = [item for item in framework_ids if item not in available]
     if unknown:
         raise HTTPException(status_code=400, detail=f"Unknown framework: {unknown[0]}")
     now = datetime.now(timezone.utc).isoformat()
     program = {
-        "id": f"program-{uuid.uuid4().hex[:10]}", "client_id": client_id, "client_name": client.get("name") or client_id,
+        "id": f"program-{uuid.uuid4().hex[:10]}", "tenant_id": platform_tenant_id(current_user), "client_id": client_id, "site_id": client.get("site_id"), "client_name": client.get("name") or client_id,
         "name": str(data.get("name") or f"{client.get('name') or 'Customer'} compliance programme").strip(),
         "framework_ids": framework_ids, "framework_names": [available[item]["name"] for item in framework_ids],
         "owner": str(data.get("owner") or current_user.get("name") or "Unassigned").strip(),
@@ -521,6 +671,10 @@ async def create_compliance_program(data: dict, current_user: dict = Depends(get
     }
     await db.compliance_programs.insert_one(program)
     program.pop("_id", None)
+    await _write_compliance_audit(
+        current_user, "compliance_program_created", program["id"], program["name"],
+        {"client_id": client_id, "framework_ids": framework_ids}, "compliance_program",
+    )
     return program
 
 
@@ -538,31 +692,38 @@ async def list_compliance_issues(
         query["program_id"] = program_id
     if status and status != "all":
         query["status"] = status
-    rows = await db.compliance_issues.find(query, {"_id": 0}).sort([("status", 1), ("due_date", 1), ("updated_at", -1)]).to_list(2000)
+    rows = await db.compliance_issues.find(_compliance_scope_query(current_user, query), {"_id": 0}).sort([("status", 1), ("due_date", 1), ("updated_at", -1)]).to_list(2000)
     today = datetime.now(timezone.utc).date().isoformat()
     for row in rows:
         row["overdue"] = bool(row.get("due_date") and row["due_date"] < today and row.get("status") not in {"resolved", "accepted_risk"})
+        row["attachments"] = [_compliance_attachment_response(row["id"], item) for item in row.get("attachments") or []]
     return rows
 
 
 @router.post("/compliance/issues")
-async def create_compliance_issue(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_compliance_issue(data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     title = str(data.get("title") or "").strip()
     client_id = str(data.get("client_id") or "").strip()
     if len(title) < 3 or not client_id:
         raise HTTPException(status_code=400, detail="Choose a customer and enter an issue title")
-    client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
-    if not client:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    client = await _get_scoped_compliance_client(client_id, current_user, request=request)
     severity = str(data.get("severity") or "medium").lower()
     if severity not in COMPLIANCE_ISSUE_SEVERITIES:
         raise HTTPException(status_code=400, detail="Unknown issue severity")
     now = datetime.now(timezone.utc).isoformat()
     actor = current_user.get("name") or current_user.get("email") or "Unknown user"
+    program_id = str(data.get("program_id") or "").strip() or None
+    if program_id:
+        linked_program = await db.compliance_programs.find_one(
+            _compliance_scope_query(current_user, {"id": program_id, "client_id": client_id, "archived": {"$ne": True}}),
+            {"_id": 0, "id": 1},
+        )
+        if not linked_program:
+            raise HTTPException(status_code=404, detail="Compliance programme not found")
     issue = {
-        "id": f"issue-{uuid.uuid4().hex[:12]}", "title": title,
-        "client_id": client_id, "client_name": client.get("name") or client_id,
-        "program_id": str(data.get("program_id") or "").strip() or None,
+        "id": f"issue-{uuid.uuid4().hex[:12]}", "tenant_id": platform_tenant_id(current_user), "title": title,
+        "client_id": client_id, "site_id": client.get("site_id"), "client_name": client.get("name") or client_id,
+        "program_id": program_id,
         "framework_id": str(data.get("framework_id") or "").strip() or None,
         "framework_name": str(data.get("framework_name") or "").strip() or None,
         "control_id": str(data.get("control_id") or "").strip() or None,
@@ -582,10 +743,8 @@ async def create_compliance_issue(data: dict, current_user: dict = Depends(get_c
 
 
 @router.put("/compliance/issues/{issue_id}")
-async def update_compliance_issue(issue_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    issue = await db.compliance_issues.find_one({"id": issue_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not issue:
-        raise HTTPException(status_code=404, detail="Compliance issue not found")
+async def update_compliance_issue(issue_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+    issue = await _get_scoped_compliance_issue(issue_id, current_user, request=request)
     update = {}
     for field in ("title", "description", "owner", "due_date", "treatment", "resolution"):
         if field in data:
@@ -610,39 +769,124 @@ async def update_compliance_issue(issue_id: str, data: dict, current_user: dict 
     now = datetime.now(timezone.utc).isoformat()
     update["updated_at"] = now
     history = {"at": now, "by": current_user.get("name") or current_user.get("email") or "Unknown user", "action": "updated", "changes": sorted(update.keys())}
-    await db.compliance_issues.update_one({"id": issue_id}, {"$set": update, "$push": {"history": history}})
-    await _write_compliance_audit(current_user, "compliance_issue_updated", issue_id, update.get("title") or issue.get("title") or issue_id, {"changes": sorted(update.keys()), "status": update.get("status")})
-    return await db.compliance_issues.find_one({"id": issue_id}, {"_id": 0})
+    issue_query = _compliance_scope_query(current_user, {"id": issue_id, "archived": {"$ne": True}})
+    await db.compliance_issues.update_one(issue_query, {"$set": update, "$push": {"history": history}})
+    await _write_compliance_audit(current_user, "compliance_issue_updated", issue_id, update.get("title") or issue.get("title") or issue_id, {"client_id": issue.get("client_id"), "changes": sorted(update.keys()), "status": update.get("status")})
+    result = await db.compliance_issues.find_one(issue_query, {"_id": 0})
+    if result:
+        result["attachments"] = [_compliance_attachment_response(issue_id, item) for item in result.get("attachments") or []]
+    return result
 
 
 @router.post("/compliance/issues/{issue_id}/attachments")
 async def upload_compliance_issue_attachment(
     issue_id: str,
+    request: Request,
     file: UploadFile = File(...),
     note: str = Form(""),
     current_user: dict = Depends(get_current_user),
 ):
-    issue = await db.compliance_issues.find_one({"id": issue_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not issue:
-        raise HTTPException(status_code=404, detail="Compliance issue not found")
-    extension = Path(file.filename or "").suffix.lower()
-    if extension not in COMPLIANCE_EVIDENCE_EXTENSIONS:
-        raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Office document, text or Markdown evidence file")
+    issue = await _get_scoped_compliance_issue(issue_id, current_user, request=request)
+    try:
+        extension = safe_upload_extension(file.filename, allowed=COMPLIANCE_EVIDENCE_EXTENSIONS)
+    except HTTPException as exc:
+        raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Office document, text or Markdown evidence file") from exc
     content = await file.read()
     if not content or len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=422, detail="Evidence files must be between 1 byte and 20 MB")
-    stored_name = f"{uuid.uuid4().hex}{extension}"
-    (COMPLIANCE_EVIDENCE_DIR / stored_name).write_bytes(content)
+    validate_upload_signature(content, extension)
+    actor_name = current_user.get("name") or current_user.get("email") or "Unknown user"
+    try:
+        clean_upload = await inspect_upload(
+            database=db, content=content, filename=file.filename, content_type=file.content_type,
+            tenant_id=issue.get("tenant_id") or platform_tenant_id(current_user), client_id=issue.get("client_id"),
+            target_type="compliance_evidence", target_id=issue_id,
+            actor_id=str(current_user.get("id") or "unknown"), actor_name=actor_name,
+        )
+    except UploadQuarantineFailure as exc:
+        if exc.rejected:
+            raise HTTPException(status_code=422, detail="Upload rejected by malware scanner") from exc
+        raise HTTPException(status_code=503, detail="Upload scanning is temporarily unavailable") from exc
+
+    stored_name = f"{uuid.uuid4().hex}.{extension}"
+    attachment_id = f"evidence-{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
     attachment = {
-        "id": f"evidence-{uuid.uuid4().hex[:12]}", "name": Path(file.filename or stored_name).name,
-        "url": f"/api/uploads/compliance-evidence/{stored_name}", "content_type": file.content_type or "application/octet-stream",
-        "size": len(content), "note": str(note or "").strip(),
-        "uploaded_by": current_user.get("id"), "uploaded_by_name": current_user.get("name") or current_user.get("email"), "uploaded_at": now,
+        "id": attachment_id, "name": safe_original_filename(file.filename, default=stored_name),
+        "stored_filename": stored_name, "content_type": file.content_type or "application/octet-stream",
+        "size": len(content), "note": str(note or "").strip(), "security_scan": clean_upload.metadata(),
+        "uploaded_by": current_user.get("id"), "uploaded_by_name": actor_name, "uploaded_at": now,
+        "tenant_id": issue.get("tenant_id") or platform_tenant_id(current_user),
     }
-    await db.compliance_issues.update_one({"id": issue_id}, {"$push": {"attachments": attachment, "history": {"at": now, "by": attachment["uploaded_by_name"], "action": "evidence_attached", "evidence_id": attachment["id"]}}, "$set": {"updated_at": now}})
-    await _write_compliance_audit(current_user, "compliance_evidence_attached", issue_id, issue.get("title") or issue_id, {"attachment": attachment["name"]})
-    return attachment
+    local_path = COMPLIANCE_EVIDENCE_DIR / stored_name
+    artifact_path = None
+    attached = False
+    issue_query = _compliance_scope_query(current_user, {"id": issue_id, "archived": {"$ne": True}})
+    try:
+        local_path.write_bytes(content)
+        artifact_path = await archive_record_artifact(
+            "compliance-evidence", attachment_id, content, extension, file.content_type or "application/octet-stream"
+        )
+        if artifact_path:
+            attachment["artifact_storage"] = {"provider": "supabase", "object_path": artifact_path, "mirrored_at": now}
+        update_result = await db.compliance_issues.update_one(
+            issue_query,
+            {"$push": {"attachments": attachment, "history": {"at": now, "by": actor_name, "action": "evidence_attached", "evidence_id": attachment_id}}, "$set": {"updated_at": now}},
+        )
+        if not update_result.matched_count:
+            raise HTTPException(status_code=404, detail="Compliance issue not found")
+        attached = True
+        await _write_compliance_audit(current_user, "compliance_evidence_attached", issue_id, issue.get("title") or issue_id, {
+            "client_id": issue.get("client_id"), "attachment": attachment["name"], "size": len(content),
+            "scan_status": "clean", "private_artifact": bool(artifact_path),
+        })
+    except Exception:
+        local_path.unlink(missing_ok=True)
+        if artifact_path:
+            await delete_artifact(artifact_path)
+        if attached:
+            await db.compliance_issues.update_one(issue_query, {"$pull": {
+                "attachments": {"id": attachment_id}, "history": {"evidence_id": attachment_id},
+            }})
+        await discard_upload(db, clean_upload)
+        raise
+    await release_upload(db, clean_upload)
+    return _compliance_attachment_response(issue_id, attachment)
+
+
+@router.get("/compliance/issues/{issue_id}/attachments/{attachment_id}/download")
+async def download_compliance_issue_attachment(
+    issue_id: str, attachment_id: str, request: Request, current_user: dict = Depends(get_current_user)
+):
+    issue = await _get_scoped_compliance_issue(issue_id, current_user, request=request)
+    attachment = next((item for item in issue.get("attachments") or [] if item.get("id") == attachment_id), None)
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Compliance evidence not found")
+    if not upload_is_releasable(attachment):
+        raise HTTPException(status_code=423, detail="Compliance evidence has not passed security scanning")
+    object_path = (attachment.get("artifact_storage") or {}).get("object_path")
+    if object_path:
+        artifact = await read_artifact(object_path)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="Retained compliance evidence is unavailable")
+        content, content_type = artifact
+    else:
+        filename = _evidence_filename(attachment)
+        local_path = next((path for path in (COMPLIANCE_EVIDENCE_DIR / filename, LEGACY_COMPLIANCE_EVIDENCE_DIR / filename) if filename and path.is_file()), None)
+        if not local_path:
+            raise HTTPException(status_code=404, detail="Retained compliance evidence is unavailable")
+        if local_path.stat().st_size > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Compliance evidence exceeds the allowed size")
+        content = local_path.read_bytes()
+        content_type = attachment.get("content_type") or "application/octet-stream"
+    filename = safe_original_filename(attachment.get("name"), default="compliance-evidence")
+    await _write_compliance_audit(current_user, "compliance_evidence_downloaded", issue_id, issue.get("title") or issue_id, {
+        "client_id": issue.get("client_id"), "attachment": filename, "private_artifact": bool(object_path),
+    })
+    return Response(
+        content=content, media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/compliance/policy-templates")
@@ -661,7 +905,9 @@ async def list_compliance_policies(
         query["client_id"] = client_id
     if status and status != "all":
         query["status"] = status
-    policies = await db.compliance_policies.find(query, {"_id": 0}).sort([("status", 1), ("next_review_date", 1), ("updated_at", -1)]).to_list(1000)
+    policies = await db.compliance_policies.find(
+        _compliance_policy_scope_query(current_user, query), {"_id": 0}
+    ).sort([("status", 1), ("next_review_date", 1), ("updated_at", -1)]).to_list(1000)
     today = datetime.now(timezone.utc).date().isoformat()
     for policy in policies:
         policy["review_overdue"] = bool(policy.get("next_review_date") and policy["next_review_date"] < today and policy.get("status") == "approved")
@@ -670,7 +916,7 @@ async def list_compliance_policies(
 
 
 @router.post("/compliance/policies")
-async def create_compliance_policy(data: dict, current_user: dict = Depends(get_current_user)):
+async def create_compliance_policy(data: dict, request: Request, current_user: dict = Depends(get_current_user)):
     template_id = str(data.get("template_id") or "").strip()
     template = POLICY_TEMPLATES.get(template_id)
     name = str(data.get("name") or (template or {}).get("name") or "").strip()
@@ -678,21 +924,25 @@ async def create_compliance_policy(data: dict, current_user: dict = Depends(get_
         raise HTTPException(status_code=400, detail="Choose a template or enter a policy name")
     client_id = str(data.get("client_id") or "").strip() or None
     client_name = None
+    site_id = None
     if client_id:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "name": 1})
-        if not client:
-            raise HTTPException(status_code=404, detail="Customer not found")
+        client = await _get_scoped_compliance_client(client_id, current_user, request=request)
         client_name = client.get("name") or client_id
+        site_id = client.get("site_id")
+    else:
+        await assert_global_scope(current_user, operation="compliance_policy:create_global", request=request)
     now = datetime.now(timezone.utc).isoformat()
     actor = current_user.get("name") or current_user.get("email") or "Unknown user"
+    requested_framework_ids = data.get("framework_ids") or (template or {}).get("frameworks") or []
+    framework_ids = await _validated_framework_ids(requested_framework_ids, current_user)
     policy = {
-        "id": f"policy-{uuid.uuid4().hex[:12]}", "template_id": template_id or None,
+        "id": f"policy-{uuid.uuid4().hex[:12]}", "tenant_id": platform_tenant_id(current_user), "site_id": site_id, "template_id": template_id or None,
         "name": name, "category": str(data.get("category") or (template or {}).get("category") or "Governance").strip(),
         "client_id": client_id, "client_name": client_name,
         "owner": str(data.get("owner") or actor).strip(),
         "approver": str(data.get("approver") or "Compliance approver").strip(),
         "review_frequency_months": max(1, min(int(data.get("review_frequency_months") or 12), 36)),
-        "framework_ids": [str(item) for item in (data.get("framework_ids") or (template or {}).get("frameworks") or []) if str(item).strip()],
+        "framework_ids": framework_ids,
         "purpose": str(data.get("purpose") or (template or {}).get("purpose") or "").strip(),
         "content": str(data.get("content") or _policy_template_content(template or {"name": name, "purpose": str(data.get("purpose") or "Define the required governance and control expectations.")}, client_name or "the organisation")).strip(),
         "status": "draft", "version": 1, "acknowledgements": [], "revisions": [],
@@ -705,16 +955,14 @@ async def create_compliance_policy(data: dict, current_user: dict = Depends(get_
 
 
 @router.put("/compliance/policies/{policy_id}")
-async def update_compliance_policy(policy_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    policy = await db.compliance_policies.find_one({"id": policy_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not policy:
-        raise HTTPException(status_code=404, detail="Compliance policy not found")
+async def update_compliance_policy(policy_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+    policy = await _get_scoped_compliance_policy(policy_id, current_user, request=request, require_global_mutation=True)
     update = {}
     for field in ("name", "category", "owner", "approver", "purpose", "content"):
         if field in data:
             update[field] = str(data.get(field) or "").strip()
     if "framework_ids" in data:
-        update["framework_ids"] = [str(item) for item in (data.get("framework_ids") or []) if str(item).strip()]
+        update["framework_ids"] = await _validated_framework_ids(data.get("framework_ids"), current_user)
     if "review_frequency_months" in data:
         update["review_frequency_months"] = max(1, min(int(data.get("review_frequency_months") or 12), 36))
     requested_status = str(data.get("status") or "").strip()
@@ -731,16 +979,17 @@ async def update_compliance_policy(policy_id: str, data: dict, current_user: dic
         update["approved_by"] = None
     update["updated_at"] = now
     revision = {"version": policy.get("version", 1), "status": policy.get("status"), "content": policy.get("content", ""), "captured_at": now, "captured_by": current_user.get("name") or current_user.get("email")}
-    await db.compliance_policies.update_one({"id": policy_id}, {"$set": update, "$push": {"revisions": revision}})
+    policy_query = _compliance_policy_record_query(current_user, policy)
+    result = await db.compliance_policies.update_one(policy_query, {"$set": update, "$push": {"revisions": revision}})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Compliance policy not found")
     await _write_compliance_audit(current_user, "compliance_policy_updated", policy_id, update.get("name") or policy.get("name") or policy_id, {"version": update.get("version", policy.get("version")), "changes": sorted(update.keys())}, "compliance_policy")
-    return await db.compliance_policies.find_one({"id": policy_id}, {"_id": 0})
+    return await db.compliance_policies.find_one(policy_query, {"_id": 0})
 
 
 @router.post("/compliance/policies/{policy_id}/approve")
-async def approve_compliance_policy(policy_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    policy = await db.compliance_policies.find_one({"id": policy_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not policy:
-        raise HTTPException(status_code=404, detail="Compliance policy not found")
+async def approve_compliance_policy(policy_id: str, data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+    policy = await _get_scoped_compliance_policy(policy_id, current_user, request=request, require_global_mutation=True)
     if len(str(policy.get("content") or "").strip()) < 100:
         raise HTTPException(status_code=400, detail="Complete the policy content before approval")
     approval_note = str(data.get("approval_note") or "").strip()
@@ -751,19 +1000,20 @@ async def approve_compliance_policy(policy_id: str, data: dict, current_user: di
     next_review = (now + timedelta(days=months * 30)).date().isoformat()
     actor = current_user.get("name") or current_user.get("email") or "Unknown user"
     approval = {"at": now.isoformat(), "by": actor, "note": approval_note, "version": policy.get("version", 1)}
-    await db.compliance_policies.update_one({"id": policy_id}, {"$set": {
+    policy_query = _compliance_policy_record_query(current_user, policy)
+    result = await db.compliance_policies.update_one(policy_query, {"$set": {
         "status": "approved", "approved_at": now.isoformat(), "approved_by": actor,
         "approval_note": approval_note, "next_review_date": next_review, "updated_at": now.isoformat(),
     }, "$push": {"approvals": approval}})
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Compliance policy not found")
     await _write_compliance_audit(current_user, "compliance_policy_approved", policy_id, policy.get("name") or policy_id, {"version": policy.get("version"), "next_review_date": next_review}, "compliance_policy")
-    return await db.compliance_policies.find_one({"id": policy_id}, {"_id": 0})
+    return await db.compliance_policies.find_one(policy_query, {"_id": 0})
 
 
 @router.post("/compliance/policies/{policy_id}/acknowledge")
-async def acknowledge_compliance_policy(policy_id: str, current_user: dict = Depends(get_current_user)):
-    policy = await db.compliance_policies.find_one({"id": policy_id, "archived": {"$ne": True}}, {"_id": 0})
-    if not policy:
-        raise HTTPException(status_code=404, detail="Compliance policy not found")
+async def acknowledge_compliance_policy(policy_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+    policy = await _get_scoped_compliance_policy(policy_id, current_user, request=request)
     if policy.get("status") != "approved":
         raise HTTPException(status_code=409, detail="Only approved policies can be acknowledged")
     user_id = current_user.get("id") or current_user.get("email")
@@ -771,7 +1021,12 @@ async def acknowledge_compliance_policy(policy_id: str, current_user: dict = Dep
     if existing:
         return existing
     acknowledgement = {"user_id": user_id, "user_name": current_user.get("name") or current_user.get("email"), "version": policy.get("version"), "acknowledged_at": datetime.now(timezone.utc).isoformat()}
-    await db.compliance_policies.update_one({"id": policy_id}, {"$push": {"acknowledgements": acknowledgement}})
+    result = await db.compliance_policies.update_one(
+        _compliance_policy_record_query(current_user, policy),
+        {"$push": {"acknowledgements": acknowledgement}, "$set": {"updated_at": acknowledgement["acknowledged_at"]}},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Compliance policy not found")
     await _write_compliance_audit(current_user, "compliance_policy_acknowledged", policy_id, policy.get("name") or policy_id, {"version": policy.get("version")}, "compliance_policy")
     return acknowledgement
 
@@ -787,14 +1042,14 @@ async def frameworks_overview(current_user: dict = Depends(get_current_user)):
     credible but were not compliance evidence, so this endpoint now derives
     its scores from the latest persisted scan for each client/framework pair.
     """
-    scans = await db.compliance_reports.find({}, {"_id": 0}).sort("scanned_at", -1).to_list(2000)
+    scans = await db.compliance_reports.find(_compliance_scope_query(current_user, {}), {"_id": 0}).sort("scanned_at", -1).to_list(2000)
     latest_by_context: dict[tuple[str, str], dict] = {}
     for scan in scans:
         key = (str(scan.get("client_id") or ""), str(scan.get("framework") or ""))
         if key not in latest_by_context:
             latest_by_context[key] = scan
     latest_scans = list(latest_by_context.values())
-    custom = await _custom_frameworks()
+    custom = await _custom_frameworks(current_user)
     definitions = {**COMPLIANCE_FRAMEWORKS, **custom}
     frameworks = []
     for framework_id, definition in definitions.items():
@@ -858,11 +1113,11 @@ async def frameworks_overview(current_user: dict = Depends(get_current_user)):
 
 @router.get("/compliance-frameworks/{framework_id}")
 async def get_framework_detail(framework_id: str, current_user: dict = Depends(get_current_user)):
-    definition = await _framework_definition(framework_id)
+    definition = await _framework_definition(framework_id, current_user)
     if not definition:
         raise HTTPException(status_code=404, detail="Compliance framework not found")
     scans = await db.compliance_reports.find(
-        tenant_scoped_query(current_user, scoped_query(current_user, {"framework": framework_id})),
+        _compliance_scope_query(current_user, {"framework": framework_id}),
         {"_id": 0},
     ).sort("scanned_at", -1).to_list(500)
     latest_by_client: dict[str, dict] = {}
@@ -886,7 +1141,7 @@ async def get_framework_detail(framework_id: str, current_user: dict = Depends(g
 # ============================================================
 @router.get("/compliance-generator/frameworks")
 async def get_generator_frameworks(current_user: dict = Depends(get_current_user)):
-    custom = await _custom_frameworks()
+    custom = await _custom_frameworks(current_user)
     definitions = {**COMPLIANCE_FRAMEWORKS, **custom}
     return [
         {"id": framework_id, "name": definition["name"], "controls": len(definition["controls"]), "description": "Evidence-backed report available after a client scan"}
@@ -907,7 +1162,7 @@ async def generate_compliance_report(data: dict, current_user: dict = Depends(ge
     if not scan_id:
         raise HTTPException(status_code=400, detail="Run an evidence scan before generating a compliance report")
     scan = await db.compliance_reports.find_one(
-        tenant_scoped_query(current_user, scoped_query(current_user, {"id": scan_id})),
+        _compliance_scope_query(current_user, {"id": scan_id}),
         {"_id": 0},
     )
     if not scan:
@@ -916,6 +1171,7 @@ async def generate_compliance_report(data: dict, current_user: dict = Depends(ge
     report = {
         "id": f"cr-{uuid.uuid4().hex[:8]}",
         "source": "evidence_scan",
+        "site_id": scan.get("site_id"),
         "scan_id": scan["id"],
         "client_id": scan.get("client_id"),
         "tenant_id": platform_tenant_id(current_user),
