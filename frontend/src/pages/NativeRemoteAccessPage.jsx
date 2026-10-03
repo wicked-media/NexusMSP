@@ -24,9 +24,9 @@ import { Textarea } from "@/components/ui/textarea";
 
 const BUILD_STAGES = [
   { name: "Trust & grants", detail: "Per-tenant signed attended-session leases, device binding, revocation and durable replay protection.", state: "ready", icon: ShieldCheck },
-  { name: "Remote Companion", detail: "Signed user-session companion for attended consent, local stop and guarded view-only capture.", state: "ready", icon: Laptop },
+  { name: "Remote Companion", detail: "Signed user-session companion for attended consent, local stop and policy-verified capture in view-only or control modes.", state: "ready", icon: Laptop },
   { name: "Nexus Relay", detail: "Authenticated, tenant-scoped frame relay with bounded uploads, freshness expiry and transport evidence.", state: "ready", icon: Network },
-  { name: "Technician Viewer", detail: "Live view-only desktop canvas with freshness state, session evidence and an emergency end control.", state: "ready", icon: MonitorUp },
+  { name: "Technician Viewer", detail: "Live desktop canvas with freshness state, session evidence, interactive control under fresh endpoint approval, and an emergency end control.", state: "ready", icon: MonitorUp },
 ];
 
 const CAPABILITY_TARGETS = [

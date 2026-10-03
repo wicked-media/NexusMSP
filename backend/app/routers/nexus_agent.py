@@ -1,5 +1,5 @@
 """
-NexusOps Agent Ã¢â‚¬â€ backend router.
+NexusOps Agent - backend router.
 
 Endpoints:
   AGENT-FACING (auth via X-Agent-Token):
@@ -13,11 +13,11 @@ Endpoints:
     GET    /api/nexus-agent/agents/{device_id}
     POST   /api/nexus-agent/agents/{device_id}/command
     GET    /api/nexus-agent/agents/{device_id}/commands
-    POST   /api/nexus-agent/installers/build           Ã¢â‚¬â€ generate installer for a client
-    GET    /api/nexus-agent/installers/{token}/download Ã¢â‚¬â€ download installer ZIP (public, token-protected)
-    GET    /api/nexus-agent/binary/latest              Ã¢â‚¬â€ latest agent .exe (public)
-    GET    /api/nexus-agent/settings                   Ã¢â‚¬â€ admin settings
-    PUT    /api/nexus-agent/settings                   Ã¢â‚¬â€ update settings
+    POST   /api/nexus-agent/installers/build           - generate installer for a client
+    GET    /api/nexus-agent/installers/{token}/download - download installer ZIP (public, token-protected)
+    GET    /api/nexus-agent/binary/latest              - latest agent .exe (public)
+    GET    /api/nexus-agent/settings                   - admin settings
+    PUT    /api/nexus-agent/settings                   - update settings
 """
 from __future__ import annotations
 
@@ -914,7 +914,7 @@ async def _queue_default_nexus_canary(agent: dict[str, Any], profile: dict[str, 
 
 
 # ----------------------------------------------------------------------
-# Public helpers Ã¢â‚¬â€ used by device_intel.bulk_action and ticket_device_actions
+# Public helpers - used by device_intel.bulk_action and ticket_device_actions
 # ----------------------------------------------------------------------
 
 async def get_nexus_agent_for_device(device_doc: dict) -> dict | None:
@@ -1098,7 +1098,7 @@ async def enroll(req: EnrollRequest):
         NEXUS_BACKUP_AGENT_PROFILE,
     )
 
-    # Idempotency Ã¢â‚¬â€ try to find an existing agent for (hostname, client_id, mac)
+    # Idempotency - try to find an existing agent for (hostname, client_id, mac)
     existing = None
     if req.hostname:
         existing = await db.nexus_agents.find_one({
@@ -1687,7 +1687,7 @@ async def heartbeat(
             except Exception:
                 # State history must never make a valid heartbeat fail.
                 logger.exception("[nexus-agent] failed to capture endpoint state history")
-            # Keep a compact, technician-useful trailÃ¢â‚¬â€not one noisy event per
+            # Keep a compact, technician-useful trail-not one noisy event per
             # minute. Heartbeat inventory is summarised at most once per hour.
             last_audit = agent.get("last_device_audit_at")
             should_audit = True
@@ -1722,11 +1722,11 @@ async def heartbeat(
                 await db.device_events.insert_one({
                     "id": str(uuid.uuid4()), "device_id": device_id, "event_type": "agent_check_in",
                     "message": (
-                        "NexusOps Agent checked in Ã‚Â· "
-                        f"CPU {telemetry['cpu_usage']:.0f}%" if telemetry["cpu_usage"] is not None else "NexusOps Agent checked in Ã‚Â· CPU not reported"
+                        "NexusOps Agent checked in - "
+                        f"CPU {telemetry['cpu_usage']:.0f}%" if telemetry["cpu_usage"] is not None else "NexusOps Agent checked in - CPU not reported"
                     ) + (
-                        f" Ã‚Â· memory {telemetry['memory_usage']:.0f}%" if telemetry["memory_usage"] is not None else " Ã‚Â· memory not reported"
-                    ) + f" Ã‚Â· {update_summary}.",
+                        f" - memory {telemetry['memory_usage']:.0f}%" if telemetry["memory_usage"] is not None else " - memory not reported"
+                    ) + f" - {update_summary}.",
                     "severity": "info", "timestamp": now, "source": "nexus-agent",
                 })
                 await db.nexus_agents.update_one({"id": agent["id"]}, {"$set": {"last_device_event_at": now}})
@@ -1744,7 +1744,7 @@ async def heartbeat(
     except Exception as exc:
         logger.warning("[nexus-agent] monitoring evaluation failed: %s", exc)
 
-    # Write a heartbeat history row (lightweight Ã¢â‚¬â€ for sparklines)
+    # Write a heartbeat history row (lightweight - for sparklines)
     try:
         await db.nexus_agent_heartbeats.insert_one({
             "device_id": agent["id"],
@@ -2730,10 +2730,10 @@ def _build_installer_zip(
         z.writestr("uninstall.bat", uninstall_bat)
         z.writestr("README.txt",
                    "NexusOps Agent\n\n"
-                   "1) Review release-manifest.json, then right-click install.bat Ã¢â€ â€™ Run as Administrator\n"
+                   "1) Review release-manifest.json, then right-click install.bat -> Run as Administrator\n"
                    "2) Agent will register itself as the 'NexusOpsAgent' Windows service\n"
                    "3) Existing NexusOps Agent services are stopped, reconfigured and restarted safely\n"
-                   "4) Within 60 seconds the device will appear in NexusOps Ã¢â€ â€™ Devices\n\n"
+                   "4) Within 60 seconds the device will appear in NexusOps -> Devices\n\n"
                    "The callback URL uses HTTPS except for explicit local loopback development.\n"
                    "To remove: run uninstall.bat as Administrator.\n")
     return buf.getvalue()
@@ -2920,7 +2920,7 @@ async def installer_download(token: str):
         if str(manifest.get("agent_version") or "") != AGENT_VERSION:
             raise HTTPException(409, "installer artifact is unavailable; build a fresh installer for the current release")
         if not AGENT_BINARY_PATH.exists():
-            raise HTTPException(500, "agent binary missing Ã¢â‚¬â€ rebuild required")
+            raise HTTPException(500, "agent binary missing - rebuild required")
         current_binary = AGENT_BINARY_PATH.read_bytes()
         expected_sha256 = str(manifest.get("agent_sha256") or "")
         if expected_sha256 and not secrets.compare_digest(expected_sha256, hashlib.sha256(current_binary).hexdigest()):
@@ -3001,7 +3001,7 @@ async def version_manifest():
 
 
 # ----------------------------------------------------------------------
-# FLEET OPERATIONS Ã¢â‚¬â€ the differentiator surface
+# FLEET OPERATIONS - the differentiator surface
 # ----------------------------------------------------------------------
 
 @router.get("/nexus-agent/fleet/version-distribution")

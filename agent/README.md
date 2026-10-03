@@ -19,8 +19,9 @@ Cross-platform RMM agent (Windows-first) for the NexusOps platform.
 - Signed update manifests are evaluated on heartbeat; the agent fails closed if
   the version, pinned signing key, signature or artifact fingerprint is wrong.
 - Nexus Remote is first-party. The Windows service brokers only a
-  policy-hash-verified, attended, view-only Remote Companion; it never starts
-  or repairs an external remote-access provider.
+  policy-hash-verified, attended Remote Companion (view-only by default;
+  interactive control requires fresh endpoint approval per session); it never
+  starts or repairs an external remote-access provider.
 
 ## Nexus Shield deployment profile
 

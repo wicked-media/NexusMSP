@@ -401,10 +401,12 @@ def background_worker_specs():
     """Return the durable-loop catalogue shared by API-dev and worker deployments."""
     from app.routers.invoice_reminders import invoice_reminder_scheduler
     from app.routers.maintenance_windows import maintenance_window_scheduler
+    from app.routers.permission_elevation import nexus_elevate_reconcile_scheduler
 
     return (
         ("recurring-invoices", _recurring_invoice_scheduler),
         ("invoice-reminders", invoice_reminder_scheduler),
+        ("nexus-elevate", nexus_elevate_reconcile_scheduler),
         ("standup-digest", _standup_digest_scheduler),
         ("warroom-escalation", _warroom_escalation_loop),
         ("chain-reactions", _chain_reactions_loop),

@@ -2,6 +2,8 @@
 Just-in-Time (JIT) Permission Elevation — temporary elevated access for techs
 with auto-expiry, audit, and break-glass mode.
 """
+import asyncio
+import logging
 import re
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -11,6 +13,8 @@ from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from app.database import db
+
+logger = logging.getLogger(__name__)
 from app.auth import get_current_user
 from app.routers.tech_intel import _log_audit
 from app.services.secret_store import encrypt_secret
@@ -1380,6 +1384,23 @@ async def _escalate_overdue_native_reviews(query: dict) -> int:
         })
         escalated += 1
     return escalated
+
+
+async def nexus_elevate_reconcile_scheduler():
+    """Durable loop: keep approval SLAs and expiry honest without console reads.
+
+    The queue also reconciles lazily on read, but an overdue review must reach
+    on-call and an elapsed approval window must close even when nobody opens
+    the Nexus Elevate console.  Both sweeps are idempotent compare-and-set
+    updates and tag every notification and audit row with the owning tenant.
+    """
+    while True:
+        try:
+            await _expire_stale_native_approvals()
+            await _escalate_overdue_native_reviews({})
+        except Exception as exc:
+            logger.error("nexus_elevate_reconcile_scheduler_error error=%s", exc)
+        await asyncio.sleep(300)
 
 
 @router.get("/nexus-elevate/secure-access/requests/{request_id}")

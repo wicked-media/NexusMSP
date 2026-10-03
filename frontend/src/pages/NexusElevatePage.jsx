@@ -300,7 +300,7 @@ export default function NexusElevatePage() {
   return (
     <div className="space-y-6" data-testid="nexus-elevate-page">
       <OperationalPageHeader
-        eyebrow="Endpoint security - controlled privilege"
+        eyebrow="Endpoint security · controlled privilege"
         title="Nexus Elevate"
         description="A native, hash-pinned service-launch approval workflow for enrolled Windows Nexus Agents. It supports precise unattended executable tasks; it does not grant an endpoint user interactive or permanent administrator access."
         icon={ShieldCheck}
