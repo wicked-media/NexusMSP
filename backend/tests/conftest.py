@@ -41,6 +41,11 @@ def _is_legacy_live_api_probe(path: Path) -> bool:
     """
     if path.suffix != ".py" or not path.name.startswith("test_"):
         return False
+    # tests/live/ is the dedicated home for live-stack probes: the directory is
+    # the marker, so a probe cannot leak into the unit gate by omitting the
+    # legacy URL constant from its source.
+    if "live" in path.parts:
+        return True
     try:
         return _LIVE_API_ENV in path.read_text(encoding="utf-8")
     except OSError:

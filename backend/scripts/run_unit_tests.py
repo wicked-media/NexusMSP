@@ -18,7 +18,10 @@ def main() -> int:
     live_tests = [
         path
         for path in tests_dir.rglob("test_*.py")
-        if "REACT_APP_BACKEND_URL" in path.read_text(encoding="utf-8", errors="ignore")
+        # tests/live/ is the dedicated live-probe home (directory is the
+        # marker); the content match also catches legacy probes left in place.
+        if "live" in path.parts
+        or "REACT_APP_BACKEND_URL" in path.read_text(encoding="utf-8", errors="ignore")
     ]
     args = [str(tests_dir), "-q", *[f"--ignore={path}" for path in live_tests]]
     print(f"Running backend unit gate; excluded {len(live_tests)} live-stack probes.")
