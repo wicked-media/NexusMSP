@@ -8,12 +8,21 @@ becoming a source of deployable secrets.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
 
 
 _LIVE_API_ENV = "REACT_APP_BACKEND_URL"
+# A legacy live probe *reads* REACT_APP_BACKEND_URL to find its API stack.  A
+# deterministic unit test that merely clears the variable for hermetic
+# behaviour is not a probe, so the content match keys on the env-read
+# signature rather than any mention of the variable name.
+_LIVE_PROBE_ENV_READ = re.compile(
+    r"(environ\.get|getenv)\(\s*[\"']REACT_APP_BACKEND_URL[\"']"
+    r"|environ\[\s*[\"']REACT_APP_BACKEND_URL[\"']"
+)
 _LIVE_INTEGRATION_OPT_IN_ENV = "NEXUS_RUN_LIVE_INTEGRATION_TESTS"
 _TEST_ENVIRONMENT_OPT_IN_ENV = "NEXUS_TEST_ENVIRONMENT"
 
@@ -47,7 +56,7 @@ def _is_legacy_live_api_probe(path: Path) -> bool:
     if "live" in path.parts:
         return True
     try:
-        return _LIVE_API_ENV in path.read_text(encoding="utf-8")
+        return bool(_LIVE_PROBE_ENV_READ.search(path.read_text(encoding="utf-8")))
     except OSError:
         return False
 

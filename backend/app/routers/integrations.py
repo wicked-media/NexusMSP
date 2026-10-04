@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.activity import log_activity, ticket_audit
 from app.models import *
 from app.services.integrations import domotz_service, office365_service, acronis_service
 from app.services.microsoft365_credentials import has_microsoft365_client_secret

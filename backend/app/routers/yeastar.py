@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.activity import log_activity, ticket_audit
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
 from app.models import *
 

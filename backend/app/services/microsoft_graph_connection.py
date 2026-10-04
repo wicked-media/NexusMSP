@@ -103,6 +103,21 @@ async def load_connect_app_config() -> dict:
     return {"client_id": "", "client_secret": "", "tenant_hint": "", "source": ""}
 
 
+async def organisation_tenant_id() -> str:
+    """Best available Entra tenant constraint for sign-in and consent flows.
+
+    An explicitly configured tenant wins; otherwise the tenant discovered by the
+    one-click Microsoft 365 connection scopes the flow to the connected
+    organisation so sign-in is never opened to arbitrary directories.
+    """
+    app_config = await load_connect_app_config()
+    tenant_hint = str(app_config.get("tenant_hint") or "").strip()
+    if tenant_hint:
+        return tenant_hint
+    connection = await load_connection()
+    return str((connection or {}).get("tenant_id") or "").strip()
+
+
 def resolve_redirect_uri(api_base_url: str) -> str:
     """Callback URL registered in the Entra application.
 

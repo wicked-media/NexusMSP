@@ -9,6 +9,7 @@ import httpx
 from urllib.parse import urlencode
 from app.database import db
 from app.auth import get_current_user, create_token, session_version_for_user
+from app.services.microsoft_graph_connection import load_connect_app_config, organisation_tenant_id
 
 router = APIRouter()
 
@@ -29,6 +30,40 @@ async def _get_sso_config():
     """Fetch Microsoft SSO settings from DB."""
     config = await db.settings.find_one({"type": "microsoft_sso"}, {"_id": 0})
     return config
+
+
+async def _effective_sso_config() -> dict:
+    """Merge stored SSO settings with the platform Microsoft application.
+
+    Installations that never entered an Entra application still get Microsoft
+    sign-in from the deployment/one-click application, scoped to the connected
+    organisation tenant so the flow is never opened to arbitrary directories.
+    """
+    config = dict(await _get_sso_config() or {})
+    if not str(config.get("client_id") or "").strip():
+        app_config = await load_connect_app_config()
+        if app_config.get("client_id"):
+            config["client_id"] = app_config["client_id"]
+            if not str(config.get("client_secret") or "").strip():
+                config["client_secret"] = app_config.get("client_secret", "")
+            if not str(config.get("tenant_id") or "").strip():
+                config["tenant_id"] = app_config.get("tenant_hint", "")
+    if not str(config.get("tenant_id") or "").strip():
+        config["tenant_id"] = await organisation_tenant_id()
+    return config
+
+
+async def _active_sso_config() -> dict | None:
+    """Return the sign-in configuration, or None when Microsoft sign-in is off."""
+    stored = await _get_sso_config()
+    if stored is not None and stored.get("enabled") is False:
+        # An administrator explicitly turned Microsoft sign-in off; do not
+        # silently re-enable it from the platform application.
+        return None
+    config = await _effective_sso_config()
+    if str(config.get("client_id") or "").strip() and str(config.get("tenant_id") or "").strip():
+        return config
+    return None
 
 
 # ============== SSO SETTINGS (Admin) ==============
@@ -73,10 +108,7 @@ async def update_sso_settings(data: dict, current_user: dict = Depends(get_curre
 @router.get("/settings/microsoft-sso/status")
 async def get_sso_status():
     """Public endpoint to check if Microsoft SSO is enabled (no auth required for login page)."""
-    config = await _get_sso_config()
-    if config and config.get("enabled") and config.get("client_id") and config.get("tenant_id"):
-        return {"enabled": True}
-    return {"enabled": False}
+    return {"enabled": bool(await _active_sso_config())}
 
 
 # ============== SSO LOGIN FLOW ==============
@@ -84,8 +116,8 @@ async def get_sso_status():
 @router.get("/auth/microsoft/login")
 async def microsoft_login(request: Request):
     """Initiate Microsoft OAuth2 login. Redirects browser to Microsoft authorization page."""
-    config = await _get_sso_config()
-    if not config or not config.get("enabled"):
+    config = await _active_sso_config()
+    if not config:
         raise HTTPException(status_code=400, detail="Microsoft SSO is not configured")
 
     tenant_id = config["tenant_id"]
@@ -151,7 +183,7 @@ async def microsoft_callback(request: Request, code: str = "", state: str = "", 
         return RedirectResponse(url=f"{frontend_url}/login?sso_error=invalid_state", status_code=302)
 
     code_verifier = state_data["code_verifier"]
-    config = await _get_sso_config()
+    config = await _active_sso_config()
     if not config:
         return RedirectResponse(url=f"{frontend_url}/login?sso_error=not_configured", status_code=302)
 
