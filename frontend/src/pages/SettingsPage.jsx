@@ -10,10 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { RichTextEditor } from "@/components/RichTextEditor";
 import UnifiControllersManager from "@/components/unifi/UnifiControllersManager";
 import ServiceTiersSettings from "@/components/settings/ServiceTiersSettings";
 import ContractTypesSettings from "@/components/settings/ContractTypesSettings";
@@ -23,10 +19,10 @@ import OperationalPageHeader from "@/components/OperationalPageHeader";
 import O365SetupPage from "./O365SetupPage";
 import { toast } from "sonner";
 import { 
-  User, Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
+  Bell, Shield, Palette, Mail, Building, Save, Loader2, MessageSquare,
   Clock, CalendarDays, Zap, CreditCard, FileText, AlertTriangle, Wifi, BookOpen, Brain,
-  Trash2, Tag, Wrench, Link2, Unlink, TestTube, RefreshCw, UserPlus,
-  CheckCircle, XCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
+  Trash2, Link2, TestTube, RefreshCw,
+  CheckCircle, KeyRound, Settings2, Plug, Upload, Image, Globe, Eye, EyeOff, Search,
   Smartphone, Copy, Cloud, Server, Activity, ChevronRight, ClipboardCheck, ShieldCheck, CloudSun, DatabaseBackup
 } from "lucide-react";
 
@@ -142,7 +138,6 @@ export default function SettingsPage() {
   const [integrationSearch, setIntegrationSearch] = useState("");
   const [integrationCategory, setIntegrationCategory] = useState("all");
   const [highlightAnchor, setHighlightAnchor] = useState("");
-  const [loading, setLoading] = useState(false);
 
   // Honour deep-links: /settings?tab=integrations&anchor=huntress-settings-card
   useEffect(() => {
@@ -174,16 +169,6 @@ export default function SettingsPage() {
     email_sender_name: "", email_footer_text: "", favicon_url: "",
   });
   const [brandingSaving, setBrandingSaving] = useState(false);
-  const [profileData, setProfileData] = useState({
-    name: user?.name || "",
-    email: user?.email || ""
-  });
-  const [notifications, setNotifications] = useState({
-    email_alerts: true,
-    ticket_updates: true,
-    device_offline: true,
-    sla_warnings: true
-  });
   const [threshold, setThreshold] = useState({ enabled: false, threshold_hours: 24, escalate_to: "", escalate_to_name: "" });
   const [xero, setXero] = useState({ client_id: "", client_secret: "", redirect_uri: "", connected: false });
   const [stripe, setStripe] = useState({ api_key: "", configured: false });
@@ -217,24 +202,10 @@ export default function SettingsPage() {
   const [openaiForm, setOpenaiForm] = useState({ api_key: "", key_label: "NexusMSP production", organization_id: "", project_id: "" });
   const [openaiBusy, setOpenaiBusy] = useState("");
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
-  const [jobNumbering, setJobNumbering] = useState({ sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" });
-  const [jnSaving, setJnSaving] = useState(false);
-  const [emailSig, setEmailSig] = useState("");
-  const [sigSaving, setSigSaving] = useState(false);
-  const [cannedResponses, setCannedResponses] = useState([]);
-  const [cannedForm, setCannedForm] = useState({ title: "", content: "", category: "general" });
   const [msSSO, setMsSSO] = useState({ enabled: false, tenant_id: "", client_id: "", client_secret: "", client_secret_set: false, redirect_uri: "", calendar_redirect_uri: "", auto_create_users: true, default_role: "tech" });
   const [msSSOSaving, setMsSSOSaving] = useState(false);
   // Mailbox state
   const [mailbox, setMailbox] = useState(null);
-  const [mailboxForm, setMailboxForm] = useState({
-    tenant_id: "", client_id: "", client_secret: "", redirect_uri: "", mailbox_email: "",
-    email_to_lead_enabled: true, email_to_ticket_enabled: false,
-    auto_reply_enabled: false, auto_reply_message: "Thank you for contacting us. We have received your inquiry and will respond shortly.",
-  });
-  const [mailboxSaving, setMailboxSaving] = useState(false);
-  const [mailboxTesting, setMailboxTesting] = useState(false);
-  const [emailLeads, setEmailLeads] = useState([]);
   const [calendarConnection, setCalendarConnection] = useState({ provider: "microsoft365", connected: false, calendar_name: "NexusMSP Dispatch", sync_direction: "two_way" });
   const [calendarSaving, setCalendarSaving] = useState(false);
   const [nexusElevate, setNexusElevate] = useState({ native_enabled: true, auto_deploy_companion: true, max_duration_minutes: 15, approval_sla_minutes: 15, require_justification: true, keeper_bridge_enabled: false, keeper_connector_reference: "", keeper_sync_interval_minutes: 15 });
@@ -325,7 +296,7 @@ export default function SettingsPage() {
       // Settings are independent surfaces. A provider outage must not prevent the
       // rest of the administration workspace from loading.
       const getOptional = (url, fallback) => axios.get(url, { headers }).catch(() => ({ data: fallback }));
-      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, jnRes, ssoRes, mbxRes, leadsRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
+      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, ssoRes, mbxRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
           getOptional(`${API}/users`, []),
           getOptional(`${API}/settings/no-notes-threshold`, {}),
           getOptional(`${API}/settings/xero`, {}),
@@ -335,10 +306,8 @@ export default function SettingsPage() {
           getOptional(`${API}/settings/hudu`, {}),
           getOptional(`${API}/ai/config`, {}),
           getOptional(`${API}/syncro/settings`, { subdomain: "", api_key: "", enabled: false }),
-          getOptional(`${API}/settings/job-numbering`, { sla_prefix: "SLA-", workshop_prefix: "WS-", cabling_prefix: "CW-" }),
           getOptional(`${API}/settings/microsoft-sso`, {}),
           getOptional(`${API}/settings/o365-mailbox`, null),
-          getOptional(`${API}/o365/email-leads`, []),
           getOptional(`${API}/settings/branding`, {}),
           getOptional(`${API}/acronis/config`, {}),
           getOptional(`${API}/settings/sms`, null),
@@ -380,116 +349,14 @@ export default function SettingsPage() {
           }));
         }
         setSyncro(prev => ({ ...prev, ...(syncroRes.data || {}), subdomain: syncroRes.data?.subdomain || "", api_key: syncroRes.data?.api_key || "" }));
-        if (jnRes.data) setJobNumbering(prev => ({ ...prev, ...jnRes.data }));
         if (ssoRes.data && ssoRes.data.type) setMsSSO(prev => ({ ...prev, ...ssoRes.data, client_secret: "" }));
         if (brandingRes.data && brandingRes.data.company_name) setBranding(prev => ({ ...prev, ...brandingRes.data }));
-        if (mbxRes.data) {
-          setMailbox(mbxRes.data);
-          if (mbxRes.data.tenant_id) {
-            setMailboxForm(f => ({
-              ...f, tenant_id: mbxRes.data.tenant_id || "", client_id: mbxRes.data.client_id || "",
-              client_secret: mbxRes.data.client_secret_set ? "********" : "",
-              redirect_uri: mbxRes.data.redirect_uri || "", mailbox_email: mbxRes.data.mailbox_email || "",
-              email_to_lead_enabled: mbxRes.data.email_to_lead_enabled !== false,
-              email_to_ticket_enabled: mbxRes.data.email_to_ticket_enabled || false,
-              auto_reply_enabled: mbxRes.data.auto_reply_enabled || false,
-              auto_reply_message: mbxRes.data.auto_reply_message || f.auto_reply_message,
-            }));
-          }
-        }
-        setEmailLeads(leadsRes.data || []);
-        // Load email signature and canned responses
-        try {
-          const userRes = await axios.get(`${API}/users/${user.id}`, { headers });
-          if (userRes.data?.email_signature) setEmailSig(userRes.data.email_signature);
-        } catch {}
-        try {
-          const crRes = await axios.get(`${API}/canned-responses`, { headers });
-          setCannedResponses(crRes.data);
-        } catch {}
+        if (mbxRes.data) setMailbox(mbxRes.data);
       } catch (error) { console.error("Failed to fetch settings"); }
     };
     fetchData();
   }, [headers, user.id]);
 
-  const handleProfileSave = async () => {
-    setLoading(true);
-    // Simulate save - in real app would call API
-    await new Promise(resolve => setTimeout(resolve, 500));
-    toast.success("Profile updated successfully");
-    setLoading(false);
-  };
-
-  const handleSaveJobNumbering = async () => {
-    setJnSaving(true);
-    try {
-      await axios.put(`${API}/settings/job-numbering`, jobNumbering, { headers });
-      toast.success("Job numbering settings saved");
-    } catch { toast.error("Failed to save job numbering"); }
-    finally { setJnSaving(false); }
-  };
-
-  // Mailbox handlers
-  const handleMailboxConnect = async () => {
-    if (!mailboxForm.tenant_id || !mailboxForm.client_id || !mailboxForm.client_secret || !mailboxForm.mailbox_email) {
-      toast.error("All Azure AD credentials and mailbox email are required"); return;
-    }
-    setMailboxSaving(true);
-    try {
-      await axios.post(`${API}/o365/connect`, mailboxForm, { headers });
-      toast.success("Office 365 mailbox connected!");
-      const [mbxRes, leadsRes] = await Promise.all([
-        axios.get(`${API}/settings/o365-mailbox`, { headers }),
-        axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] })),
-      ]);
-      setMailbox(mbxRes.data); setEmailLeads(leadsRes.data || []);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to connect"); }
-    finally { setMailboxSaving(false); }
-  };
-
-  const handleMailboxDisconnect = async () => {
-    if (!window.confirm("Disconnect Office 365 mailbox?")) return;
-    try {
-      await axios.post(`${API}/o365/disconnect`, {}, { headers });
-      toast.success("Disconnected"); setMailbox(prev => ({ ...prev, connected: false }));
-    } catch { toast.error("Failed to disconnect"); }
-  };
-
-  const handleMailboxTest = async () => {
-    setMailboxTesting(true);
-    try {
-      const res = await axios.post(`${API}/o365/test-connection`, {}, { headers });
-      if (res.data.success) toast.success("Connection test passed!"); else toast.error(res.data.message);
-    } catch { toast.error("Test failed"); }
-    finally { setMailboxTesting(false); }
-  };
-
-  const handleMailboxSettingsSave = async () => {
-    setMailboxSaving(true);
-    try {
-      await axios.put(`${API}/settings/o365-mailbox`, {
-        email_to_lead_enabled: mailboxForm.email_to_lead_enabled,
-        email_to_ticket_enabled: mailboxForm.email_to_ticket_enabled,
-        auto_reply_enabled: mailboxForm.auto_reply_enabled,
-        auto_reply_message: mailboxForm.auto_reply_message,
-      }, { headers });
-      toast.success("Mailbox settings saved");
-    } catch { toast.error("Failed to save"); }
-    finally { setMailboxSaving(false); }
-  };
-
-  const handleTestIncomingEmail = async () => {
-    try {
-      await axios.post(`${API}/o365/webhook/incoming-email`, {
-        from_address: "demo@testclient.com", from_name: "Demo User",
-        subject: "Interested in your IT services",
-        body: "Hi, we are looking for a managed service provider for our office of 25 people. Can you send us a proposal?",
-      }, { headers });
-      toast.success("Test email processed - check Leads page");
-      const leadsRes = await axios.get(`${API}/o365/email-leads`, { headers }).catch(() => ({ data: [] }));
-      setEmailLeads(leadsRes.data || []);
-    } catch { toast.error("Failed to process test email"); }
-  };
 
   const mailboxConnected = mailbox?.connected;
 
@@ -696,30 +563,6 @@ export default function SettingsPage() {
         })}
       </div>
 
-      {/* Other settings hub - quick-access cards to dedicated settings sub-pages */}
-      {false && <div className="grid grid-cols-2 gap-2 md:grid-cols-4" data-testid="settings-hub-row">
-        <button onClick={() => navigate("/tickets/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-violet-500/40 p-3 transition-all" data-testid="hub-ticket-settings">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-violet-300/80 font-mono mb-1">Ticket Settings</div>
-          <div className="text-sm font-medium">SLA · Workflows · Templates</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Configure ticket numbering, SLA tiers, workflows</div>
-        </button>
-        <button onClick={() => navigate("/ticket-ping/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-cyan-500/40 p-3 transition-all" data-testid="hub-ticket-ping">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-cyan-300/80 font-mono mb-1">Ticket Ping</div>
-          <div className="text-sm font-medium">Live alerts · Sound</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Notification rules &amp; sounds</div>
-        </button>
-        <button onClick={() => navigate("/tech/settings")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-amber-500/40 p-3 transition-all" data-testid="hub-tech-settings">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-amber-300/80 font-mono mb-1">Tech Settings</div>
-          <div className="text-sm font-medium">Per-user prefs</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Density · views · personal toggles</div>
-        </button>
-        <button onClick={() => navigate("/profile")} className="text-left rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-emerald-500/40 p-3 transition-all" data-testid="hub-tech-profile">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-300/80 font-mono mb-1">My Profile</div>
-          <div className="text-sm font-medium">Bio · Skills · CSAT · Achievements</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">Public tech profile &amp; gamification</div>
-        </button>
-      </div>}
-
       <style>{`
         [data-settings-highlight="true"] {
           box-shadow: 0 0 0 2px hsl(var(--primary));
@@ -887,317 +730,6 @@ export default function SettingsPage() {
         </Button>
       </>)}
 
-      {/* Legacy general content retained temporarily for data compatibility; no longer exposed in Settings navigation. */}
-      {false && activeTab === "general" && (<>
-      <Card className="border-sky-500/20 bg-sky-500/[0.025]" data-testid="operational-defaults-overview">
-        <CardHeader><CardTitle className="flex items-center gap-2"><Settings2 className="h-5 w-5 text-sky-300" />Operational defaults</CardTitle><CardDescription>Shared operational standards belong here. Personal preferences and team administration now live in their dedicated workspaces.</CardDescription></CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <button type="button" onClick={() => navigate("/my-settings")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-violet-500/30 hover:bg-violet-500/[0.04]"><p className="text-sm font-medium">My Workspace</p><p className="mt-1 text-xs text-muted-foreground">Profile, signature, notifications, schedule, and appearance.</p></button>
-          <button type="button" onClick={() => navigate("/team-hub?tab=command&view=directory")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-cyan-500/30 hover:bg-cyan-500/[0.04]"><p className="text-sm font-medium">Team & access</p><p className="mt-1 text-xs text-muted-foreground">Technicians, invitations, roles, permissions, and capacity.</p></button>
-          <button type="button" onClick={() => setActiveTab("branding")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-emerald-500/30 hover:bg-emerald-500/[0.04]"><p className="text-sm font-medium">Organisation identity</p><p className="mt-1 text-xs text-muted-foreground">Company details, branding, client-facing documents, and white label.</p></button>
-          <button type="button" onClick={() => navigate("/tickets/settings")} className="rounded-xl border border-border/60 bg-background/50 p-3 text-left transition-colors hover:border-amber-500/30 hover:bg-amber-500/[0.04]"><p className="text-sm font-medium">Ticket configuration</p><p className="mt-1 text-xs text-muted-foreground">Workflows, SLA policies, templates, and ticket-specific controls.</p></button>
-        </CardContent>
-      </Card>
-      <Card data-testid="general-jobnumber-card">
-        <CardHeader><div className="flex items-center gap-2"><Tag className="w-5 h-5 text-primary" /><CardTitle>Job numbering</CardTitle></div><CardDescription>Configure prefixes used across SLA, workshop, and cabling work.</CardDescription></CardHeader>
-        <CardContent className="space-y-4"><div className="grid grid-cols-1 gap-4 md:grid-cols-3"><div className="space-y-2"><Label>SLA prefix</Label><Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" /><p className="text-xs text-muted-foreground">Example: {jobNumbering.sla_prefix || "SLA-"}00001</p></div><div className="space-y-2"><Label>Workshop prefix</Label><Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" /><p className="text-xs text-muted-foreground">Example: {jobNumbering.workshop_prefix || "WS-"}00001</p></div><div className="space-y-2"><Label>Cabling / WISP prefix</Label><Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" /><p className="text-xs text-muted-foreground">Example: {jobNumbering.cabling_prefix || "CW-"}00001</p></div></div><Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">{jnSaving ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" />Saving...</> : "Save prefixes"}</Button></CardContent>
-      </Card>
-      </>)}
-
-      {false && activeTab === "general" && (<>
-
-      {/* Profile Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <User className="w-5 h-5 text-primary" />
-            <CardTitle>Profile</CardTitle>
-          </div>
-          <CardDescription>Update your personal information</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center gap-6">
-            <Avatar className="w-20 h-20">
-              <AvatarImage src={user?.avatar} alt={user?.name} />
-              <AvatarFallback className="text-xl bg-primary/20 text-primary">
-                {user?.name?.split(' ').map(n => n[0]).join('')}
-              </AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="font-semibold text-lg">{user?.name}</p>
-              <Badge variant="outline" className="capitalize">{user?.role}</Badge>
-            </div>
-          </div>
-          <Separator />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input
-                id="name"
-                value={profileData.name}
-                onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
-                data-testid="settings-name-input"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                value={profileData.email}
-                onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                data-testid="settings-email-input"
-              />
-            </div>
-          </div>
-          <Button onClick={handleProfileSave} disabled={loading} data-testid="save-profile-button">
-            {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-            Save Changes
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Email Signature & Canned Responses - Per Technician */}
-      <Card data-testid="mailbox-signature-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Mail className="w-5 h-5 text-primary" />
-            <CardTitle>Email Signature & Templates</CardTitle>
-          </div>
-          <CardDescription>Your personal email signature (rich text) auto-appended to emails sent from tickets. Also manage your canned response templates.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Rich Text Email Signature */}
-          <div className="space-y-2">
-            <Label>Email Signature (Rich Text)</Label>
-            <p className="text-xs text-muted-foreground">This signature is automatically appended to all emails sent from tickets. Supports full HTML formatting, tables, and inline images. <strong>Pro tip:</strong> click the <span className="font-mono bg-muted px-1 rounded">HTML</span> toggle in the editor to paste a full raw HTML signature (e.g. exported from Outlook -> File -> Save As -> Web Page). Outlook <code>cid:</code> inline images won't render - host images on a public URL or paste them as base64 data URIs.</p>
-            <RichTextEditor content={emailSig} onChange={setEmailSig} minHeight="300px" />
-            <Button onClick={async () => {
-              setSigSaving(true);
-              try {
-                await axios.put(`${API}/users/${user.id}`, { email_signature: emailSig }, { headers });
-                toast.success("Email signature saved");
-              } catch { toast.error("Failed to save signature"); }
-              finally { setSigSaving(false); }
-            }} disabled={sigSaving} data-testid="save-signature-btn">
-              {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-              Save Signature
-            </Button>
-          </div>
-          <Separator />
-          {/* Canned Responses */}
-          <div className="space-y-3">
-            <Label>Canned Responses</Label>
-            <p className="text-xs text-muted-foreground">Quick reply templates you can use when responding to tickets.</p>
-            <div className="grid grid-cols-3 gap-2">
-              <Input value={cannedForm.title} onChange={e => setCannedForm({ ...cannedForm, title: e.target.value })} placeholder="Title" data-testid="canned-title" />
-              <Input value={cannedForm.content} onChange={e => setCannedForm({ ...cannedForm, content: e.target.value })} placeholder="Response content" className="col-span-2" data-testid="canned-content" />
-            </div>
-            <Button size="sm" onClick={async () => {
-              if (!cannedForm.title || !cannedForm.content) { toast.error("Title and content required"); return; }
-              try {
-                await axios.post(`${API}/canned-responses`, cannedForm, { headers });
-                toast.success("Canned response saved");
-                setCannedForm({ title: "", content: "", category: "general" });
-                const r = await axios.get(`${API}/canned-responses`, { headers });
-                setCannedResponses(r.data);
-              } catch { toast.error("Failed to save"); }
-            }} data-testid="add-canned-btn">Add Response</Button>
-            {cannedResponses.length > 0 && (
-              <ScrollArea className="h-[150px]">
-                {cannedResponses.map(cr => (
-                  <div key={cr.id} className="flex justify-between items-center p-2 border-b border-border/50">
-                    <div><p className="text-sm font-medium">{cr.title}</p><p className="text-xs text-muted-foreground truncate max-w-[400px]">{cr.content}</p></div>
-                    <Button variant="ghost" size="sm" className="text-destructive" onClick={async () => {
-                      try {
-                        await axios.delete(`${API}/canned-responses/${cr.id}`, { headers });
-                        const r = await axios.get(`${API}/canned-responses`, { headers });
-                        setCannedResponses(r.data);
-                        toast.success("Deleted");
-                      } catch { toast.error("Failed to delete"); }
-                    }} data-testid={`delete-canned-${cr.id}`}><Trash2 className="w-3 h-3" /></Button>
-                  </div>
-                ))}
-              </ScrollArea>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Notifications */}
-      <Card data-testid="notifications-prefs-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Bell className="w-5 h-5 text-primary" />
-            <CardTitle>Notifications</CardTitle>
-          </div>
-          <CardDescription>Configure how you receive alerts and updates</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <SetupGuideCallout title="Configure Microsoft SSO safely" source="Create a dedicated App registration in Microsoft Entra ID, then add the NexusMSP sign-in and calendar-consent callback URLs as Web redirect URIs." steps={["Use your organisation tenant ID rather than common for production technician access.", "Grant only the delegated permissions required for sign-in and calendar consent, then approve consent.", "Set the default SSO role to Technician or Viewer unless an administrator explicitly requires more access."]} securityNote="Do not enable automatic user creation with an Admin default role. Treat the Client Secret as an Entra application credential and rotate it before expiry." />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Email Alerts</Label>
-              <p className="text-sm text-muted-foreground">Receive critical alerts via email</p>
-            </div>
-            <Switch
-              checked={notifications.email_alerts}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, email_alerts: checked })}
-              data-testid="email-alerts-switch"
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Ticket Updates</Label>
-              <p className="text-sm text-muted-foreground">Get notified when tickets are updated</p>
-            </div>
-            <Switch
-              checked={notifications.ticket_updates}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, ticket_updates: checked })}
-              data-testid="ticket-updates-switch"
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>Device Offline Alerts</Label>
-              <p className="text-sm text-muted-foreground">Alert when devices go offline</p>
-            </div>
-            <Switch
-              checked={notifications.device_offline}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, device_offline: checked })}
-              data-testid="device-offline-switch"
-            />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label>SLA Warnings</Label>
-              <p className="text-sm text-muted-foreground">Notify before SLA deadlines</p>
-            </div>
-            <Switch
-              checked={notifications.sla_warnings}
-              onCheckedChange={(checked) => setNotifications({ ...notifications, sla_warnings: checked })}
-              data-testid="sla-warnings-switch"
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Team Members */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-primary" />
-            <CardTitle>Team Members</CardTitle>
-          </div>
-          <CardDescription>View and manage team access</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {users.map(teamUser => (
-              <div key={teamUser.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-smooth">
-                <div className="flex items-center gap-3">
-                  <Avatar>
-                    <AvatarImage src={teamUser.avatar} alt={teamUser.name} />
-                    <AvatarFallback className="bg-primary/20 text-primary text-sm">
-                      {teamUser.name?.split(' ').map(n => n[0]).join('')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-medium">{teamUser.name}</p>
-                    <p className="text-sm text-muted-foreground">{teamUser.email}</p>
-                  </div>
-                </div>
-                <Badge variant="outline" className="capitalize">{teamUser.role}</Badge>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Company Info */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Building className="w-5 h-5 text-primary" />
-            <CardTitle>Company Information</CardTitle>
-          </div>
-          <CardDescription>Your MSP business details</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Company Name</Label>
-              <Input defaultValue="NexusOps MSP" data-testid="company-name-input" />
-            </div>
-            <div className="space-y-2">
-              <Label>Support Email</Label>
-              <Input defaultValue="support@nexusops.io" data-testid="support-email-input" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Business Address</Label>
-            <Input defaultValue="123 Tech Lane, San Francisco, CA 94105" data-testid="business-address-input" />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Appearance */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Palette className="w-5 h-5 text-primary" />
-            <CardTitle>Appearance</CardTitle>
-          </div>
-          <CardDescription>Customize the look and feel</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <Label>Theme</Label>
-              <p className="text-sm text-muted-foreground">Currently using dark theme for optimal visibility</p>
-            </div>
-            <Badge>Dark Mode</Badge>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Job Numbering - in General tab */}
-      <Card data-testid="general-jobnumber-card">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Tag className="w-5 h-5 text-primary" />
-            <CardTitle>Job Numbering</CardTitle>
-          </div>
-          <CardDescription>Configure the prefix for ticket numbers across different job types</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Shield className="w-4 h-4 text-blue-400" />SLA Prefix</Label>
-              <Input value={jobNumbering.sla_prefix} onChange={e => setJobNumbering(j => ({ ...j, sla_prefix: e.target.value }))} placeholder="SLA-" data-testid="jn-sla" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.sla_prefix || "SLA-"}00001</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Wrench className="w-4 h-4 text-purple-400" />Workshop Prefix</Label>
-              <Input value={jobNumbering.workshop_prefix} onChange={e => setJobNumbering(j => ({ ...j, workshop_prefix: e.target.value }))} placeholder="WS-" data-testid="jn-workshop" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.workshop_prefix || "WS-"}00001</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-400" />Cabling / WISP Prefix</Label>
-              <Input value={jobNumbering.cabling_prefix} onChange={e => setJobNumbering(j => ({ ...j, cabling_prefix: e.target.value }))} placeholder="CW-" data-testid="jn-cabling" />
-              <p className="text-xs text-muted-foreground">e.g. {jobNumbering.cabling_prefix || "CW-"}00001</p>
-            </div>
-          </div>
-          <Button onClick={handleSaveJobNumbering} disabled={jnSaving} data-testid="save-jn-btn">
-            {jnSaving ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" />Saving...</> : "Save Prefixes"}
-          </Button>
-        </CardContent>
-      </Card>
-      </>)}
-
       {/* ==================== AUTH TAB ==================== */}
       {activeTab === "tiers" && (
         <ServiceTiersSettings />
@@ -1289,139 +821,6 @@ export default function SettingsPage() {
 
       {/* ==================== MAILBOX TAB ==================== */}
       {activeTab === "mailbox" && <O365SetupPage />}
-
-      {false && activeTab === "mailbox" && (<>
-
-      {/* Mailbox Connection Status */}
-      <Card className={mailboxConnected ? "border-emerald-500/30" : "border-amber-500/30"}>
-        <CardContent className="py-5">
-          <div className="flex items-center gap-4">
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${mailboxConnected ? "bg-emerald-500/10" : "bg-amber-500/10"}`}>
-              <Mail className={`w-7 h-7 ${mailboxConnected ? "text-emerald-400" : "text-amber-400"}`} />
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-semibold text-lg">Office 365 Mailbox</h3>
-                {mailboxConnected ? (
-                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle className="w-3 h-3 mr-1" />Connected</Badge>
-                ) : (
-                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><XCircle className="w-3 h-3 mr-1" />Not Connected</Badge>
-                )}
-              </div>
-              {mailboxConnected ? (
-                <p className="text-sm text-muted-foreground">Connected to <span className="font-mono text-foreground">{mailbox?.mailbox_email}</span> &middot; Last sync: {mailbox?.last_sync ? new Date(mailbox.last_sync).toLocaleString() : "Never"}</p>
-              ) : (
-                <p className="text-sm text-muted-foreground">Connect your O365 mailbox to auto-generate leads and tickets from incoming emails.</p>
-              )}
-            </div>
-            <div className="flex gap-2">
-              {mailboxConnected && (
-                <>
-                  <Button variant="outline" size="sm" onClick={async () => {
-                    try { const r = await axios.post(`${API}/o365/sync-emails`, {}, { headers }); toast.success(r.data.message); } catch { toast.error("Sync failed"); }
-                  }}><RefreshCw className="w-4 h-4 mr-1" />Sync</Button>
-                  <Button variant="outline" size="sm" onClick={handleMailboxTest} disabled={mailboxTesting}>
-                    {mailboxTesting ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <TestTube className="w-4 h-4 mr-1" />}Test
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={handleMailboxDisconnect} data-testid="disconnect-mailbox-btn"><Unlink className="w-4 h-4 mr-1" />Disconnect</Button>
-                </>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {!mailboxConnected && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">Connect Office 365 Mailbox</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-3 rounded-lg bg-blue-500/5 border border-blue-500/20 text-xs text-muted-foreground">
-              <p className="font-medium text-blue-400 mb-1">Azure AD App Registration Required</p>
-              <p>Go to <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps" target="_blank" rel="noreferrer" className="underline text-blue-400">portal.azure.com</a> &gt; App registrations &gt; New registration. Grant <span className="font-mono">Mail.Read, Mail.Send, Mail.ReadWrite</span> permissions.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Tenant ID *</Label>
-                <Input value={mailboxForm.tenant_id} onChange={e => setMailboxForm({ ...mailboxForm, tenant_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="mbx-tenant-id" />
-              </div>
-              <div className="space-y-2">
-                <Label>Client ID (Application ID) *</Label>
-                <Input value={mailboxForm.client_id} onChange={e => setMailboxForm({ ...mailboxForm, client_id: e.target.value })} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" data-testid="mbx-client-id" />
-              </div>
-              <div className="space-y-2">
-                <Label>Client Secret *</Label>
-                <Input type="password" value={mailboxForm.client_secret} onChange={e => setMailboxForm({ ...mailboxForm, client_secret: e.target.value })} placeholder="Enter client secret" data-testid="mbx-client-secret" />
-              </div>
-              <div className="space-y-2">
-                <Label>Mailbox Email *</Label>
-                <Input type="email" value={mailboxForm.mailbox_email} onChange={e => setMailboxForm({ ...mailboxForm, mailbox_email: e.target.value })} placeholder="support@yourdomain.com" data-testid="mbx-email" />
-              </div>
-            </div>
-            <Button onClick={handleMailboxConnect} disabled={mailboxSaving} data-testid="connect-mailbox-btn">
-              {mailboxSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Zap className="w-4 h-4 mr-1" />}Connect Mailbox
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {mailboxConnected && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader><CardTitle className="text-base flex items-center gap-2"><UserPlus className="w-5 h-5 text-cyan-400" />Email Routing Rules</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-create leads from emails</p><p className="text-xs text-muted-foreground">New emails from unknown senders create a lead</p></div>
-                <Switch checked={mailboxForm.email_to_lead_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, email_to_lead_enabled: v })} data-testid="email-to-lead-toggle" />
-              </div>
-              <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-create tickets from emails</p><p className="text-xs text-muted-foreground">Emails from known clients create a support ticket</p></div>
-                <Switch checked={mailboxForm.email_to_ticket_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, email_to_ticket_enabled: v })} data-testid="email-to-ticket-toggle" />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div><p className="text-sm font-medium">Auto-reply to incoming emails</p><p className="text-xs text-muted-foreground">Send acknowledgement through the Platform notices mailbox; automatic senders are skipped.</p></div>
-                <Switch checked={mailboxForm.auto_reply_enabled} onCheckedChange={v => setMailboxForm({ ...mailboxForm, auto_reply_enabled: v })} />
-              </div>
-              {mailboxForm.auto_reply_enabled && (
-                <div className="space-y-2">
-                  <Label>Auto-reply message</Label>
-                  <Textarea value={mailboxForm.auto_reply_message} onChange={e => setMailboxForm({ ...mailboxForm, auto_reply_message: e.target.value })} rows={3} />
-                </div>
-              )}
-              <Button size="sm" onClick={handleMailboxSettingsSave} disabled={mailboxSaving} data-testid="save-mailbox-settings-btn">
-                {mailboxSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}Save Settings
-              </Button>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2"><Mail className="w-5 h-5 text-blue-400" />Email-Generated Leads</CardTitle>
-                <Button variant="outline" size="sm" onClick={handleTestIncomingEmail} data-testid="test-email-btn"><TestTube className="w-4 h-4 mr-1" />Send Test Email</Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {emailLeads.length > 0 ? (
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                  {emailLeads.slice(0, 10).map(lead => (
-                    <div key={lead.id} className="flex items-center justify-between p-2.5 rounded-lg bg-muted/30 border border-border/50">
-                      <div><p className="text-sm font-medium">{lead.company_name}</p><p className="text-xs text-muted-foreground">{lead.email} &middot; {lead.contact_name}</p></div>
-                      <Badge variant="outline" className="text-xs">{lead.status}</Badge>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Mail className="w-10 h-10 mx-auto opacity-30 mb-2" />
-                  <p className="text-sm">No email-generated leads yet</p>
-                  <p className="text-xs">Click "Send Test Email" to try it out</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      )}
-      </>)}
 
       {/* ==================== NOTIFICATIONS TAB ==================== */}
       {activeTab === "notifications" && (<>

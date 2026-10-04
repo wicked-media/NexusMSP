@@ -161,3 +161,29 @@ export function collectionFromResponse(data, keys = []) {
   if (Array.isArray(data.data)) return data.data;
   return [];
 }
+
+export function uniqueByIdentity(items = []) {
+  const seen = new Set();
+  return items.filter((item, index) => {
+    const identity = String(item?.id || item?.email || item?.name || index).trim().toLowerCase();
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+export function resolutionMinutes(ticket) {
+  const explicit = Number(ticket?.resolution_time_minutes);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const completedAt = ticket?.closed_at || ticket?.resolved_at || ticket?.updated_at;
+  if (!ticket?.created_at || !completedAt) return null;
+  const elapsed = Math.round((new Date(completedAt).getTime() - new Date(ticket.created_at).getTime()) / 60_000);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
+}
+
+export function formatDuration(minutes) {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
+  return `${(minutes / 1440).toFixed(minutes < 14_400 ? 1 : 0)}d`;
+}

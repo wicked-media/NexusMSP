@@ -1,7 +1,7 @@
 import {
-  buildTicketQueueSignals, collectionFromResponse, matchTicketByReference, TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES,
-  ticketHasStaleActivity,
-  ticketModuleForPath, ticketToolAvailability, ticketWorkspaceToolForPath,
+  buildTicketQueueSignals, collectionFromResponse, formatDuration, matchTicketByReference, resolutionMinutes,
+  TICKET_PRIORITY_STYLES, TICKET_STATUS_STYLES, ticketHasStaleActivity,
+  ticketModuleForPath, ticketToolAvailability, ticketWorkspaceToolForPath, uniqueByIdentity,
 } from "./ticketWorkspaceHelpers";
 
 describe("ticket workspace helpers", () => {
@@ -62,5 +62,34 @@ describe("ticket workspace helpers", () => {
     expect(signals.find(signal => signal.attention === "unassigned").count).toBe(1);
     expect(signals.find(signal => signal.attention === "no_response").tickets.map(ticket => ticket.id)).toEqual(["stale"]);
     expect(ticketHasStaleActivity({ status: "open", created_at: "2026-09-08T03:00:00.000Z", updated_at: "2026-09-08T11:00:00.000Z" }, now)).toBe(false);
+  });
+});
+
+describe("ticket presentation helpers", () => {
+  test("uniqueByIdentity keeps the first row per id, email or name identity", () => {
+    expect(uniqueByIdentity([
+      { id: "a", name: "First" },
+      { id: "a", name: "Duplicate id" },
+      { email: "Tech@Example.test" },
+      { email: "tech@example.test" },
+      { name: "Ana" },
+      { name: "ana" },
+    ]).map(row => row.id || row.email || row.name)).toEqual(["a", "Tech@Example.test", "Ana"]);
+    expect(uniqueByIdentity()).toEqual([]);
+  });
+
+  test("resolutionMinutes prefers the explicit metric and falls back to timestamps", () => {
+    expect(resolutionMinutes({ resolution_time_minutes: 45, created_at: "2026-09-08T03:00:00.000Z", closed_at: "2026-09-08T09:00:00.000Z" })).toBe(45);
+    expect(resolutionMinutes({ created_at: "2026-09-08T03:00:00.000Z", closed_at: "2026-09-08T04:30:00.000Z" })).toBe(90);
+    expect(resolutionMinutes({ created_at: "2026-09-08T03:00:00.000Z" })).toBeNull();
+    expect(resolutionMinutes({ resolution_time_minutes: -5 })).toBeNull();
+  });
+
+  test("formatDuration renders minutes, hours and days", () => {
+    expect(formatDuration(null)).toBe("—");
+    expect(formatDuration(45)).toBe("45m");
+    expect(formatDuration(150)).toBe("3h");
+    expect(formatDuration(2880)).toBe("2.0d");
+    expect(formatDuration(14400)).toBe("10d");
   });
 });
