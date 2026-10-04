@@ -35,8 +35,10 @@ from typing import Optional
 
 from app.database import db
 from app.auth import get_current_user
-from app.services.scope_permissions import assert_client_scope
+from app.services.achievement_catalog import ACHIEVEMENT_DEFINITIONS, profile_badge_view
+from app.services.scope_permissions import assert_client_scope, tenant_scoped_query
 from app.services.module_permissions import require_module_permission
+from app.services.tech_rewards import points_summary
 
 router = APIRouter()
 
@@ -143,23 +145,41 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     return earned
 
 
+async def _merged_badges(uid: str, name: str) -> tuple[list, list]:
+    """All badges for a tech: quirky fun badges + the badge/points system.
+
+    The badge system (``app.services.achievement_catalog`` + the
+    ``user_achievements`` award store) is the same set the achievements
+    workspace and points economy use, so badges earned there flow through to
+    the technician profile instead of a drifting hard-coded copy.
+    """
+    earned_keys = set(await _calc_user_achievements(uid, name))
+    quirky_views = [{**a, "earned": a["key"] in earned_keys} for a in ACHIEVEMENTS]
+
+    awards = await db.user_achievements.find({"user_id": uid}, {"_id": 0}).to_list(500)
+    awarded_ids = {a.get("achievement_id") for a in awards}
+    system_views = [profile_badge_view(d, earned=d["id"] in awarded_ids) for d in ACHIEVEMENT_DEFINITIONS]
+
+    earned = [v for v in quirky_views if v["earned"]] + [v for v in system_views if v["earned"]]
+    locked = [v for v in quirky_views if not v["earned"]] + [v for v in system_views if not v["earned"]]
+    return earned, locked
+
+
 @router.get("/team/{tech_id}/achievements")
 async def user_achievements(tech_id: str, current_user: dict = Depends(get_current_user)):
     u = await db.users.find_one({"$or": [{"id": tech_id}, {"email": tech_id}]}, {"_id": 0})
     if not u:
         raise HTTPException(404, "user not found")
-    earned_keys = await _calc_user_achievements(u.get("id"), u.get("name") or "")
-    earned_set = set(earned_keys)
-    earned = [{**a, "earned": True} for a in ACHIEVEMENTS if a["key"] in earned_set]
-    locked = [{**a, "earned": False} for a in ACHIEVEMENTS if a["key"] not in earned_set]
+    earned, locked = await _merged_badges(u.get("id"), u.get("name") or "")
+    total = len(earned) + len(locked)
     return {
         "tech_id": u.get("id"),
         "name": u.get("name"),
         "earned": earned,
         "locked": locked,
         "total_unlocked": len(earned),
-        "total_available": len(ACHIEVEMENTS),
-        "completion_pct": round(len(earned) / len(ACHIEVEMENTS) * 100),
+        "total_available": total,
+        "completion_pct": round(len(earned) / total * 100) if total else 0,
     }
 
 
@@ -190,7 +210,21 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
 
     open_tx = await db.tickets.count_documents({"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["open", "in_progress", "pending"]}})
 
-    earned = await _calc_user_achievements(u["id"], name)
+    earned, locked = await _merged_badges(u["id"], name)
+
+    # Points economy: balance + equipped cosmetics (pets, skins, titles).
+    ledger = await db.tech_points_ledger.find(
+        tenant_scoped_query(current_user, {"user_id": u["id"]}), {"_id": 0}
+    ).sort("created_at", -1).limit(500).to_list(500)
+    points = points_summary(ledger)
+    inventory = await db.tech_inventory.find(
+        tenant_scoped_query(current_user, {"user_id": u["id"]}), {"_id": 0}
+    ).sort("acquired_at", -1).to_list(200)
+    equipped = {
+        "pet": next((r for r in inventory if r.get("kind") == "pet" and r.get("equipped")), None),
+        "skin": next((r for r in inventory if r.get("kind") == "skin" and r.get("equipped")), None),
+        "title": next((r for r in inventory if r.get("kind") == "title" and r.get("equipped")), None),
+    }
 
     # Avg time to resolve (last 50)
     resolutions = []
@@ -250,7 +284,12 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
         "avg_resolve_hours": avg_resolve_hrs,
         "skills_radar": radar,
         "achievements_earned": len(earned),
-        "achievements_total": len(ACHIEVEMENTS),
+        "achievements_total": len(earned) + len(locked),
+        "points": points,
+        "rewards_owned": len(inventory),
+        "equipped_pet": equipped["pet"],
+        "equipped_skin": equipped["skin"],
+        "equipped_title": equipped["title"],
         "csat_avg": csat_avg,
         "csat_count": csat_count,
         "recent_closed": recent_closed,

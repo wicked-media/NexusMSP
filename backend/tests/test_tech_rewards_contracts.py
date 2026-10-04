@@ -51,6 +51,17 @@ class TestDefaultCatalog:
             assert item["rarity"] in RARITIES
             assert item["price_points"] > 0
 
+    def test_catalog_is_deep_enough_for_a_shop(self):
+        for kind in ("pet", "skin", "title"):
+            assert sum(1 for item in DEFAULT_CATALOG if item["kind"] == kind) >= 8, (
+                f"the {kind} shop should carry at least 8 items"
+            )
+
+    def test_every_rarity_is_represented(self):
+        for kind in ("pet", "skin", "title"):
+            rarities = {item["rarity"] for item in DEFAULT_CATALOG if item["kind"] == kind}
+            assert rarities == RARITIES, f"{kind} items should span every rarity tier"
+
 
 class TestCatalogPayload:
     def test_valid_custom_item(self):

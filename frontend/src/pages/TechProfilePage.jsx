@@ -107,7 +107,7 @@ export default function TechProfilePage() {
             <Trophy className="w-3 h-3" />Tech Profile
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">{profile.name}</h1>
-          <p className="text-sm text-muted-foreground">{profile.email} · Level {profile.level} · {achievements?.total_unlocked || 0}/{achievements?.total_available || 0} achievements unlocked</p>
+          <p className="text-sm text-muted-foreground">{profile.email} · Level {profile.level} · {achievements?.total_unlocked || 0}/{achievements?.total_available || 0} achievements unlocked{profile.equipped_title ? ` · ${profile.equipped_title.emoji || ""} ${profile.equipped_title.name}` : ""}</p>
         </div>
 
         <Card className="border-violet-500/30 bg-gradient-to-br from-violet-900/10 to-slate-900">
@@ -120,6 +120,12 @@ export default function TechProfilePage() {
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className="text-violet-400 border-violet-500/40 bg-violet-500/10"><Trophy className="w-3 h-3 mr-1" />Level {profile.level}</Badge>
                 <Badge variant="outline" className="text-amber-400 border-amber-500/40 bg-amber-500/10">{achievements?.total_unlocked || 0}/{achievements?.total_available || 0} 🏆</Badge>
+                <Badge variant="outline" className="text-amber-300 border-amber-400/40 bg-amber-400/10">🪙 {(profile.points?.balance ?? 0).toLocaleString()} pts</Badge>
+                {profile.equipped_pet && (
+                  <Badge variant="outline" className="text-cyan-300 border-cyan-400/40 bg-cyan-400/10" title={profile.equipped_pet.name}>
+                    {profile.equipped_pet.emoji || "🐾"} {profile.equipped_pet.name}
+                  </Badge>
+                )}
                 <Badge variant="outline" className="text-emerald-400 border-emerald-500/40 bg-emerald-500/10">{profile.closed_tickets} closed</Badge>
                 <Badge variant="outline" className="text-sky-400 border-sky-500/40 bg-sky-500/10">{profile.avg_resolve_hours ?? "—"}h avg</Badge>
               </div>

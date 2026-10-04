@@ -51,6 +51,23 @@ DEFAULT_CATALOG: list[dict[str, Any]] = [
     {"id": "title-guardian", "kind": "title", "name": "Uptime Guardian", "description": "For those who keep the lights on.", "rarity": "rare", "price_points": 500, "accent": "#3b82f6"},
     {"id": "title-architect", "kind": "title", "name": "Automation Architect", "description": "Builder of pipelines, tamer of toil.", "rarity": "epic", "price_points": 1400, "accent": "#a78bfa"},
     {"id": "title-legend", "kind": "title", "name": "Nexus Legend", "description": "Reserved for the truly exceptional.", "rarity": "legendary", "price_points": 3800, "accent": "#f59e0b"},
+    # Pets: second wave
+    {"id": "pet-cat", "kind": "pet", "name": "Cache the Cat", "description": "Always lands on its feet — even during a rollback.", "rarity": "common", "price_points": 250, "emoji": "🐱", "accent": "#f472b6"},
+    {"id": "pet-penguin", "kind": "pet", "name": "Tux the Pingwin", "description": "Small, sturdy, and completely immune to Windows updates.", "rarity": "common", "price_points": 250, "emoji": "🐧", "accent": "#60a5fa"},
+    {"id": "pet-octopus", "kind": "pet", "name": "Inky the Octopus", "description": "Eight arms, eight parallel ticket threads.", "rarity": "rare", "price_points": 650, "emoji": "🐙", "accent": "#a78bfa"},
+    {"id": "pet-honeybadger", "kind": "pet", "name": "The Honey Badger", "description": "Does not care about your production outage. Fixes it anyway.", "rarity": "epic", "price_points": 1600, "emoji": "🦡", "accent": "#f59e0b"},
+    {"id": "pet-phoenix", "kind": "pet", "name": "Ember the Phoenix", "description": "Rises from every disaster-recovery drill, fully restored.", "rarity": "legendary", "price_points": 4500, "emoji": "🔥", "accent": "#ef4444"},
+    # Skins: second wave
+    {"id": "skin-frost", "kind": "skin", "name": "Frostbyte", "description": "Cool ice-blue styling for calm incident command.", "rarity": "common", "price_points": 300, "accent": "#38bdf8", "tokens": {"primary": "#38bdf8", "surface": "#0c2733"}},
+    {"id": "skin-sakura", "kind": "skin", "name": "Sakura Drift", "description": "Soft pink petals drift across your profile.", "rarity": "rare", "price_points": 750, "accent": "#f472b6", "tokens": {"primary": "#f472b6", "surface": "#2e1420"}},
+    {"id": "skin-obsidian", "kind": "skin", "name": "Obsidian Core", "description": "Matte black with a molten red edge.", "rarity": "epic", "price_points": 1700, "accent": "#f87171", "tokens": {"primary": "#f87171", "surface": "#1a1113"}},
+    {"id": "skin-aurora", "kind": "skin", "name": "Aurora Wave", "description": "A legendary northern-lights shimmer.", "rarity": "legendary", "price_points": 4300, "accent": "#34d399", "tokens": {"primary": "#34d399", "surface": "#0b2b23"}},
+    {"id": "skin-goldrush", "kind": "skin", "name": "Gold Rush", "description": "Because platinum-level support deserves gold.", "rarity": "epic", "price_points": 1800, "accent": "#fbbf24", "tokens": {"primary": "#fbbf24", "surface": "#2c220a"}},
+    # Titles: second wave
+    {"id": "title-firefighter", "kind": "title", "name": "Chief Firefighter", "description": "For the tech who runs toward the outage.", "rarity": "common", "price_points": 150, "accent": "#ef4444"},
+    {"id": "title-whisperer", "kind": "title", "name": "Printer Whisperer", "description": "A rare and ancient power. Respect.", "rarity": "rare", "price_points": 550, "accent": "#14b8a6"},
+    {"id": "title-marathon", "kind": "title", "name": "Marathon Closer", "description": "Closed more tickets before lunch than most do all day.", "rarity": "epic", "price_points": 1500, "accent": "#f97316"},
+    {"id": "title-immortal", "kind": "title", "name": "The Immortal", "description": "Legendary status across every queue.", "rarity": "legendary", "price_points": 3900, "accent": "#e879f9"},
 ]
 
 DEFAULT_POINTS_PER_ITEM = 25

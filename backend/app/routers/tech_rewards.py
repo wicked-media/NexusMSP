@@ -11,6 +11,7 @@ Routes stay thin: validation and transition policy live in
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -54,17 +55,24 @@ async def _ledger(user_id: str, tenant_id: str, limit: int = 200) -> list[dict]:
 
 
 async def _ensure_catalog(tenant_id: str) -> None:
-    """Seed the tenant's reward catalog once so the shop is never empty."""
-    count = await db.reward_catalog.count_documents({"tenant_id": tenant_id})
-    if count:
-        return
+    """Keep the tenant's reward catalog topped up with the default items.
+
+    Missing defaults are added on read so newly shipped pets, skins and titles
+    appear for existing tenants; already-present ids are never duplicated.
+    """
     from pymongo.errors import DuplicateKeyError
+    existing = await db.reward_catalog.find(
+        {"tenant_id": tenant_id}, {"_id": 0, "id": 1}
+    ).to_list(500)
+    have_ids = {row["id"] for row in existing}
     for item in DEFAULT_CATALOG:
+        if item["id"] in have_ids:
+            continue
         document = {**item, "tenant_id": tenant_id, "custom": False}
         try:
             await db.reward_catalog.insert_one(document)
         except DuplicateKeyError:
-            return
+            continue
         document.pop("_id", None)
 
 
@@ -264,6 +272,22 @@ async def purchase_reward(data: dict, current_user: dict = Depends(get_current_u
     entry = inventory_entry(tenant_id=tenant_id, user_id=current_user["id"], item=item)
     await db.tech_inventory.insert_one(entry)
     entry.pop("_id", None)
+    # First-ever purchase unlocks the Shop Opener achievement (idempotent).
+    owned_count = await db.tech_inventory.count_documents(
+        tenant_scoped_query(current_user, {"user_id": current_user["id"]})
+    )
+    if owned_count == 1:
+        already = await db.user_achievements.find_one({"user_id": current_user["id"], "achievement_id": "first_prize"})
+        if not already:
+            ach_entry = {
+                "id": str(uuid.uuid4()), "user_id": current_user["id"],
+                "user_name": current_user.get("name"), "achievement_id": "first_prize",
+                "achievement_name": "Shop Opener", "awarded_by": "System",
+                "awarded_at": datetime.now(timezone.utc).isoformat(),
+                "note": "Purchased your first reward",
+            }
+            await db.user_achievements.insert_one(ach_entry)
+            ach_entry.pop("_id", None)
     await log_activity(
         current_user, "created", "tech_reward_purchase", entry["id"],
         item["name"], "Purchased a reward item with points",

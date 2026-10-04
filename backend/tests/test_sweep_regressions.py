@@ -135,6 +135,34 @@ class TestTaxProfileSeedIdLeak:
             assert "_id" not in doc
 
 
+class TestAchievementDefinitionsIntegrity:
+    def test_achievement_ids_are_unique(self):
+        from app.routers.achievements import ACHIEVEMENT_DEFINITIONS
+
+        ids = [a["id"] for a in ACHIEVEMENT_DEFINITIONS]
+        assert len(ids) == len(set(ids))
+
+    def test_every_category_maps_to_points(self):
+        from app.routers.achievements import ACHIEVEMENT_DEFINITIONS, ACHIEVEMENT_POINTS
+
+        for ach in ACHIEVEMENT_DEFINITIONS:
+            assert ach["category"] in ACHIEVEMENT_POINTS, (
+                f"achievement {ach['id']} category {ach['category']} has no points mapping"
+            )
+
+    def test_threshold_zero_achievements_are_not_auto_awarded(self):
+        """Zero-threshold badges (birthday, shop opener) need explicit events.
+
+        The auto-check loop requires threshold > 0 so these cannot be farmed
+        by repeatedly calling the check endpoint.
+        """
+        from app.routers.achievements import ACHIEVEMENT_DEFINITIONS
+
+        zero = [a for a in ACHIEVEMENT_DEFINITIONS if a["threshold"] == 0]
+        assert zero, "expected some zero-threshold event badges"
+        assert all(a["category"] in {"celebration", "special", "points"} for a in zero)
+
+
 class _TaxProfileDb:
     def __init__(self, tax_profiles):
         self.tax_profiles = tax_profiles
