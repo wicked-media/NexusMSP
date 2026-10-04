@@ -82,8 +82,6 @@ import { readFileAsBase64 } from "@/lib/teamChatFormat";
 import {
   ChannelAvatar,
   ConversationRow,
-  ConversationSkeleton,
-  ConversationWelcome,
   CustomerConnectionPulse,
   DirectRequestDecisionForm,
   DirectRequestInbox,
@@ -94,6 +92,8 @@ import {
 import { MessageRow } from "@/components/teamChat/TeamChatMessages";
 import {
   ComposerButton,
+  ConversationSkeleton,
+  ConversationWelcome,
   DayDivider,
   EmptyWorkspace,
   FilesView,
