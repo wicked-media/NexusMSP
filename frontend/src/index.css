@@ -2292,3 +2292,30 @@ html[data-motion="none"] .nexus-estate-status.is-critical .nexus-estate-status__
         display: contents !important;
     }
 }
+
+/* Seasonal delight animations (snow / bats overlay) */
+.seasonal-flake {
+    top: -12px;
+    animation-name: seasonal-fall;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+}
+
+@keyframes seasonal-fall {
+    from { transform: translateY(-10vh) rotate(0deg); opacity: 0.9; }
+    to { transform: translateY(110vh) rotate(360deg); opacity: 0.15; }
+}
+
+.seasonal-bat {
+    left: -40px;
+    animation-name: seasonal-fly;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    animation-duration: 14s;
+}
+
+@keyframes seasonal-fly {
+    0% { transform: translateX(-10vw) translateY(0); }
+    50% { transform: translateX(50vw) translateY(-30px); }
+    100% { transform: translateX(110vw) translateY(10px); }
+}

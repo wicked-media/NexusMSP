@@ -48,6 +48,7 @@ export const navGroups = [
           { path: "/technician-onboarding", label: "Technician readiness" },
           { path: "/onboarding-checklists", label: "Onboarding checklists" },
           { path: "/tech-rewards", label: "Achievements & rewards" },
+          { path: "/toolbox", label: "Tech Toolbox" },
           { path: "/nexus-academy", label: "Nexus Academy" },
           { path: "/team-hub?view=roster", label: "On-call roster" },
           { path: "/team-hub?view=capacity", label: "Capacity" },

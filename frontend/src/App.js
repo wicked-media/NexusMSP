@@ -14,6 +14,8 @@ import { ChatPanel } from "@/components/presence/ChatPanel";
 import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
 import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
+import SeasonalEffects from "@/components/seasonal/SeasonalEffects";
+import NotFoundPage from "@/pages/NotFoundPage";
 import CommandPalette from "@/components/CommandPalette";
 import NexusQuickDock from "@/components/NexusQuickDock";
 import NexusWorkspaceCompass from "@/components/NexusWorkspaceCompass";
@@ -513,7 +515,7 @@ function App() {
               element={buildRouteElement(route)}
             />
           ))}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
       </NavCountsProvider>
@@ -542,6 +544,7 @@ function AuthedAddons({ token }) {
       <ChatPanel />
       <KonamiCRT />
       <ShortcutPalette />
+      <SeasonalEffects />
       <CommandPalette />
       <NexusQuickDock />
       <NexusWorkspaceCompass />

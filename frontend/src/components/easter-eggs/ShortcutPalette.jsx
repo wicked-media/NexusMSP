@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
+import axios from "axios";
+import { API, useAuth } from "@/App";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Keyboard } from "lucide-react";
+import { toast } from "sonner";
 
 const SHORTCUTS = [
   { group: "Global", items: [
@@ -33,6 +37,18 @@ const SHORTCUTS = [
 export default function ShortcutPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const { token } = useAuth();
+
+  // Hidden egg: typing "sudo" here has exactly the effect you deserve.
+  const fireSudoEgg = async () => {
+    try {
+      const { data } = await axios.post(`${API}/tech-fun/easter-egg/sudo`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      toast(data.message || "Permission denied. Nice try.");
+      if (data.awarded) toast.success("Hidden badge unlocked: Privilege Escalator 🐧");
+    } catch {
+      toast("Permission denied. Nice try.");
+    }
+  };
 
   useEffect(() => {
     const onKey = (e) => {
@@ -61,6 +77,12 @@ export default function ShortcutPalette() {
           <DialogTitle className="flex items-center gap-2 text-base"><Keyboard className="w-4 h-4 text-violet-400" />Keyboard shortcuts</DialogTitle>
         </DialogHeader>
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shortcuts…" autoFocus data-testid="shortcut-search" />
+        {ql === "sudo" && (
+          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-sm" data-testid="sudo-egg">
+            <p className="font-medium text-amber-200">Permission denied. Nice try. 😏</p>
+            <Button size="sm" variant="outline" className="mt-2" onClick={fireSudoEgg} data-testid="sudo-egg-button">Ask again nicely</Button>
+          </div>
+        )}
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
           {groups.map((g) => (
             <div key={g.group}>

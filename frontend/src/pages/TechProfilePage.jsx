@@ -28,6 +28,51 @@ export default function TechProfilePage() {
   const [presence, setPresence] = useState(null);
   const [bucket, setBucket] = useState("");
   const [bucketLoading, setBucketLoading] = useState(false);
+  const [funData, setFunData] = useState(null);
+  const [coinBusy, setCoinBusy] = useState(false);
+  const [focusBusy, setFocusBusy] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    axios.get(`${API}/tech-fun/me`, { headers }).then(({ data }) => setFunData(data)).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const claimCoin = async () => {
+    setCoinBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/tech-fun/lucky-coin`, {}, { headers });
+      if (data.available) {
+        toast.success(data.jackpot ? `🍀 JACKPOT! +${data.amount} points!` : `🍀 Lucky coin: +${data.amount} points`);
+        setFunData((prev) => ({ ...prev, coin_available_today: false }));
+      } else {
+        toast(data.message);
+      }
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "The coin rolled away");
+    } finally {
+      setCoinBusy(false);
+    }
+  };
+
+  const toggleFocus = async () => {
+    setFocusBusy(true);
+    try {
+      if (funData?.focus?.active) {
+        await axios.delete(`${API}/tech-fun/focus`, { headers });
+        toast("Focus session ended.");
+      } else {
+        await axios.post(`${API}/tech-fun/focus`, { minutes: 25 }, { headers });
+        toast.success("Going dark for 25 minutes. Non-urgent pings can wait.");
+      }
+      const { data } = await axios.get(`${API}/tech-fun/me`, { headers });
+      setFunData(data);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Focus mode unavailable");
+    } finally {
+      setFocusBusy(false);
+    }
+  };
   const [editingProfile, setEditingProfile] = useState(false);
   const [bioDraft, setBioDraft] = useState("");
   const [tzDraft, setTzDraft] = useState("");
@@ -128,6 +173,29 @@ export default function TechProfilePage() {
                 )}
                 <Badge variant="outline" className="text-emerald-400 border-emerald-500/40 bg-emerald-500/10">{profile.closed_tickets} closed</Badge>
                 <Badge variant="outline" className="text-sky-400 border-sky-500/40 bg-sky-500/10">{profile.avg_resolve_hours ?? "—"}h avg</Badge>
+                {funData?.streak?.days > 0 && (
+                  <Badge variant="outline" className="text-orange-300 border-orange-400/40 bg-orange-400/10">🔥 {funData.streak.days}-day streak</Badge>
+                )}
+                {funData?.has_pet && (
+                  <Badge variant="outline" className="text-cyan-200 border-cyan-300/40 bg-cyan-300/10">🧬 {funData.pet_evolution.label}</Badge>
+                )}
+                <button
+                  onClick={claimCoin}
+                  disabled={coinBusy || !funData?.coin_available_today}
+                  className="rounded-full border border-lime-400/40 bg-lime-400/10 px-2.5 py-0.5 text-xs font-medium text-lime-300 transition hover:bg-lime-400/20 disabled:opacity-50"
+                  data-testid="lucky-coin"
+                  title="Claim today's lucky coin"
+                >
+                  🍀 {funData?.coin_available_today ? "Lucky coin" : "Coin recharging"}
+                </button>
+                <button
+                  onClick={toggleFocus}
+                  disabled={focusBusy}
+                  className="rounded-full border border-indigo-400/40 bg-indigo-400/10 px-2.5 py-0.5 text-xs font-medium text-indigo-300 transition hover:bg-indigo-400/20 disabled:opacity-50"
+                  data-testid="focus-toggle"
+                >
+                  🌙 {funData?.focus?.active ? "End focus" : "Focus 25m"}
+                </button>
               </div>
               <div className="mt-3 flex items-center gap-3 text-xs">
                 <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">

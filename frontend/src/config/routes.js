@@ -158,6 +158,7 @@ export const routeConfig = [
   { path: "/technician-onboarding", component: page("TechnicianOnboardingPage"), auth: true, layout: true },
   { path: "/onboarding-checklists", component: page("OnboardingChecklistsPage"), auth: true, layout: true },
   { path: "/tech-rewards", component: page("TechRewardsPage"), auth: true, layout: true },
+  { path: "/toolbox", component: page("TechToolboxPage"), auth: true, layout: true },
   { path: "/nexus-academy", component: page("NexusAcademyPage"), auth: true, layout: true },
   { path: "/onboarding", component: page("OnboardingWizardPage"), auth: true, layout: true },
   { path: "/sentiment", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "sentiment" },

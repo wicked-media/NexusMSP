@@ -39,6 +39,7 @@ from app.services.achievement_catalog import ACHIEVEMENT_DEFINITIONS, profile_ba
 from app.services.scope_permissions import assert_client_scope, tenant_scoped_query
 from app.services.module_permissions import require_module_permission
 from app.services.tech_rewards import points_summary
+from app.services import tech_fun
 
 router = APIRouter()
 
@@ -160,8 +161,28 @@ async def _merged_badges(uid: str, name: str) -> tuple[list, list]:
     awarded_ids = {a.get("achievement_id") for a in awards}
     system_views = [profile_badge_view(d, earned=d["id"] in awarded_ids) for d in ACHIEVEMENT_DEFINITIONS]
 
-    earned = [v for v in quirky_views if v["earned"]] + [v for v in system_views if v["earned"]]
-    locked = [v for v in quirky_views if not v["earned"]] + [v for v in system_views if not v["earned"]]
+    # Delight layer: hidden ("glitched") badges stay masked until earned, so
+    # the hunt survives the profile page.  Derived keys recompute from ticket
+    # history; event keys arrive through the shared award store.
+    hidden_earned = (await tech_fun.derived_badge_keys(db, uid, name)) | {
+        key for key in awarded_ids if key in tech_fun.HIDDEN_BADGE_TITLES
+    }
+    fun_views = []
+    for d in [*tech_fun.HIDDEN_BADGES, *tech_fun.DERIVED_BADGES]:
+        got = d["key"] in hidden_earned
+        masked = d["key"] in tech_fun.HIDDEN_KEYS and not got
+        fun_views.append({
+            "key": d["key"],
+            "title": "??? (hidden badge)" if masked else d["title"],
+            "icon": "❓" if masked else d["icon"],
+            "rarity": d["rarity"],
+            "description": "Hidden badge — keep hunting." if masked else d["description"],
+            "category": "special",
+            "earned": got,
+        })
+
+    earned = [v for v in quirky_views if v["earned"]] + [v for v in system_views if v["earned"]] + [v for v in fun_views if v["earned"]]
+    locked = [v for v in quirky_views if not v["earned"]] + [v for v in system_views if not v["earned"]] + [v for v in fun_views if not v["earned"]]
     return earned, locked
 
 
