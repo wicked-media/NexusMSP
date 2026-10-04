@@ -9,9 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import {
-  Dices, Focus, Gamepad2, QrCode, IdCard, Trophy, CloudSun, Timer, Loader2, Download, Printer, Zap, Moon,
+  Dices, Focus, Gamepad2, QrCode, IdCard, Trophy, CloudSun, Timer, Loader2, Download, Printer, Zap, Moon, Volume2, VolumeX,
 } from "lucide-react";
-import { playSound } from "@/lib/sounds";
+import { playSound, isSoundEnabled, setSoundEnabled } from "@/lib/sounds";
 import { buildTechCardSvg, techCardFilename } from "@/lib/techCard";
 
 const WEATHER = {
@@ -515,18 +515,33 @@ function Speedruns() {
 // ============== PAGE ==============
 
 export default function TechToolboxPage() {
+  const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundEnabled(next);
+    setSoundOn(next);
+    if (next) playSound("coin");
+  };
+
   return (
     <PageShell>
       <div className="space-y-4" data-testid="tech-toolbox-page">
-        <div>
-          <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
-            <Gamepad2 className="w-3 h-3" />Tech Toolbox
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
+              <Gamepad2 className="w-3 h-3" />Tech Toolbox
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">Toys, tools & tiny triumphs</h1>
+            <p className="text-sm text-muted-foreground">
+              Everything here runs on real Nexus data — the wheel picks real tickets, the arcade measures real latency,
+              and every point lands in the real ledger.
+            </p>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Toys, tools & tiny triumphs</h1>
-          <p className="text-sm text-muted-foreground">
-            Everything here runs on real Nexus data — the wheel picks real tickets, the arcade measures real latency,
-            and every point lands in the real ledger.
-          </p>
+          <Button variant="outline" size="sm" onClick={toggleSound} data-testid="sound-toggle" title={soundOn ? "Mute delight sounds" : "Enable delight sounds (off by default)"}>
+            {soundOn ? <Volume2 className="mr-1 h-3 w-3" /> : <VolumeX className="mr-1 h-3 w-3" />}
+            {soundOn ? "Sounds on" : "Sounds off"}
+          </Button>
         </div>
         <div className="grid gap-4 xl:grid-cols-2">
           <WheelOfTickets />
