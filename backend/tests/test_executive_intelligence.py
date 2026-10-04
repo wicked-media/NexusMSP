@@ -1,6 +1,9 @@
+import asyncio
+
 import pytest
 
 from app.routers.executive_intelligence import (
+    _load_executive_state,
     build_board_brief,
     build_executive_scenario,
     build_profit_killers,
@@ -58,6 +61,55 @@ def test_scenario_is_non_mutating_and_explains_the_math():
     assert result["lost_client"]["name"] == "Anchor Client"
     assert result["projected_service_contribution"] == 2600
     assert len(result["assumptions"]) == 4
+
+
+def test_load_executive_state_scopes_client_health_with_the_requesting_user(monkeypatch):
+    """Client health enforces tenant scope, so the executive loader must forward the requesting user."""
+    from app.routers import executive_intelligence as executive
+
+    class _Cursor:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def sort(self, *args, **kwargs):
+            return self
+
+        async def to_list(self, limit=None):
+            return list(self._rows)
+
+    class _Collection:
+        def __init__(self, rows=()):
+            self._rows = rows
+
+        def find(self, *args, **kwargs):
+            return _Cursor(self._rows)
+
+    class _FakeDb:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def __getattr__(self, name):
+            return _Collection(self._rows.get(name, []))
+
+    user = {"id": "user-1", "tenant_id": "tenant-1"}
+    monkeypatch.setattr(executive, "db", _FakeDb({
+        "clients": [{"id": "client-1", "name": "Anchor Client", "tenant_id": "tenant-1"}],
+    }))
+
+    seen = {}
+
+    async def _fake_compute_health(client, current_user):
+        seen["client_id"] = client.get("id")
+        seen["current_user"] = current_user
+        return {"client_id": client.get("id"), "health_score": 72}
+
+    monkeypatch.setattr(executive, "_compute_health", _fake_compute_health)
+
+    state = asyncio.run(_load_executive_state(user))
+
+    assert seen["client_id"] == "client-1"
+    assert seen["current_user"] is user
+    assert isinstance(state, dict)
 
 
 def test_scenario_does_not_invent_contribution_without_cost_evidence():

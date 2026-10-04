@@ -412,7 +412,7 @@ async def _load_executive_state(user: dict) -> dict:
     available_hours = len(technicians) * 160
     capacity_pct = round(recorded_hours / available_hours * 100, 1) if available_hours else None
 
-    health_scores = await asyncio.gather(*[_compute_health(client) for client in clients]) if clients else []
+    health_scores = await asyncio.gather(*[_compute_health(client, user) for client in clients]) if clients else []
     assessed_health = [row for row in health_scores if isinstance(row.get("health_score"), (int, float))]
     at_risk = [row for row in assessed_health if row["health_score"] < 50]
     average_health = (
