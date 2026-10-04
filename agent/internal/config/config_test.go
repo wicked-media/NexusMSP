@@ -114,6 +114,20 @@ func TestRuntimeCapabilitiesAdvertiseNativeRemoteOnlyForPinnedCompanion(t *testi
 	agentDigest := sha256.Sum256(agentPayload)
 	cfg.PlatformPolicy.NativeRemote["companion_sha256"] = fmt.Sprintf("%x", digest)
 	cfg.PlatformPolicy.NativeRemote["agent_release_sha256"] = fmt.Sprintf("%x", agentDigest)
+	if runtime.GOOS != "windows" {
+		// Native remote is a Windows-only capability. The policy gate must
+		// recognise the pinned pair on every platform, but only a Windows
+		// agent may advertise a capability it can actually deliver.
+		if !cfg.NativeRemoteCompanionReady() {
+			t.Fatal("pinned companion pair must satisfy the native remote policy gate")
+		}
+		for _, capability := range cfg.RuntimeCapabilities() {
+			if capability == "native_remote_v1" || capability == "native_remote_v2" {
+				t.Fatalf("non-windows agent must not advertise %q", capability)
+			}
+		}
+		return
+	}
 	capabilities := cfg.RuntimeCapabilities()
 	foundV1, foundV2 := false, false
 	for _, capability := range capabilities {

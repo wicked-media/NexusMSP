@@ -19,7 +19,7 @@ type FrameSink interface {
 }
 
 // DisplaySource optionally reports monitor geometry for a virtual-desktop
-capture so the relay can hand the viewer per-display views of each frame.
+// capture so the relay can hand the viewer per-display views of each frame.
 type DisplaySource interface {
 	Displays() []DisplayInfo
 }

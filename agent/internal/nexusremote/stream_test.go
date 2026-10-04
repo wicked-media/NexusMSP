@@ -12,7 +12,10 @@ func (s *testFrameSource) CaptureJPEG(int) ([]byte, error) { s.calls++; return [
 
 type testFrameSink struct{ calls int }
 
-func (s *testFrameSink) SendFrame(context.Context, string, []byte) error { s.calls++; return nil }
+func (s *testFrameSink) SendFrame(context.Context, string, []byte, []DisplayInfo) error {
+	s.calls++
+	return nil
+}
 
 func TestStreamOptionsPreserveBoundedHighQualityProfile(t *testing.T) {
 	options := (StreamOptions{FrameInterval: 500 * time.Millisecond, StatusEvery: 5 * time.Second, JPEGQuality: 82}).normalized()
