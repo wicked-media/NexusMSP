@@ -104,12 +104,12 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     """Determine which achievements a user has earned."""
     earned = []
 
-    closed = await db.tickets.count_documents({"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}})
+    closed = await db.tickets.count_documents({"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}})
     if closed >= 1: earned.append("first_blood")
     if closed >= 10: earned.append("decade")
     if closed >= 100: earned.append("century")
 
-    crit = await db.tickets.count_documents({"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}, "priority": "critical"})
+    crit = await db.tickets.count_documents({"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}, "priority": "critical"})
     if crit >= 5: earned.append("five_alarm")
 
     rb = await db.runbooks.count_documents({"created_by": name})
@@ -118,14 +118,14 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
     drills = await db.backup_drills.count_documents({"completed_by": name, "status": "completed"})
     if drills >= 5: earned.append("drill_sergeant")
 
-    bp_done = await db.tickets.count_documents({"$or": [{"assignee_id": uid}, {"assignee_name": name}],
+    bp_done = await db.tickets.count_documents({"$or": [{"assigned_to": uid}, {"assigned_name": name}],
                                                 "status": {"$in": ["resolved", "closed"]},
                                                 "blueprint_id": {"$exists": True, "$ne": None}})
     if bp_done >= 10: earned.append("blueprint_master")
 
     # Polyglot â€” XP across 5+ categories
     closed_tx = await db.tickets.find(
-        {"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "category": 1}
     ).limit(2000).to_list(2000)
     cats = {t.get("category") for t in closed_tx if t.get("category")}
@@ -133,7 +133,7 @@ async def _calc_user_achievements(uid: str, name: str) -> list:
 
     # Night owl â€” any ticket resolved between 22:00 and 06:00
     night = await db.tickets.find(
-        {"$or": [{"assignee_id": uid}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}},
+        {"$or": [{"assigned_to": uid}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}},
         {"_id": 0, "resolved_at": 1}
     ).limit(50).to_list(50)
     for t in night:
@@ -193,7 +193,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
     name = u.get("name") or ""
 
     closed_tx = await db.tickets.find(
-        {"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"$or": [{"assigned_to": u["id"]}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "category": 1, "tags": 1, "priority": 1, "resolved_at": 1, "created_at": 1}
     ).limit(2000).to_list(2000)
 
@@ -208,7 +208,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
     total_xp = sum(xp_by_skill.values())
     radar = sorted([{"skill": k, "xp": v} for k, v in xp_by_skill.items()], key=lambda x: -x["xp"])[:7]
 
-    open_tx = await db.tickets.count_documents({"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["open", "in_progress", "pending"]}})
+    open_tx = await db.tickets.count_documents({"$or": [{"assigned_to": u["id"]}, {"assigned_name": name}], "status": {"$in": ["open", "in_progress", "pending"]}})
 
     earned, locked = await _merged_badges(u["id"], name)
 
@@ -251,7 +251,7 @@ async def tech_profile(tech_id: str, current_user: dict = Depends(get_current_us
 
     # â”€â”€â”€ New: 5 most recent closed tickets â”€â”€â”€
     recent_closed = await db.tickets.find(
-        {"$or": [{"assignee_id": u["id"]}, {"assignee_name": name}], "status": {"$in": ["resolved", "closed"]}},
+        {"$or": [{"assigned_to": u["id"]}, {"assigned_name": name}], "status": {"$in": ["resolved", "closed"]}},
         {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "client_name": 1, "priority": 1, "resolved_at": 1, "created_at": 1}
     ).sort("resolved_at", -1).limit(5).to_list(5)
 
@@ -317,7 +317,7 @@ async def daily_quests(tech_id: str, current_user: dict = Depends(get_current_us
     if existing:
         return existing
 
-    open_tx = await db.tickets.count_documents({"$or": [{"assignee_id": u["id"]}, {"assignee_name": u.get("name")}], "status": {"$in": ["open", "in_progress", "pending"]}})
+    open_tx = await db.tickets.count_documents({"$or": [{"assigned_to": u["id"]}, {"assigned_name": u.get("name")}], "status": {"$in": ["open", "in_progress", "pending"]}})
 
     quest_pool = [
         {"key": "close_one_p3", "title": "Close 1 low/normal-priority ticket", "xp": 25, "icon": "ðŸŽ¯"},
@@ -359,8 +359,12 @@ async def friday_reel(current_user: dict = Depends(get_current_user)):
 
     top_tx = await db.tickets.find(
         {"resolved_at": {"$gte": week_iso}, "priority": "critical"},
-        {"_id": 0, "ticket_number": 1, "title": 1, "client_name": 1, "assignee_name": 1, "resolution_notes": 1}
+        {"_id": 0, "ticket_number": 1, "title": 1, "client_name": 1, "assigned_name": 1, "assignee_name": 1, "resolution_notes": 1}
     ).limit(3).to_list(3)
+    top_tx = [
+        {**t, "assignee_name": t.get("assignee_name") or t.get("assigned_name")}
+        for t in top_tx
+    ]
 
     funniest = await db.tickets.find(
         {"created_at": {"$gte": week_iso}},

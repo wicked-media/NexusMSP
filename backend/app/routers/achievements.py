@@ -6,8 +6,9 @@ from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit
 from app.services.achievement_catalog import ACHIEVEMENT_DEFINITIONS, ACHIEVEMENT_POINTS
+from app.services.achievement_engine import run_achievement_check
 from app.services.tech_rewards import award_points
-from app.services.scope_permissions import platform_tenant_id
+from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -96,92 +97,41 @@ async def check_achievements(tech_id: str, current_user: dict = Depends(get_curr
     user = await db.users.find_one({"id": tech_id}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=404, detail="Technician not found")
-    
-    earned = await db.user_achievements.find({"user_id": tech_id}, {"_id": 0}).to_list(500)
-    earned_ids = {e["achievement_id"] for e in earned}
-    newly_awarded = []
-    
-    # Count ticket closures
-    closed_tickets = await db.tickets.count_documents({"assigned_to": tech_id, "status": {"$in": ["closed", "resolved"]}})
-    for ach in ACHIEVEMENT_DEFINITIONS:
-        if ach["category"] == "tickets" and ach["id"] not in earned_ids and closed_tickets >= ach["threshold"]:
-            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {closed_tickets} tickets closed"}
-            await db.user_achievements.insert_one(entry)
-            newly_awarded.append(ach["name"])
-    
-    # Count invoices
-    invoices_created = await db.activity_logs.count_documents({"user_id": tech_id, "entity_type": "invoice", "action": "created"})
-    for ach in ACHIEVEMENT_DEFINITIONS:
-        if ach["category"] == "invoices" and ach["id"] not in earned_ids and invoices_created >= ach["threshold"]:
-            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {invoices_created} invoices created"}
-            await db.user_achievements.insert_one(entry)
-            newly_awarded.append(ach["name"])
-    
-    # Count remote sessions
-    remote_count = await db.remote_sessions.count_documents({"user_id": tech_id, "status": "ended"})
-    for ach in ACHIEVEMENT_DEFINITIONS:
-        if ach["category"] == "remote" and ach["id"] not in earned_ids and remote_count >= ach["threshold"]:
-            entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {remote_count} remote sessions"}
-            await db.user_achievements.insert_one(entry)
-            newly_awarded.append(ach["name"])
-    
-    # Milestone categories driven by their own accountable evidence.
-    milestone_metrics = [
-        ("workshop", await db.workshop_jobs.count_documents({"assigned_to": tech_id, "repair_status": "collected"}), "workshop jobs completed"),
-        ("field", await db.field_jobs.count_documents({"assigned_to": tech_id, "field_status": "completed"}), "field jobs completed"),
-        ("onboarding", await db.onboarding_checklist_runs.count_documents({"technician_id": tech_id, "status": "completed"}), "onboarding checklists completed"),
-    ]
-    points_ledger = await db.tech_points_ledger.find({"user_id": tech_id}, {"_id": 0}).to_list(5000)
-    lifetime_points = sum(int(e.get("delta") or 0) for e in points_ledger if int(e.get("delta") or 0) > 0)
-    milestone_metrics.append(("points", lifetime_points, "lifetime points earned"))
-    for category, metric, label in milestone_metrics:
-        for ach in ACHIEVEMENT_DEFINITIONS:
-            if ach["category"] == category and ach["id"] not in earned_ids and metric >= ach["threshold"] > 0:
-                entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {metric} {label}"}
-                await db.user_achievements.insert_one(entry)
-                newly_awarded.append(ach["name"])
+    return await run_achievement_check(
+        db, user, tenant_id=platform_tenant_id(current_user), actor=current_user
+    )
 
-    # Check tenure
-    hire_date = user.get("hire_date")
-    if hire_date:
-        try:
-            hd = datetime.fromisoformat(hire_date)
-            days_employed = (datetime.now(timezone.utc) - hd).days
-            for ach in ACHIEVEMENT_DEFINITIONS:
-                if ach["category"] == "tenure" and ach["id"] not in earned_ids and days_employed >= ach["threshold"]:
-                    entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": ach["id"], "achievement_name": ach["name"], "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": f"Auto-awarded: {days_employed} days employed"}
-                    await db.user_achievements.insert_one(entry)
-                    newly_awarded.append(ach["name"])
-        except:
-            pass
-    
-    # Check birthday
-    birthday = user.get("birthday")
-    if birthday and "birthday" not in earned_ids:
-        try:
-            today = datetime.now(timezone.utc)
-            bd = datetime.fromisoformat(birthday)
-            if bd.month == today.month and bd.day == today.day:
-                entry = {"id": str(uuid.uuid4()), "user_id": tech_id, "user_name": user.get("name"), "achievement_id": "birthday", "achievement_name": "Birthday Star", "awarded_by": "System", "awarded_at": datetime.now(timezone.utc).isoformat(), "note": "Happy Birthday!"}
-                await db.user_achievements.insert_one(entry)
-                newly_awarded.append("Birthday Star")
-        except:
-            pass
-    
-    points_earned = 0
-    if newly_awarded:
-        ledger_entry = await award_points(
-            db,
-            user_id=tech_id,
-            tenant_id=platform_tenant_id(current_user),
-            delta=len(newly_awarded) * 75,
-            kind="earn",
-            reason=f"Achievements unlocked: {', '.join(newly_awarded[:5])}",
-            actor=current_user,
-            reference_id=f"achievements-check:{tech_id}:{len(earned_ids) + len(newly_awarded)}",
-        )
-        points_earned = ledger_entry["delta"]
-    return {"newly_awarded": newly_awarded, "total_earned": len(earned_ids) + len(newly_awarded), "points_earned": points_earned}
+
+@router.post("/achievements/recompute")
+async def recompute_all_achievements(current_user: dict = Depends(get_current_user)):
+    """Retro-award sweep: run the badge engine across every team member.
+
+    Idempotent — already-earned badges are never duplicated — so it is safe for
+    schedulers and for the one-time backfill of historical work.
+    """
+    caller = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    if not caller or (caller.get("role") != "admin" and not caller.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    users = await db.users.find(tenant_scoped_query(current_user, {}), {"_id": 0}).to_list(2000)
+    tenant_id = platform_tenant_id(current_user)
+    per_user = []
+    totals = {"users_processed": len(users), "badges_awarded": 0, "points_earned": 0}
+    for user in users:
+        result = await run_achievement_check(db, user, tenant_id=tenant_id, actor=current_user)
+        if result["newly_awarded"]:
+            per_user.append({
+                "user_id": user["id"],
+                "name": user.get("name"),
+                "newly_awarded": result["newly_awarded"],
+                "points_earned": result["points_earned"],
+            })
+            totals["badges_awarded"] += len(result["newly_awarded"])
+            totals["points_earned"] += result["points_earned"]
+    await log_activity(
+        current_user, "achievements.recomputed", "achievement", "recompute",
+        details=f"Retro-awarded {totals['badges_awarded']} badges across {totals['users_processed']} users",
+    )
+    return {**totals, "users_with_new_awards": per_user}
 
 @router.delete("/technicians/{tech_id}/achievements/{achievement_id}")
 async def revoke_achievement(tech_id: str, achievement_id: str, current_user: dict = Depends(get_current_user)):
