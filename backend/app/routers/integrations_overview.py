@@ -29,9 +29,7 @@ def _configured(doc: dict[str, Any] | None, *fields: str) -> bool:
     return bool(doc) and all(bool(doc.get(field)) for field in fields)
 
 
-def _tenant_id(value: Any) -> str | None:
-    tenant_id = str(value or "").strip()
-    return tenant_id or None
+from app.services.identity_utils import tenant_id_or_none as _tenant_id
 
 
 def _visible_site_manager_settings(settings: dict[str, Any], current_user: dict) -> dict[str, Any]:

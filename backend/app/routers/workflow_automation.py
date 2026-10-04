@@ -31,7 +31,9 @@ from app.services.time_utils import now_iso as _now
 
 
 def _actor(user: dict) -> str:
-    return user.get("name") or user.get("email") or user.get("id") or "Unknown technician"
+    from app.services.identity_utils import actor_label
+
+    return actor_label(user, "Unknown technician")
 
 
 async def _run_in_scope(run_id: str, current_user: dict, operation: str, request: Request | None = None) -> dict:

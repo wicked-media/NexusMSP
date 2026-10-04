@@ -68,6 +68,42 @@ def parse_date_compact(value) -> datetime | None:
         return None
 
 
+def parse_datetime_tolerant(value) -> datetime | None:
+    """Parse a datetime or date-ish value; datetimes pass through.
+
+    Strings accept full ISO timestamps or bare YYYY-MM-DD dates; naive values
+    are normalised to UTC and absent or malformed input returns None.
+    """
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            try:
+                parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+            except ValueError:
+                return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def parse_iso_datetime(value):
+    """Strict ISO timestamp parse with Z support; None on failure.
+
+    Unlike the other parse helpers this variant does not coerce naive values
+    to UTC, matching the legacy asset/procurement callers exactly.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
 def iso_or_none(value: datetime | None) -> str | None:
     """ISO-format a datetime, passing None through unchanged."""
     return value.isoformat() if value else None

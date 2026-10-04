@@ -118,13 +118,7 @@ async def _write_client_studio_audit(
     })
 
 
-def _number(value: Any) -> float | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+from app.services.number_utils import float_or_none as _number
 
 
 def _date(value: Any) -> datetime | None:

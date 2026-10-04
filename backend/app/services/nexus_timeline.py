@@ -58,11 +58,7 @@ def _actor(value: Any) -> str | None:
     return str(value).strip() if value else None
 
 
-def _number(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
+from app.services.number_utils import float_or_zero as _number
 
 
 def _event(

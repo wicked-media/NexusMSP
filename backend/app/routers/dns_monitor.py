@@ -170,7 +170,9 @@ from app.services.time_utils import now_iso as _now
 
 
 def _actor(current_user: dict) -> str:
-    return current_user.get("name") or current_user.get("email") or current_user.get("id") or "NexusMSP technician"
+    from app.services.identity_utils import actor_label
+
+    return actor_label(current_user, "NexusMSP technician")
 
 
 async def _assert_dns_scope(

@@ -34,34 +34,14 @@ OPEN_PO_STATES = {"draft", "submitted", "approved", "ordered", "partially_receiv
 from app.services.time_utils import now_iso as _now
 
 
-def _number(value: Any, default: float = 0.0) -> float:
-    if isinstance(value, bool):
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+from app.services.number_utils import float_or_default_no_bool as _number
 
 
 def _round_money(value: Any) -> float:
     return round(_number(value), 2)
 
 
-def _parse_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        text = str(value or "").strip()
-        if not text:
-            return None
-        try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
-            try:
-                parsed = datetime.strptime(text[:10], "%Y-%m-%d")
-            except ValueError:
-                return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+from app.services.time_utils import parse_datetime_tolerant as _parse_datetime
 
 
 def _within_window(row: dict, threshold: datetime, fields: tuple[str, ...]) -> bool:
@@ -127,7 +107,9 @@ def _and(*clauses: dict) -> dict:
 
 
 def _actor(user: dict) -> str:
-    return user.get("name") or user.get("email") or user.get("id") or "Unknown owner"
+    from app.services.identity_utils import actor_label
+
+    return actor_label(user, "Unknown owner")
 
 
 def build_profit_killers(

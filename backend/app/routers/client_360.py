@@ -35,8 +35,7 @@ async def _enforce_client_360_scope(request: Request, current_user: dict = Depen
 router = APIRouter(dependencies=[Depends(_enforce_client_360_scope)])
 
 
-def _iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _iso
 
 
 def _monthly_equivalent(amount: float, frequency: str | None) -> float:

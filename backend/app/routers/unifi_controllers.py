@@ -47,9 +47,7 @@ def _controller_client_id(controller: dict[str, Any]) -> str | None:
     return client_id or None
 
 
-def _tenant_id(value: object) -> str | None:
-    tenant_id = str(value or "").strip()
-    return tenant_id or None
+from app.services.identity_utils import tenant_id_or_none as _tenant_id
 
 
 def _controller_write_query(controller: dict[str, Any]) -> dict[str, Any]:

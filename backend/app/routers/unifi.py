@@ -49,9 +49,7 @@ def _payload(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _tenant_id(value: object) -> str | None:
-    tenant_id = str(value or "").strip()
-    return tenant_id or None
+from app.services.identity_utils import tenant_id_or_none as _tenant_id
 
 
 def _tenant_scoped_query(current_user: dict, query: dict[str, Any] | None = None) -> dict[str, Any]:

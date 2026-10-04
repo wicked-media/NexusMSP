@@ -27,17 +27,7 @@ TRUSTED_TELEMETRY_SOURCES = {"nexus-agent", "rmm-agent", "agent", "api-agent", "
 from app.services.time_utils import now_iso as _now
 
 
-def _number(value: Any, *, minimum: float = 0, maximum: float = 100) -> float | None:
-    """Return a bounded observed number, never an implicit zero."""
-    if isinstance(value, bool) or value is None:
-        return None
-    try:
-        numeric = float(value)
-    except (TypeError, ValueError):
-        return None
-    if numeric < minimum or numeric > maximum:
-        return None
-    return round(numeric, 2)
+from app.services.number_utils import bounded_number as _number
 
 
 def _first_number(record: dict, keys: tuple[str, ...], *, maximum: float = 100) -> float | None:
