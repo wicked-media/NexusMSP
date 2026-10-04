@@ -15,6 +15,10 @@ from app.services.microsoft365_credentials import (
     has_microsoft365_client_secret,
     load_microsoft365_client_secret,
 )
+from app.services.microsoft_graph_connection import (
+    acquire_graph_access_token,
+    load_connection as load_microsoft_mail_connection,
+)
 from app.services.secret_store import encrypt_secret
 from app.services.ticket_subscriptions import notify_ticket_subscribers
 from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
@@ -351,37 +355,41 @@ async def disconnect_o365_mailbox(current_user: dict = Depends(get_current_user)
 
 @router.post("/o365/test-connection")
 async def test_o365_connection(current_user: dict = Depends(get_current_user)):
-    """Verify the saved Microsoft Graph app credentials and shared mailbox access."""
+    """Verify the active Microsoft Graph credential and mailbox access."""
     await _require_mailbox_admin(current_user)
-    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
-    if not settings or not settings.get("connected"):
-        return {"success": False, "message": "O365 mailbox not connected"}
-    mailbox = settings.get("outbound_mailbox_email") or settings.get("mailbox_email", "")
-    client_secret = await load_microsoft365_client_secret(
-        settings,
-        collection=db.settings,
-        query={"type": "o365_mailbox"},
-    )
-    required = ("tenant_id", "client_id")
-    if not mailbox or not client_secret or not all(settings.get(field) for field in required):
-        return {"success": False, "message": "Mailbox or Microsoft Graph credentials are incomplete", "mailbox": mailbox}
+    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    connection = await load_microsoft_mail_connection()
+    delegated = connection if (connection and connection.get("status") == "connected") else None
+    if delegated:
+        mailbox = settings.get("outbound_mailbox_email") or settings.get("mailbox_email") or delegated.get("connected_account", "")
+    else:
+        if not settings.get("connected"):
+            return {"success": False, "message": "O365 mailbox not connected"}
+        mailbox = settings.get("outbound_mailbox_email") or settings.get("mailbox_email", "")
+        required = ("tenant_id", "client_id")
+        if not mailbox or not has_microsoft365_client_secret(settings) or not all(settings.get(field) for field in required):
+            return {"success": False, "message": "Mailbox or Microsoft Graph credentials are incomplete", "mailbox": mailbox}
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            token_response = await client.post(
-                f"https://login.microsoftonline.com/{settings['tenant_id']}/oauth2/v2.0/token",
-                data={"client_id": settings["client_id"], "client_secret": client_secret, "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
+        access_token, token_mode = await acquire_graph_access_token()
+        if not access_token:
+            message = (
+                "The Microsoft 365 sign-in has expired. Reconnect Microsoft 365 to restore mail access."
+                if delegated
+                else "Microsoft 365 authentication failed. Verify the Tenant ID, Client ID, secret, and admin consent."
             )
-            if token_response.status_code != 200:
-                message = "Microsoft 365 authentication failed. Verify the Tenant ID, Client ID, secret, and admin consent."
-                await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"live_sync_enabled": False, "last_connection_test_at": datetime.now(timezone.utc).isoformat(), "last_connection_test_status": "failed"}})
-                return {"success": False, "message": message, "mailbox": mailbox, "token_valid": False}
-            access_token = token_response.json().get("access_token")
+            await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"live_sync_enabled": False, "last_connection_test_at": datetime.now(timezone.utc).isoformat(), "last_connection_test_status": "failed"}})
+            return {"success": False, "message": message, "mailbox": mailbox, "token_valid": False}
+        async with httpx.AsyncClient(timeout=20) as client:
             graph_response = await client.get(
                 f"https://graph.microsoft.com/v1.0/users/{mailbox}/mailFolders/inbox/messages?$top=1&$select=id",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         if graph_response.status_code != 200:
-            message = "Microsoft 365 authenticated, but the shared mailbox cannot be read. Grant Mail.Read application permission and admin consent."
+            message = (
+                "Microsoft 365 authenticated, but the mailbox cannot be read. Reconnect the Microsoft sign-in including Mail.Read."
+                if token_mode == "delegated"
+                else "Microsoft 365 authenticated, but the shared mailbox cannot be read. Grant Mail.Read application permission and admin consent."
+            )
             await db.settings.update_one({"type": "o365_mailbox"}, {"$set": {"live_sync_enabled": False, "last_connection_test_at": datetime.now(timezone.utc).isoformat(), "last_connection_test_status": "mailbox_access_failed"}})
             return {"success": False, "message": message, "mailbox": mailbox, "token_valid": True, "permissions": ["Mail.Read required"]}
         now = datetime.now(timezone.utc).isoformat()
@@ -394,20 +402,20 @@ async def test_o365_connection(current_user: dict = Depends(get_current_user)):
 async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
     """Pull newly received Graph messages and feed them through the normal lead/ticket router."""
     await _require_mailbox_admin(current_user, allow_system_sync=True)
-    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0})
-    if not settings or not settings.get("connected"):
-        raise HTTPException(status_code=400, detail="O365 mailbox not connected")
-    client_secret = await load_microsoft365_client_secret(
-        settings,
-        collection=db.settings,
-        query={"type": "o365_mailbox"},
-    )
-    required = ("tenant_id", "client_id")
-    if not client_secret or not all(settings.get(field) for field in required):
-        raise HTTPException(status_code=400, detail="Microsoft Graph credentials are incomplete")
+    settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    connection = await load_microsoft_mail_connection()
+    delegated = connection if (connection and connection.get("status") == "connected") else None
+    if not delegated:
+        if not settings.get("connected"):
+            raise HTTPException(status_code=400, detail="O365 mailbox not connected")
+        required = ("tenant_id", "client_id")
+        if not has_microsoft365_client_secret(settings) or not all(settings.get(field) for field in required):
+            raise HTTPException(status_code=400, detail="Microsoft Graph credentials are incomplete")
     mailboxes = [mailbox for mailbox in settings.get("mailboxes", []) if mailbox.get("mailbox_email")]
     if not mailboxes and settings.get("mailbox_email"):
         mailboxes = [{"mailbox_email": settings["mailbox_email"]}]
+    if not mailboxes and delegated and delegated.get("connected_account"):
+        mailboxes = [{"mailbox_email": delegated["connected_account"]}]
     if not mailboxes:
         raise HTTPException(status_code=400, detail="No connected mailbox is available to sync")
 
@@ -418,15 +426,12 @@ async def sync_o365_emails(current_user: dict = Depends(get_current_user)):
     else:
         since = (now - timedelta(days=7)).isoformat().replace("+00:00", "Z")
     fetched = intake_created = leads_created = tickets_created = activities_added = skipped = errors = 0
+    access_token, _ = await acquire_graph_access_token()
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Microsoft 365 authentication failed")
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            token_response = await client.post(
-                f"https://login.microsoftonline.com/{settings['tenant_id']}/oauth2/v2.0/token",
-                data={"client_id": settings["client_id"], "client_secret": client_secret, "scope": "https://graph.microsoft.com/.default", "grant_type": "client_credentials"},
-            )
-            if token_response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Microsoft 365 authentication failed")
-            headers = {"Authorization": f"Bearer {token_response.json().get('access_token')}"}
+            headers = {"Authorization": f"Bearer {access_token}"}
             for mailbox in mailboxes:
                 address = mailbox["mailbox_email"]
                 next_url = f"https://graph.microsoft.com/v1.0/users/{address}/mailFolders/inbox/messages"

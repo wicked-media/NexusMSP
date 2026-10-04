@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 import httpx
 from app.database import db
 from app.auth import get_current_user
-from app.services.microsoft365_credentials import load_microsoft365_client_secret
+from app.services.microsoft365_credentials import has_microsoft365_client_secret
+from app.services.microsoft_graph_connection import acquire_graph_access_token, load_connection
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings/email-delivery", tags=["Microsoft 365 Email Delivery"])
@@ -17,19 +18,28 @@ router = APIRouter(prefix="/settings/email-delivery", tags=["Microsoft 365 Email
 
 async def _load_microsoft365_config():
     settings = await db.settings.find_one({"type": "o365_mailbox"}, {"_id": 0}) or {}
+    connection = await load_connection()
+    delegated = connection if (connection and connection.get("status") == "connected") else None
+    if delegated:
+        # One-click Microsoft sign-in: the delegated grant is the credential,
+        # so no manual Azure client secret or mailbox registration is required.
+        settings["connection_mode"] = "delegated"
+        settings["connected_account"] = delegated.get("connected_account", "")
+        settings["sender_email"] = (
+            settings.get("outbound_mailbox_email")
+            or settings.get("mailbox_email")
+            or settings["connected_account"]
+        )
+        if not str(settings.get("sender_email") or "").strip():
+            return None
+        return settings
+    # Legacy manual Azure application connection (client-credentials).
     if not settings.get("enabled") or not settings.get("connected"):
         return None
-    client_secret = await load_microsoft365_client_secret(
-        settings,
-        collection=db.settings,
-        query={"type": "o365_mailbox"},
-    )
     required = ("tenant_id", "client_id")
-    if not client_secret or not all(str(settings.get(field) or "").strip() for field in required):
+    if not has_microsoft365_client_secret(settings) or not all(str(settings.get(field) or "").strip() for field in required):
         return None
-    # This is a request-local copy used only to obtain the Graph token.  The
-    # persisted settings document has only ``client_secret_encrypted``.
-    settings["client_secret"] = client_secret
+    settings["connection_mode"] = "app_only"
     settings["sender_email"] = settings.get("outbound_mailbox_email") or settings.get("mailbox_email")
     if not str(settings.get("sender_email") or "").strip():
         return None
@@ -229,20 +239,21 @@ async def send_email(to_email: str | list[str], subject: str, html_content: str,
             "contentBytes": base64.b64encode(content_bytes).decode("ascii"),
         })
     try:
+        access_token, token_mode = await acquire_graph_access_token()
+    except Exception:
+        access_token, token_mode = None, ""
+    if not access_token:
+        result = {"status": "failed", "message": "Microsoft 365 authentication failed", "email_id": None}
+        return await record(result)
+    # A delegated one-click grant sends as the connected account directly;
+    # shared senders keep the /users/{sender} path so Exchange Send As applies.
+    connected_account = str(config.get("connected_account") or "").strip().casefold()
+    if token_mode == "delegated" and connected_account and sender.casefold() == connected_account:
+        send_path = "me"
+    else:
+        send_path = f"users/{sender}"
+    try:
         async with httpx.AsyncClient(timeout=20) as client:
-            token_response = await client.post(
-                f"https://login.microsoftonline.com/{config['tenant_id']}/oauth2/v2.0/token",
-                data={
-                    "client_id": config["client_id"],
-                    "client_secret": config["client_secret"],
-                    "scope": "https://graph.microsoft.com/.default",
-                    "grant_type": "client_credentials",
-                },
-            )
-            if token_response.status_code != 200:
-                result = {"status": "failed", "message": "Microsoft 365 authentication failed", "email_id": None}
-                return await record(result)
-            access_token = token_response.json().get("access_token")
             message = {
                 "subject": subject,
                 "body": {"contentType": "HTML", "content": html_content},
@@ -256,7 +267,7 @@ async def send_email(to_email: str | list[str], subject: str, html_content: str,
                 if related_type == "ticket" and related_id:
                     message["internetMessageHeaders"].append({"name": "X-Nexus-Ticket-ID", "value": str(related_id)})
             send_response = await client.post(
-                f"https://graph.microsoft.com/v1.0/users/{sender}/sendMail",
+                f"https://graph.microsoft.com/v1.0/{send_path}/sendMail",
                 headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
                 json={"message": message, "saveToSentItems": True},
             )
@@ -289,6 +300,8 @@ async def get_email_delivery_settings(current_user: dict = Depends(get_current_u
     return {
         "provider": "microsoft_365",
         "configured": bool(config),
+        "connection_mode": (config or {}).get("connection_mode", ""),
+        "connected_account": (config or {}).get("connected_account", ""),
         "sender_email": config.get("sender_email") if config else "",
         "updated_at": config.get("updated_at") if config else None,
         "updated_by": config.get("connected_by") if config else None,

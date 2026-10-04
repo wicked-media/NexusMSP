@@ -52,6 +52,9 @@ export default function O365SetupPage() {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [removingMailboxBusy, setRemovingMailboxBusy] = useState(false);
+  const [msConnection, setMsConnection] = useState(null);
+  const [msConnectBusy, setMsConnectBusy] = useState(false);
+  const [msDisconnectBusy, setMsDisconnectBusy] = useState(false);
   const [form, setForm] = useState({
     tenant_id: "", client_id: "", client_secret: "",
     redirect_uri: "", mailbox_email: "",
@@ -68,14 +71,16 @@ export default function O365SetupPage() {
     if (quiet) setRefreshing(true);
     else setLoading(true);
     try {
-      const [sRes, lRes, auditRes] = await Promise.all([
+      const [sRes, lRes, auditRes, msRes] = await Promise.all([
         axios.get(`${API}/settings/o365-mailbox`, { headers }),
         axios.get(`${API}/o365/email-leads`, { headers }),
         axios.get(`${API}/settings/email-delivery/audit?limit=12`, { headers }).catch(() => ({ data: { deliveries: [] } })),
+        axios.get(`${API}/settings/microsoft-connect/connection`, { headers }).catch(() => ({ data: null })),
       ]);
       setSettings(sRes.data);
       setEmailLeads(lRes.data);
       setDeliveries(auditRes.data?.deliveries || []);
+      setMsConnection(msRes.data);
       const savedRouting = sRes.data.outbound_routing || {};
       const fallbackSender = sRes.data.outbound_mailbox_email || sRes.data.mailbox_email || "";
       setOutboundRouting(Object.fromEntries(OUTBOUND_ROLES.map(role => [role.id, savedRouting[role.id] || fallbackSender])));
@@ -104,6 +109,38 @@ export default function O365SetupPage() {
   };
 
   useEffect(() => { fetchSettings(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("microsoft_connected") === "1") toast.success("Microsoft 365 connected — ticket replies, lead emails and inbox intake now use this sign-in.");
+    if (params.get("microsoft_connect_error")) toast.error(`Microsoft 365 sign-in failed: ${params.get("microsoft_connect_error")}`);
+  }, []);
+
+  const startMicrosoftConnect = async () => {
+    setMsConnectBusy(true);
+    try {
+      const response = await axios.get(`${API}/settings/microsoft-connect/start`, { headers });
+      const authorizationUrl = response.data?.authorization_url;
+      if (!authorizationUrl) throw new Error("Microsoft did not return an authorization URL");
+      window.location.assign(authorizationUrl);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || error.message || "Could not start Microsoft sign-in");
+      setMsConnectBusy(false);
+    }
+  };
+
+  const disconnectMicrosoftConnection = async () => {
+    setMsDisconnectBusy(true);
+    try {
+      await axios.delete(`${API}/settings/microsoft-connect/connection`, { headers });
+      toast.success("Microsoft 365 sign-in disconnected");
+      fetchSettings({ quiet: true });
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not disconnect Microsoft 365");
+    } finally {
+      setMsDisconnectBusy(false);
+    }
+  };
 
   const handleConnect = async () => {
     if (!form.tenant_id || !form.client_id || !form.client_secret || !form.mailbox_email) {
@@ -250,6 +287,7 @@ export default function O365SetupPage() {
 
   const isConnected = settings?.connected;
   const isGraphLive = settings?.live_sync_enabled === true;
+  const msConnected = Boolean(msConnection?.connected);
   const mailboxes = settings?.mailboxes || [];
   const outboundMailbox = settings?.outbound_mailbox_email || settings?.mailbox_email || "";
   const routedRoleCount = OUTBOUND_ROLES.filter(role => outboundRouting[role.id] && mailboxes.some(mailbox => mailbox.mailbox_email === outboundRouting[role.id])).length;
@@ -282,9 +320,65 @@ export default function O365SetupPage() {
               <Button size="sm" onClick={() => setIsSetupOpen(true)} data-testid="add-o365-mailbox"><Plus className="w-4 h-4 mr-2" />Add inbox</Button>
             </>
           )}
-          {!isConnected && <><Button variant="outline" size="sm" onClick={() => fetchSettings({ quiet: true })} disabled={refreshing} data-testid="refresh-o365-workspace">{refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Refresh</Button><Button onClick={() => setIsSetupOpen(true)} data-testid="connect-o365-btn"><Zap className="w-4 h-4 mr-2" />Connect Microsoft 365</Button></>}
+          {!isConnected && <><Button variant="outline" size="sm" onClick={() => fetchSettings({ quiet: true })} disabled={refreshing} data-testid="refresh-o365-workspace">{refreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Refresh</Button><Button variant="outline" onClick={() => setIsSetupOpen(true)} data-testid="connect-o365-btn"><Key className="w-4 h-4 mr-2" />Manual Azure setup</Button></>}
         </>}
       />
+
+      {/* One-click Microsoft sign-in */}
+      <Card className={msConnected ? "border-emerald-500/40 bg-emerald-500/[0.04]" : "border-sky-500/30 bg-sky-500/[0.03]"}>
+        <CardContent className="py-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${msConnected ? "bg-emerald-500/10" : "bg-sky-500/10"}`}>
+              <Zap className={`w-7 h-7 ${msConnected ? "text-emerald-400" : "text-sky-400"}`} />
+            </div>
+            <div className="flex-1 min-w-[260px]">
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="font-semibold text-lg">One-click Microsoft 365 sign-in</h3>
+                {msConnected ? (
+                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30"><CheckCircle className="w-3 h-3 mr-1" />Connected</Badge>
+                ) : msConnection?.status === "reauth_required" ? (
+                  <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30"><RefreshCw className="w-3 h-3 mr-1" />Reconnect needed</Badge>
+                ) : (
+                  <Badge className="bg-sky-500/20 text-sky-400 border-sky-500/30"><Shield className="w-3 h-3 mr-1" />Not signed in</Badge>
+                )}
+              </div>
+              {msConnected ? (
+                <p className="text-sm text-muted-foreground">
+                  Signed in as <span className="font-mono text-foreground">{msConnection?.connected_account}</span>
+                  {msConnection?.tenant_id ? <> &middot; tenant <span className="font-mono text-foreground">{msConnection.tenant_id}</span></> : null}
+                  {" "}&mdash; ticket replies, lead emails and inbox intake use this grant. Tokens stay encrypted and refresh automatically.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Sign in with Microsoft once and approve the request &mdash; that single admin consent covers sending ticket and lead email (<span className="font-mono">Mail.Send</span>) and reading the inbox that generates leads and tickets (<span className="font-mono">Mail.Read</span>). No Azure application registration or client secret needed.</p>
+              )}
+              {!msConnected && msConnection?.app_configured === false && (
+                <p className="mt-2 text-xs text-amber-400">This Nexus server has no Microsoft sign-in application yet. Set the deployment&apos;s multi-tenant Entra application (MICROSOFT_OAUTH_CLIENT_ID) once, or save an application under Settings &gt; Sign-in &amp; Access.</p>
+              )}
+              {msConnected && (msConnection?.scopes || []).length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {msConnection.scopes.filter(scope => ["Mail.Send", "Mail.Read", "User.Read", "offline_access"].includes(scope)).map(scope => (
+                    <Badge key={scope} variant="outline" className="text-[10px] text-muted-foreground">{scope}</Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {msConnected ? (<>
+                <Button variant="outline" size="sm" onClick={startMicrosoftConnect} disabled={msConnectBusy} data-testid="microsoft-connect-reconnect">
+                  {msConnectBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}Reconnect
+                </Button>
+                <Button variant="destructive" size="sm" onClick={disconnectMicrosoftConnection} disabled={msDisconnectBusy} data-testid="microsoft-connect-disconnect">
+                  {msDisconnectBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Unlink className="w-4 h-4 mr-2" />}Disconnect
+                </Button>
+              </>) : (
+                <Button onClick={startMicrosoftConnect} disabled={msConnectBusy || msConnection?.app_configured === false} data-testid="microsoft-connect-btn">
+                  {msConnectBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Zap className="w-4 h-4 mr-2" />}Sign in with Microsoft
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Connection Status Card */}
       <Card className={isConnected ? "border-emerald-500/30" : "border-amber-500/30"}>
@@ -295,7 +389,7 @@ export default function O365SetupPage() {
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-semibold text-lg">Microsoft 365 Integration</h3>
+                <h3 className="font-semibold text-lg">Manual Azure application (optional)</h3>
                 {isConnected ? (
                   <Badge className={isGraphLive ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"}><CheckCircle className="w-3 h-3 mr-1" />{isGraphLive ? "Graph Connected" : "Setup Saved"}</Badge>
                 ) : (
