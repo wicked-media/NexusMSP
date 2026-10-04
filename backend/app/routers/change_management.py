@@ -179,6 +179,7 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
         "updated_at": now,
     }
     await db.change_requests.insert_one(doc)
+    doc.pop("_id", None)
     await _write_audit(user, "change_request_submitted", doc)
     return doc
 

@@ -256,6 +256,7 @@ async def create_project_from_template(payload: dict, current_user: dict = Depen
     project_doc["template_id"] = template["id"]
     project_doc["template_name"] = template["name"]
     await db.projects.insert_one(project_doc)
+    project_doc.pop("_id", None)
 
     scope_docs = []
     for item in template.get("scope") or []:
@@ -526,6 +527,7 @@ async def create_project_ticket_plan(project_id: str, payload: dict, current_use
     }
     try:
         await db.project_ticket_plans.insert_one(plan)
+        plan.pop("_id", None)
     except DuplicateKeyError:
         existing = await db.project_ticket_plans.find_one(
             {"project_id": project_id, "blueprint_id": blueprint_id}, {"_id": 0}

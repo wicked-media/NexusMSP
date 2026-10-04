@@ -692,6 +692,7 @@ async def record_dr_test(plan_id: str, data: dict, current_user: dict = Depends(
     interval = int(plan.get("test_interval_days") or 180)
     next_test_due = (now + timedelta(days=interval)).date().isoformat()
     await db.dr_plan_tests.insert_one(test)
+    test.pop("_id", None)
     await db.dr_plans.update_one({"id": plan_id}, {"$set": {"last_tested": now.isoformat(), "next_test_due": next_test_due, "updated_at": now.isoformat()}, "$inc": {"test_count": 1}})
     await log_activity(current_user, "disaster_recovery_test_recorded", "disaster_recovery_plan", plan_id, plan.get("name", ""), f"Recorded a {test_type} DR test with outcome {outcome}", metadata={"test_id": test["id"], "outcome": outcome, "client_id": plan.get("client_id")})
     return {**test, "next_test_due": next_test_due}

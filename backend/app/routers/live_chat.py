@@ -110,6 +110,7 @@ async def _agent_live_chat_session(x_agent_token: str | None) -> dict:
         "created_at": now, "updated_at": now,
     }
     await db.chat_sessions.insert_one(session)
+    session.pop("_id", None)
     return session
 
 
@@ -140,6 +141,7 @@ async def send_agent_visitor_message(payload: dict = Body(...), x_agent_token: s
         occurred_at=now,
     )
     _typing_by_session.get(session["id"], {}).pop("visitor", None)
+    msg.pop("_id", None)
     return msg
 
 
@@ -220,6 +222,7 @@ async def open_device_chat(device_id: str, user=Depends(get_current_user)):
             "assigned_name": user.get("name", ""), "created_at": now, "updated_at": now,
         }
         await db.chat_sessions.insert_one(session)
+        session.pop("_id", None)
         await db.chat_messages.insert_one({"id": str(uuid.uuid4())[:8], "session_id": session["id"], "sender_type": "system", "sender_name": "NexusMSP", "content": f"{user.get('name') or 'A technician'} opened live support for this asset.", "read": True, "sent_at": now})
     elif not session.get("assigned_to"):
         await db.chat_sessions.update_one({"id": session["id"]}, {"$set": {"assigned_to": user.get("id", ""), "assigned_name": user.get("name", ""), "updated_at": now}})

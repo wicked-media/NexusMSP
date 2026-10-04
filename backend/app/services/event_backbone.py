@@ -719,6 +719,7 @@ async def replay_events(data: dict, actor: dict) -> dict:
         "created_at": utc_now(),
     }
     await db.platform_event_replays.insert_one(replay)
+    replay.pop("_id", None)
     return {**replay, "dry_run": False}
 
 

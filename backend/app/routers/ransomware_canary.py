@@ -141,6 +141,7 @@ async def deploy_canary(data: dict[str, Any], current_user: dict = Depends(requi
         "created_at": _now(),
     }
     await db.ransomware_canaries.insert_one(canary)
+    canary.pop("_id", None)
     await db.nexus_agent_commands.insert_one(command)
     await _audit(db, "canary_deploy_queued", {"canary_id": canary_id, "device_id": agent_id, "command_id": command_id})
     await _write_security_audit("ransomware_canary_deploy_queued", canary_id, {

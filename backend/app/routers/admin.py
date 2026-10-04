@@ -214,6 +214,7 @@ async def create_on_call_rotation(rotation_data: dict, request: Request, current
     doc = rotation.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.on_call_rotations.insert_one(doc)
+    doc.pop("_id", None)
     await log_activity(current_user, "on_call_rotation_created", "on_call_rotation", doc["id"], doc.get("name") or "On-call rotation")
     return doc
 
@@ -262,6 +263,7 @@ async def create_custom_field(field_data: dict, request: Request, current_user: 
     doc = field.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.custom_fields.insert_one(doc)
+    doc.pop("_id", None)
     await log_activity(current_user, "custom_field_created", "custom_field", doc["id"], doc.get("field_label") or "Custom field")
     return doc
 
@@ -397,6 +399,7 @@ async def create_site(site_data: dict, request: Request, current_user: dict = De
     doc = site.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     await db.sites.insert_one(doc)
+    doc.pop("_id", None)
     await log_activity(current_user, "site_created", "site", doc["id"], doc.get("name") or "Site", metadata={"client_id": doc["client_id"]})
     return doc
 

@@ -513,7 +513,7 @@ async def tenant_hygiene(tenant_id: str, force: bool = False, current_user: dict
     if not client:
         raise HTTPException(404, "CIPP tenant not found")
     await assert_client_scope(current_user, client["id"], operation="cipp.hygiene.read", mask_not_found=True)
-    cfg = await _get_config()
+    cfg = await _get_config(current_user)
     if not cfg:
         raise HTTPException(503, "CIPP not configured")
     return await _hygiene_for_tenant(tenant_id, current_user, force=force)
@@ -528,7 +528,7 @@ async def client_hygiene(client_id: str, force: bool = False, current_user: dict
     tenant_id = client.get("cipp_tenant_id")
     if not tenant_id:
         return {"linked": False, "message": "No CIPP tenant linked"}
-    cfg = await _get_config()
+    cfg = await _get_config(current_user)
     if not cfg:
         return {"linked": True, "configured": False, "message": "CIPP not configured"}
     hygiene = await _hygiene_for_tenant(tenant_id, current_user, force=force)
@@ -537,7 +537,7 @@ async def client_hygiene(client_id: str, force: bool = False, current_user: dict
 
 async def _build_hygiene_digest(current_user: dict) -> dict:
     """Compute hygiene for every linked client. Cached per-tenant."""
-    cfg = await _get_config()
+    cfg = await _get_config(current_user)
     if not cfg:
         return {"configured": False, "clients": [], "message": "CIPP not configured"}
 

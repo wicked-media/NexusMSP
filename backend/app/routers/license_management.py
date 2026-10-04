@@ -205,6 +205,7 @@ async def add_license(data: dict, current_user: dict = Depends(get_current_user)
         "confirmed_by": current_user.get("name") or current_user.get("email") or "Unknown technician",
     }
     await db.licenses.insert_one(licence)
+    licence.pop("_id", None)
     await log_activity(current_user, "created", "licence", licence["id"], product_name, "Created a confirmed manual licence register entry", metadata={"client_id": licence["client_id"], "source": "manual"})
     return licence
 

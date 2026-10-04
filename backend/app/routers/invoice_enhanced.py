@@ -932,6 +932,7 @@ async def get_tax_profiles(current_user: dict = Depends(get_current_user)):
         ]
         for d in defaults:
             await db.tax_profiles.insert_one(d)
+            d.pop("_id", None)
         return defaults
     return profiles
 

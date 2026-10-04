@@ -27,6 +27,7 @@ async def get_report_templates(user=Depends(get_current_user)):
         for t in defaults:
             t["created_at"] = datetime.now(timezone.utc).isoformat()
             await db.report_templates.insert_one(t)
+            t.pop("_id", None)
         templates = defaults
     return templates
 

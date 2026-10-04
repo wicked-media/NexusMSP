@@ -1099,6 +1099,7 @@ async def _log_sync_event(event_type: str, message: str):
         "status": "success",
     }
     await db.xero_sync_history.insert_one(event)
+    event.pop("_id", None)
     return event
 
 async def _seed_sync_history():
@@ -1279,4 +1280,4 @@ async def _seed_xero_demo():
                 "synced_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.xero_contacts.insert_one(contact)
-    return invoices
+    return [{k: v for k, v in inv.items() if k != "_id"} for inv in invoices]

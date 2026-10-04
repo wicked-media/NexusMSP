@@ -185,6 +185,7 @@ async def record_inbound_client_email(*, sender_email: str, sender_name: str, su
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.client_communication_events.insert_one(event)
+    event.pop("_id", None)
     return event
 
 

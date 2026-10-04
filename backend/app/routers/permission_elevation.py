@@ -980,6 +980,7 @@ async def grant_elevation(data: dict, current_user: dict = Depends(get_current_u
     })
 
     record.pop("previous_permissions", None)
+    record.pop("_id", None)
     return record
 
 
@@ -1088,6 +1089,7 @@ async def break_glass(data: dict, current_user: dict = Depends(get_current_user)
         "duration_minutes": duration, "reason": reason, "elevation_id": elevation_id,
     })
     record.pop("previous_permissions", None)
+    record.pop("_id", None)
     return record
 
 

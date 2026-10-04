@@ -164,6 +164,9 @@ ROUTER_PRIORITY = [
     "auth",
     # The client portal also exposes /tickets. Register the technician-facing
     # ticket router first so the main application does not match portal routes.
+    # Literal /tickets/* routes (merge-suggestions) must be claimed before the
+    # generic /tickets/{ticket_id} route, or FastAPI match-order shadows them.
+    "ticket_merge",
     "tickets",
     "ticket_attachments", "ticket_email_notifications",
     "device_discovery", "device_viewers", "device_chat",

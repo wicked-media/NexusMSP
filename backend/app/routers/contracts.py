@@ -61,6 +61,7 @@ async def create_contract_type(data: dict, current_user: dict = Depends(get_curr
     now = datetime.now(timezone.utc).isoformat()
     doc = {"id": str(uuid.uuid4()), "code": code, "name": name, "description": data.get("description", ""), "color": data.get("color", "blue"), "default_billing_frequency": data.get("default_billing_frequency", "monthly"), "default_sla_tier": data.get("default_sla_tier", "standard"), "is_active": bool(data.get("is_active", True)), "created_at": now, "updated_at": now}
     await db.contract_types.insert_one(doc)
+    doc.pop("_id", None)
     await log_activity(current_user, "created", "contract_type", doc["id"], name, f"Created contract type {code}")
     return doc
 

@@ -436,6 +436,7 @@ async def execute_script(script_id: str, device_ids: List[str], parameters: Dict
         doc = execution.model_dump()
         doc['created_at'] = doc['created_at'].isoformat()
         await db.script_executions.insert_one(doc)
+        doc.pop("_id", None)
         await _dispatch_execution_to_agent(doc, script, device, current_user.get("email") or current_user["id"])
         executions.append(doc)
     

@@ -85,6 +85,7 @@ async def create_terminal_session(data: dict, current_user: dict = Depends(requi
         "os": device.get("os") or "",
     }
     await db.terminal_sessions.insert_one(session)
+    session.pop("_id", None)
     await log_activity(current_user, "agent_command_session_opened", "device", device_id, session["device_name"], f"{shell} command console opened", metadata={"session_id": session["id"], "agent_id": session["agent_id"]})
     return session
 

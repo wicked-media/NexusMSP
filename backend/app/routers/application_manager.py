@@ -242,7 +242,7 @@ async def create_application_policy(
     )
     return {
         "policy": {
-            **{key: value for key, value in policy.items() if key not in {"created_by"}},
+            **{key: value for key, value in policy.items() if key not in {"_id", "created_by"}},
             "enforcement_message": "Policy recorded. Configure a verified execution provider before relying on it to deploy software.",
         }
     }

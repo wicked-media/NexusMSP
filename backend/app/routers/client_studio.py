@@ -438,6 +438,7 @@ async def create_stakeholder(
         entity_id=stakeholder["id"],
         metadata={"role": stakeholder["role"]},
     )
+    stakeholder.pop("_id", None)
     return stakeholder
 
 

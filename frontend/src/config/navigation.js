@@ -42,9 +42,12 @@ export const navGroups = [
       },
       {
         path: "/team-hub", icon: UserCog, label: "Team",
-        workspacePaths: ["/technician-onboarding", "/nexus-academy"],
+        workspacePaths: ["/technician-onboarding", "/onboarding-checklists", "/tech-rewards", "/nexus-academy"],
         children: [
           { path: "/team-hub?view=directory", label: "Team directory" },
+          { path: "/technician-onboarding", label: "Technician readiness" },
+          { path: "/onboarding-checklists", label: "Onboarding checklists" },
+          { path: "/tech-rewards", label: "Achievements & rewards" },
           { path: "/nexus-academy", label: "Nexus Academy" },
           { path: "/team-hub?view=roster", label: "On-call roster" },
           { path: "/team-hub?view=capacity", label: "Capacity" },

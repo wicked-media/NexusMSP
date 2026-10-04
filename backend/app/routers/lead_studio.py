@@ -88,6 +88,7 @@ async def create_email_intake_item(*, current_user: dict, sender_email: str, sen
         if existing:
             return existing
     await db.lead_intake_items.insert_one(item)
+    item.pop("_id", None)
     await db.lead_intake_events.insert_one({
         "id": str(uuid.uuid4()), "tenant_id": tenant_id, "intake_id": item["id"],
         "action": "received", "actor_id": "system", "actor_name": "Email intake",

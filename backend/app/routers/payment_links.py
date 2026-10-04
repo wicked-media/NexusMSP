@@ -434,6 +434,7 @@ async def create_payment_link(
         str(invoice.get("invoice_number") or invoice_id),
         metadata={"payment_link_id": link["id"], "client_id": invoice.get("client_id"), "expires_days": expires_days},
     )
+    link.pop("_id", None)
     return link
 
 

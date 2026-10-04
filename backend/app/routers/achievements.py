@@ -5,7 +5,19 @@ import uuid
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
 from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.tech_rewards import award_points
+from app.services.scope_permissions import platform_tenant_id
 from app.models import *
+
+ACHIEVEMENT_POINTS = {
+    "tickets": 100,
+    "invoices": 80,
+    "remote": 60,
+    "tenure": 150,
+    "special": 120,
+    "celebration": 50,
+    "custom": 75,
+}
 
 router = APIRouter()
 
@@ -90,7 +102,20 @@ async def award_achievement(tech_id: str, data: dict, current_user: dict = Depen
     await db.user_achievements.insert_one(entry)
     # Remove MongoDB _id before returning
     entry.pop("_id", None)
-    return {"message": "Achievement awarded", "achievement": entry}
+    # Hook the achievement into the points economy so techs can save for pets/skins.
+    definition = next((a for a in ACHIEVEMENT_DEFINITIONS if a["id"] == achievement_id), None)
+    points = int(data.get("points") or ACHIEVEMENT_POINTS.get((definition or {}).get("category", "custom"), 75))
+    ledger_entry = await award_points(
+        db,
+        user_id=tech_id,
+        tenant_id=platform_tenant_id(current_user),
+        delta=points,
+        kind="earn",
+        reason=f"Achievement unlocked: {entry['achievement_name']}",
+        actor=current_user,
+        reference_id=f"achievement:{achievement_id}",
+    )
+    return {"message": "Achievement awarded", "achievement": entry, "points_awarded": points, "points_balance": ledger_entry["balance_after"]}
 
 @router.post("/technicians/{tech_id}/achievements/check")
 async def check_achievements(tech_id: str, current_user: dict = Depends(get_current_user)):
@@ -154,7 +179,20 @@ async def check_achievements(tech_id: str, current_user: dict = Depends(get_curr
         except:
             pass
     
-    return {"newly_awarded": newly_awarded, "total_earned": len(earned_ids) + len(newly_awarded)}
+    points_earned = 0
+    if newly_awarded:
+        ledger_entry = await award_points(
+            db,
+            user_id=tech_id,
+            tenant_id=platform_tenant_id(current_user),
+            delta=len(newly_awarded) * 75,
+            kind="earn",
+            reason=f"Achievements unlocked: {', '.join(newly_awarded[:5])}",
+            actor=current_user,
+            reference_id=f"achievements-check:{tech_id}:{len(earned_ids) + len(newly_awarded)}",
+        )
+        points_earned = ledger_entry["delta"]
+    return {"newly_awarded": newly_awarded, "total_earned": len(earned_ids) + len(newly_awarded), "points_earned": points_earned}
 
 @router.delete("/technicians/{tech_id}/achievements/{achievement_id}")
 async def revoke_achievement(tech_id: str, achievement_id: str, current_user: dict = Depends(get_current_user)):

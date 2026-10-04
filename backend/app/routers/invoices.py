@@ -655,6 +655,7 @@ async def create_split_billing_invoices(
         child_doc["created_at"] = now.isoformat()
         child_doc["tenant_id"] = platform_tenant_id(current_user)
         await db.invoices.insert_one(child_doc)
+        child_doc.pop("_id", None)
         payer_invoices.append(child_doc)
         await log_activity(
             current_user,
@@ -1074,6 +1075,7 @@ async def close_payment_settlement(data: dict, request: Request, current_user: d
         raise HTTPException(status_code=404, detail="No pending payments matched this settlement")
     record = {"id": settlement_id, "method": method, "date": date, "reference": reference, "payment_count": payment_count, "total": round(total, 2), "status": "pending_xero_reconciliation", "created_at": datetime.now(timezone.utc).isoformat(), "created_by": current_user.get("name", "")}
     await db.billing_settlements.insert_one(record)
+    record.pop("_id", None)
     return record
 
 

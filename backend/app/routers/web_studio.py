@@ -518,7 +518,9 @@ async def request_wordpress_action(site_id: str, payload: WordPressActionInput, 
         "Created an approval-backed WordPress maintenance request",
         metadata={"client_id": site.get("client_id"), "site_id": site_id, "target": action["target"], "approval_id": approval["id"]},
     )
-    return {"action": {**action, "approval_id": approval["id"]}, "approval": approval,
+    action_view = {k: v for k, v in action.items() if k != "_id"}
+    approval_view = {k: v for k, v in approval.items() if k != "_id"}
+    return {"action": {**action_view, "approval_id": approval["id"]}, "approval": approval_view,
             "message": "Update is awaiting approval and a Nexus WordPress Control worker; no WordPress change has been made."}
 
 
@@ -628,7 +630,7 @@ async def create_synergy_action(payload: SynergyActionRequest, user: dict = Depe
         }, user)
         await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"approval_id": approval["id"]}})
         action["approval_id"] = approval["id"]
-        return {"action": action, "approval": approval, "message": "Provider change is awaiting independent approval"}
+        return {"action": {k: v for k, v in action.items() if k != "_id"}, "approval": {k: v for k, v in approval.items() if k != "_id"}, "message": "Provider change is awaiting independent approval"}
     try:
         result = await asyncio.to_thread(execute_synergy, payload.operation_id, parameters, await _synergy_credentials())
     except HTTPException:
@@ -642,7 +644,7 @@ async def create_synergy_action(payload: SynergyActionRequest, user: dict = Depe
     safe_result = _redact_provider_value(result)
     await db.web_provider_actions.update_one({"id": action["id"]}, {"$set": {"status": "completed", "completed_at": _now(), "result": safe_result}})
     await log_activity(user, "synergy_action_completed", "web_provider_action", action["id"], payload.operation_id, "Completed a read-only Synergy Wholesale action", metadata={"client_id": payload.client_id})
-    return {"action": {**action, "status": "completed"}, "result": safe_result}
+    return {"action": {**{k: v for k, v in action.items() if k != "_id"}, "status": "completed"}, "result": safe_result}
 
 
 @router.post("/web-studio/integrations/synergy-wholesale/actions/{action_id}/execute")
