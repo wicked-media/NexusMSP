@@ -16,12 +16,19 @@ from app.database import db
 from app.services import (
     nexus_certainty,
     nexus_connector,
+    nexus_decision_family,
+    nexus_diagnostics,
+    nexus_find,
     nexus_genome,
     nexus_insight,
     nexus_intent,
     nexus_ledger,
     nexus_ops_layer,
     nexus_protocol,
+    nexus_recorder,
+    nexus_rescue,
+    nexus_safety_layer,
+    nexus_synthetic,
     qol_tools,
     tech_fun,
 )
@@ -33,6 +40,28 @@ router = APIRouter()
 
 def _user_id(current_user: dict) -> str:
     return str(current_user.get("id") or "")
+
+
+def _guard(result: dict, not_found_detail: str) -> dict:
+    """Map the service contract onto HTTP.
+
+    Services report bad input as ``{"found": False, "error": ...}`` (400) and a
+    genuinely missing object as ``{"found": False}`` with no error (404). A
+    successful read that simply has no ``found`` key passes straight through.
+    """
+    if result.get("found") is False:
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    return result
+
+
+def _source_list(value: str | None) -> list[str] | None:
+    """Parse a comma-separated source filter, or None for every source."""
+    if value is None:
+        return None
+    parts = [part.strip() for part in str(value).split(",") if part.strip()]
+    return parts or None
 
 
 @router.get("/tech-fun/me")
@@ -902,3 +931,380 @@ async def list_certification_reviews(
 ):
     """Recorded certification reviews in your tenant scope."""
     return await nexus_protocol.list_reviews(db, current_user, adapter)
+
+
+# ============== SAFETY UX (P1 #9): WRITING GUARD, WRONG-CUSTOMER, FOUR-EYES ==============
+
+
+@router.post("/tech-fun/safety/writing-guard")
+async def safety_writing_guard(data: dict, current_user: dict = Depends(get_current_user)):
+    """Scan a draft for cross-customer references before a human sends it."""
+    result = await nexus_safety_layer.writing_guard(db, current_user, data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid draft")
+    return result
+
+
+@router.post("/tech-fun/safety/wrong-customer")
+async def safety_wrong_customer(data: dict, current_user: dict = Depends(get_current_user)):
+    """Wrong-Customer Protection: is this content safe to send to this customer?"""
+    result = await nexus_safety_layer.wrong_customer_check(db, current_user, data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid check")
+    return result
+
+
+@router.post("/tech-fun/safety/four-eyes")
+async def request_four_eyes(data: dict, current_user: dict = Depends(get_current_user)):
+    """Request independent sign-off on a change — the real diff is attached."""
+    result = await nexus_safety_layer.request_four_eyes(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid sign-off request")
+    return result
+
+
+@router.get("/tech-fun/safety/four-eyes")
+async def list_four_eyes(client_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Sign-off queue and history with derived honest lifecycle states."""
+    return await nexus_safety_layer.list_four_eyes(db, current_user, client_id)
+
+
+@router.post("/tech-fun/safety/four-eyes/{review_id}/review")
+async def review_four_eyes(review_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Approve or reject a sign-off — never your own."""
+    result = await nexus_safety_layer.review_four_eyes(
+        db, current_user, str(current_user.get("name") or ""), review_id, data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=404 if result.get("error") is None else 400,
+                            detail=result.get("error") or "sign-off not found")
+    return result
+
+
+# ============== HUMAN-DECISION FAMILY (P0 #7) ==============
+
+
+@router.get("/tech-fun/decision-family/lifecycle")
+async def decision_family_lifecycle(current_user: dict = Depends(get_current_user)):
+    """The shared lifecycle: proposed → reviewed → decided → review-due → expired."""
+    return nexus_decision_family.lifecycle_spec()
+
+
+@router.post("/tech-fun/decision-family")
+async def record_family_object(data: dict, current_user: dict = Depends(get_current_user)):
+    """Record an approval, consent receipt, risk acceptance or decision-log entry."""
+    result = await nexus_decision_family.record_object(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid object")
+    return result
+
+
+@router.get("/tech-fun/decision-family")
+async def decision_family_index(client_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Who accepted what risk, when does it expire, what happened next — one read."""
+    return await nexus_decision_family.family_index(db, current_user, client_id)
+
+
+@router.post("/tech-fun/decision-family/{object_id}/transition")
+async def transition_family_object(object_id: str, data: dict, current_user: dict = Depends(get_current_user)):
+    """Move one object through the shared lifecycle — every move audited."""
+    result = await nexus_decision_family.transition(
+        db, current_user, str(current_user.get("name") or ""), object_id, data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=404 if result.get("error") is None else 400,
+                            detail=result.get("error") or "object not found")
+    return result
+
+
+# ============== DIAGNOSTIC WORKBENCH: ONE INVESTIGATION, HYPOTHESES, NEXT TEST ==============
+
+
+@router.get("/tech-fun/diagnostics/model")
+async def diagnostics_model(current_user: dict = Depends(get_current_user)):
+    """The published differential-diagnosis model: domains, priors and tests."""
+    return nexus_diagnostics.hypothesis_catalog()
+
+
+@router.post("/tech-fun/diagnostics/investigations")
+async def open_investigation(data: dict, current_user: dict = Depends(get_current_user)):
+    """Open an investigation on a user, device or customer and gather what is observed."""
+    result = await nexus_diagnostics.open_investigation(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Subject not found in your scope")
+
+
+@router.get("/tech-fun/diagnostics/investigations")
+async def list_investigations(
+    client_id: str | None = None,
+    status: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Open and recent investigations in your scope, newest first."""
+    result = await nexus_diagnostics.list_investigations(db, current_user, client_id, status)
+    return _guard(result, "No investigations in your scope")
+
+
+@router.get("/tech-fun/diagnostics/investigations/{investigation_id}")
+async def investigation_summary(investigation_id: str, current_user: dict = Depends(get_current_user)):
+    """Ranked hypotheses, the evidence trail and the next test that removes most doubt."""
+    result = await nexus_diagnostics.investigation_summary(db, current_user, investigation_id)
+    return _guard(result, "Investigation not found in your scope")
+
+
+@router.get("/tech-fun/diagnostics/investigations/{investigation_id}/next-test")
+async def investigation_next_test(investigation_id: str, current_user: dict = Depends(get_current_user)):
+    """The single test with the highest expected information value right now."""
+    result = await nexus_diagnostics.next_best_test(db, current_user, investigation_id)
+    return _guard(result, "Investigation not found in your scope")
+
+
+@router.post("/tech-fun/diagnostics/investigations/{investigation_id}/evidence")
+async def record_investigation_evidence(
+    investigation_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Record one observed test result and update the hypotheses honestly."""
+    result = await nexus_diagnostics.add_evidence(
+        db, current_user, str(current_user.get("name") or ""), investigation_id, data or {})
+    return _guard(result, "Investigation not found in your scope")
+
+
+@router.post("/tech-fun/diagnostics/investigations/{investigation_id}/close")
+async def close_investigation(
+    investigation_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Close with an honest outcome — a guessed cause is refused."""
+    result = await nexus_diagnostics.close_investigation(
+        db, current_user, str(current_user.get("name") or ""), investigation_id, data or {})
+    return _guard(result, "Investigation not found in your scope")
+
+
+# ============== FIND EVERYWHERE: ONE VALUE, EVERY STORE, CHANGE IMPACT ==============
+
+
+@router.get("/tech-fun/find/sources")
+async def find_sources(current_user: dict = Depends(get_current_user)):
+    """Exactly which stores Find Everywhere searches, and who owns each one."""
+    return nexus_find.search_sources()
+
+
+@router.get("/tech-fun/find")
+async def find_everywhere(
+    q: str = Query(..., max_length=200),
+    sources: str | None = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    """Find one value across every Nexus store in your tenant, grouped by store."""
+    result = await nexus_find.find_everywhere(db, current_user, q, _source_list(sources), limit)
+    return _guard(result, "Nothing to search")
+
+
+@router.post("/tech-fun/find/literals")
+async def find_literals(data: dict, current_user: dict = Depends(get_current_user)):
+    """Hardcoded IP, hostname and domain hunter — locate one value or discover them all."""
+    result = await nexus_find.literal_scan(db, current_user, data or {})
+    return _guard(result, "Nothing to scan")
+
+
+@router.post("/tech-fun/find/change-impact")
+async def find_change_impact(data: dict, current_user: dict = Depends(get_current_user)):
+    """Before changing a value: everything in Nexus that references it."""
+    result = await nexus_find.change_impact(db, current_user, data or {})
+    return _guard(result, "Nothing to inspect")
+
+
+# ============== COMMAND RECORDER: RECORDED FIX → REVIEWED RUNBOOK → VERIFIED ==============
+
+
+@router.post("/tech-fun/recorder/sessions")
+async def start_recording(data: dict, current_user: dict = Depends(get_current_user)):
+    """Start recording a manual fix as an append-only session."""
+    result = await nexus_recorder.start_session(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Session could not be started")
+
+
+@router.get("/tech-fun/recorder/sessions")
+async def list_recording_sessions(
+    status: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Recorded sessions in your scope, newest first."""
+    result = await nexus_recorder.list_sessions(db, current_user, status)
+    return _guard(result, "No sessions in your scope")
+
+
+@router.get("/tech-fun/recorder/sessions/{session_id}")
+async def get_recording_session(session_id: str, current_user: dict = Depends(get_current_user)):
+    """One recorded session with its redacted, append-only steps."""
+    result = await nexus_recorder.get_session(db, current_user, session_id)
+    return _guard(result, "Session not found in your scope")
+
+
+@router.post("/tech-fun/recorder/sessions/{session_id}/steps")
+async def record_recording_step(
+    session_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Append one step. Secrets are redacted before anything is stored."""
+    result = await nexus_recorder.record_step(db, current_user, session_id, data or {})
+    return _guard(result, "Session not found in your scope")
+
+
+@router.post("/tech-fun/recorder/sessions/{session_id}/end")
+async def end_recording_session(
+    session_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Close a recording with its real outcome."""
+    result = await nexus_recorder.end_session(db, current_user, session_id, data or {})
+    return _guard(result, "Session not found in your scope")
+
+
+@router.post("/tech-fun/recorder/sessions/{session_id}/runbook")
+async def propose_runbook_from_session(
+    session_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Turn a real recorded fix into a draft runbook a human must review."""
+    result = await nexus_recorder.propose_runbook(
+        db, current_user, str(current_user.get("name") or ""), session_id, data or {})
+    return _guard(result, "Session not found in your scope")
+
+
+@router.get("/tech-fun/recorder/runbooks")
+async def list_recorded_runbooks(
+    status: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Draft, verified and demoted runbooks in your scope."""
+    result = await nexus_recorder.list_runbooks(db, current_user, status)
+    return _guard(result, "No runbooks in your scope")
+
+
+@router.post("/tech-fun/recorder/runbooks/{runbook_id}/verify")
+async def verify_recorded_runbook(
+    runbook_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Record a real outcome. Autonomy needs three verified successes and approval."""
+    result = await nexus_recorder.verify_runbook(
+        db, current_user, str(current_user.get("name") or ""), runbook_id, data or {})
+    return _guard(result, "Runbook not found in your scope")
+
+
+# ============== SYNTHETIC EMPLOYEE: BUSINESS CHECKS, NOT "SERVER RESPONDS" ==============
+
+
+@router.get("/tech-fun/synthetic/checks")
+async def synthetic_checks(current_user: dict = Depends(get_current_user)):
+    """The safe, read-only checks a synthetic identity can run."""
+    return nexus_synthetic.check_catalog()
+
+
+@router.post("/tech-fun/synthetic/identities")
+async def register_synthetic_identity(data: dict, current_user: dict = Depends(get_current_user)):
+    """Register a synthetic identity by vault reference — never a credential."""
+    result = await nexus_synthetic.register_identity(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Identity could not be registered")
+
+
+@router.get("/tech-fun/synthetic/identities")
+async def list_synthetic_identities(
+    client_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Synthetic identities in your scope with their declared checks."""
+    result = await nexus_synthetic.list_identities(db, current_user, client_id)
+    return _guard(result, "No synthetic identities in your scope")
+
+
+@router.get("/tech-fun/synthetic/identities/{identity_id}")
+async def synthetic_identity_status(identity_id: str, current_user: dict = Depends(get_current_user)):
+    """Latest business verdict, coverage and trend for one identity."""
+    result = await nexus_synthetic.identity_status(db, current_user, identity_id)
+    return _guard(result, "Synthetic identity not found in your scope")
+
+
+@router.post("/tech-fun/synthetic/identities/{identity_id}/state")
+async def set_synthetic_identity_state(
+    identity_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Enable or disable a synthetic identity."""
+    result = await nexus_synthetic.set_identity_state(db, current_user, identity_id, data or {})
+    return _guard(result, "Synthetic identity not found in your scope")
+
+
+@router.post("/tech-fun/synthetic/runs")
+async def record_synthetic_run(data: dict, current_user: dict = Depends(get_current_user)):
+    """Record check outcomes. Partial evidence is never reported as healthy."""
+    result = await nexus_synthetic.record_run(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Synthetic identity not found in your scope")
+
+
+@router.get("/tech-fun/synthetic/overview")
+async def synthetic_overview(
+    client_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """What synthetic identities currently prove, and what they have never run."""
+    result = await nexus_synthetic.synthetic_overview(db, current_user, client_id)
+    return _guard(result, "No synthetic identities in your scope")
+
+
+# ============== NEXUS RESCUE: HELP WHEN WINDOWS CANNOT BOOT (PLANS, NOT CLAIMS) ==============
+
+
+@router.get("/tech-fun/rescue/capabilities")
+async def rescue_capabilities(current_user: dict = Depends(get_current_user)):
+    """The recovery capability ladder, with each capability's honest boundary."""
+    return nexus_rescue.capability_ladder()
+
+
+@router.post("/tech-fun/rescue/assess")
+async def rescue_assess(data: dict, current_user: dict = Depends(get_current_user)):
+    """What is actually reachable for this device, from real observed evidence."""
+    result = await nexus_rescue.assess(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Device not found in your scope")
+
+
+@router.get("/tech-fun/rescue/console/{device_id}")
+async def rescue_console(device_id: str, current_user: dict = Depends(get_current_user)):
+    """One call for a recovery console: device, liveness evidence, what is reachable."""
+    result = await nexus_rescue.rescue_console(db, current_user, device_id)
+    return _guard(result, "Device not found in your scope")
+
+
+@router.post("/tech-fun/rescue/sessions")
+async def start_rescue_session(data: dict, current_user: dict = Depends(get_current_user)):
+    """Plan a recovery. Sessions are born \"planned\" and are never executed remotely."""
+    result = await nexus_rescue.start_recovery(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Device not found in your scope")
+
+
+@router.get("/tech-fun/rescue/sessions")
+async def list_rescue_sessions(
+    device_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Planned and in-progress recovery sessions in your scope."""
+    result = await nexus_rescue.list_sessions(db, current_user, device_id)
+    return _guard(result, "No rescue sessions in your scope")
+
+
+@router.get("/tech-fun/rescue/sessions/{session_id}")
+async def get_rescue_session(session_id: str, current_user: dict = Depends(get_current_user)):
+    """One recovery session with its append-only step log."""
+    result = await nexus_rescue.get_session(db, current_user, session_id)
+    return _guard(result, "Rescue session not found in your scope")
+
+
+@router.post("/tech-fun/rescue/sessions/{session_id}/steps")
+async def record_rescue_step(
+    session_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Log progress. Technician actions are recorded as performed by a human."""
+    result = await nexus_rescue.record_step(
+        db, current_user, str(current_user.get("name") or ""), session_id, data or {})
+    return _guard(result, "Rescue session not found in your scope")

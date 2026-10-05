@@ -222,9 +222,11 @@ payroll), rubber-duck diagnosis, "bet you $5 it's DNS" predictions.
 | Tech toolbox, shift intelligence, work locks, handover | QoL / P1 (#6, #7 partial) |
 | Insight layer (baselines, anomaly explorer, timeline, search, sidecar, debt) | P0 #4/#8 groundwork, P1 #7 |
 | Certainty layer (unknowns, Prove It, confidence, laws, noise, readiness) | P0 #2/#8, P1 #2/#3 |
-| This batch (consequence engine, commander, decision/risk memory) | P1 #1/#6/#8 |
+| Operating-layer batch (consequence engine, commander, decision/risk memory) | P1 #1/#6/#8 |
 | Network primitives batch (intent, genome, connector, metering + ledger) | $1B thesis primitives — intent (#4), genome (#1–2), connector (#8–9), commerce (#10–11) |
 | Protocol batch (Nexus Protocol v0.1, Nexus Native certification) | Protocol era — spec, action descriptor (P0 #1), conformance |
+| Safety & decision-family batch (Writing Guard, wrong-customer, four-eyes with real diffs, unified lifecycle) | P1 #9 flagship + P0 #7 human-decision object family |
+| Technician-OS batch (Diagnostic Workbench, Find Everywhere, Command Recorder, Synthetic Employee, Nexus Rescue) | P1 #7 flagship — the Observe → Explain → Recommend → Act → Verify → Learn loop, evidence-first |
 
 **Planning rule:** each batch ships one flagship step *and* strengthens a P0
 primitive. Features from P2 appear only when they ride along for free.
