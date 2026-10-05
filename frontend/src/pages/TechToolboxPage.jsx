@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
+import DevicePicker from "@/components/DevicePicker";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,9 +36,9 @@ const WIN_KINDS = {
   close: { icon: "✅", label: "Ticket closed" },
 };
 
-function Section({ icon: Icon, title, hint, children }) {
+function Section({ icon: Icon, title, hint, children, id }) {
   return (
-    <Card className="border-violet-500/20 bg-slate-900/40">
+    <Card id={id} className="nx-tool-card border-violet-500/20 bg-slate-900/40">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Icon className="h-4 w-4 text-violet-400" />{title}
@@ -707,7 +709,7 @@ function RealityCheck() {
   return (
     <Section icon={ShieldCheck} title="Verify User Report" hint="Evidence summary for a customer claim — facts, never accusations. Officially not called the bullshit detector.">
       <div className="flex gap-2">
-        <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID (e.g. dev-1)" data-testid="verify-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="verify-device" />
         <Button size="sm" onClick={run} disabled={busy} data-testid="verify-run">
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ShieldCheck className="mr-1 h-3 w-3" />}Verify
         </Button>
@@ -786,7 +788,7 @@ function DevicePersonality() {
   return (
     <Section icon={Server} title="Device personality" hint="A generated history for long-lived machines — and a nudge when a veteran deserves retirement.">
       <div className="flex gap-2">
-        <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID (e.g. dev-1)" data-testid="personality-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="personality-device" />
         <Button size="sm" onClick={run} disabled={busy} data-testid="personality-run">
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Server className="mr-1 h-3 w-3" />}Tell me
         </Button>
@@ -1224,7 +1226,7 @@ function BlastRadius() {
   return (
     <Section icon={Radar} title="Blast radius" hint="Click any device: if this fails, what is affected? Derived from live relationships only.">
       <div className="flex gap-2">
-        <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID" data-testid="blast-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="blast-device" />
         <Button size="sm" onClick={run} disabled={busy || !deviceId.trim()} data-testid="blast-run">
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Radar className="mr-1 h-3 w-3" />}Map it
         </Button>
@@ -1279,7 +1281,7 @@ function WorkLocks() {
   return (
     <Section icon={Lock} title="Before you touch it…" hint="Soft object locks: see who else is on the device, what's already open, then claim or deliberately take ownership.">
       <div className="flex gap-2">
-        <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID" data-testid="lock-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="lock-device" />
         <Button size="sm" variant="outline" onClick={check} disabled={busy || !deviceId.trim()} data-testid="lock-check">Check</Button>
         <Button size="sm" onClick={() => claim(false)} disabled={busy || !deviceId.trim()} data-testid="lock-claim">
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Lock className="mr-1 h-3 w-3" />}Work on this
@@ -1415,7 +1417,7 @@ function BehaviourBaseline() {
   return (
     <Section icon={Activity} title="Understand normal" hint="What is normal for THIS device? Peer-derived behaviour bands — so 85% RAM is only interesting when 85% isn't this server's normal.">
       <div className="flex gap-2">
-        <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID" data-testid="baseline-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="baseline-device" />
         <Button size="sm" onClick={run} disabled={busy || !deviceId.trim()} data-testid="baseline-run">
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Activity className="mr-1 h-3 w-3" />}Baseline
         </Button>
@@ -1607,7 +1609,7 @@ function SessionSidecar() {
   return (
     <Section icon={PanelRight} title="Remote session sidecar" hint="Everything beside the session: device health, open tickets, recent changes, warranty — without leaving the screen.">
       <div className="flex gap-2">
-        <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID" data-testid="sidecar-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="sidecar-device" />
         <Button size="sm" onClick={run} disabled={busy || !deviceId.trim()} data-testid="sidecar-run">
           {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <PanelRight className="mr-1 h-3 w-3" />}Open sidecar
         </Button>
@@ -3033,7 +3035,7 @@ function DiagnosticWorkbench() {
   };
 
   return (
-    <Section icon={Stethoscope} title="Diagnostic Workbench" hint="One investigation instead of eighty tools: the plausible cause domains, the evidence recorded so far, and the single next test that eliminates the most uncertainty. Probabilities are arithmetic on published heuristics — unrecorded tests never count as passed.">
+    <Section id="tool-diagnostic-workbench" icon={Stethoscope} title="Diagnostic Workbench" hint="One investigation instead of eighty tools: the plausible cause domains, the evidence recorded so far, and the single next test that eliminates the most uncertainty. Probabilities are arithmetic on published heuristics — unrecorded tests never count as passed.">
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-64" value={form.symptom} onChange={(e) => setForm({ ...form, symptom: e.target.value })} placeholder="symptom" data-testid="inv-symptom" />
         <select className="h-8 rounded-md border border-border bg-card px-2 text-xs" value={form.subject_type} onChange={(e) => setForm({ ...form, subject_type: e.target.value })} data-testid="inv-subject-type">
@@ -3136,7 +3138,7 @@ function FindEverywhere() {
   };
 
   return (
-    <Section icon={Crosshair} title="Find Everywhere" hint="Where else does this value appear? One IP, hostname or domain across every store Nexus owns — then what breaks if you change it. Nexus cannot see hardcoded values inside applications, appliances or firmware, and says so rather than implying clean.">
+    <Section id="tool-find-everywhere" icon={Crosshair} title="Find Everywhere" hint="Where else does this value appear? One IP, hostname or domain across every store Nexus owns — then what breaks if you change it. Nexus cannot see hardcoded values inside applications, appliances or firmware, and says so rather than implying clean.">
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-56" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="IP, hostname or domain" data-testid="find-query" />
         <Button size="sm" onClick={search} disabled={busy || !query.trim()} data-testid="find-search">Search every store</Button>
@@ -3144,7 +3146,7 @@ function FindEverywhere() {
         <Button size="sm" variant="outline" onClick={hunt} disabled={busy} data-testid="find-hunt">Hunt hardcoded literals</Button>
       </div>
       {result && (
-        <div className="mt-3 space-y-1.5 text-xs" data-testid="find-result">
+        <div className="mt-3 space-y-1.5 text-xs nx-result-reveal" data-testid="find-result">
           <p className="font-semibold text-violet-200">{result.total} reference(s) across {result.groups?.length || 0} store(s)</p>
           {result.groups?.map((group) => (
             <div key={group.source} className="rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5">
@@ -3254,7 +3256,7 @@ function CommandRecorder() {
     <Section icon={Radio} title="Command Recorder" hint="Fix it by hand, and Nexus asks the useful question: save this as a runbook? Recorded steps become prerequisites, variables, actions, verification and rollback. Three verified successes make it an autonomy candidate — never autonomous without explicit approval.">
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-52" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="what are you fixing" data-testid="rec-label" />
-        <Input className="h-8 w-28" value={form.device_id} onChange={(e) => setForm({ ...form, device_id: e.target.value })} placeholder="device ID" data-testid="rec-device" />
+        <DevicePicker value={form.device_id} onChange={(v) => setForm({ ...form, device_id: v })} testId="rec-device" />
         <Button size="sm" onClick={start} disabled={busy || !form.label.trim()} data-testid="rec-start">Start recording</Button>
       </div>
       {session && (
@@ -3406,7 +3408,7 @@ function NexusRescue() {
   return (
     <Section icon={LifeBuoy} title="Nexus Rescue" hint="What happens when the machine is broken badly enough that the agent does not work. Nexus reports only what is actually reachable from real evidence and produces a reviewed recovery plan — it never claims a remote execution the agent cannot perform.">
       <div className="flex flex-wrap gap-2">
-        <Input className="h-8 w-28" value={form.device_id} onChange={(e) => setForm({ ...form, device_id: e.target.value })} placeholder="device ID" data-testid="rescue-device" />
+        <DevicePicker value={form.device_id} onChange={(v) => setForm({ ...form, device_id: v })} testId="rescue-device" />
         <select className="h-8 rounded-md border border-border bg-card px-2 text-xs" value={form.symptom} onChange={(e) => setForm({ ...form, symptom: e.target.value })} data-testid="rescue-symptom">
           {RESCUE_SYMPTOMS.map((symptom) => <option key={symptom} value={symptom}>{symptom}</option>)}
         </select>
@@ -3467,7 +3469,7 @@ function MissionControlInvestigate() {
 
   const investigation = result?.investigation;
   return (
-    <Section icon={Radar} title="Mission Control · Investigate" hint="Stop deciding which of eighty tools to open. Describe what appears wrong and Nexus assembles the scope, the tools worth opening, the hypotheses and the single next action — and says plainly when a human must decide instead of Nexus.">
+    <Section id="tool-mission-control" icon={Radar} title="Mission Control · Investigate" hint="Stop deciding which of eighty tools to open. Describe what appears wrong and Nexus assembles the scope, the tools worth opening, the hypotheses and the single next action — and says plainly when a human must decide instead of Nexus.">
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-72" value={problem} onChange={(e) => setProblem(e.target.value)} placeholder="tell Nexus what appears wrong" data-testid="mci-problem" />
         <Button size="sm" onClick={investigate} disabled={busy || !problem.trim()} data-testid="mci-run">
@@ -3475,7 +3477,7 @@ function MissionControlInvestigate() {
         </Button>
       </div>
       {investigation && (
-        <div className="mt-3 space-y-2 text-xs" data-testid="mci-result">
+        <div className="mt-3 space-y-2 text-xs nx-result-reveal" data-testid="mci-result">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="text-violet-300">{investigation.id}</Badge>
             <span className="text-muted-foreground">{investigation.status}</span>
@@ -3539,13 +3541,13 @@ function StateEngineDrift() {
   };
 
   return (
-    <Section icon={Activity} title="State Engine · Drift Control" hint="Declare what a device should look like and reconcile it continuously: desired → actual → difference → remediation → verification. A check with no evidence in the record is reported unverified — Nexus never infers protection from a missing field.">
+    <Section id="tool-state-engine" icon={Activity} title="State Engine · Drift Control" hint="Declare what a device should look like and reconcile it continuously: desired → actual → difference → remediation → verification. A check with no evidence in the record is reported unverified — Nexus never infers protection from a missing field.">
       <div className="flex flex-wrap gap-2">
-        <Input className="h-8 w-32" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} placeholder="device ID" data-testid="state-device" />
+        <DevicePicker value={deviceId} onChange={setDeviceId} testId="state-device" />
         <Button size="sm" onClick={evaluate} disabled={busy || !deviceId.trim()} data-testid="state-evaluate">Evaluate device</Button>
       </div>
       {result && (
-        <div className="mt-3 space-y-1.5 text-xs" data-testid="state-result">
+        <div className="mt-3 space-y-1.5 text-xs nx-result-reveal" data-testid="state-result">
           <p className="font-semibold text-violet-200">
             {result.counts.met} met · {result.counts.drifted} drifted · {result.counts.unverified} unverified
           </p>
@@ -3614,14 +3616,14 @@ function FleetShell() {
   };
 
   return (
-    <Section icon={Waypoints} title="Fleet Shell" hint="Not terminal access — a question across the fleet whose answer is an actionable object set. Refine it, and a device the fleet has no evidence about is reported as unavailable rather than quietly counted or dropped.">
+    <Section id="tool-fleet-shell" icon={Waypoints} title="Fleet Shell" hint="Not terminal access — a question across the fleet whose answer is an actionable object set. Refine it, and a device the fleet has no evidence about is reported as unavailable rather than quietly counted or dropped.">
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-32" type="number" value={days} onChange={(e) => setDays(e.target.value)} title="days since boot" data-testid="fleet-days" />
         <Button size="sm" onClick={ask} disabled={busy} data-testid="fleet-ask">Which endpoints haven&apos;t rebooted?</Button>
         <Button size="sm" variant="outline" onClick={refine} disabled={busy || !result} data-testid="fleet-refine">Exclude servers &amp; active users</Button>
       </div>
       {result && (
-        <div className="mt-3 space-y-1.5 text-xs" data-testid="fleet-result">
+        <div className="mt-3 space-y-1.5 text-xs nx-result-reveal" data-testid="fleet-result">
           <p className="font-semibold text-violet-200">{result.count} device(s) in the answer</p>
           <p className="text-muted-foreground">
             excluded — servers {result.excluded?.servers || 0}, active user {result.excluded?.active_user || 0},
@@ -3672,15 +3674,15 @@ function EvidenceEngine() {
   };
 
   return (
-    <Section icon={BadgeCheck} title="Evidence Engine" hint='Proof that an operation actually succeeded, instead of “the script exited zero”. A verdict is verified only when every required check carries a real observation — a success with an unobserved check is partial, not proven.'>
+    <Section id="tool-evidence-engine" icon={BadgeCheck} title="Evidence Engine" hint='Proof that an operation actually succeeded, instead of “the script exited zero”. A verdict is verified only when every required check carries a real observation — a success with an unobserved check is partial, not proven.'>
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-44" value={form.operation} onChange={(e) => setForm({ ...form, operation: e.target.value })} placeholder="operation" data-testid="evidence-operation" />
-        <Input className="h-8 w-28" value={form.target_id} onChange={(e) => setForm({ ...form, target_id: e.target.value })} placeholder="target ID" data-testid="evidence-target" />
+        <DevicePicker value={form.target_id} onChange={(v) => setForm({ ...form, target_id: v })} testId="evidence-target" />
         <Button size="sm" onClick={() => record(false)} disabled={busy} data-testid="evidence-partial">Prove it — one check observed</Button>
         <Button size="sm" variant="outline" onClick={() => record(true)} disabled={busy} data-testid="evidence-proven">Prove it — all checks observed</Button>
       </div>
       {result && (
-        <div className="mt-3 space-y-1.5 text-xs" data-testid="evidence-result">
+        <div className="mt-3 space-y-1.5 text-xs nx-result-reveal" data-testid="evidence-result">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-violet-300">{result.evidence.id}</Badge>
             <Badge className={result.verdict.verdict === "verified" ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-200"}>
@@ -3730,7 +3732,7 @@ function OperationalMode() {
   };
 
   return (
-    <Section icon={Lock} title="Operational Mode · Safe Mode" hint="Deterministic control during an incident: normal, observe-only (Nexus detects and recommends but executes nothing), or a scoped freeze. A written reason is mandatory, and the response states honestly which layers consult it and which still do not.">
+    <Section id="tool-operational-mode" icon={Lock} title="Operational Mode · Safe Mode" hint="Deterministic control during an incident: normal, observe-only (Nexus detects and recommends but executes nothing), or a scoped freeze. A written reason is mandatory, and the response states honestly which layers consult it and which still do not.">
       <div className="flex flex-wrap gap-2">
         <Input className="h-8 w-72" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="why are you stopping things" data-testid="ops-reason" />
         <Button size="sm" onClick={() => apply("observe_only")} disabled={busy || !reason.trim()} data-testid="ops-observe">Observe only</Button>
@@ -3756,6 +3758,20 @@ function OperationalMode() {
 
 export default function TechToolboxPage() {
   const [soundOn, setSoundOn] = useState(() => isSoundEnabled());
+  const location = useLocation();
+
+  // Deep-link support: /toolbox?tool=mission-control scrolls to and highlights
+  // the matching tool so the sidebar can bring a technician straight to it.
+  useEffect(() => {
+    const target = new URLSearchParams(location.search).get("tool");
+    if (!target || typeof document === "undefined") return;
+    const el = document.getElementById(`tool-${target}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-violet-500/70", "rounded-xl");
+    const timer = setTimeout(() => el.classList.remove("ring-2", "ring-violet-500/70", "rounded-xl"), 2600);
+    return () => clearTimeout(timer);
+  }, [location.search]);
 
   const toggleSound = () => {
     const next = !soundOn;
@@ -3783,7 +3799,31 @@ export default function TechToolboxPage() {
             {soundOn ? "Sounds on" : "Sounds off"}
           </Button>
         </div>
-        <div className="grid gap-4 xl:grid-cols-2">
+        {/* Featured: the orchestration layer and the primitives underneath it */}
+        <section aria-labelledby="toolbox-featured-heading" data-testid="toolbox-featured">
+          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-violet-500/25 bg-violet-500/[0.07] p-3">
+            <Radar className="h-4 w-4 shrink-0 text-violet-300" />
+            <h2 id="toolbox-featured-heading" className="text-sm font-semibold tracking-tight text-violet-200">Mission Control &amp; Trusted State</h2>
+            <p className="text-xs text-muted-foreground">Tell Nexus what appears wrong and it assembles the scope, tools and evidence — backed by device state, fleet sets and operation proof.</p>
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2 nx-tool-grid">
+            <MissionControlInvestigate />
+            <DiagnosticWorkbench />
+            <FindEverywhere />
+            <StateEngineDrift />
+            <FleetShell />
+            <EvidenceEngine />
+            <OperationalMode />
+          </div>
+        </section>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <ListChecks className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <h2 className="text-sm font-semibold tracking-tight">Every other tool</h2>
+          <p className="text-xs text-muted-foreground">The rest of the toolbox, running on real Nexus data.</p>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2 nx-tool-grid">
           <AlertTriage />
           <BlastRadius />
           <WorkLocks />
@@ -3815,13 +3855,6 @@ export default function TechToolboxPage() {
           <WritingGuard />
           <FourEyesSignOff />
           <DecisionFamily />
-          <MissionControlInvestigate />
-          <DiagnosticWorkbench />
-          <FindEverywhere />
-          <StateEngineDrift />
-          <FleetShell />
-          <EvidenceEngine />
-          <OperationalMode />
           <CommandRecorder />
           <SyntheticEmployee />
           <NexusRescue />

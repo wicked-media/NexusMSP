@@ -91,7 +91,6 @@ export default function ContractsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [contractFilter, setContractFilter] = useState("all");
   const [renewalAlerts, setRenewalAlerts] = useState([]);
-  const [, setContractSummary] = useState(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isLineItemDialogOpen, setIsLineItemDialogOpen] = useState(false);
   const [editingLineItem, setEditingLineItem] = useState(null);
@@ -126,14 +125,13 @@ export default function ContractsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [contractsRes, clientsRes, lineItemsRes, assetsRes, typesRes, renewalsRes, summaryRes] = await Promise.all([
+      const [contractsRes, clientsRes, lineItemsRes, assetsRes, typesRes, renewalsRes] = await Promise.all([
         axios.get(`${API}/contracts`, { headers }),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/line-items`, { headers }),
         axios.get(`${API}/assets`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/contract-types?include_inactive=true`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/contracts/renewal-alerts`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/contracts/summary`, { headers }).catch(() => ({ data: null })),
       ]);
       setContracts(contractsRes.data);
       setClients(clientsRes.data);
@@ -141,7 +139,6 @@ export default function ContractsPage() {
       setAssets(assetsRes.data);
       setContractTypeOptions(typesRes.data);
       setRenewalAlerts(renewalsRes.data);
-      setContractSummary(summaryRes.data);
     } catch (error) {
       toast.error("Failed to fetch contracts");
     } finally {

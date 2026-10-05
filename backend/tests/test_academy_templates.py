@@ -12,6 +12,10 @@ import pytest
 from app.routers.academy import CourseInput
 from app.services.academy_templates import (
     COURSE_TEMPLATES,
+    TRACK_CAPABILITY,
+    TRACK_CUSTOMER,
+    TRACK_OPERATIONS,
+    TRACK_SECURITY,
     get_template,
     template_as_course,
     template_catalogue,
@@ -54,9 +58,25 @@ class TestTemplateIntegrity:
         ids = [template["id"] for template in COURSE_TEMPLATES]
         assert len(ids) == len(set(ids))
 
-    def test_covers_security_awareness_and_capability_tracks(self):
+    def test_covers_the_core_training_tracks(self):
+        """The library spans the full training model, not a single slice."""
         tracks = {template["track"] for template in COURSE_TEMPLATES}
-        assert tracks == {"Security awareness", "MSP capability"}
+        assert {
+            TRACK_SECURITY,
+            TRACK_CAPABILITY,
+            TRACK_OPERATIONS,
+            TRACK_CUSTOMER,
+        } <= tracks
+
+    def test_library_is_substantial(self):
+        """The Academy ships a real training library, not a handful of stubs."""
+        assert len(COURSE_TEMPLATES) >= 12
+        # Every core track carries more than a single course.
+        from collections import Counter
+
+        per_track = Counter(template["track"] for template in COURSE_TEMPLATES)
+        for track in (TRACK_SECURITY, TRACK_CAPABILITY, TRACK_OPERATIONS, TRACK_CUSTOMER):
+            assert per_track[track] >= 2, f"{track} needs at least two courses"
 
 
 class TestTemplateViews:

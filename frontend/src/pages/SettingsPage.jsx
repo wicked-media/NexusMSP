@@ -30,6 +30,7 @@ const TABS = [
   { id: "branding", label: "Platform Branding", description: "Identity, logo, document styling, and portal appearance.", icon: Palette, group: "organisation", tone: "violet" },
   { id: "tiers", label: "Service Tiers", description: "Service levels, pricing, and response commitments.", icon: Shield, group: "organisation", tone: "emerald" },
   { id: "contract-types", label: "Contract Types", description: "Agreement defaults, billing cadence, and SLA rules.", icon: FileText, group: "organisation", tone: "amber" },
+  { id: "billing", label: "Billing & Invoicing", description: "Invoice numbering, payment terms, tax, and billing gateways.", icon: CreditCard, group: "organisation", tone: "emerald", route: "/billing-settings", routeCta: "Open billing settings" },
   { id: "white-label", label: "White Label", description: "Client-facing naming, domains, and presentation.", icon: Image, group: "organisation", tone: "cyan" },
   { id: "channel", label: "Channel / MSP Mode", description: "MSP tenancy and partner operating model.", icon: Building, group: "organisation", tone: "violet" },
   { id: "tickets", label: "Ticket Defaults", description: "Numbering, categories, issue types, and work prefixes.", icon: FileText, group: "operations", tone: "amber" },
@@ -39,10 +40,11 @@ const TABS = [
   { id: "mailbox", label: "Mailbox & Email", description: "Microsoft 365 inboxes, sending, intake, and delivery.", icon: Mail, group: "operations", tone: "cyan" },
   { id: "notifications", label: "No-notes escalation", description: "Escalate unattended tickets when technician notes are missing.", icon: Bell, group: "operations", tone: "violet" },
   { id: "auth", label: "Authentication", description: "Microsoft sign-in and user provisioning controls.", icon: KeyRound, group: "security", tone: "violet" },
-  { id: "twofa", label: "My 2FA & Security", description: "Your authenticator, password and active session controls.", icon: Shield, group: "security", tone: "emerald", route: "/my-settings?tab=security" },
-  { id: "audit", label: "Audit Trail", description: "Review recorded platform activity and accountability.", icon: ClipboardCheck, group: "security", tone: "amber", route: "/audit-trail" },
+  { id: "api-tokens", label: "API Tokens", description: "Issue and revoke programmatic access tokens for the Nexus API.", icon: KeyRound, group: "security", tone: "cyan", route: "/settings-api-tokens", routeCta: "Manage API tokens" },
+  { id: "twofa", label: "My 2FA & Security", description: "Your authenticator, password and active session controls.", icon: Shield, group: "security", tone: "emerald", route: "/my-settings?tab=security", routeCta: "Open security settings" },
+  { id: "audit", label: "Audit Trail", description: "Review recorded platform activity and accountability.", icon: ClipboardCheck, group: "security", tone: "amber", route: "/audit-trail", routeCta: "Open audit log" },
   { id: "integrations", label: "Integrations", description: "Connection credentials, policies, and setup ownership.", icon: Plug, group: "platform", tone: "cyan" },
-  { id: "platform-recovery", label: "Platform Backup & Recovery", description: "Nexus Core restore points, isolated recovery proof, and fresh-host cutover planning.", icon: DatabaseBackup, group: "platform", tone: "emerald", route: "/nexus-continuity" },
+  { id: "platform-recovery", label: "Platform Backup & Recovery", description: "Nexus Core restore points, isolated recovery proof, and fresh-host cutover planning.", icon: DatabaseBackup, group: "platform", tone: "emerald", route: "/nexus-continuity", routeCta: "Open recovery console" },
   { id: "ai", label: "AI & Automation", description: "AI provider, model, and automation controls.", icon: Brain, group: "platform", tone: "violet" },
   { id: "comms", label: "Notify Channels", description: "Slack, Teams, and external notification channels.", icon: MessageSquare, group: "platform", tone: "emerald" },
   { id: "my-settings", label: "My Workspace", description: "Your profile, signature, schedule, and preferences.", icon: Settings2, group: "workspace", tone: "rose" },
@@ -75,7 +77,11 @@ const SETTINGS_INDEX = [
   { tab: "branding", anchor: "branding-section", label: "Invoice Header / Footer", keywords: "invoice pdf branding header footer" },
   // Service Tiers
   { tab: "tiers", anchor: "service-tiers-card", label: "Service Tiers", keywords: "service tier bronze silver gold platinum diamond sla msp plan level price" },
-  // Auth
+  // Billing & finance
+  { tab: "billing", route: "/billing-settings", label: "Billing & Invoicing", keywords: "billing invoice numbering sequence payment terms tax gst vat proforma receipt quote gateway surcharge late fee" },
+  { tab: "billing", route: "/billing-settings", label: "Invoice numbering & terms", keywords: "invoice number format prefix suffix {YYYY} {SEQ} payment terms due days default currency" },
+  // Auth & access
+  { tab: "api-tokens", route: "/settings-api-tokens", label: "API Tokens", keywords: "api token key programmatic access developer bearer revoke expire scope integration" },
   { tab: "auth", anchor: "auth-sso-card", label: "Microsoft SSO", keywords: "sso microsoft azure ad entra single sign on oauth" },
   // Mailbox
   { tab: "mailbox", anchor: "mailbox-o365-card", label: "Microsoft 365 Inbox", keywords: "mailbox o365 office365 inbox ticket email to ticket" },
@@ -134,6 +140,7 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeTab, setActiveTab] = useState("branding");
+  const [activeGroup, setActiveGroup] = useState("all");
   const [settingSearch, setSettingSearch] = useState("");
   const [integrationSearch, setIntegrationSearch] = useState("");
   const [integrationCategory, setIntegrationCategory] = useState("all");
@@ -189,8 +196,6 @@ export default function SettingsPage() {
   const [cippBusy, setCippBusy] = useState(false);
   const [unifi, setUnifi] = useState({ base_url: "", api_key: "", configured: false, migration_required: false, api_key_preview: null, last_test_status: null, last_tested_at: null, last_synced_at: null });
   const [unifiBusy, setUnifiBusy] = useState(false);
-  const [, setTrmm] = useState({ configured: false }); // Legacy compatibility while old connection checks remain.
-  const setTrmmNotif = () => {};
   const [splynx, setSplynx] = useState({ url: "", api_key: "", api_secret: "", configured: false });
   const [splynxSaving, setSplynxSaving] = useState(false);
   const [hudu, setHudu] = useState({ url: "", api_key: "", configured: false });
@@ -296,7 +301,7 @@ export default function SettingsPage() {
       // Settings are independent surfaces. A provider outage must not prevent the
       // rest of the administration workspace from loading.
       const getOptional = (url, fallback) => axios.get(url, { headers }).catch(() => ({ data: fallback }));
-      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, ssoRes, mbxRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, trmmRes, trmmNotifRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
+      const [usersRes, thresholdRes, xeroRes, stripeRes, supedRes, splynxRes, huduRes, aiRes, syncroRes, ssoRes, mbxRes, brandingRes, acronisRes, smsRes, pax8Res, huntressRes, cippRes, unifiRes, calendarRes, nexusElevateRes, synergyRes] = await Promise.all([
           getOptional(`${API}/users`, []),
           getOptional(`${API}/settings/no-notes-threshold`, {}),
           getOptional(`${API}/settings/xero`, {}),
@@ -315,8 +320,6 @@ export default function SettingsPage() {
           getOptional(`${API}/huntress/status`, null),
           getOptional(`${API}/cipp/status`, null),
           getOptional(`${API}/unifi/status`, null),
-          getOptional(`${API}/trmm/status`, null),
-          getOptional(`${API}/trmm/notifications/settings`, null),
           getOptional(`${API}/scheduling/calendar-connection`, null),
           getOptional(`${API}/nexus-elevate/settings`, null),
           getOptional(`${API}/settings/synergy-wholesale`, null),
@@ -331,8 +334,6 @@ export default function SettingsPage() {
         if (huntressRes?.data) setHuntress(prev => ({ ...prev, ...huntressRes.data, api_key: "", secret_key: "" }));
         if (cippRes?.data) setCipp(prev => ({ ...prev, ...cippRes.data, api_key: "" }));
         if (unifiRes?.data) setUnifi(prev => ({ ...prev, ...unifiRes.data, api_key: "" }));
-        if (trmmRes?.data) setTrmm(prev => ({ ...prev, ...trmmRes.data, api_key: "" }));
-        if (trmmNotifRes?.data) setTrmmNotif(prev => ({ ...prev, ...trmmNotifRes.data }));
         if (calendarRes?.data) setCalendarConnection(prev => ({ ...prev, ...calendarRes.data }));
         if (nexusElevateRes?.data) setNexusElevate(prev => ({ ...prev, ...nexusElevateRes.data }));
         if (synergyRes?.data) setSynergy(prev => ({ ...prev, ...synergyRes.data, api_key: "" }));
@@ -520,9 +521,25 @@ export default function SettingsPage() {
         </div>
       </section>
 
+      {/* Quick category filter — one click to any settings area */}
+      <nav className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-card/40 p-2" aria-label="Filter settings by category" data-testid="settings-group-filter">
+        {[{ id: "all", label: "All settings" }, ...SETTINGS_GROUPS].map(g => {
+          const count = g.id === "all" ? TABS.length : TABS.filter(t => t.group === g.id).length;
+          const active = activeGroup === g.id;
+          return (
+            <button key={g.id} onClick={() => setActiveGroup(g.id)}
+              className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${active ? "border-violet-500/40 bg-violet-500/15 text-violet-200" : "border-border/70 bg-background/40 text-muted-foreground hover:border-violet-500/30 hover:text-foreground"}`}
+              data-testid={`settings-group-filter-${g.id}`}>
+              {g.label}
+              <span className={`rounded-full px-1.5 text-[10px] ${active ? "bg-violet-500/25 text-violet-100" : "bg-muted text-muted-foreground"}`}>{count}</span>
+            </button>
+          );
+        })}
+      </nav>
+
       {/* Settings directory */}
       <div className="space-y-5" data-testid="settings-tabs">
-        {SETTINGS_GROUPS.map(group => {
+        {SETTINGS_GROUPS.filter(group => activeGroup === "all" || group.id === activeGroup).map(group => {
           const groupTabs = TABS.filter(tab => tab.group === group.id);
           return (
             <section key={group.id} className="rounded-2xl border border-border/60 bg-card/40 p-4 md:p-5" data-testid={`settings-group-${group.id}`}>
@@ -552,7 +569,7 @@ export default function SettingsPage() {
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center justify-between gap-2"><span className="font-semibold text-foreground">{tab.label}</span>{isActive ? <Badge className="border-0 bg-violet-500/15 px-1.5 py-0 text-[10px] font-medium text-violet-200">Open</Badge> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-violet-300" />}</span>
                         <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{tab.description}</span>
-                        {tab.route && <span className="mt-2 block text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">Open audit log</span>}
+                        {tab.route && <span className="mt-2 flex items-center gap-1 text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/80">{tab.routeCta || "Open workspace"}<ChevronRight className="h-3 w-3" /></span>}
                       </span>
                     </button>
                   );

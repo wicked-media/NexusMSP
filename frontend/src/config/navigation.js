@@ -16,6 +16,17 @@ export const navGroups = [
       { path: "/", icon: LayoutDashboard, label: "Dashboard" },
       { path: "/workspace", icon: Bookmark, label: "My Workspace" },
       {
+        path: "/toolbox?tool=mission-control", icon: Radar, label: "Mission Control",
+        children: [
+          { path: "/toolbox?tool=mission-control", label: "Investigate a problem" },
+          { path: "/toolbox?tool=state-engine", label: "State Engine & drift" },
+          { path: "/toolbox?tool=fleet-shell", label: "Fleet Shell" },
+          { path: "/toolbox?tool=evidence-engine", label: "Evidence Engine" },
+          { path: "/toolbox?tool=operational-mode", label: "Operational mode" },
+          { path: "/toolbox", label: "All toolbox tools" },
+        ],
+      },
+      {
         path: "/tickets", icon: Ticket, label: "Tickets",
         workspacePaths: ["/triage-queue", "/sla-timer", "/dispatch-board", "/workshop-bench", "/escalation-matrix", "/intelligent-routing", "/blueprints", "/service-catalog", "/nexus-verify", "/work-session"],
         children: [

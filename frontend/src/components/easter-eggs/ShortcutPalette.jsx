@@ -38,6 +38,7 @@ export default function ShortcutPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const { token } = useAuth();
+  const ql = q.trim().toLowerCase();
 
   // Hidden eggs discovered by typing the right words into search.
   const EGGS = [
@@ -76,7 +77,6 @@ export default function ShortcutPalette() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const ql = q.trim().toLowerCase();
   const groups = SHORTCUTS.map((g) => ({
     ...g,
     items: g.items.filter((i) => !ql || i.label.toLowerCase().includes(ql) || i.keys.join(" ").toLowerCase().includes(ql)),

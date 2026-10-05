@@ -30,6 +30,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Sparkles,
   UserRoundCheck,
@@ -164,6 +165,8 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
   const [assignmentRequired, setAssignmentRequired] = useState(true);
   const [savingAssignments, setSavingAssignments] = useState(false);
   const [templates, setTemplates] = useState([]);
+  const [templateTrack, setTemplateTrack] = useState("All");
+  const [templateSearch, setTemplateSearch] = useState("");
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [previewingTemplate, setPreviewingTemplate] = useState(false);
   const [templatesError, setTemplatesError] = useState(false);
@@ -204,6 +207,15 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
   const academyCourses = useMemo(() => learnerCourses.filter((course) => !isSecurityCourse(course)), [learnerCourses]);
   const completedCount = learnerCourses.filter(isCompleted).length;
   const completionPercent = learnerCourses.length ? Math.round((completedCount / learnerCourses.length) * 100) : 0;
+  const trackOptions = useMemo(() => ["All", ...Array.from(new Set(templates.map((template) => template.track).filter(Boolean)))], [templates]);
+  const filteredTemplates = useMemo(() => {
+    const query = templateSearch.trim().toLowerCase();
+    return templates.filter((template) => {
+      if (templateTrack !== "All" && template.track !== templateTrack) return false;
+      if (!query) return true;
+      return `${template.name} ${template.tagline} ${template.track} ${(template.roles || []).join(" ")} ${template.category}`.toLowerCase().includes(query);
+    });
+  }, [templates, templateTrack, templateSearch]);
   const technicians = useMemo(() => Array.from(new Map(
     (assignmentInfo?.learners || [])
       .filter((member) => member?.id)
@@ -420,12 +432,25 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
                 <p className="mt-1 text-base font-semibold">Start from proven MSP training programs</p>
                 <p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Modelled on how leading MSP tools structure training — story-driven security-awareness episodes with knowledge checks, and role-based capability tracks (client onboarding, service desk triage, patch management, billing reconciliation). Every template becomes a fully customisable draft.</p>
               </div>
-              <Badge variant="outline" className="shrink-0 border-cyan-400/25 bg-cyan-400/[0.06] text-cyan-100"><Library className="mr-1.5 h-3 w-3" />{templates.length} templates</Badge>
+              <Badge variant="outline" className="shrink-0 border-cyan-400/25 bg-cyan-400/[0.06] text-cyan-100"><Library className="mr-1.5 h-3 w-3" />{filteredTemplates.length} of {templates.length} templates</Badge>
             </div>
-            {templates.length ? (
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {templates.map((template) => (
-                  <div key={template.id} className="group flex flex-col rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 transition hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-white/[0.04]" data-testid={`academy-template-${template.id}`}>
+            <div className="mt-4 space-y-2.5">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} placeholder="Search templates by name, role, tagline or topic…" className="h-9 border-white/[0.1] bg-white/[0.03] pl-8 text-xs" data-testid="academy-template-search" />
+              </div>
+              <div className="flex flex-wrap gap-1.5" data-testid="academy-template-tracks">
+                {trackOptions.map((track) => (
+                  <button key={track} type="button" onClick={() => setTemplateTrack(track)} className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition ${templateTrack === track ? "border-cyan-400/40 bg-cyan-400/15 text-cyan-100" : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:border-cyan-400/25 hover:text-foreground"}`} data-testid={`academy-track-${String(track).toLowerCase().replace(/\s+/g, "-")}`}>
+                    {track}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {filteredTemplates.length ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3 nx-tool-grid">
+                {filteredTemplates.map((template) => (
+                  <div key={template.id} className="nx-enter group flex flex-col rounded-xl border border-white/[0.08] bg-white/[0.02] p-4 transition hover:-translate-y-0.5 hover:border-cyan-400/30 hover:bg-white/[0.04]" data-testid={`academy-template-${template.id}`}>
                     <div className="flex items-start justify-between gap-2">
                       <Badge variant="outline" className={template.track === "Security awareness" ? "border-emerald-400/25 bg-emerald-400/[0.07] text-[9px] text-emerald-200" : "border-violet-400/25 bg-violet-400/[0.07] text-[9px] text-violet-200"}>{template.track}</Badge>
                       <span className="text-[9px] text-muted-foreground">{template.estimated_minutes} min · {template.difficulty}</span>
