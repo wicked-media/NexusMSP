@@ -289,6 +289,84 @@ function LabelPrinter() {
 
 // ============== TECH CARD ==============
 
+function ProtocolRegistry() {
+  const { token } = useAuth();
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.get(`${API}/tech-fun/protocol/coverage`, { headers: { Authorization: `Bearer ${token}` } });
+      setResult(data);
+    } catch {
+      toast.error("Could not read the protocol registry.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section icon={Waypoints} title="Nexus Protocol" hint="The standard objects and actions third-party technology speaks to become Nexus-compatible — and the platform's honest coverage of its own protocol.">
+      <Button size="sm" onClick={run} disabled={busy} data-testid="protocol-run">
+        {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Waypoints className="mr-1 h-3 w-3" />}Read the protocol
+      </Button>
+      {result && (
+        <div className="mt-3 text-sm" data-testid="protocol-result">
+          <p className="text-xs text-muted-foreground">{result.actions_shipped} of 10 standard actions shipped · {result.actions_partial} partial (wired, not yet full verified execution)</p>
+          <ul className="mt-2 space-y-1 text-xs">
+            {result.coverage.map((row) => (
+              <li key={row.action} className="flex items-center justify-between gap-2 rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5">
+                <span className="font-mono">{row.action}()</span>
+                <span className={row.status === "shipped" ? "text-emerald-300" : "text-amber-300"}>{row.status} · {row.platform_home}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function NexusNativeCertification() {
+  const { token } = useAuth();
+  const [board, setBoard] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.get(`${API}/tech-fun/protocol/conformance`, { headers: { Authorization: `Bearer ${token}` } });
+      setBoard(data);
+    } catch {
+      toast.error("Could not build the conformance board.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section icon={BadgeCheck} title="Nexus Native certification" hint="What a vendor must prove: provisioning, telemetry, billing, health, remediation, uninstall, audit, evidence. Gaps are published — never hidden.">
+      <Button size="sm" onClick={run} disabled={busy} data-testid="native-run">
+        {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <BadgeCheck className="mr-1 h-3 w-3" />}Evaluate adapters
+      </Button>
+      {board && (
+        <div className="mt-3 space-y-1 text-xs" data-testid="native-result">
+          {board.adapters.map((a) => (
+            <div key={a.adapter} className="rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{a.vendor || a.adapter}</span>
+                <span className={a.level === "nexus_native" ? "text-emerald-300" : a.level === "nexus_ready" ? "text-cyan-300" : "text-amber-300"}>
+                  {a.level === "nexus_native" ? "Nexus Native ✓" : a.level}
+                </span>
+              </div>
+              <p className="text-muted-foreground">verified {a.counts.verified} · partial {a.counts.partial} · unverified {a.counts.unverified}</p>
+              {a.latest_review && <p className="text-violet-200/80">review: {a.latest_review.decision} ({a.latest_review.basis})</p>}
+            </div>
+          ))}
+          {board.adapters[0]?.honesty_note && <p className="pt-1 text-[10px] italic text-muted-foreground">{board.adapters[0].honesty_note}</p>}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function TechCardPanel() {
   const { token, user } = useAuth();
   const [svg, setSvg] = useState(null);
@@ -2787,6 +2865,8 @@ export default function TechToolboxPage() {
           <ITGenome />
           <UniversalConnector />
           <LedgerMetering />
+          <ProtocolRegistry />
+          <NexusNativeCertification />
           <GoHomeCheck />
           <WeekendRisk />
           <CaughtUp />

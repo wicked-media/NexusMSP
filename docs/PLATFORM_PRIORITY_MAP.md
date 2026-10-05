@@ -16,6 +16,49 @@ Tiers:
 
 ---
 
+## The protocol era — above “Nexus runs MSPs”: Nexus as infrastructure
+
+The 2026-10 vision escalation: the endgame is not an MSP product but the
+infrastructure other technology businesses operate *through*. Vendors
+implement the Nexus Protocol instead of bespoke integrations; certification
+makes deep integration a purchasing preference; autonomous agents run under
+Nexus identity, delegation and proof. The controlling question for every
+build: **can Nexus own the control plane regardless of which technology
+underneath wins?**
+
+Shipped this batch — **Nexus Protocol v0.1** (`docs/NEXUS_PROTOCOL.md`,
+`nexus_protocol.py`): 17 standard objects, 10 standard actions, the canonical
+action descriptor (the P0 #1 contract), and Nexus Native certification —
+eight dimensions evaluated from live adapter wiring and recorded evidence,
+with gaps published. No bundled adapter is Nexus Native yet; that is the
+honest state of the registry.
+
+The audit — what the vision needs and what already exists:
+
+| Vision piece | Grounding today | Verdict |
+|---|---|---|
+| Nexus Protocol | `nexus_connector` verbs + `nexus_objects` + this batch | 🆕 v0.1 shipped |
+| Nexus Certified | `nexus_protocol` conformance + `agent_trust` | 🆕 v0.1 shipped |
+| Service Identity | `agent_trust` (device certs, signed policy), `identity_utils` | grounded — needs workload/AI principals |
+| Delegation / Agent Passport | `nexus_verify_execution` gate, laws, `action/scope_permissions`, decision objects | grounded — needs capability tokens + risk/spend limits |
+| Agent Runtime / Capability Modules | `agent_runtime` + Go agent, `script_library_catalog`, `module_permissions` | grounded — module manifest is the next step |
+| Edge Runtime / Fabric overlay / Private Network | none (network product) — note `nexus_fabric.py` is the graph read model; an overlay needs a new name (e.g. `nexus_overlay`) | Labs: genuine architecture programme |
+| Promise Graph / Contract Compiler / Regulation Compiler | intents + controls + consequence engine + agreements | grounded — “promise → control → evidence” is buildable |
+| Business Risk Graph / Board Intelligence / CFO / CIO / CTO / Negotiator | `core_relationships` graph, consequence engine, agreement margin, commercial records | grounded — advisory surfaces are buildable |
+| Outcome Marketplace / Dynamic Vendor Routing | `nexus_connector` swap plans + `nexus_ledger` metering | primitives shipped; markets need transaction volume + consent |
+| Cloud Exchange / Capacity Grid | `nexus_ledger` settlement + BYO backup vault | Labs: reliability, regulatory and security complexity |
+| Agent Economy / Reputation Marketplace | ledger + verified outcomes (Prove It) | needs adoption and outcome volume |
+| Data Escrow / Sovereignty / Policy Exchange | backup vault, tenant scope, laws | escrow buildable; sovereignty is a data-classification programme |
+| Company Launch / Clone / M&A / Separation | intent OS + `nexus_switchboard` migration plans | grounded — estate diffing is the next step |
+| Radar / IT Index / Predict | `nexus_genome` aggregates (k-floor 3) | needs cross-deployment scale + participation consent |
+
+Planning rule for this era: protocol and certification are the wedge — every
+other piece is only credible once actions flow through the descriptor, the
+identity and the evidence store. Commerce and network products wait for real
+transaction volume (the rule below still stands).
+
+---
+
 ## The $1B thesis — Nexus is the operating network for managed technology
 
 The filter changed (2026-10): the question is no longer "is this a feature MSPs
@@ -181,6 +224,7 @@ payroll), rubber-duck diagnosis, "bet you $5 it's DNS" predictions.
 | Certainty layer (unknowns, Prove It, confidence, laws, noise, readiness) | P0 #2/#8, P1 #2/#3 |
 | This batch (consequence engine, commander, decision/risk memory) | P1 #1/#6/#8 |
 | Network primitives batch (intent, genome, connector, metering + ledger) | $1B thesis primitives — intent (#4), genome (#1–2), connector (#8–9), commerce (#10–11) |
+| Protocol batch (Nexus Protocol v0.1, Nexus Native certification) | Protocol era — spec, action descriptor (P0 #1), conformance |
 
 **Planning rule:** each batch ships one flagship step *and* strengthens a P0
 primitive. Features from P2 appear only when they ride along for free.

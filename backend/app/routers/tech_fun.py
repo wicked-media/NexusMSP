@@ -21,6 +21,7 @@ from app.services import (
     nexus_intent,
     nexus_ledger,
     nexus_ops_layer,
+    nexus_protocol,
     qol_tools,
     tech_fun,
 )
@@ -838,3 +839,66 @@ async def revenue_share_preview(data: dict, current_user: dict = Depends(get_cur
     if not result.get("found"):
         raise HTTPException(status_code=400, detail=result.get("error") or "invalid preview")
     return result
+
+
+# ============== NEXUS PROTOCOL (standard objects, actions, certification) ==============
+
+
+@router.get("/tech-fun/protocol")
+async def protocol_spec(current_user: dict = Depends(get_current_user)):
+    """The Nexus Protocol manifest: standard objects, standard actions, certification."""
+    return nexus_protocol.protocol_manifest()
+
+
+@router.get("/tech-fun/protocol/objects")
+async def protocol_objects(current_user: dict = Depends(get_current_user)):
+    """Standard protocol objects with their stable Nexus IDs."""
+    return nexus_protocol.list_objects()
+
+
+@router.get("/tech-fun/protocol/actions")
+async def protocol_actions(current_user: dict = Depends(get_current_user)):
+    """The ten standard actions and what each means."""
+    return nexus_protocol.list_actions()
+
+
+@router.get("/tech-fun/protocol/coverage")
+async def platform_protocol_coverage(current_user: dict = Depends(get_current_user)):
+    """How much of the protocol the platform itself speaks today — honestly."""
+    return nexus_protocol.platform_coverage()
+
+
+@router.post("/tech-fun/protocol/validate-action")
+async def validate_protocol_action(data: dict, current_user: dict = Depends(get_current_user)):
+    """Validate one proposed action against the canonical action descriptor (P0 #1)."""
+    return nexus_protocol.validate_action_descriptor(data or {})
+
+
+@router.get("/tech-fun/protocol/conformance")
+async def protocol_conformance(
+    adapter: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Nexus Native conformance board — verified/partial/unverified, gaps published."""
+    return await nexus_protocol.conformance_board(db, current_user, adapter)
+
+
+@router.post("/tech-fun/protocol/reviews")
+async def record_certification_review(data: dict, current_user: dict = Depends(get_current_user)):
+    """Record a certification review — admin only; declarations never certify."""
+    if not (current_user.get("is_admin") or current_user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="admin access required")
+    result = await nexus_protocol.record_review(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid review")
+    return result
+
+
+@router.get("/tech-fun/protocol/reviews")
+async def list_certification_reviews(
+    adapter: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Recorded certification reviews in your tenant scope."""
+    return await nexus_protocol.list_reviews(db, current_user, adapter)
