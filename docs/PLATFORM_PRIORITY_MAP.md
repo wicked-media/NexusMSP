@@ -1,0 +1,112 @@
+# Nexus Platform Priority Map
+
+Ranked from every concept developed across the stabilisation, toolbox, insight and
+certainty batches. This replaces the flat backlog. Future batches are planned from
+**P1** (flagships) and the P0 architecture work they depend on — never from the
+bottom of this file.
+
+Tiers:
+
+- **P0** — architecture decisions to get right *now*. Changing these later is
+  expensive or impossible without a migration programme.
+- **P1** — flagship differentiators. The moat. Hard to bolt on from outside.
+- **P2** — modules. Valuable, buildable on top of P0/P1 primitives.
+- **Labs** — promising but contingent (needs new data sources, customers, or trust).
+- **Easter eggs** — the technician personality. Cheap, delightful, never blocking.
+
+---
+
+## P0 — architecture decisions to get right now
+
+| # | Decision | Why it will hurt later |
+|---|----------|------------------------|
+| 1 | **Canonical action descriptor + consequence contract.** One schema for every proposed action: actor, target (Nexus ID), scope, destructive?, reversible?, autonomy level, verification plan, rollback. Laws, Guardian, Consequence Engine, approvals, audit and automation all consume it. | If each feature invents its own action shape, the Laws evaluator, four-eyes approvals and audit trail can never be unified — and the Consequence Engine (the moat) becomes five disconnected toys. |
+| 2 | **Evidence/attestation store.** Append-only, tenant-scoped, retention-aware records of `claim → evidence → verdict → freshness → responsible party` (the Prove It shape). Every "healthy", "verified", "compliant" claim in the product must be renderable from this store. | Retrofitting evidence onto a product that already prints green badges means choosing between lying to customers or rewriting every surface. |
+| 3 | **Explicit tenant markers everywhere.** Migrate legacy unmarked documents off the `nexus-local` partition escape hatch; one datum, one tenant, always on the document. | The permissive legacy partition is a latent cross-tenant leak. The longer it exists, the larger the migration and the higher the incident risk. |
+| 4 | **Event envelope for the timeline.** Canonical `who/what/when/where/why` schema with source system, actor, object IDs, and ingest points at every mutation. The universal timeline becomes a read of this stream, not ad-hoc unioning. | Rebuilding timeline/search/audit/flight-recorder on a proper event core later means touching every writer in the codebase. |
+| 5 | **Relationship graph schema with provenance.** Every edge (device→switch→firewall→WAN→ISP, host→VM→app→user, UPS→host) carries `source`, `confidence`, `observed_at`. Populated by discovery *and* zero-click documentation; never by stale Visio. | The Consequence Engine, diagrams, blast radius and "what dies if this dies" all read this graph. A graph without provenance becomes the 2023 Visio diagram everyone stops trusting. |
+| 6 | **Autonomy contract.** Autonomy levels (observe → suggest → act-with-verification → act), mandatory post-action verification, rollback records, and a hard rule that unverifiable outcomes are never claimed as fixes (Law 9). | Bolting verification onto automations after they exist means an estate of automations nobody trusts and nobody can safely widen. |
+| 7 | **Human-decision object family.** Approvals, consent receipts, risk acceptances and decision log share one lifecycle: `proposed → reviewed → decided → review-due → expired`. Four-eyes and "we told you" are reads over this family. | Separate approval/consent/risk tables can't answer "who accepted what risk, when does it expire, and what happened next" — which is exactly the governance product. |
+| 8 | **Freshness/confidence metadata on every stored fact.** `observed_at`, `source`, `confidence` conventions (the certainty-layer shape). | Without it, "facts decay" stays a demo. With it, every module gets self-correcting data for free. |
+
+---
+
+## P1 — flagship differentiators (the moat)
+
+Built on P0 primitives; each is hard for a competitor to bolt on afterwards.
+
+1. **Nexus Consequence Engine** — "what does clicking this button *mean* to the
+   business?" (v1 shipped this batch from live data; grows with the graph).
+   Powers: Can I Delete/Reboot/Disable/Remove/Change/Retire/Cancel This?
+2. **Nexus Proof** — customer-facing evidence: control → evidence → history →
+   verification → responsible party. Audit Readiness Pack (shipped) is its v1.
+3. **Nexus Laws** — shipped: 9 invariants + custom laws + deterministic gate.
+   Grows: per-target windows, approval laws wired to the decision-object family.
+4. **Nexus Detective** — evidence board, Challenge Nexus, Attempt-to-Disprove,
+   Second Opinion. Needs the independent reasoning pass; confidence layer (shipped)
+   is its inspectability backbone.
+5. **Truth Engine** — cross-source reconciliation ("why do these numbers differ?").
+   Blocked on P0 #4/#5 plus source connectors (RMM/EDR/identity/billing).
+6. **Morning Commander / End My Day** — shipped v1: Nexus decides what matters
+   today, and what you must not leave behind.
+7. **Self-organising work queue** — difficulty, gravity and escalation preflight
+   shipped as parts; the queue re-ranking itself is the flagship form.
+8. **Commercial brain** — decision log + risk acceptances + "We Told You" shipped
+   this batch; agreement margin shipped earlier; vendor bill auditing joins next.
+9. **Safety UX layer** — Writing Guard, cross-customer leak prevention ("this
+   content references Contoso, you are replying to ACME"), Wrong-Customer
+   Protection, four-eyes with real diffs. Security differentiator, customer-trust
+   critical.
+10. **Collective memory** — Nexus Memory (shipped), Already-Tried-That,
+    don't-ask-the-customer-again, Context Capsules for handovers.
+
+## P2 — modules (build on the primitives)
+
+- Automation debt meter, Micro-Automations ("you've done this three times"),
+  Watch-me-do-it → Recipe drafts (trigger/preconditions/steps/verification/
+  failure/rollback — *verification and rollback are P0 #6, so recipes slot in*).
+- Process mining, bottleneck finder, "where did today go?" (technician-private),
+  friction map (improves Nexus itself).
+- FCR failure-reason intelligence, customer patience meter, No Ping-Pong,
+  Promise Time, Don't-make-me-chase-you timers.
+- Explain This Customer / Explain Like I'm Taking Over (context capsules feed these).
+- Automatic live diagrams + "draw me this customer" (reads P0 #5).
+- Procurement price memory, stock scavenger, licence scavenger,
+  "what can we cancel?", vendor margin-leak reports.
+- Accessibility preferences in support flows, customer Safe Mode during majors.
+- "What permission do I actually need?" + scoped temporary-access requests.
+
+## Labs (contingent — needs data, customers, or trust)
+
+- Nexus Chaos Testing / Fire Drill / Restore Roulette (needs isolated restore
+  environments and change windows; Prove It already reports the gap honestly).
+- Anonymised cross-MSP benchmarking (needs privacy architecture and volume).
+- M&A / acquisition onboarding mode (needs import pipelines + credential transfer).
+- Carbon/energy view (needs power telemetry; only measurable data, no greenwashing).
+- Travel optimisation, trunk inventory, custody-chain scanning (needs mobile).
+- Lost-device mode (needs per-platform isolate/lock agent commands).
+
+## Easter eggs (the identity — cheap, never blocking)
+
+Shipped: urgency punctuation vs severity, "Narrator: somebody changed something.",
+definition-of-insanity threshold, Technician Presence Effect, "Forgotten by God"
+uptime museum, 🦖 prehistoric uptime, hope-based storage, Friday-4:58 Law windows.
+Queued: Schrödinger's IT Problem (problem existed until observed by technician),
+"the customer restarted it" (unexpected collaboration), ticket title translator
+(HELP!!!!!! → unable to print), "have you saved your work?" pre-reboot check,
+device-name critic (DESKTOP-NEW created 2019, SERVER-FINAL, TEST-PC hosting
+payroll), rubber-duck diagnosis, "bet you $5 it's DNS" predictions.
+
+---
+
+## Where the shipped batches live
+
+| Batch | Tier home |
+|---|---|
+| Tech toolbox, shift intelligence, work locks, handover | QoL / P1 (#6, #7 partial) |
+| Insight layer (baselines, anomaly explorer, timeline, search, sidecar, debt) | P0 #4/#8 groundwork, P1 #7 |
+| Certainty layer (unknowns, Prove It, confidence, laws, noise, readiness) | P0 #2/#8, P1 #2/#3 |
+| This batch (consequence engine, commander, decision/risk memory) | P1 #1/#6/#8 |
+
+**Planning rule:** each batch ships one flagship step *and* strengthens a P0
+primitive. Features from P2 appear only when they ride along for free.

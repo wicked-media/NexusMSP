@@ -39,14 +39,26 @@ export default function ShortcutPalette() {
   const [q, setQ] = useState("");
   const { token } = useAuth();
 
-  // Hidden egg: typing "sudo" here has exactly the effect you deserve.
-  const fireSudoEgg = async () => {
+  // Hidden eggs discovered by typing the right words into search.
+  const EGGS = [
+    { match: (s) => s.startsWith("sudo"), title: "Permission denied. Nice try. 😏", button: "Ask again nicely", egg: "sudo" },
+    { match: (s) => s === "is it dns" || s === "dns", title: "It's always DNS. Checking anyway… 🌐", button: "Accept the truth", egg: "dns" },
+    { match: (s) => s === "coffee", title: "Technician performance dependency detected. ☕ Remediation recommended immediately.", button: "File an incident", egg: "coffee" },
+    { match: (s) => s === "firewall" || s === "it was the firewall", title: "It was the firewall. It's always the firewall. 🧱", button: "Accept this truth", egg: "firewall" },
+    { match: (s) => s === "enable printer reliability", title: "Error: Such technology does not currently exist.", button: "Understood", egg: "printer_reliability" },
+    { match: (s) => s === "printer" || s === "printers", title: "Nexus has detected suffering. 🖨️", button: "Stay strong", egg: "printer" },
+    { match: (s) => s === "microsoft licensing", title: "Opening ancient texts… 📜", button: "Close the forbidden tome", egg: "microsoft_licensing" },
+    { match: (s) => s === "why", title: "How much time do you have? ⏳", button: "Not that much", egg: "why" },
+    { match: (s) => s.includes("rm -rf"), title: "Absolutely not.", button: "Fine, I'll behave", egg: "rm_rf" },
+  ];
+  const activeEgg = EGGS.find((e) => e.match(ql));
+
+  const fireEgg = async (egg) => {
     try {
-      const { data } = await axios.post(`${API}/tech-fun/easter-egg/sudo`, {}, { headers: { Authorization: `Bearer ${token}` } });
-      toast(data.message || "Permission denied. Nice try.");
-      if (data.awarded) toast.success("Hidden badge unlocked: Privilege Escalator 🐧");
+      const { data } = await axios.post(`${API}/tech-fun/easter-egg/${egg}`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      if (data.awarded) toast.success("Hidden badge unlocked! Check your Tech Profile.");
     } catch {
-      toast("Permission denied. Nice try.");
+      /* the joke still lands without the award */
     }
   };
 
@@ -77,10 +89,10 @@ export default function ShortcutPalette() {
           <DialogTitle className="flex items-center gap-2 text-base"><Keyboard className="w-4 h-4 text-violet-400" />Keyboard shortcuts</DialogTitle>
         </DialogHeader>
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shortcuts…" autoFocus data-testid="shortcut-search" />
-        {ql === "sudo" && (
-          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-sm" data-testid="sudo-egg">
-            <p className="font-medium text-amber-200">Permission denied. Nice try. 😏</p>
-            <Button size="sm" variant="outline" className="mt-2" onClick={fireSudoEgg} data-testid="sudo-egg-button">Ask again nicely</Button>
+        {activeEgg && (
+          <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-3 text-sm" data-testid="search-egg">
+            <p className="font-medium text-amber-200">{activeEgg.title}</p>
+            <Button size="sm" variant="outline" className="mt-2" onClick={() => fireEgg(activeEgg.egg)} data-testid="search-egg-button">{activeEgg.button}</Button>
           </div>
         )}
         <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
