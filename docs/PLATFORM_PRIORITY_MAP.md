@@ -227,6 +227,9 @@ payroll), rubber-duck diagnosis, "bet you $5 it's DNS" predictions.
 | Protocol batch (Nexus Protocol v0.1, Nexus Native certification) | Protocol era — spec, action descriptor (P0 #1), conformance |
 | Safety & decision-family batch (Writing Guard, wrong-customer, four-eyes with real diffs, unified lifecycle) | P1 #9 flagship + P0 #7 human-decision object family |
 | Technician-OS batch (Diagnostic Workbench, Find Everywhere, Command Recorder, Synthetic Employee, Nexus Rescue) | P1 #7 flagship — the Observe → Explain → Recommend → Act → Verify → Learn loop, evidence-first |
+| Orchestration & trust batch (Mission Control · Investigate, device-level State Engine + Drift Control, Fleet Shell, Evidence Engine, platform Operational Mode) | P1 #7 flagship — one problem in, assembled scope/tools/hypotheses out; plus the trusted-state and proof primitives |
+
+**Naming note (avoid a third Mission Control):** `backend/app/routers/mission_control.py` owns the *portfolio* briefing for the home workspace. The per-problem orchestrator lives in `app/services/nexus_investigate.py` behind `/tech-fun/mission-control/*`, and `nexus_diagnostics` owns hypothesis probabilities. Likewise `routers/expected_state.py` owns client-level assurance standards while `nexus_device_state.py` owns device-level desired state and drift. Extend those files rather than adding parallel ones.
 
 **Planning rule:** each batch ships one flagship step *and* strengthens a P0
 primitive. Features from P2 appear only when they ride along for free.

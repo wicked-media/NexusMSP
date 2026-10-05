@@ -17,12 +17,17 @@ from app.services import (
     nexus_certainty,
     nexus_connector,
     nexus_decision_family,
+    nexus_device_state,
     nexus_diagnostics,
+    nexus_evidence,
     nexus_find,
+    nexus_fleet_shell,
     nexus_genome,
     nexus_insight,
     nexus_intent,
+    nexus_investigate,
     nexus_ledger,
+    nexus_operational_mode,
     nexus_ops_layer,
     nexus_protocol,
     nexus_recorder,
@@ -1308,3 +1313,319 @@ async def record_rescue_step(
     result = await nexus_rescue.record_step(
         db, current_user, str(current_user.get("name") or ""), session_id, data or {})
     return _guard(result, "Rescue session not found in your scope")
+
+
+# ============== MISSION CONTROL · INVESTIGATE: THE ORCHESTRATION LAYER ==============
+
+
+@router.get("/tech-fun/mission-control/tools")
+async def mission_control_tools(current_user: dict = Depends(get_current_user)):
+    """Every tool Mission Control can reach, and the endpoint that really exists."""
+    return nexus_investigate.tool_catalog()
+
+
+@router.post("/tech-fun/mission-control/investigate")
+async def mission_control_investigate(data: dict, current_user: dict = Depends(get_current_user)):
+    """Describe what appears wrong; get scope, tools, hypotheses and the next action."""
+    result = await nexus_investigate.investigate(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Nothing to investigate")
+
+
+@router.get("/tech-fun/mission-control/investigations")
+async def list_mission_investigations(
+    status: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Open and recent problem investigations in your scope."""
+    result = await nexus_investigate.list_investigations(db, current_user, status)
+    return _guard(result, "No investigations in your scope")
+
+
+@router.get("/tech-fun/mission-control/investigations/{mission_id}")
+async def get_mission_investigation(mission_id: str, current_user: dict = Depends(get_current_user)):
+    """One investigation with its live next action and human-decision gate."""
+    result = await nexus_investigate.get_investigation(db, current_user, mission_id)
+    return _guard(result, "Investigation not found in your scope")
+
+
+@router.post("/tech-fun/mission-control/investigations/{mission_id}/subject")
+async def attach_mission_subject(
+    mission_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Attach the real subject and rebuild the scope from actual records."""
+    result = await nexus_investigate.attach_subject(
+        db, current_user, str(current_user.get("name") or ""), mission_id, data or {})
+    return _guard(result, "Investigation or subject not found in your scope")
+
+
+@router.post("/tech-fun/mission-control/investigations/{mission_id}/decision")
+async def record_mission_decision(
+    mission_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Record the human decision and why — append-only."""
+    result = await nexus_investigate.record_decision(
+        db, current_user, str(current_user.get("name") or ""), mission_id, data or {})
+    return _guard(result, "Investigation not found in your scope")
+
+
+@router.post("/tech-fun/mission-control/investigations/{mission_id}/close")
+async def close_mission_investigation(
+    mission_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Close with an honest outcome; the scope and decisions stay."""
+    result = await nexus_investigate.close_investigation(
+        db, current_user, str(current_user.get("name") or ""), mission_id, data or {})
+    return _guard(result, "Investigation not found in your scope")
+
+
+# ============== STATE ENGINE (DEVICE-LEVEL) & DRIFT CONTROL ==============
+
+
+@router.get("/tech-fun/state-engine/checks")
+async def state_engine_checks(current_user: dict = Depends(get_current_user)):
+    """The declared device checks and the live record each one reads."""
+    return nexus_device_state.check_catalog()
+
+
+@router.post("/tech-fun/state-engine/declarations")
+async def declare_device_state(data: dict, current_user: dict = Depends(get_current_user)):
+    """Declare what a device (or a whole customer) should look like."""
+    result = await nexus_device_state.declare_state(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Declaration could not be recorded")
+
+
+@router.get("/tech-fun/state-engine/declarations")
+async def list_device_declarations(
+    client_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Declared device-state expectations in your scope."""
+    result = await nexus_device_state.list_declarations(db, current_user, client_id)
+    return _guard(result, "No declarations in your scope")
+
+
+@router.get("/tech-fun/state-engine/evaluate/{device_id}")
+async def evaluate_device_state(device_id: str, current_user: dict = Depends(get_current_user)):
+    """Desired vs actual for one device: met, drifted, or honestly unverified."""
+    result = await nexus_device_state.evaluate_device(db, current_user, device_id)
+    return _guard(result, "Device not found in your scope")
+
+
+@router.post("/tech-fun/state-engine/evaluate")
+async def evaluate_estate_state(data: dict, current_user: dict = Depends(get_current_user)):
+    """Evaluate an estate slice — bounded, and it never infers from a missing field."""
+    payload = data or {}
+    result = await nexus_device_state.evaluate_estate(
+        db, current_user, payload.get("client_id"), payload.get("limit") or 200)
+    return _guard(result, "Nothing to evaluate")
+
+
+@router.get("/tech-fun/drift")
+async def list_drift(
+    client_id: str | None = None,
+    status: str | None = None,
+    device_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """The drift work queue: open findings outrank resolved ones."""
+    result = await nexus_device_state.list_drift(db, current_user, client_id, status, device_id)
+    return _guard(result, "No drift findings in your scope")
+
+
+@router.get("/tech-fun/drift/summary")
+async def drift_summary(
+    client_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Drift counts by status, check and customer, with an honest trend note."""
+    result = await nexus_device_state.drift_summary(db, current_user, client_id)
+    return _guard(result, "No drift findings in your scope")
+
+
+@router.post("/tech-fun/drift/{drift_id}/remediation")
+async def propose_drift_remediation(
+    drift_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Propose how to close one drift. A plan — Nexus executes nothing."""
+    result = await nexus_device_state.propose_remediation(
+        db, current_user, str(current_user.get("name") or ""), drift_id, data or {})
+    return _guard(result, "Drift finding not found in your scope")
+
+
+@router.post("/tech-fun/drift/{drift_id}/verification")
+async def record_drift_verification(
+    drift_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Record whether the drift is really gone — verified, still drifted, waived."""
+    result = await nexus_device_state.record_verification(
+        db, current_user, str(current_user.get("name") or ""), drift_id, data or {})
+    return _guard(result, "Drift finding not found in your scope")
+
+
+# ============== FLEET SHELL: A QUESTION BECOMES AN ACTIONABLE OBJECT SET ==============
+
+
+@router.get("/tech-fun/fleet/grammar")
+async def fleet_grammar(current_user: dict = Depends(get_current_user)):
+    """The supported fleet filters, and the device field each one needs."""
+    return nexus_fleet_shell.shell_grammar()
+
+
+@router.post("/tech-fun/fleet/query")
+async def fleet_query(data: dict, current_user: dict = Depends(get_current_user)):
+    """Query the fleet. Filters needing absent evidence report it as unavailable."""
+    result = await nexus_fleet_shell.query_fleet(db, current_user, data or {})
+    return _guard(result, "Nothing to query")
+
+
+@router.get("/tech-fun/fleet/summary")
+async def fleet_summary(
+    client_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fleet counts derived from recorded fields only."""
+    result = await nexus_fleet_shell.fleet_summary(db, current_user, client_id)
+    return _guard(result, "Nothing in your scope")
+
+
+@router.post("/tech-fun/fleet/sets")
+async def save_fleet_object_set(data: dict, current_user: dict = Depends(get_current_user)):
+    """Freeze a fleet answer into a saved object set with its membership and counts."""
+    result = await nexus_fleet_shell.save_object_set(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Object set could not be saved")
+
+
+@router.get("/tech-fun/fleet/sets")
+async def list_fleet_object_sets(current_user: dict = Depends(get_current_user)):
+    """Saved fleet object sets in your scope."""
+    result = await nexus_fleet_shell.list_object_sets(db, current_user)
+    return _guard(result, "No object sets in your scope")
+
+
+@router.get("/tech-fun/fleet/sets/{set_id}")
+async def get_fleet_object_set(set_id: str, current_user: dict = Depends(get_current_user)):
+    """One saved object set with its recorded membership."""
+    result = await nexus_fleet_shell.get_object_set(db, current_user, set_id)
+    return _guard(result, "Object set not found in your scope")
+
+
+@router.post("/tech-fun/fleet/sets/{set_id}/refine")
+async def refine_fleet_object_set(
+    set_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Narrow a saved set into a NEW set. The parent is never mutated."""
+    result = await nexus_fleet_shell.refine_object_set(
+        db, current_user, str(current_user.get("name") or ""), set_id, data or {})
+    return _guard(result, "Object set not found in your scope")
+
+
+@router.post("/tech-fun/fleet/sets/{set_id}/plan")
+async def plan_fleet_set_action(
+    set_id: str, data: dict, current_user: dict = Depends(get_current_user)
+):
+    """Plan an action over a set: blast-radius rings, rollback, verification. Plan only."""
+    result = await nexus_fleet_shell.plan_set_action(
+        db, current_user, str(current_user.get("name") or ""), set_id, data or {})
+    return _guard(result, "Object set not found in your scope")
+
+
+# ============== EVIDENCE ENGINE: PROOF THAT AN OPERATION ACTUALLY SUCCEEDED ==============
+
+
+@router.get("/tech-fun/evidence/contract")
+async def evidence_contract(current_user: dict = Depends(get_current_user)):
+    """What counts as proof: the verdicts and the never-infer rule."""
+    return nexus_evidence.evidence_contract()
+
+
+@router.post("/tech-fun/evidence")
+async def record_operation_evidence(data: dict, current_user: dict = Depends(get_current_user)):
+    """Record the evidence envelope for one operation, hash-chained per tenant."""
+    result = await nexus_evidence.record_evidence(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Evidence could not be recorded")
+
+
+@router.get("/tech-fun/evidence")
+async def list_operation_evidence(
+    client_id: str | None = None,
+    target_id: str | None = None,
+    operation: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Recorded operation evidence in your scope."""
+    result = await nexus_evidence.list_evidence(db, current_user, client_id, target_id, operation)
+    return _guard(result, "No evidence in your scope")
+
+
+@router.post("/tech-fun/evidence/packs")
+async def build_evidence_pack(data: dict, current_user: dict = Depends(get_current_user)):
+    """Build an incident evidence pack manifest with a verifiable root hash."""
+    result = await nexus_evidence.build_evidence_pack(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Evidence pack could not be built")
+
+
+@router.get("/tech-fun/evidence/packs")
+async def list_evidence_packs(current_user: dict = Depends(get_current_user)):
+    """Evidence packs in your scope."""
+    result = await nexus_evidence.list_packs(db, current_user)
+    return _guard(result, "No evidence packs in your scope")
+
+
+@router.get("/tech-fun/evidence/packs/{pack_id}")
+async def get_evidence_pack(pack_id: str, current_user: dict = Depends(get_current_user)):
+    """One pack, re-verified against its stored root hash."""
+    result = await nexus_evidence.get_pack(db, current_user, pack_id)
+    return _guard(result, "Evidence pack not found in your scope")
+
+
+@router.get("/tech-fun/evidence/{evidence_id}")
+async def get_operation_evidence(evidence_id: str, current_user: dict = Depends(get_current_user)):
+    """One evidence record with its derived verdict."""
+    result = await nexus_evidence.get_evidence(db, current_user, evidence_id)
+    return _guard(result, "Evidence not found in your scope")
+
+
+@router.post("/tech-fun/evidence/{evidence_id}/verify")
+async def verify_operation_evidence(evidence_id: str, current_user: dict = Depends(get_current_user)):
+    """Re-derive the verdict from the recorded checks — never from a claim."""
+    result = await nexus_evidence.verify_operation(db, current_user, evidence_id)
+    return _guard(result, "Evidence not found in your scope")
+
+
+# ============== OPERATIONAL MODE: NORMAL, OBSERVE-ONLY, SCOPED FREEZE ==============
+
+
+@router.get("/tech-fun/operational-mode/capabilities")
+async def operational_mode_capabilities(current_user: dict = Depends(get_current_user)):
+    """What can be stopped, and which layers actually consult this state."""
+    return nexus_operational_mode.capability_catalog()
+
+
+@router.get("/tech-fun/operational-mode")
+async def get_operational_mode(current_user: dict = Depends(get_current_user)):
+    """The platform's current operational intent."""
+    return {"mode": await nexus_operational_mode.current_mode(db, current_user)}
+
+
+@router.post("/tech-fun/operational-mode")
+async def set_operational_mode(data: dict, current_user: dict = Depends(get_current_user)):
+    """Change it (admin only). A written reason is mandatory; history is append-only."""
+    if not (current_user.get("is_admin") or current_user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    result = await nexus_operational_mode.set_mode(
+        db, current_user, str(current_user.get("name") or ""), data or {})
+    return _guard(result, "Mode change refused")
+
+
+@router.get("/tech-fun/operational-mode/events")
+async def list_operational_mode_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: dict = Depends(get_current_user),
+):
+    """Append-only history of operational-mode changes with actor and reason."""
+    return await nexus_operational_mode.list_events(db, current_user, limit)
