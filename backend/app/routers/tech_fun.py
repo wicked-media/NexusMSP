@@ -13,7 +13,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.auth import get_current_user
 from app.database import db
-from app.services import nexus_certainty, nexus_insight, nexus_ops_layer, qol_tools, tech_fun
+from app.services import (
+    nexus_certainty,
+    nexus_connector,
+    nexus_genome,
+    nexus_insight,
+    nexus_intent,
+    nexus_ledger,
+    nexus_ops_layer,
+    qol_tools,
+    tech_fun,
+)
 from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from app.services.tech_rewards import points_summary
 
@@ -664,3 +674,167 @@ async def we_told_you(
 ):
     """Prior Recommendation Evidence: recommendation → decision → accepted risk → incident."""
     return await nexus_ops_layer.we_told_you(db, current_user, client_id, device_id)
+
+
+# ============== NETWORK PRIMITIVES (intent, genome, connector, ledger) ==============
+
+
+@router.post("/tech-fun/intents")
+async def record_intent(data: dict, current_user: dict = Depends(get_current_user)):
+    """Intent OS: state the business outcome; Nexus compiles it into checkable controls."""
+    payload = data or {}
+    if not str(payload.get("statement") or "").strip():
+        raise HTTPException(status_code=400, detail="statement is required")
+    result = await nexus_intent.record_intent(db, current_user, str(current_user.get("name") or ""), payload)
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid intent")
+    return result
+
+
+@router.get("/tech-fun/intents")
+async def list_intents(client_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Active business intents in your scope."""
+    return await nexus_intent.list_intents(db, current_user, client_id)
+
+
+@router.get("/tech-fun/intent-evaluation")
+async def evaluate_intents(client_id: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Continuous desired state: every intent's controls evaluated against live data."""
+    return await nexus_intent.evaluate_intents(db, current_user, client_id)
+
+
+@router.post("/tech-fun/intent-suggest")
+async def suggest_intent_controls(data: dict, current_user: dict = Depends(get_current_user)):
+    """Compile plain-English intent into suggested controls (suggestions, never auto-recorded)."""
+    statement = str((data or {}).get("statement") or "").strip()
+    if not statement:
+        raise HTTPException(status_code=400, detail="statement is required")
+    return {"suggested_controls": nexus_intent.suggest_controls(statement),
+            "known_controls": nexus_intent.known_controls()}
+
+
+@router.post("/tech-fun/genome/patterns")
+async def contribute_genome_pattern(data: dict, current_user: dict = Depends(get_current_user)):
+    """Contribute one anonymised outcome tuple to the Nexus IT Genome."""
+    payload = data or {}
+    result = await nexus_genome.contribute_pattern(db, current_user, str(current_user.get("name") or ""), payload)
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid pattern")
+    return result
+
+
+@router.get("/tech-fun/genome/contribution")
+async def genome_contribution(current_user: dict = Depends(get_current_user)):
+    """What this environment contributed, and the privacy guarantees in force."""
+    return await nexus_genome.contribution_report(db, current_user)
+
+
+@router.get("/tech-fun/genome/emerging-issues")
+async def genome_emerging_issues(
+    window_days: int = Query(14, ge=1, le=90),
+    current_user: dict = Depends(get_current_user),
+):
+    """Emerging failure patterns with lift vs baseline — k-anonymised aggregates only."""
+    return await nexus_genome.emerging_issues(db, current_user, window_days=window_days)
+
+
+@router.get("/tech-fun/genome/insights")
+async def genome_insights(
+    symptom: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """What normally causes this symptom, and which fixes actually work."""
+    return await nexus_genome.genome_insights(db, current_user, symptom)
+
+
+@router.get("/tech-fun/connector/capabilities")
+async def connector_capabilities(current_user: dict = Depends(get_current_user)):
+    """The stable capability verbs workflows are written against."""
+    return nexus_connector.list_capabilities()
+
+
+@router.get("/tech-fun/connector/adapters")
+async def connector_adapters(current_user: dict = Depends(get_current_user)):
+    """Which vendor adapters implement which verbs — wired status never exaggerated."""
+    return nexus_connector.list_adapters()
+
+
+@router.get("/tech-fun/connector/coverage")
+async def connector_coverage(current_user: dict = Depends(get_current_user)):
+    """Capability coverage: what is portable today, and where a single vendor is a risk."""
+    return nexus_connector.capability_coverage()
+
+
+@router.post("/tech-fun/connector/translate")
+async def connector_translate(data: dict, current_user: dict = Depends(get_current_user)):
+    """Resolve a capability verb to a vendor-specific operation plan (plan, not execution)."""
+    payload = data or {}
+    result = nexus_connector.translate(str(payload.get("verb") or ""), str(payload.get("adapter") or ""))
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "no translation")
+    return result
+
+
+@router.post("/tech-fun/connector/swap-plan")
+async def connector_swap_plan(data: dict, current_user: dict = Depends(get_current_user)):
+    """What changing the vendor under a workflow actually touches."""
+    payload = data or {}
+    result = nexus_connector.swap_plan(
+        str(payload.get("verb") or ""),
+        str(payload.get("from_adapter") or ""),
+        str(payload.get("to_adapter") or ""),
+    )
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "no swap plan")
+    return result
+
+
+@router.post("/tech-fun/ledger/usage")
+async def record_usage(data: dict, current_user: dict = Depends(get_current_user)):
+    """Record a usage meter event — idempotent, ready for marketplace rating."""
+    payload = data or {}
+    result = await nexus_ledger.record_usage(db, current_user, str(current_user.get("name") or ""), payload)
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid usage event")
+    return result
+
+
+@router.get("/tech-fun/ledger/usage")
+async def usage_summary(meter: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Recorded usage totals per meter."""
+    return await nexus_ledger.usage_summary(db, current_user, meter)
+
+
+@router.post("/tech-fun/ledger/entries")
+async def post_ledger_entries(data: dict, current_user: dict = Depends(get_current_user)):
+    """Post a balanced double-entry transaction — append-only, hash-chained."""
+    payload = data or {}
+    result = await nexus_ledger.post_entries(db, current_user, str(current_user.get("name") or ""), payload)
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid transaction")
+    return result
+
+
+@router.get("/tech-fun/ledger/balance")
+async def ledger_balance(account: str, current_user: dict = Depends(get_current_user)):
+    """Net position of one ledger account."""
+    result = await nexus_ledger.account_balance(db, current_user, account)
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "account not found")
+    return result
+
+
+@router.get("/tech-fun/ledger/statement")
+async def ledger_statement(account: str | None = None, current_user: dict = Depends(get_current_user)):
+    """Append-only statement across ledger accounts."""
+    return await nexus_ledger.statement(db, current_user, account)
+
+
+@router.post("/tech-fun/ledger/revenue-share")
+async def revenue_share_preview(data: dict, current_user: dict = Depends(get_current_user)):
+    """Preview marketplace revenue share from recorded usage × a supplied rate."""
+    payload = data or {}
+    result = await nexus_ledger.revenue_share_preview(db, current_user, payload)
+    if not result.get("found"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "invalid preview")
+    return result

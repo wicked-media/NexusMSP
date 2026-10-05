@@ -16,6 +16,79 @@ Tiers:
 
 ---
 
+## The $1B thesis — Nexus is the operating network for managed technology
+
+The filter changed (2026-10): the question is no longer "is this a feature MSPs
+want?" but "does this create a network effect, an ecosystem position, or a
+compounding moat?". Kaseya is racing on agentic IT management with 17M+ endpoints
+of aggregated intelligence; NinjaOne on autonomous patching. "RMM + PSA + AI but
+better" loses. The endgame: RMM/PSA is one workload running on Nexus — a network
+of MSPs, businesses and vendors over the Nexus Graph, Intelligence (IT Genome),
+Intent OS, Autonomy, and Guardian/Verification, monetised through Services,
+Commerce, Trust and Labour.
+
+Moats that design targets: data (Genome), network (more MSPs → better
+intelligence), marketplace (two-sided), automation (verified outcomes improve
+recipes), trust (accumulated evidence), financial (billing plumbing), labour
+(shared capacity), switching (Nexus holds the operational intent/history).
+
+### The eight network primitives
+
+Today's architecture must contain the primitives those businesses need later.
+Status after this batch:
+
+| Primitive | Status | Lives in |
+|---|---|---|
+| Universal object graph | ✅ solid (P0 #5) | `core_relationships.py` (provenance edges, `client_core_graph`), `nexus_objects.py` |
+| Entitlement system | ✅ solid | `action_permissions.py`, `scope_permissions.py`, `module_permissions.py` |
+| Evidence model | ✅ solid (P0 #2/#6) | `nexus_verify_execution.py`, hash-chained `event_backbone.py`, Prove It |
+| Intent model | 🆕 shipped | `nexus_intent.py` — record/suggest/evaluate; drift verdicts never faked |
+| Privacy-preserving aggregate intelligence | 🆕 shipped | `nexus_genome.py` — one-way fingerprints, k-anonymity floor 3, lift vs baseline |
+| Vendor abstraction layer | 🆕 shipped | `nexus_connector.py` — 14 capability verbs, 7 adapters, coverage, translate, swap plans |
+| Metering | 🆕 shipped | `nexus_ledger.py` — idempotent usage meter events with dimensions |
+| Transaction ledger | 🆕 shipped | `nexus_ledger.py` — hash-chained double-entry, statements, supplied-rate revenue share |
+
+Honesty boundaries kept: the connector plans vendor operations but does not
+execute them; Genome aggregates never surface clusters below the k floor; ledger
+rates are supplied, never invented; intent verdicts are `unverified` when the
+evidence does not exist.
+
+### The 25 network ideas, re-filtered
+
+| # | Idea | Already in Nexus | Still needed | Tier |
+|---|---|---|---|---|
+| 1 | Global IT Exchange | Genome primitive (patterns, emerging issues, lift) | cross-deployment aggregate pipeline + participation consent | P1 |
+| 2 | IT Genome | `nexus_genome` (this batch) | scale + global pool | P1 |
+| 3 | Autonomy Network | Laws gate, Guardian, verified execution, consequence engine | agent orchestration over the autonomy contract (P0 #6) | P1 |
+| 4 | Intent OS | `nexus_intent` (this batch) | execution planners per control family | P1 |
+| 5 | Digital Company Twin | `core_relationships` graph, dependency horizon | process/data/contract layers on the graph | P1 |
+| 6 | Business Simulator | consequence engine (v1) | twin completeness + scenario algebra | P2 (on #5) |
+| 7 | Autonomous Migration Engine | `nexus_switchboard` migration plans | RMM/tenant/backup translators | P1 |
+| 8 | Universal Connector | `nexus_connector` (this batch) | real adapter execution behind the verbs | P1 |
+| 9 | Vendor-independent MSP | swap plans + coverage risk flags | live dual-run + parity evidence | P1 |
+| 10 | Marketplace economy | metering + ledger primitives (this batch) | vendor publishing + provisioning automation | P2 |
+| 11 | Clearing House | ledger (double-entry, hash chain) | wholesale agreements + consolidated invoicing | P2 |
+| 12 | Procurement Exchange | procurement/supplier scorecard modules | distributor APIs + RFQ engine | P2 |
+| 13 | Autonomous FinOps | agreement margin, licence reclamation, cost views | cross-cloud spend ingestion + savings ledger | P1 |
+| 14 | Insurance Engine | Prove It / audit readiness / evidence model | insurer partnerships + actuarial trust | Labs |
+| 15 | Trust Passport | evidence model + confidence report | portable customer-controlled sharing | Labs |
+| 16 | Questionnaire killer | evidence model | high evidence coverage + question mapping corpus | Labs |
+| 17 | Machine Trust Network | evidence model | bilateral verification protocol + adoption | Labs |
+| 18 | Autonomous Compliance | compliance modules + evidence reports | continuous control→evidence mapping | P1 |
+| 19 | AI Employee IT Layer | chat, ticket intelligence, intent model | safe request→approval→provision autonomy | P2 |
+| 20 | Zero-Ticket Enterprise | — | the metric target of #19, not a build | Labs (target) |
+| 21 | MSP-in-a-Box | most modules exist | packaging + onboarding flow | P2 |
+| 22 | Franchise/Network | — | verified partner graph + routing + settlement (ledger) | P2 |
+| 23 | Technician marketplace | skills matrix, trust scores | vetting, escrow, access brokerage | P2 |
+| 24 | Capacity Exchange | — | partner capacity listings + settlement | P2 |
+| 25 | Autonomous MSP | commander, consequence, laws, verified execution | the whole autonomy stack matured | P1 (endgame) |
+
+Planning rule: P1 network items only start when their primitive row above is
+solid. Commerce items (10–12, 21–24) wait until metering + ledger have real
+transaction volume behind them.
+
+---
+
 ## P0 — architecture decisions to get right now
 
 | # | Decision | Why it will hurt later |
@@ -107,6 +180,7 @@ payroll), rubber-duck diagnosis, "bet you $5 it's DNS" predictions.
 | Insight layer (baselines, anomaly explorer, timeline, search, sidecar, debt) | P0 #4/#8 groundwork, P1 #7 |
 | Certainty layer (unknowns, Prove It, confidence, laws, noise, readiness) | P0 #2/#8, P1 #2/#3 |
 | This batch (consequence engine, commander, decision/risk memory) | P1 #1/#6/#8 |
+| Network primitives batch (intent, genome, connector, metering + ledger) | $1B thesis primitives — intent (#4), genome (#1–2), connector (#8–9), commerce (#10–11) |
 
 **Planning rule:** each batch ships one flagship step *and* strengthens a P0
 primitive. Features from P2 appear only when they ride along for free.

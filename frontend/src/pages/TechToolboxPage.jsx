@@ -15,7 +15,7 @@ import {
   Siren, Radar, Lock, ArrowRightLeft, PiggyBank,
   Activity, Eye, History, Search, MapPin, CalendarClock, TrendingDown, Hammer, PanelRight,
   HelpCircle, BadgeCheck, Sparkles, BellOff, GitMerge, ClipboardCheck, Scale, ShieldAlert, MessageSquare,
-  AlertTriangle, Sunrise, Sunset, BookOpen,
+  AlertTriangle, Sunrise, Sunset, BookOpen, Waypoints, Dna, Coins,
 } from "lucide-react";
 import { playSound, isSoundEnabled, setSoundEnabled } from "@/lib/sounds";
 import { buildTechCardSvg, techCardFilename } from "@/lib/techCard";
@@ -2257,6 +2257,227 @@ function RealityChecks() {
   );
 }
 
+function IntentOS() {
+  const { token } = useAuth();
+  const [statement, setStatement] = useState("");
+  const [suggested, setSuggested] = useState(null);
+  const [report, setReport] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const headers = { Authorization: `Bearer ${token}` };
+  const suggest = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/tech-fun/intent-suggest`, { statement }, { headers });
+      setSuggested(data.suggested_controls);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not compile that intent.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const recordAndEvaluate = async () => {
+    setBusy(true);
+    try {
+      await axios.post(`${API}/tech-fun/intents`, { statement }, { headers });
+      const { data } = await axios.get(`${API}/tech-fun/intent-evaluation`, { headers });
+      setReport(data);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not record that intent.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section icon={Waypoints} title="Intent OS" hint="Stop configuring technology — state the business outcome. Nexus compiles plain English into checkable controls and continuously measures drift. Unverifiable controls are never reported as met.">
+      <div className="flex flex-wrap gap-2">
+        <Input className="h-8 min-w-56 flex-1" value={statement} onChange={(e) => setStatement(e.target.value)} placeholder="Every employee handling financial data must be MFA'd and encrypted" data-testid="intent-statement" />
+        <Button size="sm" variant="outline" onClick={suggest} disabled={busy || !statement.trim()} data-testid="intent-suggest">
+          {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Waypoints className="mr-1 h-3 w-3" />}Compile
+        </Button>
+        <Button size="sm" onClick={recordAndEvaluate} disabled={busy || !statement.trim()} data-testid="intent-record">
+          Record &amp; evaluate
+        </Button>
+      </div>
+      {suggested && (
+        <div className="mt-2 flex flex-wrap gap-1" data-testid="intent-suggested">
+          {suggested.length ? suggested.map((c) => (
+            <Badge key={c} variant="secondary" className="text-[10px]">{c}</Badge>
+          )) : <span className="text-xs text-muted-foreground">No known controls suggested — add explicit controls.</span>}
+        </div>
+      )}
+      {report && (
+        <div className="mt-3 space-y-1 text-xs" data-testid="intent-report">
+          <p className="font-semibold text-sm">{report.drifting} drifting / {report.count} intent(s)</p>
+          {report.intents.map((intent) => (
+            <div key={intent.id} className="rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5">
+              <p className="font-medium">{intent.statement}</p>
+              {intent.results.map((r) => (
+                <p key={r.control} className={r.verdict === "drifting" ? "text-amber-300" : r.verdict === "met" ? "text-emerald-300" : "text-muted-foreground"}>
+                  {r.verdict === "met" ? "✓" : r.verdict === "drifting" ? "⚠" : "?"} {r.control}: {r.reason}
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function ITGenome() {
+  const { token } = useAuth();
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const scan = async () => {
+    setBusy(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [issues, insights, contribution] = await Promise.all([
+        axios.get(`${API}/tech-fun/genome/emerging-issues`, { headers }),
+        axios.get(`${API}/tech-fun/genome/insights`, { headers }),
+        axios.get(`${API}/tech-fun/genome/contribution`, { headers }),
+      ]);
+      setResult({ issues: issues.data, insights: insights.data, contribution: contribution.data });
+    } catch {
+      toast.error("Could not read the Genome.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section icon={Dna} title="Nexus IT Genome" hint="Privacy-preserving operational intelligence: which stacks fail, what causes which symptoms, and which fixes actually work. Patterns are one-way fingerprinted and only ever surfaced as k-anonymised aggregates — no customer data leaves this page.">
+      <Button size="sm" onClick={scan} disabled={busy} data-testid="genome-scan">
+        {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Dna className="mr-1 h-3 w-3" />}Scan the Genome
+      </Button>
+      {result && (
+        <div className="mt-3 space-y-2 text-xs" data-testid="genome-result">
+          <p className="text-muted-foreground">{result.contribution.patterns_contributed} anonymised pattern(s) contributed · k ≥ {result.contribution.privacy.k_anonymity_min}</p>
+          {result.issues.emerging_issues.length === 0 && result.insights.insights.length === 0 && (
+            <p className="rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5">Not enough evidence yet — clusters below the anonymity floor are never reported.</p>
+          )}
+          {result.issues.emerging_issues.map((issue, i) => (
+            <div key={i} className="rounded border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-1.5 text-amber-200">
+              🧬 {issue.symptom} on {issue.os_family} — {issue.baseline_note} ({issue.recent_failures}/{issue.recent_samples} recent)
+            </div>
+          ))}
+          {result.insights.insights.map((insight, i) => (
+            <div key={i} className="rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5">
+              <p className="font-medium">{insight.symptom} · {insight.samples} sample(s)</p>
+              {insight.remedies.slice(0, 2).map((r) => (
+                <p key={r.remediation_kind} className="text-muted-foreground">{r.remediation_kind}: {Math.round(r.success_rate * 100)}% success ({r.attempts} attempt(s))</p>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function UniversalConnector() {
+  const { token } = useAuth();
+  const [coverage, setCoverage] = useState(null);
+  const [form, setForm] = useState({ verb: "license.assign", from_adapter: "pax8", to_adapter: "microsoft365" });
+  const [swap, setSwap] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const headers = { Authorization: `Bearer ${token}` };
+  const load = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.get(`${API}/tech-fun/connector/coverage`, { headers });
+      setCoverage(data);
+    } catch {
+      toast.error("Could not load capability coverage.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const planSwap = async () => {
+    setBusy(true);
+    try {
+      const { data } = await axios.post(`${API}/tech-fun/connector/swap-plan`, form, { headers });
+      setSwap(data);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "No swap plan for that combination.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section icon={ArrowRightLeft} title="Universal Connector" hint="One operational abstraction over every vendor. Workflows speak capability verbs — identity.user.disable, endpoint.isolate, backup.restore — so vendors become replaceable components. Coverage shows exactly what is portable today; adapters are never claimed as wired when they are not.">
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" onClick={load} disabled={busy} data-testid="connector-coverage">
+          {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <ArrowRightLeft className="mr-1 h-3 w-3" />}Capability coverage
+        </Button>
+        <Input className="h-8 w-40" value={form.verb} onChange={(e) => setForm({ ...form, verb: e.target.value })} data-testid="connector-verb" />
+        <Input className="h-8 w-32" value={form.from_adapter} onChange={(e) => setForm({ ...form, from_adapter: e.target.value })} data-testid="connector-from" />
+        <Input className="h-8 w-32" value={form.to_adapter} onChange={(e) => setForm({ ...form, to_adapter: e.target.value })} data-testid="connector-to" />
+        <Button size="sm" onClick={planSwap} disabled={busy} data-testid="connector-swap">Swap plan</Button>
+      </div>
+      {coverage && (
+        <div className="mt-3 text-xs" data-testid="connector-result">
+          <p className="font-semibold text-sm">{coverage.verbs_portable_now}/{coverage.verbs_total} verbs portable now · {coverage.verbs_with_wired_adapter} with a wired adapter</p>
+          {coverage.single_vendor_risks.length > 0 && (
+            <p className="mt-1 rounded border border-amber-500/25 bg-amber-500/[0.07] px-2.5 py-1.5 text-amber-200">
+              ⚠ Single-vendor risk: {coverage.single_vendor_risks.join(", ")}
+            </p>
+          )}
+          {swap && (
+            <div className="mt-2 rounded border border-violet-500/15 bg-violet-500/[0.04] px-2.5 py-1.5" data-testid="connector-swap-result">
+              <p className="font-medium">{swap.from.vendor} → {swap.to.vendor} for {swap.verb} (target: {swap.to.status})</p>
+              <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                {swap.checklist.map((step, i) => <li key={i}>• {step}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function LedgerMetering() {
+  const { token } = useAuth();
+  const [usage, setUsage] = useState({ meter: "endpoints.managed", quantity: 15 });
+  const [share, setShare] = useState({ meter: "endpoints.managed", rate_per_unit: 2.5, platform_share_percent: 10 });
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const headers = { Authorization: `Bearer ${token}` };
+  const record = async () => {
+    setBusy(true);
+    try {
+      await axios.post(`${API}/tech-fun/ledger/usage`, { ...usage, quantity: Number(usage.quantity) }, { headers });
+      const { data } = await axios.post(`${API}/tech-fun/ledger/revenue-share`, {
+        ...share, rate_per_unit: Number(share.rate_per_unit), platform_share_percent: Number(share.platform_share_percent),
+      }, { headers });
+      setResult(data);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not record usage.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section icon={Coins} title="Metering &amp; Ledger" hint="The financial plumbing for marketplace economics: idempotent usage meter events and an append-only, hash-chained double-entry ledger. Revenue-share previews use only rates you or an agreement supply — Nexus never invents pricing.">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input className="h-8 w-44" value={usage.meter} onChange={(e) => setUsage({ ...usage, meter: e.target.value })} data-testid="ledger-meter" />
+        <Input className="h-8 w-20" type="number" value={usage.quantity} onChange={(e) => setUsage({ ...usage, quantity: e.target.value })} data-testid="ledger-qty" />
+        <Input className="h-8 w-24" type="number" value={share.rate_per_unit} onChange={(e) => setShare({ ...share, rate_per_unit: e.target.value })} data-testid="ledger-rate" title="rate per unit (supplied by you)" />
+        <Input className="h-8 w-20" type="number" value={share.platform_share_percent} onChange={(e) => setShare({ ...share, platform_share_percent: e.target.value })} data-testid="ledger-share" title="platform share %" />
+        <Button size="sm" onClick={record} disabled={busy} data-testid="ledger-record">
+          {busy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Coins className="mr-1 h-3 w-3" />}Record &amp; preview
+        </Button>
+      </div>
+      {result && (
+        <div className="mt-3 text-sm" data-testid="ledger-result">
+          <p className="font-semibold">{result.meter}: {result.quantity} × {result.rate_per_unit} = {result.gross}</p>
+          <p className="text-xs text-muted-foreground">Platform fee {result.platform_fee} ({result.platform_share_percent}%) · MSP net {result.msp_net} · {result.note}</p>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function ConsequenceEngine() {
   const { token } = useAuth();
   const [form, setForm] = useState({ action_type: "reboot", target_id: "", destructive: false });
@@ -2562,6 +2783,10 @@ export default function TechToolboxPage() {
           <MorningCommander />
           <EndMyDay />
           <DecisionMemory />
+          <IntentOS />
+          <ITGenome />
+          <UniversalConnector />
+          <LedgerMetering />
           <GoHomeCheck />
           <WeekendRisk />
           <CaughtUp />
