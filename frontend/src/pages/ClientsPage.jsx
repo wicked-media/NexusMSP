@@ -49,6 +49,21 @@ import ConfidenceLens from "@/components/confidence/ConfidenceLens";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import WorkspaceControlBar from "@/components/WorkspaceControlBar";
 import WorkspaceToolsMenu from "@/components/WorkspaceToolsMenu";
+import {
+  CLIENT_HEALTH_FILTER_OPTIONS,
+  healthBand,
+  resolveClientHealthBand,
+} from "@/lib/clientHealthBands";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
+
+const EMPTY_CREATE_FORM = { name: "", industry: "", email: "", phone: "", website: "", tier: "", lifecycle: "active" };
+
+/** Optional account fields are cleared by omission, not by an empty string: the
+ * API validates email, and `""` is not an address. */
+const blankToNull = (value) => {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+};
 
 const LIFECYCLE_COLORS = {
   prospect: "text-violet-400 border-violet-500/30 bg-violet-500/5",
@@ -131,20 +146,25 @@ const CLIENT_WORKSPACE_GROUPS = [
 const CLIENT_TAB_VALUES = new Set(CLIENT_WORKSPACE_GROUPS.flatMap((group) => group.tabs.map((tab) => tab.value)));
 
 function HealthDial({ score, size = 44 }) {
-  const s = Math.max(0, Math.min(100, score || 0));
-  const color = s >= 85 ? "#34d399" : s >= 70 ? "#fbbf24" : s >= 50 ? "#fb923c" : "#fb7185";
+  // The ring reports the band Nexus served, so an account the engine calls
+  // healthy is never drawn amber. An unscored account is an empty ring, not a
+  // score of zero.
+  const band = healthBand(score);
+  const s = band ? Math.max(0, Math.min(100, Number(score))) : 0;
+  const color = band?.dial || "#71717a";
   const stroke = 4, r = (size / 2) - stroke;
   const c = 2 * Math.PI * r;
   const offset = c * (1 - s / 100);
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" role="img"
+      aria-label={band ? `Service health ${s} out of 100 — ${band.label}` : "Service health is not scored yet"}>
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth={stroke} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={c} strokeDashoffset={offset}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
         style={{ transition: "stroke-dashoffset 600ms ease-out" }}
       />
-      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fontSize={size * 0.32} fontWeight="600" fill={color} fontFamily="monospace">{s}</text>
+      <text x="50%" y="54%" dominantBaseline="middle" textAnchor="middle" fontSize={size * 0.32} fontWeight="600" fill={color} fontFamily="monospace">{band ? s : "—"}</text>
     </svg>
   );
 }
@@ -244,7 +264,7 @@ export default function ClientsPage() {
   const [detailTab, setDetailTab] = useState(CLIENT_TAB_VALUES.has(tabFromUrl) ? tabFromUrl : "overview");
   const [detailLoading, setDetailLoading] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", industry: "", email: "", phone: "", website: "", tier: "standard", lifecycle: "active" });
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
   const searchRef = useRef(null);
 
   const openClient = useCallback((id, { preserveView = false } = {}) => {
@@ -270,6 +290,20 @@ export default function ClientsPage() {
       return next;
     }, { replace: true });
   }, [selectedId, setSearchParams]);
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setLifecycleFilter("all");
+    setRiskFilter("all");
+    setIntegrationFilter("all");
+    setTierFilter("all");
+  }, []);
+
+  const hasActiveFilters = Boolean(search)
+    || lifecycleFilter !== "all"
+    || riskFilter !== "all"
+    || integrationFilter !== "all"
+    || tierFilter !== "all";
 
   const fetchData = async () => {
     setLoading(true);
@@ -322,12 +356,39 @@ export default function ClientsPage() {
 
   useEffect(() => { if (selectedId) fetchDetail(selectedId); /* eslint-disable-line */ }, [selectedId]);
 
-  // Keyboard shortcut: / focuses search; j/k navigate; Esc clears selection
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return (data.clients || []).filter(c => {
+      if (q && !(`${c.name} ${c.industry || ""} ${c.email || ""}`.toLowerCase().includes(q))) return false;
+      if (lifecycleFilter !== "all" && c.lifecycle !== lifecycleFilter) return false;
+      if (riskFilter !== "all" && resolveClientHealthBand(c)?.key !== riskFilter) return false;
+      if (integrationFilter !== "all" && !c.integrations?.[integrationFilter]) return false;
+      if (tierFilter === "untiered" && c.service_tier_id) return false;
+      if (tierFilter !== "all" && tierFilter !== "untiered" && c.service_tier_id !== tierFilter) return false;
+      return true;
+    }).sort((left, right) => {
+      const attention = (client) => {
+        const bandKey = resolveClientHealthBand(client)?.key;
+        return (bandKey === "critical" ? 400 : bandKey === "at_risk" ? 300 : 0)
+          + Math.min(Number(client.patch_pending) || 0, 99) * 2
+          + Math.max(0, 70 - (Number(client.health_score) || 0))
+          + Math.min(Number(client.open_tickets) || 0, 50);
+      };
+      const delta = attention(right) - attention(left);
+      return delta || String(left.name || "").localeCompare(String(right.name || ""));
+    });
+  }, [data, search, lifecycleFilter, riskFilter, integrationFilter, tierFilter]);
+
+  // Keyboard shortcut: / focuses search, j/k walk the visible directory, and
+  // Cmd/Ctrl+N creates a client. This depends on the filtered list, so a search
+  // or filter narrows the walk instead of navigating clients the technician
+  // cannot see.
   useEffect(() => {
     const handler = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if (e.key === "/") { e.preventDefault(); searchRef.current?.focus(); }
       else if (e.key === "j" || e.key === "k") {
+        if (!filtered.length) return;
         const idx = filtered.findIndex(c => c.id === selectedId);
         const next = e.key === "j" ? Math.min(idx + 1, filtered.length - 1) : Math.max(idx - 1, 0);
         if (filtered[next]) openClient(filtered[next].id);
@@ -338,30 +399,7 @@ export default function ClientsPage() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-    // eslint-disable-next-line
-  }, [selectedId, data, openClient]);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return (data.clients || []).filter(c => {
-      if (q && !(`${c.name} ${c.industry || ""} ${c.email || ""}`.toLowerCase().includes(q))) return false;
-      if (lifecycleFilter !== "all" && c.lifecycle !== lifecycleFilter) return false;
-      if (riskFilter !== "all" && c.risk_level !== riskFilter) return false;
-      if (integrationFilter !== "all" && !c.integrations?.[integrationFilter]) return false;
-      if (tierFilter === "untiered" && c.service_tier_id) return false;
-      if (tierFilter !== "all" && tierFilter !== "untiered" && c.service_tier_id !== tierFilter) return false;
-      return true;
-    }).sort((left, right) => {
-      const attention = (client) => (
-        (client.risk_level === "critical" ? 400 : client.risk_level === "at_risk" ? 300 : 0)
-        + Math.min(Number(client.patch_pending) || 0, 99) * 2
-        + Math.max(0, 70 - (Number(client.health_score) || 0))
-        + Math.min(Number(client.open_tickets) || 0, 50)
-      );
-      const delta = attention(right) - attention(left);
-      return delta || String(left.name || "").localeCompare(String(right.name || ""));
-    });
-  }, [data, search, lifecycleFilter, riskFilter, integrationFilter, tierFilter]);
+  }, [filtered, selectedId, openClient]);
 
   const selectedClient = useMemo(() => data.clients?.find(c => c.id === selectedId), [data, selectedId]);
   const onboardingProgress = onboardingSession
@@ -370,11 +408,24 @@ export default function ClientsPage() {
 
   const createClient = async () => {
     if (!createForm.name) { toast.error("Name required"); return; }
+    // A catalogue tier is a real Nexus service tier: it carries the response and
+    // resolution targets, it is what the directory's tier filter matches, and it
+    // is what active tickets inherit. Choosing one here has to assign it, not
+    // write a label the catalogue never sees.
+    const chosenTier = tierOptions.find(t => t.id === createForm.tier) || null;
     try {
-      const response = await axios.post(`${API}/clients`, createForm, { headers });
+      const response = await axios.post(`${API}/clients`, {
+        name: createForm.name.trim(),
+        industry: blankToNull(createForm.industry),
+        email: blankToNull(createForm.email),
+        phone: blankToNull(createForm.phone),
+        website: blankToNull(createForm.website),
+        tier: chosenTier?.slug || "standard",
+        lifecycle: createForm.lifecycle,
+      }, { headers });
       const createdClient = response.data;
       setCreateDialog(false);
-      setCreateForm({ name: "", industry: "", email: "", phone: "", website: "", tier: "standard", lifecycle: "active" });
+      setCreateForm(EMPTY_CREATE_FORM);
       setSelectedId(createdClient.id);
       setSearchParams((current) => {
         const next = new URLSearchParams(current);
@@ -383,8 +434,18 @@ export default function ClientsPage() {
         return next;
       });
       await fetchData();
-      toast.success(`${createdClient.name} created — ready for onboarding`);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
+      if (chosenTier) {
+        try {
+          await axios.patch(`${API}/clients/${createdClient.id}/service-tier`, { service_tier_id: chosenTier.id }, { headers });
+          toast.success(`${createdClient.name} created on ${chosenTier.name} — ready for onboarding`);
+        } catch {
+          // The account exists and must not be lost because of the tier call.
+          toast.error(`${createdClient.name} was created, but ${chosenTier.name} was not assigned. Set the service tier from the client header.`);
+        }
+      } else {
+        toast.success(`${createdClient.name} created — ready for onboarding`);
+      }
+    } catch (e) { toast.error(apiErrorMessage(e, "The client could not be created. Nothing has been changed.")); }
   };
 
   const dismissOnboardingPrompt = () => {
@@ -416,9 +477,9 @@ export default function ClientsPage() {
 
   const s = data.summary || {};
   const attentionClients = (data.clients || [])
-    .filter(client => client.patch_pending > 0 || client.risk_level === "critical" || client.risk_level === "at_risk")
+    .filter(client => client.patch_pending > 0 || ["critical", "at_risk"].includes(resolveClientHealthBand(client)?.key))
     .sort((a, b) => (b.patch_pending || 0) - (a.patch_pending || 0) || (a.health_score || 0) - (b.health_score || 0));
-  const clientWorkspaceSignal = attentionClients.some(client => client.risk_level === "critical" || (client.health_score || 100) < 60)
+  const clientWorkspaceSignal = attentionClients.some(client => resolveClientHealthBand(client)?.signal === "critical")
     ? "critical"
     : attentionClients.length > 0 || (s.patch_pending || 0) > 0
       ? "attention"
@@ -493,11 +554,9 @@ export default function ClientsPage() {
                 <Select value={riskFilter} onValueChange={setRiskFilter}>
                   <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-risk"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All health</SelectItem>
-                    <SelectItem value="healthy">Healthy 85+</SelectItem>
-                    <SelectItem value="attention">Needs attention</SelectItem>
-                    <SelectItem value="at_risk">At risk</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
+                    {CLIENT_HEALTH_FILTER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value} data-testid={`filter-health-${option.value}`}>{option.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={integrationFilter} onValueChange={setIntegrationFilter}>
@@ -526,23 +585,37 @@ export default function ClientsPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {(search || lifecycleFilter !== "all" || riskFilter !== "all" || integrationFilter !== "all" || tierFilter !== "all") && (
-                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={() => { setSearch(""); setLifecycleFilter("all"); setRiskFilter("all"); setIntegrationFilter("all"); setTierFilter("all"); }}>
+                {hasActiveFilters && (
+                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={clearFilters} data-testid="clients-clear-filters-inline">
                     <X className="w-2.5 h-2.5 mr-1" />Clear
                   </Button>
                 )}
               </div>
               <div className="text-[10px] text-muted-foreground flex justify-between gap-2 px-1">
                 <span>{filtered.length} of {data.clients?.length || 0} · most urgent first</span>
-                <span className="hidden lg:inline">/ search · ⌘N new</span>
+                <span className="hidden lg:inline">/ search · J/K walk · ⌘N new</span>
               </div>
             </WorkspaceControlBar>
             <div className="flex-1 overflow-y-auto">
               {filtered.length === 0 ? (
-                <div className="p-8 text-center text-sm text-zinc-500">
-                  <Filter className="w-8 h-8 mx-auto mb-3 opacity-40" />
-                  No clients match these filters.
-                </div>
+                (data.clients?.length || 0) === 0 ? (
+                  <div className="p-8 text-center" data-testid="clients-empty-portfolio">
+                    <Building2 className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                    <p className="text-sm text-zinc-400">No clients are in this workspace yet.</p>
+                    <p className="mt-1.5 mx-auto max-w-xs text-xs leading-5 text-zinc-500">Create the first client record so tickets, assets, agreements and billing have an account to belong to.</p>
+                    <Button size="sm" className="mt-4" onClick={() => setCreateDialog(true)} data-testid="clients-empty-create">
+                      <Plus className="mr-1 h-4 w-4" />New client
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-sm text-zinc-500" data-testid="clients-no-matches">
+                    <Filter className="w-8 h-8 mx-auto mb-3 opacity-40" />
+                    No clients match these filters.
+                    <div className="mt-4">
+                      <Button size="sm" variant="outline" onClick={clearFilters} data-testid="clients-clear-filters">Clear filters</Button>
+                    </div>
+                  </div>
+                )
               ) : (
                 filtered.map(c => (
                   <ClientListItem key={c.id} client={c} selected={selectedId === c.id} onClick={() => openClient(c.id)} />
@@ -648,17 +721,26 @@ export default function ClientsPage() {
               </section>
 
               <section className="flex flex-col gap-3 rounded-xl border border-primary/15 bg-primary/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs font-medium text-foreground">Initial service tier</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">This can be refined later through the managed service-tier catalogue.</p>
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                    {tierOptions.length
+                      ? "Chosen from the managed service-tier catalogue and assigned immediately, so its response and resolution targets apply from the first ticket."
+                      : "The service-tier catalogue is not available right now, so this account starts untiered. Assign the tier from the client header once the catalogue loads."}
+                  </p>
                 </div>
-                <Select value={createForm.tier} onValueChange={v => setCreateForm({ ...createForm, tier: v })}>
-                  <SelectTrigger className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+                <Select value={createForm.tier || "none"} onValueChange={v => setCreateForm({ ...createForm, tier: v === "none" ? "" : v })}>
+                  <SelectTrigger className="w-full sm:w-56" data-testid="new-client-tier"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="standard">Standard</SelectItem>
-                    <SelectItem value="silver">Silver</SelectItem>
-                    <SelectItem value="gold">Gold</SelectItem>
-                    <SelectItem value="platinum">Platinum</SelectItem>
+                    <SelectItem value="none">No service tier yet</SelectItem>
+                    {tierOptions.map(t => (
+                      <SelectItem key={t.id} value={t.id} data-testid={`new-client-tier-${t.slug}`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="h-2 w-2 rounded-full" style={{ background: t.color }} />
+                          {t.name}
+                        </span>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </section>
@@ -838,7 +920,7 @@ function ClientContactsPanel({ clientId, token, onCountChange }) {
       else await axios.put(`${API}/clients/${clientId}/contacts/${editor.id}`, form, { headers });
       toast.success(editor === "create" ? "Contact added" : "Contact updated");
       setEditor(null); await load();
-    } catch (error) { toast.error(error.response?.data?.detail || "Could not save contact"); }
+    } catch (error) { toast.error(apiErrorMessage(error, "Could not save contact")); }
     finally { pending.current = false; setSaving(false); }
   };
   const remove = async () => {
@@ -849,7 +931,7 @@ function ClientContactsPanel({ clientId, token, onCountChange }) {
       await axios.delete(`${API}/clients/${clientId}/contacts/${deleting.id}`, { headers });
       toast.success(`${deleting.name} removed from this client`);
       setDeleting(null); await load();
-    } catch (error) { toast.error(error.response?.data?.detail || "Could not remove contact"); }
+    } catch (error) { toast.error(apiErrorMessage(error, "Could not remove contact")); }
     finally { pending.current = false; setSaving(false); }
   };
   const makePrimary = async (contact) => {
@@ -860,7 +942,7 @@ function ClientContactsPanel({ clientId, token, onCountChange }) {
       await axios.put(`${API}/clients/${clientId}/contacts/${contact.id}`, { is_primary: true }, { headers });
       toast.success(`${contact.name || "Contact"} is now the primary contact`);
       await load();
-    } catch (error) { toast.error(error.response?.data?.detail || "Could not update the primary contact"); }
+    } catch (error) { toast.error(apiErrorMessage(error, "Could not update the primary contact")); }
     finally { pending.current = false; setSaving(false); }
   };
   const contactRole = (role) => ({
@@ -1059,7 +1141,7 @@ function ClientDetailPane({
       setProfileEditorOpen(false);
       toast.success("Client profile updated");
     } catch (error) {
-      toast.error(error?.response?.data?.detail || "Could not update client profile");
+      toast.error(apiErrorMessage(error, "Could not update client profile"));
     } finally {
       setProfileSaving(false);
     }
@@ -1093,7 +1175,7 @@ function ClientDetailPane({
   return (
     <div className="flex min-h-full flex-col gap-4 p-4 sm:p-5" data-testid="client-detail-pane">
       {/* Cover banner */}
-      <section className="nx-ambient-surface overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-nx-signal={client.health_score < 60 ? "critical" : client.health_score < 85 ? "attention" : "healthy"}>
+      <section className="nx-ambient-surface overflow-hidden rounded-2xl border border-white/[0.08] bg-[radial-gradient(circle_at_top_right,rgba(45,212,191,0.12),transparent_38%),linear-gradient(135deg,rgba(15,23,42,0.95),rgba(9,12,18,0.98))] shadow-[0_18px_55px_rgba(0,0,0,0.2)]" data-nx-signal={resolveClientHealthBand(client)?.signal || "healthy"}>
         {tab === "overview" && <ClientCoverImage client={client} onUpdated={applyClientPatch}>
           <ClientAccountAlerts client={client} />
         </ClientCoverImage>}

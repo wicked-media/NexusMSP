@@ -1,3 +1,5 @@
+import { healthBand } from "./clientHealthBands";
+
 const numberFrom = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -59,8 +61,11 @@ export function getClientAttentionReasons(client) {
   const risk = riskReason(client.risk_level ?? client.riskLevel);
   if (risk) reasons.push(risk);
 
+  // Health reasons follow the bands the health engine serves, so this queue can
+  // never disagree with the account banner and directory about the same score.
   const healthScore = numberFrom(client.health_score ?? client.healthScore);
-  if (healthScore !== null && healthScore < 60) {
+  const scoreBand = healthScore === null ? null : healthBand(healthScore);
+  if (scoreBand?.key === "critical") {
     reasons.push({
       id: "health-critical",
       label: `Health ${Math.round(healthScore)}/100`,
@@ -68,7 +73,15 @@ export function getClientAttentionReasons(client) {
       severity: "critical",
       weight: 88,
     });
-  } else if (healthScore !== null && healthScore < 70) {
+  } else if (scoreBand?.key === "at_risk") {
+    reasons.push({
+      id: "health-at-risk",
+      label: `Health ${Math.round(healthScore)}/100`,
+      detail: "Scored commitments are failing",
+      severity: "critical",
+      weight: 74,
+    });
+  } else if (scoreBand?.key === "attention") {
     reasons.push({
       id: "health-attention",
       label: `Health ${Math.round(healthScore)}/100`,
