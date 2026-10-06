@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 
@@ -54,4 +54,28 @@ export function useClientOptions() {
     return () => { alive = false; };
   }, [token]);
   return items;
+}
+
+/**
+ * Devices and clients in one list for dual-target pickers. Item ids are
+ * namespaced (`device:…` / `client:…`) so the two stable-ID spaces can never
+ * collide and the caller learns which kind was chosen.
+ */
+export function useDeviceOrClientOptions() {
+  const devices = useDeviceOptions();
+  const clients = useClientOptions();
+  return useMemo(() => [
+    ...devices.map((item) => ({
+      ...item,
+      id: `device:${item.id}`,
+      description: `Device · ${item.description || item.label}`,
+      keywords: `device ${item.keywords || ""}`,
+    })),
+    ...clients.map((item) => ({
+      ...item,
+      id: `client:${item.id}`,
+      description: `Client · ${item.description || item.label}`,
+      keywords: `client ${item.keywords || ""}`,
+    })),
+  ], [devices, clients]);
 }
