@@ -4,6 +4,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Academy certificate: print/saves as a clean white sheet */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .nx-print-cert,
+  .nx-print-cert * {
+    visibility: visible;
+    color: #111 !important;
+    border-color: #cbd5e1 !important;
+    background: transparent !important;
+  }
+  .nx-print-cert {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 24px;
+    background: #fff !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 12px;
+  }
+}
+
 @layer base {
     :root {
         /* Swiss Tactical Dark — zinc-based palette (matches PageShell) */

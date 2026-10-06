@@ -49,12 +49,13 @@ class Collection:
 
 ADMIN = {"id": "admin-a", "tenant_id": "a", "role": "admin"}
 LEARNER = {"id": "learner-a", "tenant_id": "a", "role": "technician"}
+PEER = {"id": "learner-c", "tenant_id": "a", "role": "technician"}
 FOREIGN = {"id": "learner-b", "tenant_id": "b", "role": "admin"}
 
 
 @pytest.fixture
 def database(monkeypatch):
-    db = SimpleNamespace(academy_courses=Collection(), academy_assignments=Collection(), users=Collection([ADMIN, LEARNER, FOREIGN]))
+    db = SimpleNamespace(academy_courses=Collection(), academy_assignments=Collection(), academy_certificates=Collection(), users=Collection([ADMIN, LEARNER, PEER, FOREIGN]))
     monkeypatch.setattr(api, "db", db)
     return db
 
@@ -128,6 +129,57 @@ def test_archived_course_cannot_receive_new_assignments(database):
     created = run(api.create_course(course(archived=True), ADMIN))["course"]
     with pytest.raises(HTTPException) as archived: run(api.assign(created["id"], api.AssignmentInput(learner_ids=[LEARNER["id"]]), ADMIN))
     assert archived.value.status_code == 409
+
+
+def test_completion_issues_certificate_and_backfills(database):
+    created = run(api.create_course(course(), ADMIN))["course"]
+    run(api.assign(created["id"], api.AssignmentInput(learner_ids=[LEARNER["id"]]), ADMIN))
+    assignment_id = database.academy_assignments.rows[0]["id"]
+    passed = api.CompletionInput(acknowledged=True, answers=[dict(question_id="q1", selected_option=1)])
+    cert = run(api.complete(assignment_id, passed, LEARNER))["certificate"]
+    assert cert["verification_code"].startswith("NXA-") and len(cert["verification_code"]) == 18
+    assert cert["score_percent"] == 100 and cert["question_count"] == 1 and cert["correct_count"] == 1
+    assert cert["course_title"] == "Safe support" and cert["content_hash"]
+    assert "tenant_id" not in cert and "correct_option" not in str(cert)
+    assert cert["evidence_boundary"]
+    assert len(database.academy_certificates.rows) == 1
+    second = run(api.complete(assignment_id, passed, LEARNER))
+    assert second["certificate"]["id"] == cert["id"]
+    assert second["certificate"]["verification_hash"] == cert["verification_hash"]
+    assert len(database.academy_certificates.rows) == 1
+    database.academy_certificates.rows.clear()  # completion predates the certificate store
+    backfilled = run(api.complete(assignment_id, passed, LEARNER))
+    assert backfilled["changed"] is False
+    assert backfilled["certificate"]["id"] == cert["id"]
+    assert backfilled["certificate"]["verification_hash"] == cert["verification_hash"]
+    assert len(database.academy_certificates.rows) == 1
+
+
+def test_certificate_reads_are_scope_enforced(database):
+    created = run(api.create_course(course(), ADMIN))["course"]
+    run(api.assign(created["id"], api.AssignmentInput(learner_ids=[LEARNER["id"]]), ADMIN))
+    assignment_id = database.academy_assignments.rows[0]["id"]
+    passed = api.CompletionInput(acknowledged=True, answers=[dict(question_id="q1", selected_option=1)])
+    cert_id = run(api.complete(assignment_id, passed, LEARNER))["certificate"]["id"]
+    assert [row["id"] for row in run(api.my_certificates(LEARNER))["certificates"]] == [cert_id]
+    assert run(api.my_certificates(PEER))["certificates"] == []
+    assert run(api.my_certificates(FOREIGN))["certificates"] == []
+    assert run(api.get_certificate(cert_id, LEARNER))["certificate"]["id"] == cert_id
+    assert run(api.get_certificate(cert_id, ADMIN))["certificate"]["id"] == cert_id
+    with pytest.raises(HTTPException) as peer: run(api.get_certificate(cert_id, PEER))
+    assert peer.value.status_code == 403
+    with pytest.raises(HTTPException) as foreign: run(api.get_certificate(cert_id, FOREIGN))
+    assert foreign.value.status_code == 404
+
+
+def test_failed_attempt_retains_no_certificate(database):
+    created = run(api.create_course(course(), ADMIN))["course"]
+    run(api.assign(created["id"], api.AssignmentInput(learner_ids=[LEARNER["id"]]), ADMIN))
+    assignment_id = database.academy_assignments.rows[0]["id"]
+    wrong = api.CompletionInput(acknowledged=True, answers=[dict(question_id="q1", selected_option=0)])
+    with pytest.raises(HTTPException): run(api.complete(assignment_id, wrong, LEARNER))
+    assert database.academy_certificates.rows == []
+    assert run(api.my_certificates(LEARNER))["certificates"] == []
 
 
 def test_assignment_summary_separates_versions_and_completed_due_dates(database):

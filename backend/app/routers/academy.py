@@ -10,8 +10,8 @@ from app.auth import get_current_user
 from app.database import db
 from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 from app.services.academy import (
-    SECURITY_AWARENESS_STARTER_TEMPLATE, assessment_result, course_snapshot,
-    learner_course, stable_id, utc_now,
+    SECURITY_AWARENESS_STARTER_TEMPLATE, assessment_result, certificate_record,
+    course_snapshot, learner_course, public_certificate, stable_id, utc_now,
 )
 from app.services.academy_templates import (
     template_as_course, template_catalogue, template_preview,
@@ -102,6 +102,14 @@ async def get_course(course_id, user):
     if not row:
         raise HTTPException(404, "Course not found")
     return row
+
+
+async def issue_certificate(assignment_row):
+    """Idempotently retain the completion certificate for a completed assignment."""
+    record = certificate_record(assignment_row)
+    await db.academy_certificates.update_one({"_id": record["id"]}, {"$setOnInsert": deepcopy(record)}, upsert=True)
+    retained = await db.academy_certificates.find_one({"_id": record["id"]}, {"_id": 0})
+    return public_certificate(retained or record)
 
 
 @router.get("/admin/courses")
@@ -249,7 +257,9 @@ async def complete(assignment_id: str, data: CompletionInput, current_user: dict
     if not row:
         raise HTTPException(404, "Assignment not found")
     if row["status"] == "completed":
-        return {**learner_row(row), "changed": False}
+        # Backfill-safe: a retry of an already-completed assignment still
+        # ensures the learner's certificate exists without duplicating it.
+        return {**learner_row(row), "changed": False, "certificate": await issue_certificate(row)}
     if not data.acknowledged:
         raise HTTPException(400, "Confirm you have reviewed the assigned material")
     try:
@@ -263,4 +273,24 @@ async def complete(assignment_id: str, data: CompletionInput, current_user: dict
     changed = await db.academy_assignments.update_one({**query, "status": "assigned"},
         {"$set": {"status": "completed", "completed_at": evidence["at"], "completion_evidence": evidence}, "$push": {"audit": evidence}})
     refreshed = await db.academy_assignments.find_one(query, {"_id": 0})
-    return {**learner_row(refreshed), "changed": bool(changed.matched_count)}
+    return {**learner_row(refreshed), "changed": bool(changed.matched_count), "certificate": await issue_certificate(refreshed)}
+
+
+@router.get("/me/certificates")
+async def my_certificates(current_user: dict = Depends(get_current_user)):
+    rows = await db.academy_certificates.find(
+        scope(current_user, learner_id=current_user["id"]), {"_id": 0}
+    ).sort("issued_at", -1).to_list(500)
+    return {"certificates": [public_certificate(row) for row in rows], "limit": 500}
+
+
+@router.get("/certificates/{certificate_id}")
+async def get_certificate(certificate_id: str, current_user: dict = Depends(get_current_user)):
+    row = await db.academy_certificates.find_one(scope(current_user, id=certificate_id), {"_id": 0})
+    if not row:
+        raise HTTPException(404, "Certificate not found")
+    if row.get("learner_id") != current_user["id"]:
+        # Tenant administrators may inspect their own organisation's records;
+        # nobody sees another tenant's certificates (scope() enforces 404).
+        admin(current_user)
+    return {"certificate": public_certificate(row)}

@@ -193,6 +193,79 @@ def assessment_result(snapshot: dict[str, Any], answers: list[dict[str, Any]]) -
     }
 
 
+CERTIFICATE_TYPE = "academy_completion_certificate"
+
+
+def certificate_id(tenant_id: str, assignment_id: str) -> str:
+    """One certificate per assignment, so retries and backfills cannot duplicate."""
+    identity = f"{tenant_id}:{assignment_id}"
+    return "cert-" + sha256(identity.encode("utf-8")).hexdigest()
+
+
+def certificate_verification_hash(identity: dict[str, Any]) -> str:
+    """Integrity fingerprint over the certificate's public learning evidence.
+
+    This is a tamper-evident fingerprint of the public fields, not a signature
+    and not a professional certification credential.
+    """
+    canonical = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def verification_code(verification_hash: str) -> str:
+    """Human-readable short code for phone/email verification of a certificate."""
+    raw = verification_hash.upper()[:12]
+    return "NXA-" + "-".join(raw[i:i + 4] for i in range(0, 12, 4))
+
+
+def certificate_record(assignment: dict[str, Any]) -> dict[str, Any]:
+    """Build the durable certificate document from a completed assignment.
+
+    Only issued from retained completion evidence: a certificate never exists
+    for an uncompleted assignment and never carries assessment answers.
+    """
+    evidence = assignment.get("completion_evidence") or {}
+    snapshot = assignment.get("course_snapshot") or {}
+    identity = {
+        "assignment_id": str(assignment.get("id") or ""),
+        "learner_id": str(assignment.get("learner_id") or ""),
+        "course_id": str(assignment.get("course_id") or ""),
+        "course_version": int(assignment.get("course_version") or 1),
+        "score_percent": int(evidence.get("score_percent") or 0),
+        "question_count": int(evidence.get("question_count") or 0),
+        "correct_count": int(evidence.get("correct_count") or 0),
+        "content_hash": str(evidence.get("content_hash") or snapshot.get("content_hash") or ""),
+        "issued_at": str(evidence.get("at") or utc_now()),
+    }
+    verification = certificate_verification_hash(identity)
+    return {
+        "id": certificate_id(str(assignment.get("tenant_id") or ""), identity["assignment_id"]),
+        "tenant_id": str(assignment.get("tenant_id") or ""),
+        "type": CERTIFICATE_TYPE,
+        "assignment_id": identity["assignment_id"],
+        "course_id": identity["course_id"],
+        "course_version": identity["course_version"],
+        "course_title": str(snapshot.get("title") or "Course"),
+        "category": str(snapshot.get("category") or "academy"),
+        "learner_id": identity["learner_id"],
+        "learner_name": str(assignment.get("learner_name") or "Learner"),
+        "score_percent": identity["score_percent"],
+        "question_count": identity["question_count"],
+        "correct_count": identity["correct_count"],
+        "issued_at": identity["issued_at"],
+        "content_hash": identity["content_hash"],
+        "verification_hash": verification,
+        "verification_code": verification_code(verification),
+        "completion_statement": str(snapshot.get("completion_statement") or ""),
+        "evidence_boundary": EVIDENCE_BOUNDARY,
+    }
+
+
+def public_certificate(row: dict[str, Any]) -> dict[str, Any]:
+    """Expose a certificate without tenant internals or assessment answers."""
+    return {key: value for key, value in row.items() if key not in {"_id", "tenant_id", "created_at"}}
+
+
 SECURITY_AWARENESS_STARTER_TEMPLATE: dict[str, Any] = {
     "template_key": "nexus-security-awareness-starter-v1",
     "title": "Nexus Security Awareness: Protect the Workday",
@@ -309,6 +382,17 @@ async def ensure_academy_indexes(*, database: Any) -> None:
                     {"unique": True, "name": "academy_assignment_revision_unique"},
                 ),
                 ([("tenant_id", 1), ("learner_id", 1), ("status", 1), ("assigned_at", -1)], {}),
+            ),
+        ),
+        (
+            getattr(database, "academy_certificates", None),
+            (
+                ([("id", 1)], {"unique": True, "name": "academy_certificate_id_unique"}),
+                (
+                    [("tenant_id", 1), ("assignment_id", 1)],
+                    {"unique": True, "name": "academy_certificate_assignment_unique"},
+                ),
+                ([("tenant_id", 1), ("learner_id", 1), ("issued_at", -1)], {}),
             ),
         ),
     )

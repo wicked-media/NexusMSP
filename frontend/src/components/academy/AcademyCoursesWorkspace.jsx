@@ -3,6 +3,8 @@ import axios from "axios";
 import { API } from "@/App";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import AcademyAssignmentEvidence from "./AcademyAssignmentEvidence";
+import { AcademyCertificateCard, AcademyCertificateSheet } from "./AcademyCertificate";
+import AcademyCoursePlayerDialog from "./AcademyCoursePlayer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +20,7 @@ import { toast } from "sonner";
 import {
   Archive,
   ArrowRight,
+  Award,
   BookOpenCheck,
   CheckCircle2,
   Clock3,
@@ -29,11 +32,11 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Printer,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
-  UserRoundCheck,
   UsersRound,
 } from "lucide-react";
 
@@ -152,9 +155,11 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
   const [studioError, setStudioError] = useState("");
   const [tab, setTab] = useState("learning");
   const [openCourse, setOpenCourse] = useState(null);
-  const [acknowledged, setAcknowledged] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [answers, setAnswers] = useState({});
+  const [certificates, setCertificates] = useState([]);
+  const [certificatesLoading, setCertificatesLoading] = useState(false);
+  const [certificatesLoaded, setCertificatesLoaded] = useState(false);
+  const [certificatesError, setCertificatesError] = useState(false);
+  const [selectedCertificate, setSelectedCertificate] = useState(null);
   const [editing, setEditing] = useState(null);
   const [courseForm, setCourseForm] = useState(() => emptyCourse());
   const [saving, setSaving] = useState(false);
@@ -203,6 +208,15 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
       .catch(() => { setTemplates([]); setTemplatesError(true); });
   }, [headers, isAdmin]);
 
+  useEffect(() => {
+    if (tab !== "certificates" || certificatesLoaded || certificatesLoading) return;
+    setCertificatesLoading(true);
+    axios.get(`${API}/academy/me/certificates`, { headers })
+      .then(({ data }) => { setCertificates(data?.certificates || []); setCertificatesError(false); setCertificatesLoaded(true); })
+      .catch(() => { setCertificatesError(true); })
+      .finally(() => setCertificatesLoading(false));
+  }, [tab, certificatesLoaded, certificatesLoading, headers]);
+
   const securityCourses = useMemo(() => learnerCourses.filter(isSecurityCourse), [learnerCourses]);
   const academyCourses = useMemo(() => learnerCourses.filter((course) => !isSecurityCourse(course)), [learnerCourses]);
   const completedCount = learnerCourses.filter(isCompleted).length;
@@ -224,25 +238,14 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
 
   const beginCourse = (course) => {
     setOpenCourse(course);
-    setAcknowledged(false);
-    setAnswers({});
   };
 
-  const completeCourse = async () => {
-    if (!openCourse || !acknowledged) return;
-    setCompleting(true);
-    try {
-      const response = await axios.post(`${API}/academy/assignments/${encodeURIComponent(openCourse.assignment.id)}/complete`, { acknowledged: true, answers: Object.entries(answers).map(([question_id, selected_option]) => ({ question_id, selected_option })) }, { headers });
-      const result = response.data || {};
-      const updated = learnerCourse({ course: result.course || openCourse, assignment: result.assignment || openCourse.assignment });
-      setLearnerCourses((current) => current.map((course) => (course.assignment.id === updated.assignment.id ? updated : course)));
-      setOpenCourse(updated);
-      toast.success(result.changed === false ? "Your Academy attestation is already retained" : "Academy attestation retained");
-    } catch (error) {
-      toast.error(error?.response?.data?.detail || "Nexus could not retain this Academy attestation");
-    } finally {
-      setCompleting(false);
+  const handleCourseFinished = (result) => {
+    const updated = learnerCourse({ course: result?.course || openCourse, assignment: result?.assignment || openCourse?.assignment });
+    if (updated?.assignment?.id) {
+      setLearnerCourses((current) => current.map((course) => (course.assignment?.id === updated.assignment.id ? updated : course)));
     }
+    setCertificatesLoaded(false);
   };
 
   const beginCreate = (category = "academy") => {
@@ -410,6 +413,7 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
       <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto p-1 sm:w-auto">
         <TabsTrigger value="learning" className="gap-1.5" data-testid="academy-learning-tab"><GraduationCap className="h-3.5 w-3.5" />My learning</TabsTrigger>
         <TabsTrigger value="security" className="gap-1.5" data-testid="academy-security-tab"><ShieldCheck className="h-3.5 w-3.5" />Security awareness</TabsTrigger>
+        <TabsTrigger value="certificates" className="gap-1.5" data-testid="academy-certificates-tab"><Award className="h-3.5 w-3.5" />Certificates</TabsTrigger>
         {isAdmin ? <TabsTrigger value="studio" className="gap-1.5" data-testid="academy-studio-tab"><FilePenLine className="h-3.5 w-3.5" />Course studio</TabsTrigger> : null}
       </TabsList>
 
@@ -420,6 +424,11 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
       <TabsContent value="security" className="mt-4 space-y-4">
         <Card className="overflow-hidden border-emerald-400/20 bg-[radial-gradient(circle_at_88%_0%,rgba(16,185,129,0.14),transparent_35%),linear-gradient(125deg,rgba(9,26,24,0.88),rgba(15,19,33,0.88))]"><CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Nexus security awareness</p><p className="mt-1 text-base font-semibold">Practical habits, taught in your own service context</p><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Use internal courses to teach how your team verifies identity, reports suspicious requests and preserves evidence. This is a learning program—not a simulated campaign result or a customer-security assertion.</p></div>{isAdmin ? <Button variant="outline" className="shrink-0 border-emerald-400/30" onClick={() => beginCreate("security_awareness")} data-testid="academy-create-security-course"><Plus className="mr-1.5 h-3.5 w-3.5" />Create awareness course</Button> : null}</CardContent></Card>
         {loading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading awareness training…</CardContent></Card> : learnerContent(securityCourses, "No security-awareness course is assigned", "Your service manager can publish an internal security-awareness lesson and assign it to you here. Nexus will retain an attestation only after you review it.")}
+      </TabsContent>
+
+      <TabsContent value="certificates" className="mt-4 space-y-4">
+        <Card className="border-amber-400/20 bg-amber-400/[0.035]"><CardContent className="p-3.5"><p className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">Certificates earned</p><p className="mt-1 text-xl font-semibold">{certificates.length}</p></CardContent></Card>
+        {certificatesLoading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading certificates…</CardContent></Card> : certificatesError ? <Card className="border-amber-400/25 bg-amber-400/[0.04]"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs leading-5 text-muted-foreground">Nexus could not load your certificates. Your completion evidence is unchanged.</p><Button size="sm" variant="outline" onClick={() => { setCertificatesError(false); setCertificatesLoaded(false); }} data-testid="academy-certificates-retry">Retry safely</Button></CardContent></Card> : certificates.length ? <div className="grid gap-4 xl:grid-cols-3">{certificates.map((certificate) => <AcademyCertificateCard key={certificate.id} certificate={certificate} onOpen={setSelectedCertificate} />)}</div> : <EmptyState title="No certificates yet" description="Complete an assigned course and pass its knowledge check. Nexus issues a verifiable completion certificate against the exact assigned version." />}
       </TabsContent>
 
       {isAdmin ? <TabsContent value="studio" className="mt-4 space-y-4">
@@ -525,13 +534,11 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
       </NexusWorkflowDialog>
     </Dialog>
 
-    <Dialog open={Boolean(openCourse)} onOpenChange={(open) => { if (!open) setOpenCourse(null); }}>
-      {openCourse ? <NexusWorkflowDialog eyebrow={isSecurityCourse(openCourse) ? "Nexus security awareness" : "Nexus Academy"} title={openCourse.title || "Academy course"} description={openCourse.description || "Review the internal standard, then make a deliberate learning attestation."} icon={isSecurityCourse(openCourse) ? ShieldCheck : BookOpenCheck} tone={isSecurityCourse(openCourse) ? "emerald" : "violet"} className="max-w-3xl" contentClassName="space-y-5" data-testid="academy-course-player" footer={<><Button variant="ghost" onClick={() => setOpenCourse(null)}>Close</Button>{isCompleted(openCourse) ? <Button variant="outline" onClick={() => setOpenCourse(null)}><CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Attestation retained</Button> : <Button onClick={completeCourse} disabled={!acknowledged || completing}>{completing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserRoundCheck className="mr-2 h-4 w-4" />}Retain my attestation</Button>}</>}>
-        <div className="flex flex-wrap items-center gap-2"><CourseStatusBadge course={openCourse} /><Badge variant="outline">v{openCourse.version || 1}</Badge>{openCourse.assignment?.due_at ? <Badge variant="outline">Due {formatDate(openCourse.assignment.due_at)}</Badge> : null}<span className="text-xs text-muted-foreground">{Number(openCourse.estimated_minutes || 0) || "—"} min estimated</span></div>
-        <section className="rounded-xl border border-border/70 bg-muted/[0.1] p-4"><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Lesson</p><div className="mt-3 space-y-4">{lessonBlocks(openCourse.content).length ? lessonBlocks(openCourse.content).map((block, index) => <p key={`${index}-${block.slice(0, 16)}`} className="whitespace-pre-wrap text-sm leading-6 text-foreground/90">{block}</p>) : <p className="text-sm text-muted-foreground">This course does not have lesson content yet. Ask an administrator to complete the draft before it is assigned.</p>}</div></section>
-        {!isCompleted(openCourse) && (openCourse.assessment || []).map((question) => <fieldset key={question.id} className="space-y-3 rounded-xl border border-border p-4"><legend className="px-1 text-sm font-semibold">{question.prompt}</legend>{question.options.map((option, index) => <label key={index} className="flex items-center gap-3 text-sm"><input type="radio" name={question.id} checked={answers[question.id] === index} onChange={() => setAnswers((current) => ({ ...current, [question.id]: index }))} />{option}</label>)}</fieldset>)}
-        <section className="rounded-xl border border-cyan-400/20 bg-cyan-400/[0.04] p-4"><p className="text-xs font-semibold">Learning evidence</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Your completion records the assigned version, time and knowledge-check result. Required score: {openCourse.passing_score || 100}%.</p></section>
-        {!isCompleted(openCourse) ? <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-violet-400/25 bg-violet-400/[0.045] p-4"><Checkbox checked={acknowledged} onCheckedChange={(value) => setAcknowledged(Boolean(value))} aria-label={`Acknowledge ${openCourse.title}`} /><span className="text-sm leading-6"><span className="font-medium">I have reviewed this course and understand the standard.</span><span className="mt-1 block text-xs text-muted-foreground">Nexus will retain this self-attestation against the published version. I will use the owning workflow for real work.</span></span></label> : <div className="flex gap-3 rounded-xl border border-emerald-400/25 bg-emerald-400/[0.05] p-4"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" /><div><p className="text-sm font-medium">Attestation retained</p><p className="mt-1 text-xs text-muted-foreground">Completed {formatDate(openCourse.assignment?.completed_at, "previously")}. Revisit this version whenever you need a refresher.</p></div></div>}
+    {openCourse ? <AcademyCoursePlayerDialog course={openCourse} token={token} onClose={() => setOpenCourse(null)} onFinished={handleCourseFinished} /> : null}
+
+    <Dialog open={Boolean(selectedCertificate)} onOpenChange={(open) => { if (!open) setSelectedCertificate(null); }}>
+      {selectedCertificate ? <NexusWorkflowDialog eyebrow="Nexus Academy · certificate" title={selectedCertificate.course_title || "Academy certificate"} description={`Completed by ${selectedCertificate.learner_name || "Learner"} · issued ${formatDate(selectedCertificate.issued_at)}`} icon={Award} tone="amber" className="max-w-2xl" contentClassName="space-y-4" data-testid="academy-certificate-dialog" footer={<><Button variant="ghost" onClick={() => setSelectedCertificate(null)}>Close</Button><Button variant="outline" onClick={() => window.print()} data-testid="academy-certificate-print"><Printer className="mr-1.5 h-3.5 w-3.5" />Print / Save PDF</Button></>}>
+        <AcademyCertificateSheet certificate={selectedCertificate} />
       </NexusWorkflowDialog> : null}
     </Dialog>
 
