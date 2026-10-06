@@ -241,13 +241,48 @@ export default function TicketsPage() {
   const [timerStart, setTimerStart] = useState(null);
   const [timerElapsed, setTimerElapsed] = useState(0);
   const [tagInput, setTagInput] = useState("");
-  const [formData, setFormData] = useState({
-    title: "", description: "", client_id: "", priority: "medium", category: "support",
-    assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
-    source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
-    device_id: "",
-    cc: [], watchers: [], service_kit_id: STANDARD_SERVICE_KIT, service_kit_context: {}
+  const [formData, setFormData] = useState(() => {
+    const defaults = {
+      title: "", description: "", client_id: "", priority: "medium", category: "support",
+      assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
+      source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+      device_id: "",
+      cc: [], watchers: [], service_kit_id: STANDARD_SERVICE_KIT, service_kit_context: {}
+    };
+    try {
+      const raw = localStorage.getItem("nexus.tickets.createDraft");
+      if (raw) return { ...defaults, ...JSON.parse(raw) };
+    } catch { /* draft restore is best-effort */ }
+    return defaults;
   });
+  // Keep an unfinished intake across an accidental refresh; cleared when empty.
+  useEffect(() => {
+    try {
+      if (formData.title?.trim() || formData.description?.trim()) {
+        localStorage.setItem("nexus.tickets.createDraft", JSON.stringify(formData));
+      } else {
+        localStorage.removeItem("nexus.tickets.createDraft");
+      }
+    } catch { /* storage unavailable: drafts are best-effort */ }
+  }, [formData]);
+  const createIdempotencyRef = useRef("");
+  const [dupeCandidates, setDupeCandidates] = useState([]);
+  // Advisory: open same-client tickets that may duplicate this intake.
+  useEffect(() => {
+    const title = formData.title?.trim() || "";
+    if (!isCreateOpen || title.length < 6) { setDupeCandidates([]); return; }
+    let active = true;
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ title });
+        if (formData.client_id) params.set("client_id", formData.client_id);
+        const res = await axios.get(`${API}/ticket-intake/candidates?${params.toString()}`, { headers });
+        if (active) setDupeCandidates(res.data?.candidates || []);
+      } catch { if (active) setDupeCandidates([]); }
+    }, 600);
+    return () => { active = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.title, formData.client_id, isCreateOpen]);
   const [childForm, setChildForm] = useState({ title: "", description: "", priority: "medium" });
   const [mergeIds, setMergeIds] = useState([]);
   const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true, labour_type_id: "", performed_at: "" });
@@ -692,8 +727,10 @@ export default function TicketsPage() {
       ...(selectedClient?.contacts || []),
     ].find(ct => ct.id === formData.contact_id || ct.name === formData.contact_id);
     const { service_kit_id: serviceKitId, service_kit_context: serviceKitContext, ...ticketFields } = formData;
+    if (!createIdempotencyRef.current) createIdempotencyRef.current = crypto.randomUUID();
     const payload = {
       ...ticketFields,
+      idempotency_key: createIdempotencyRef.current,
       client_name: selectedClient?.name || "",
       contact_name: selectedContact?.name || "",
       contact_email: selectedContact?.email || "",
@@ -725,6 +762,7 @@ export default function TicketsPage() {
         toast.success(`Ticket ${created.ticket_number || ""} created`.trim());
       }
       setIsCreateOpen(false);
+      createIdempotencyRef.current = "";
       setFormData({
         title: "", description: "", client_id: "", priority: "medium", category: "support",
         assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
@@ -4482,6 +4520,7 @@ export default function TicketsPage() {
         triageResult={triageResult} applyTriage={applyTriage}
         handleCreateTicket={handleCreateTicket}
         creating={creatingTicket}
+        dupeCandidates={dupeCandidates}
       />
 
       <AlertDialog open={Boolean(attachmentDeleteTarget)} onOpenChange={(open) => !open && setAttachmentDeleteTarget(null)}>

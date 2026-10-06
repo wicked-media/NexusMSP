@@ -67,6 +67,7 @@ function TicketSearchPicker({
 export function CreateTicketDialog({
   open, onOpenChange, formData, setFormData, clients, clientContacts = [], devices, users, tickets,
   handleAiTriage, triaging, triageResult, applyTriage, handleCreateTicket, services, creating = false,
+  dupeCandidates = [],
 }) {
   const selectedClient = clients.find(client => client.id === formData.client_id);
   const availableContacts = clientContacts.length ? clientContacts : (selectedClient?.contacts || []);
@@ -104,6 +105,12 @@ export function CreateTicketDialog({
             </div>}
         footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />The service desk record opens immediately after creation.</p><div className="flex gap-2"><Button variant="outline" disabled={creating} onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={handleCreateTicket} disabled={!canCreate || creating} aria-busy={creating} className="bg-emerald-500 text-emerald-950 hover:bg-emerald-400" data-testid="create-ticket-submit">{creating ? <Loader2 className="mr-1.5 w-4 h-4 animate-spin" /> : <Plus className="mr-1.5 w-4 h-4" />}{creating ? "Creating ticket…" : serviceKitCreateLabel(formData.service_kit_id)}</Button></div></>}
       >
+        <div className="space-y-4" onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCreate && !creating) {
+            e.preventDefault();
+            handleCreateTicket();
+          }
+        }}>
           <section className="grid gap-2 rounded-xl border border-white/[0.08] bg-black/[0.14] p-3 md:grid-cols-4" data-testid="ticket-intake-summary">
             <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Client</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedClient?.name || "Not selected"}</p><p className="truncate text-[10px] text-zinc-600">{selectedContact?.name || "No requester selected"}</p></div>
             <div className="rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2.5"><span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Service policy</span><p className="mt-1 truncate text-xs font-medium text-zinc-200">{selectedService?.name || "Manual routing"}</p><p className="truncate text-[10px] text-zinc-600">{selectedService ? `${selectedService.sla_resolve_hours || "—"}h resolution target` : "Client SLA inherited"}</p></div>
@@ -115,6 +122,28 @@ export function CreateTicketDialog({
             <div><Label>Title <span className="text-destructive">*</span></Label><Input className="mt-1.5 bg-background/65" value={formData.title} onChange={e => setFormData({ ...formData, title: e.target.value })} placeholder="Brief, outcome-focused description of the issue" data-testid="create-title" /></div>
             <div><Label>Description</Label><Textarea className="mt-1.5 bg-background/65" value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} rows={4} placeholder="Describe the impact, affected people or systems, timing, and any steps already tried." data-testid="create-desc" /></div>
           </section>
+
+          {dupeCandidates.length > 0 && (
+            <section className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3.5" data-testid="create-dupe-candidates">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-300" />
+                <h3 className="text-sm font-semibold text-amber-200">Tickets to review before creating</h3>
+                <span className="ml-auto text-[10px] text-muted-foreground">Keyword matches — relationships not confirmed</span>
+              </div>
+              <ul className="mt-2 space-y-1">
+                {dupeCandidates.map((c) => (
+                  <li key={c.ticket_id} className="flex items-center justify-between gap-2 rounded border border-amber-500/20 bg-amber-500/[0.04] px-2.5 py-1.5 text-xs">
+                    <span className="truncate">
+                      <span className="font-mono text-amber-300">{c.ticket_number}</span>{" "}
+                      <span className="text-zinc-200">{c.title}</span>
+                      <span className="text-muted-foreground"> · {c.status} · {c.priority}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">If one of these already covers the request, open it instead of creating another ticket.</p>
+            </section>
+          )}
 
           {(services?.length > 0) && (
             <section className="p-4 rounded-xl border border-violet-500/25 bg-violet-500/[0.045]">
@@ -383,6 +412,7 @@ export function CreateTicketDialog({
             <Input placeholder="Type a tag and press Enter" data-testid="create-tags"
               onKeyDown={e => { if (e.key === "Enter" && e.target.value.trim()) { e.preventDefault(); setFormData({ ...formData, tags: [...(formData.tags || []), e.target.value.trim()] }); e.target.value = ""; } }} />
           </div></section>
+        </div>
       </NexusWorkflowDialog>
     </Dialog>
   );

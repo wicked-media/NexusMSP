@@ -9,6 +9,7 @@ import os
 import asyncio
 import logging
 from email_validator import EmailNotValidError, validate_email
+from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel, ConfigDict, Field
 from app.database import db, AVATARS_DIR
 from app.auth import get_current_user, hash_password, verify_password, create_token
@@ -432,6 +433,34 @@ async def _ensure_ticket_conversation_action_indexes() -> None:
     _CONVERSATION_INDEXED_DATABASE_IDS.add(database_id)
 
 
+_CREATE_INDEXED_DATABASE_IDS: set = set()
+
+
+async def _ensure_ticket_create_idempotency_index() -> None:
+    """One ticket per (tenant, create key) so retries replay instead of duplicating."""
+    database_id = id(db)
+    if database_id in _CREATE_INDEXED_DATABASE_IDS:
+        return
+    create_index = getattr(db.tickets, "create_index", None)
+    if not callable(create_index):
+        return
+    await create_index(
+        [("tenant_id", 1), ("idempotency_key", 1)],
+        name="ticket_create_idempotency",
+        unique=True,
+        partialFilterExpression={"idempotency_key": {"$type": "string"}},
+    )
+    _CREATE_INDEXED_DATABASE_IDS.add(database_id)
+
+
+async def _ticket_by_create_idempotency_key(current_user: dict, idempotency_key: str):
+    """Tenant-scoped replay lookup for a retried ticket create."""
+    return await db.tickets.find_one(
+        tenant_scoped_query(current_user, {"idempotency_key": idempotency_key}),
+        {"_id": 0},
+    )
+
+
 async def _set_ticket_activity(ticket: dict, actor: dict, *, public: bool, at: str) -> None:
     update = {
         "updated_at": at,
@@ -627,6 +656,12 @@ async def get_ticket(ticket_id: str, current_user: dict = Depends(get_current_us
 @router.post("/tickets", response_model=Ticket)
 async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(get_current_user)):
     await assert_client_scope(current_user, ticket_data.client_id, operation="ticket.create")
+    idempotency_key = (ticket_data.idempotency_key or "").strip()
+    if idempotency_key:
+        await _ensure_ticket_create_idempotency_index()
+        existing = await _ticket_by_create_idempotency_key(current_user, idempotency_key)
+        if existing:
+            return Ticket(**existing)
     client = await db.clients.find_one(
         tenant_scoped_query(current_user, {"id": ticket_data.client_id}),
         {"_id": 0},
@@ -743,7 +778,18 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
             "tier_response_sla_minutes": inherited_tier.get("response_sla_minutes"),
             "tier_resolution_sla_minutes": inherited_tier.get("resolution_sla_minutes"),
         })
-    await db.tickets.insert_one(doc)
+    if idempotency_key:
+        doc["idempotency_key"] = idempotency_key
+    try:
+        await db.tickets.insert_one(doc)
+    except DuplicateKeyError:
+        # A concurrent retry with the same key won the race: return its ticket.
+        if not idempotency_key:
+            raise
+        existing = await _ticket_by_create_idempotency_key(current_user, idempotency_key)
+        if existing:
+            return Ticket(**existing)
+        raise
     await db.clients.update_one(
         tenant_scoped_query(current_user, {"id": ticket_data.client_id}),
         {"$inc": {"ticket_count": 1}},

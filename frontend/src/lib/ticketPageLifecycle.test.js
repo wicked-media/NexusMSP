@@ -100,12 +100,31 @@ test("late contacts cannot fill the next ticket's recipient", async () => {
 function createContext(post) {
   return {
     createTicketPendingRef: { current: false }, setCreatingTicket: jest.fn(),
+    createIdempotencyRef: { current: "" },
+    crypto: { randomUUID: (() => { let n = 0; return () => `jest-create-key-${String(++n).padStart(12, "0")}`; })() },
     formData: { title: "New ticket", client_id: "client-a" }, clients: [], createClientContacts: [],
     axios: { post }, API: "/api", headers: {}, STANDARD_SERVICE_KIT: "standard",
     toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() },
     setIsCreateOpen: jest.fn(), setFormData: jest.fn(), fetchTickets: jest.fn(), fetchTicketDetail: jest.fn(),
   };
 }
+test("create sends a stable idempotency key that survives retries and rotates after success", async () => {
+  const pending = deferred();
+  const context = createContext(jest.fn(() => pending.promise));
+  const create = handler("handleCreateTicket", context);
+  const first = create();
+  await create();
+  const sentKey = context.axios.post.mock.calls[0][1].idempotency_key;
+  expect(typeof sentKey).toBe("string");
+  expect(sentKey.length).toBeGreaterThanOrEqual(16);
+  pending.resolve({ data: { id: "created", ticket_number: "123" } });
+  await first;
+  // A retried create must not mint a second ticket; a fresh create must.
+  expect(context.createIdempotencyRef.current).toBe("");
+  context.axios.post.mockResolvedValue({ data: { id: "created-2", ticket_number: "124" } });
+  await create();
+  expect(context.axios.post.mock.calls[1][1].idempotency_key).not.toBe(sentKey);
+});
 test("same-tick repeated Create submits only once and unlocks after completion", async () => {
   const pending = deferred();
   const context = createContext(jest.fn(() => pending.promise));

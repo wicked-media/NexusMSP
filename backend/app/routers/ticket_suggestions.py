@@ -195,6 +195,54 @@ async def get_ticket_suggestions(ticket_id: str, current_user: dict = Depends(ge
         "meta": {"data_status": "current", "source": "same_client_resolved_tickets_and_knowledge_records"},
     }
 
+@router.get("/ticket-intake/candidates")
+async def intake_duplicate_candidates(
+    title: str = "",
+    client_id: str = "",
+    current_user: dict = Depends(get_current_user),
+):
+    """Open tickets that may duplicate a draft intake.
+
+    Advisory only: a candidate is a keyword overlap, not a confirmed
+    relationship. Scoped like the ticket queue so restricted technicians
+    only ever see tickets inside their own client boundary.
+    """
+    keywords = extract_keywords(title)
+    if not keywords or len(title.strip()) < 6:
+        return {"candidates": [], "keywords": [], "meta": {"data_status": "empty", "source": "open_tickets"}}
+    query: dict = {"status": {"$nin": ["resolved", "closed"]}}
+    if client_id:
+        query["client_id"] = client_id
+    open_tickets = await db.tickets.find(
+        scoped_query(current_user, query),
+        {"_id": 0, "id": 1, "ticket_number": 1, "title": 1, "description": 1,
+         "status": 1, "priority": 1, "client_name": 1, "created_at": 1},
+    ).to_list(300)
+    scored = []
+    for tk in open_tickets:
+        match_text = f"{tk.get('title', '')} {tk.get('description', '')}".lower()
+        # Two distinct keyword overlaps: one common word is noise, not a duplicate.
+        hits = sum(1 for kw in keywords if kw in match_text)
+        score = score_match(keywords, match_text)
+        if hits >= 2 and score >= 2:
+            scored.append({
+                "ticket_id": tk["id"],
+                "ticket_number": tk.get("ticket_number", ""),
+                "title": tk.get("title", ""),
+                "status": tk.get("status", ""),
+                "priority": tk.get("priority", ""),
+                "client_name": tk.get("client_name", ""),
+                "created_at": tk.get("created_at", ""),
+                "relevance_score": score,
+            })
+    scored.sort(key=lambda x: -x["relevance_score"])
+    return {
+        "candidates": scored[:5],
+        "keywords": keywords[:10],
+        "meta": {"data_status": "current", "source": "open_tickets"},
+    }
+
+
 @router.get("/ticket-search/suggestions")
 async def global_search_suggestions(q: str = "", current_user: dict = Depends(get_current_user)):
     """Quick search across tickets and KB for resolution hints"""
