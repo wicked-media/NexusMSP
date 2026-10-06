@@ -161,6 +161,11 @@ export default function TicketsPage() {
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
   const [resolutionReview, setResolutionReview] = useState(null);
+  // Ticket id whose inline status write is in flight (disables the queue control).
+  const [queueStatusPendingId, setQueueStatusPendingId] = useState(null);
+  // Ticket id that just changed, for a one-shot queue highlight.
+  const [recentlyChangedTicketId, setRecentlyChangedTicketId] = useState(null);
+  const queueChangeTimerRef = useRef(null);
   const [resolutionProcessing, setResolutionProcessing] = useState(false);
   const [runbookCreating, setRunbookCreating] = useState(false);
   const [ticketRunbook, setTicketRunbook] = useState(null);
@@ -172,6 +177,7 @@ export default function TicketsPage() {
   const createTicketPendingRef = useRef(false);
   const [creatingTicket, setCreatingTicket] = useState(false);
   useEffect(() => () => { ticketDetailRequestRef.current += 1; }, []);
+  useEffect(() => () => { if (queueChangeTimerRef.current) window.clearTimeout(queueChangeTimerRef.current); }, []);
   const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [edgeToolsOpen, setEdgeToolsOpen] = useState(false);
@@ -908,6 +914,17 @@ export default function TicketsPage() {
 
   const handleQueueQuickAction = async (ticket, action) => {
     if (!ticket?.id) return;
+    if (action === "copy") {
+      const link = `${window.location.origin}/tickets?ticket=${encodeURIComponent(ticket.id)}`;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+        await navigator.clipboard.writeText(link);
+        toast.success(`${ticket.ticket_number || "Ticket"} link copied`);
+      } catch {
+        toast.error("This browser blocked clipboard access — open the ticket to copy its address");
+      }
+      return;
+    }
     if (action === "remote") {
       const deviceId = ticket.device_id || ticket.asset_id || ticket.device_ids?.[0];
       if (!deviceId) { toast.error("Link a managed asset before starting a remote session"); return; }
@@ -931,6 +948,27 @@ export default function TicketsPage() {
       toast.success(label);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Could not update ticket");
+    }
+  };
+
+  // Inline queue status change. Only reversible states reach this handler;
+  // terminal closure and reopen keep their governed review flow
+  // (`requestResolutionReview` → `/tickets/{id}/resolution` or `/reopen`).
+  const handleQueueStatusChange = async (ticket, nextStatus) => {
+    if (!ticket?.id || !nextStatus || ticket.status === nextStatus) return;
+    setQueueStatusPendingId(ticket.id);
+    try {
+      await axios.put(`${API}/tickets/${ticket.id}`, { status: nextStatus }, { headers });
+      await fetchTickets();
+      // Acknowledge the change only after the write succeeded.
+      setRecentlyChangedTicketId(ticket.id);
+      if (queueChangeTimerRef.current) window.clearTimeout(queueChangeTimerRef.current);
+      queueChangeTimerRef.current = window.setTimeout(() => setRecentlyChangedTicketId(null), 1600);
+      toast.success(`${ticket.ticket_number || "Ticket"} → ${statusConfig[nextStatus]?.label || nextStatus}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update ticket status");
+    } finally {
+      setQueueStatusPendingId(null);
     }
   };
 
@@ -4370,13 +4408,18 @@ export default function TicketsPage() {
               tone={group.tone} defaultOpen={group.defaultOpen !== false}
               testId={`group-${group.key}`}
             >
-              {group.items.map(t => (
+              {group.items.map((t, rowIndex) => (
                 <TicketRow
                   key={t.id} ticket={t} density={density}
                   isSelected={selectedTickets.has(t.id)}
                   onToggleSelect={toggleTicketSelect}
                   onOpen={fetchTicketDetail}
                   onQuickAction={handleQueueQuickAction}
+                  onStatusChange={handleQueueStatusChange}
+                  onRequestTerminal={requestResolutionReview}
+                  statusPending={queueStatusPendingId === t.id}
+                  recentlyChanged={recentlyChangedTicketId === t.id}
+                  index={rowIndex}
                   viewers={ticketViewers[t.id] || []}
                   noteCount={noteCounts[t.id]}
                   attachmentCount={t.attachment_count}
@@ -4386,13 +4429,18 @@ export default function TicketsPage() {
               ))}
             </TicketGroupSection>
           ) : (
-            group.items.map(t => (
+            group.items.map((t, rowIndex) => (
               <TicketRow
                 key={t.id} ticket={t} density={density}
                 isSelected={selectedTickets.has(t.id)}
                 onToggleSelect={toggleTicketSelect}
                 onOpen={fetchTicketDetail}
                 onQuickAction={handleQueueQuickAction}
+                onStatusChange={handleQueueStatusChange}
+                onRequestTerminal={requestResolutionReview}
+                statusPending={queueStatusPendingId === t.id}
+                recentlyChanged={recentlyChangedTicketId === t.id}
+                index={rowIndex}
                 viewers={ticketViewers[t.id] || []}
                 noteCount={noteCounts[t.id]}
                 attachmentCount={t.attachment_count}
