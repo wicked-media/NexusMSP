@@ -2381,3 +2381,80 @@ html[data-motion="none"] .nexus-estate-status.is-critical .nexus-estate-status__
     50% { transform: translateX(50vw) translateY(-30px); }
     100% { transform: translateX(110vw) translateY(10px); }
 }
+
+/* Global technician bar. This is the one surface that never scrolls away, so it
+   carries the active workspace context and one consistent action affordance. */
+.nx-topbar {
+    background-image: linear-gradient(180deg, hsl(var(--card) / .9), hsl(var(--background) / .86));
+}
+.nx-topbar-context { min-width: 0; }
+.nx-topbar-icon {
+    border-radius: .6rem;
+    transition: border-color .16s ease, background .16s ease, color .16s ease, transform .16s ease;
+}
+.nx-topbar-icon:hover {
+    border-color: hsl(var(--primary) / .32);
+    transform: translateY(-1px);
+}
+.nx-topbar-icon:active { transform: translateY(0); }
+.nx-topbar-search {
+    transition: border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease;
+}
+.nx-topbar-search:hover { box-shadow: 0 0 0 3px hsl(var(--primary) / .08); }
+.nx-topbar-kbd {
+    border: 1px solid hsl(var(--border) / .85);
+    border-bottom-width: 2px;
+    border-radius: .3rem;
+    background: hsl(var(--background) / .7);
+    padding: 0 .3rem;
+    font-size: .58rem;
+    line-height: 1.4;
+}
+
+/* Service Desk inline queue control. The status pill becomes an interactive
+   control so work moves without opening the ticket. */
+.nx-queue-status-menu { min-width: 13rem; }
+.nx-queue-status-menu [role="menuitem"] kbd { opacity: .85; }
+
+/* Service Desk queue delight. The entrance cascade is capped by the row's own
+   index so a long queue never waits on a 40-step timeline. */
+.nx-queue-row {
+    animation: nx-queue-row-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes nx-queue-row-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Breached SLA breathes rather than strobes: enough to catch the eye on a
+   dense queue without becoming a distraction across a whole screen. */
+.nx-sla-overdue {
+    animation: nx-sla-breath 2600ms ease-in-out infinite;
+}
+@keyframes nx-sla-breath {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .45; }
+}
+
+/* One-shot acknowledgement of a recorded queue change, rendered as an overlay
+   so it can never restart the row's own entrance animation. */
+.nx-queue-row-flash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    animation: nx-queue-row-flash 1400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes nx-queue-row-flash {
+    0% { background-color: hsl(var(--primary) / .18); }
+    55% { background-color: hsl(var(--primary) / .07); }
+    100% { background-color: transparent; }
+}
+
+html[data-motion="minimal"] .nx-queue-row,
+html[data-motion="minimal"] .nx-sla-overdue,
+html[data-motion="minimal"] .nx-queue-row-flash { animation: none; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+    .nx-queue-row,
+    .nx-sla-overdue,
+    .nx-queue-row-flash { animation: none; transition: none; }
+}

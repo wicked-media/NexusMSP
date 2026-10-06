@@ -25,7 +25,8 @@ import UniversalInspector from "@/components/UniversalInspector";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
 import { ClientContextProvider } from "@/contexts/ClientContext";
 import WeatherStrip from "@/components/ambient/WeatherStrip";
-import { Bot, Menu, Search } from "lucide-react";
+import { Bot, ChevronRight, Menu, Search } from "lucide-react";
+import { resolveTopbarWorkspace } from "@/lib/topbarWorkspaceContext";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
 // Only the local dev server reaches a directly exposed API on :8000. A
@@ -395,6 +396,10 @@ const MainLayout = ({ children }) => {
     navigate("/login");
   };
 
+  // Global header context: the active workspace label, resolved from the same
+  // navigation config the sidebar renders so the two never drift.
+  const workspaceContext = resolveTopbarWorkspace(location.pathname);
+
   return (
     <div className={`${collaborationWorkspace ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex`} style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
       {!focusMode && mobileNavigationOpen && (
@@ -413,25 +418,36 @@ const MainLayout = ({ children }) => {
         onCollapsedPreferenceRestore={restoreSidebarCollapsed}
       />}
       {!focusMode && (
-        <header className={`fixed right-0 top-0 z-30 flex h-14 items-center gap-2 border-b border-border/70 bg-background/90 px-3 shadow-[0_10px_30px_-26px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[left] duration-300 ${sidebarCollapsed ? "left-0 md:left-[64px]" : "left-0 md:left-[240px]"}`} data-testid="global-technician-bar">
+        <header className={`nx-topbar fixed right-0 top-0 z-30 flex h-14 items-center gap-2 border-b border-border/70 bg-background/90 px-3 shadow-[0_10px_30px_-26px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[left] duration-300 ${sidebarCollapsed ? "left-0 md:left-[64px]" : "left-0 md:left-[240px]"}`} data-testid="global-technician-bar">
           <button
             type="button"
             aria-label="Open navigation"
             onClick={() => { setSidebarCollapsed(false); setMobileNavigationOpen(true); }}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden"
+            className="nx-topbar-icon inline-flex h-9 w-9 items-center justify-center border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
           <span className="text-sm font-semibold tracking-tight md:hidden">NexusMSP</span>
+          {workspaceContext && (
+            <div className="nx-topbar-context hidden min-w-0 items-center gap-1.5 md:flex" data-testid="topbar-workspace-context">
+              {workspaceContext.group && (
+                <>
+                  <span className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/70">{workspaceContext.group}</span>
+                  <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/35" aria-hidden="true" />
+                </>
+              )}
+              <span className="truncate text-sm font-semibold tracking-tight text-foreground" data-testid="topbar-workspace-label">{workspaceContext.label}</span>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"))}
-            className="hidden h-9 min-w-[220px] items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 text-left text-xs text-muted-foreground transition hover:border-primary/25 hover:bg-card hover:text-foreground md:flex"
+            className="nx-topbar-search hidden h-9 min-w-[220px] items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 text-left text-xs text-muted-foreground transition hover:border-primary/25 hover:bg-card hover:text-foreground md:flex"
             data-testid="topbar-search"
           >
             <Search className="h-3.5 w-3.5" />
             <span>Search Nexus</span>
-            <span className="ml-auto rounded border border-border/70 bg-background/60 px-1.5 py-0.5 font-mono text-[9px]">Ctrl K</span>
+            <span className="nx-topbar-kbd ml-auto font-mono">Ctrl K</span>
           </button>
           <div className="ml-auto flex items-center gap-1">
             {location.pathname === "/" && <WeatherStrip compact />}
