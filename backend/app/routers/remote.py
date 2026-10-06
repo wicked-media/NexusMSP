@@ -31,6 +31,149 @@ router = APIRouter()
 
 NATIVE_REMOTE_HEARTBEAT_STALE_SECONDS = 20
 
+# Session risk is an explainable read of the governed session record, never a
+# second source of authority: it adds no evidence, it only cites what the
+# session already recorded so a technician can act on the list, not a number.
+# Business hours are evaluated in UTC and are deliberately explicit.
+NATIVE_REMOTE_BUSINESS_HOURS_UTC = (7, 19)
+NATIVE_REMOTE_LONG_SESSION_MINUTES = 120
+NATIVE_REMOTE_GENERIC_PURPOSE = "technician support session"
+NATIVE_REMOTE_STEP_UP_SCORE = 50
+NATIVE_REMOTE_RISK_WEIGHTS = {
+    "control_consent_unconfirmed": 25,
+    "standing_authorisation": 22,
+    "consent_missing": 20,
+    "interactive_control": 18,
+    "no_ticket_context": 12,
+    "server_control": 10,
+    "long_session": 8,
+    "generic_purpose": 8,
+    "outside_business_hours": 6,
+}
+
+
+def _parse_utc(value: Any) -> datetime | None:
+    """Read a recorded ISO timestamp as timezone-aware UTC, or None."""
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def _native_session_minutes(session: dict) -> int | None:
+    started = _parse_utc(session.get("started_at"))
+    if started is None:
+        return None
+    ended = _parse_utc(session.get("ended_at")) or datetime.now(timezone.utc)
+    return max(0, int((ended - started).total_seconds() // 60))
+
+
+def _native_session_risk(session: dict) -> dict:
+    """Explainable session risk derived only from the governed session record.
+
+    Each factor reports whether it raised the score and why. Terminal sessions
+    are still scored so the ledger can explain a completed session, but an
+    ended session never demands step-up.
+    """
+    if session.get("provider") != "nexus":
+        return {"native_risk": {"score": 0, "band": "not_native", "requires_step_up": False, "factors": []}}
+
+    control = session.get("access_mode") == "control"
+    purpose = str(session.get("purpose") or "").strip()
+    started = _parse_utc(session.get("started_at"))
+    minutes = _native_session_minutes(session)
+    active = session.get("status") in {"authorised", "active", "ending"}
+    ticket_reference = session.get("ticket_number") or session.get("ticket_id") or session.get("work_session_id")
+
+    factors: list[dict[str, Any]] = []
+
+    def add(key: str, label: str, is_raised: bool, raised_detail: str, satisfied_detail: str) -> None:
+        factors.append({
+            "key": key,
+            "label": label,
+            "state": "raised" if is_raised else "satisfied",
+            "weight": NATIVE_REMOTE_RISK_WEIGHTS[key],
+            "detail": raised_detail if is_raised else satisfied_detail,
+        })
+
+    add(
+        "interactive_control",
+        "Interactive control",
+        control,
+        "Mouse and keyboard input is authorised for this session.",
+        "View-only: endpoint input stays disabled.",
+    )
+    add(
+        "control_consent_unconfirmed",
+        "Control consent confirmation",
+        control and not session.get("control_consent_confirmed"),
+        "Control mode is recorded without a confirmed control-consent record.",
+        "Control consent matches the recorded access mode.",
+    )
+    add(
+        "consent_missing",
+        "Customer consent",
+        bool(session.get("consent_required", True)) and not session.get("consent_confirmed"),
+        "Attended customer consent is required but not recorded.",
+        "Attended consent is recorded for this session.",
+    )
+    add(
+        "standing_authorisation",
+        "Standing authorisation",
+        bool(session.get("standing_authorisation")),
+        "Standing authorisation allows unattended access without a local prompt.",
+        "A local attended prompt is required for this session.",
+    )
+    add(
+        "no_ticket_context",
+        "Ticket context",
+        not ticket_reference,
+        "Session is not attached to a ticket or work session.",
+        f"Attached to {ticket_reference}.",
+    )
+    add(
+        "generic_purpose",
+        "Recorded purpose",
+        purpose.lower() in {"", NATIVE_REMOTE_GENERIC_PURPOSE},
+        "The recorded purpose is the generic default.",
+        "A specific purpose is recorded.",
+    )
+    add(
+        "server_control",
+        "Server-class endpoint",
+        control and "server" in str(session.get("device_type") or "").lower(),
+        "Interactive control is authorised against a server-class endpoint.",
+        "Not an interactive-control session on a server-class endpoint.",
+    )
+    add(
+        "long_session",
+        "Session duration",
+        bool(active and minutes is not None and minutes > NATIVE_REMOTE_LONG_SESSION_MINUTES),
+        f"The session has run for {minutes} minutes." if minutes is not None else "The session has run longer than the expected window.",
+        "Duration is within the expected window.",
+    )
+    low_hour, high_hour = NATIVE_REMOTE_BUSINESS_HOURS_UTC
+    add(
+        "outside_business_hours",
+        "Business hours (UTC)",
+        bool(started is not None and not (low_hour <= started.hour < high_hour)),
+        f"Started at {started.strftime('%H:%M')} UTC, outside {low_hour:02d}:00–{high_hour:02d}:00 UTC." if started else "Start time is not recorded.",
+        f"Started at {started.strftime('%H:%M')} UTC, inside business hours." if started else "Business hours not evaluated.",
+    )
+
+    score = min(100, sum(factor["weight"] for factor in factors if factor["state"] == "raised"))
+    band = "low" if score < 25 else "medium" if score < 50 else "elevated" if score < 75 else "high"
+    return {
+        "native_risk": {
+            "score": score,
+            "band": band,
+            "requires_step_up": bool(active and score >= NATIVE_REMOTE_STEP_UP_SCORE),
+            "raised_count": sum(1 for factor in factors if factor["state"] == "raised"),
+            "factors": factors,
+        }
+    }
+
 
 def _native_session_freshness(session: dict) -> dict:
     """Expose derived capture freshness without changing session authority."""
@@ -272,7 +415,10 @@ async def get_remote_sessions(
     sessions = await db.remote_sessions.find(
         tenant_scoped_query(current_user, query), {"_id": 0}
     ).sort("started_at", -1).to_list(200)
-    return [{**session, **_native_session_freshness(session)} for session in sessions]
+    return [
+        {**session, **_native_session_freshness(session), **_native_session_risk(session)}
+        for session in sessions
+    ]
 
 @router.get("/remote/active-sessions")
 async def get_active_remote_sessions(current_user: dict = Depends(get_current_user)):
@@ -292,6 +438,7 @@ async def get_active_remote_sessions(current_user: dict = Depends(get_current_us
         except:
             s["live_duration_minutes"] = 0
         s.update(_native_session_freshness(s))
+        s.update(_native_session_risk(s))
     return sessions
 
 @router.post("/remote/sessions/{session_id}/opened")

@@ -160,3 +160,95 @@ export function deriveSuggestions(usageCounts = {}, totals = {}) {
   }
   return suggestions.slice(0, 4);
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Session evidence derivations.
+
+   These read the governed session record and label what it already proved.
+   They never infer desktop content, credentials or endpoint paths, and they
+   never invent an event the record did not record.
+   ───────────────────────────────────────────────────────────── */
+
+/** Ordered, de-duplicated evidence timeline for one session. */
+export function sessionTimeline(session) {
+  const events = [
+    ["Authorised", session?.started_at],
+    ["Consent recorded", session?.consent_confirmed_at],
+    ["Companion acknowledged", session?.companion_acknowledged_at],
+    ["Latest input queued", session?.last_control_input_queued_at],
+    ["Endpoint acknowledged input", session?.last_control_input_acknowledged_at],
+    ["Transport reported", session?.transport_reported_at],
+    ["Companion disconnected", session?.last_transport_disconnect_at],
+    ["Latest protected capture", session?.last_heartbeat_at],
+    ["Session closed", session?.ended_at],
+  ].filter(([, at]) => at);
+  return events
+    .filter(([label, at], index) => !events.slice(0, index).some(([priorLabel, priorAt]) => priorLabel === label && priorAt === at))
+    .sort(([, first], [, second]) => Date.parse(first) - Date.parse(second));
+}
+
+const CHAPTERS = {
+  Authorised: { key: "connect", title: "Connect", detail: "A short-lived grant was issued for this endpoint." },
+  "Consent recorded": { key: "consent", title: "Customer consent", detail: "Attended consent was recorded before capture began." },
+  "Companion acknowledged": { key: "companion", title: "Endpoint accepted", detail: "The endpoint companion verified and accepted the grant." },
+  "Transport reported": { key: "transport", title: "Transport", detail: "The secure relay reported an authenticated transport." },
+  "Latest input queued": { key: "input", title: "Interactive input", detail: "Bounded control input was queued for the endpoint." },
+  "Endpoint acknowledged input": { key: "input_ack", title: "Input acknowledged", detail: "The endpoint acknowledged the latest control input." },
+  "Companion disconnected": { key: "disconnect", title: "Disconnected", detail: "The endpoint companion reported a disconnect." },
+  "Latest protected capture": { key: "capture", title: "Protected capture", detail: "The endpoint sent a fresh protected capture." },
+  "Session closed": { key: "close", title: "Session closed", detail: "The session ended and its grant was revoked." },
+};
+
+/**
+ * Session chapters: the recorded evidence framed as an ordered work journal with
+ * an offset from the start of the session, so a 40-minute session reads as
+ * chapters rather than a wall of timestamps.
+ */
+export function deriveSessionChapters(session) {
+  const startedAt = Date.parse(session?.started_at || "");
+  return sessionTimeline(session).map(([label, at], index) => {
+    const parsed = Date.parse(at);
+    const meta = CHAPTERS[label] || { key: `step_${index}`, title: label, detail: "Recorded session evidence." };
+    return {
+      ...meta,
+      label,
+      at,
+      offset_seconds: Number.isFinite(startedAt) && Number.isFinite(parsed) ? Math.max(0, Math.round((parsed - startedAt) / 1000)) : null,
+    };
+  });
+}
+
+/** Whole minutes a session has run, from its recorded start and end. */
+export function sessionDurationMinutes(session, now = Date.now()) {
+  const startedAt = Date.parse(session?.started_at || "");
+  if (!Number.isFinite(startedAt)) return null;
+  const endedAt = Date.parse(session?.ended_at || "");
+  const finish = Number.isFinite(endedAt) ? endedAt : now;
+  return Math.max(0, Math.floor((finish - startedAt) / 60000));
+}
+
+/**
+ * Suggested ticket labour for a session. The suggestion is rounded UP to the
+ * next five minutes and capped, and always reports the recorded minutes it came
+ * from so a technician confirms a number rather than accepting a mystery.
+ */
+export function suggestSessionLabour(session, now = Date.now()) {
+  const recorded = sessionDurationMinutes(session, now);
+  if (recorded === null || recorded <= 0) return null;
+  const minutes = Math.min(480, recorded < 2 ? 1 : Math.ceil(recorded / 5) * 5);
+  return {
+    minutes,
+    recorded_minutes: recorded,
+    rationale: `Recorded session time ${recorded} min, rounded up to the next five minutes.`,
+  };
+}
+
+/** Tailwind tone classes for a server-reported session risk band. */
+export function riskTone(band) {
+  return {
+    low: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+    medium: "border-amber-400/30 bg-amber-400/10 text-amber-200",
+    elevated: "border-orange-400/30 bg-orange-400/10 text-orange-200",
+    high: "border-rose-400/30 bg-rose-400/10 text-rose-200",
+  }[band] || "border-border/60 text-muted-foreground";
+}
