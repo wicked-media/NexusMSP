@@ -80,14 +80,17 @@
         --nx-toast-tone-critical: var(--destructive);
         --nx-toast-tone-info: var(--info);
 
-        /* Device detail tones. The dark theme keeps the cluster's original signal
-           hues; the light theme restates them below, because these neon glyph,
-           track and severity colours measured 1.78-2.13:1 on the white surface. */
-        --nx-device-tone-positive: 156 85% 46%;
-        --nx-device-tone-caution: 42 87% 58%;
-        --nx-device-tone-watch: 49 89% 60%;
-        --nx-device-tone-critical: 355 84% 61%;
-        --nx-device-tone-info: 187 85% 48%;
+        /* Shared Nexus signal tones. Device detail, the fleet cockpit and the
+           workspace header all render severity as colour, so one scale owns one
+           tone instead of each cluster keeping its own literals. The dark theme
+           keeps the original signal hues; the light theme restates them below,
+           because these neon glyphs, tracks and status dots measured 1.68-2.13:1
+           against the white surface. */
+        --nx-tone-positive: 156 85% 46%;
+        --nx-tone-caution: 42 87% 58%;
+        --nx-tone-watch: 49 89% 60%;
+        --nx-tone-critical: 355 84% 61%;
+        --nx-tone-info: 187 85% 48%;
 
         /* One motion rhythm across Nexus: acknowledge, transition, reveal. */
         --nx-motion-instant: 100ms;
@@ -144,13 +147,14 @@
         --nx-toast-tone-critical: 0 72% 45%;
         --nx-toast-tone-info: 217 91% 40%;
 
-        /* Deepened so device glyphs, severity dots and telemetry tracks clear the
-           3:1 non-text threshold and the agent status text clears 4.5:1. */
-        --nx-device-tone-positive: 152 72% 26%;
-        --nx-device-tone-caution: 26 92% 31%;
-        --nx-device-tone-watch: 32 95% 30%;
-        --nx-device-tone-critical: 0 72% 45%;
-        --nx-device-tone-info: 217 91% 40%;
+        /* Deepened so every signal glyph, severity dot, status label and telemetry
+           track clears the 3:1 non-text threshold, with caution also clearing the
+           4.5:1 text threshold it needs for the agent status and header copy. */
+        --nx-tone-positive: 152 72% 26%;
+        --nx-tone-caution: 26 92% 31%;
+        --nx-tone-watch: 32 95% 30%;
+        --nx-tone-critical: 0 72% 45%;
+        --nx-tone-info: 217 91% 40%;
     }
 }
 
@@ -757,7 +761,7 @@ html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__spinner { animation
     box-shadow: 0 0 12px hsl(var(--nx-header-accent) / .76);
 }
 .nx-workspace-header[data-signal-state="critical"] .nx-workspace-header__orb { background: hsl(var(--destructive)); box-shadow: 0 0 12px hsl(var(--destructive) / .72); }
-.nx-workspace-header[data-signal-state="attention"] .nx-workspace-header__orb { background: #f2c141; box-shadow: 0 0 12px rgb(242 193 65 / .68); }
+.nx-workspace-header[data-signal-state="attention"] .nx-workspace-header__orb { background: hsl(var(--nx-tone-caution)); box-shadow: 0 0 12px hsl(var(--nx-tone-caution) / .68); }
 .nx-workspace-header[data-signal-state="working"] .nx-workspace-header__orb { animation: nx-workspace-orb 1.8s ease-in-out infinite; }
 .nx-workspace-header__copy { min-width: 0; }
 .nx-workspace-header__back { margin-bottom: .45rem; }
@@ -827,7 +831,7 @@ html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__spinner { animation
     color: hsl(var(--nx-header-accent));
     background: hsl(var(--nx-header-accent) / .07);
 }
-.nx-workspace-header[data-signal-state="attention"] .nx-workspace-header__state-icon { border-color: rgb(242 193 65 / .25); color: #f2c141; background: rgb(242 193 65 / .07); }
+.nx-workspace-header[data-signal-state="attention"] .nx-workspace-header__state-icon { border-color: hsl(var(--nx-tone-caution) / .25); color: hsl(var(--nx-tone-caution)); background: hsl(var(--nx-tone-caution) / .07); }
 .nx-workspace-header[data-signal-state="critical"] .nx-workspace-header__state-icon { border-color: hsl(var(--destructive) / .28); color: hsl(var(--destructive)); background: hsl(var(--destructive) / .075); }
 .nx-workspace-header__state-icon svg { width: .95rem; height: .95rem; }
 .nx-workspace-header__state p { font-size: .76rem; font-weight: 750; }
@@ -1005,13 +1009,13 @@ html[data-motion="minimal"] .nx-endpoint-briefing { animation: none; }
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    border: 2px solid rgb(13 202 218 / .5);
+    border: 2px solid hsl(var(--nx-tone-info) / .5);
     border-radius: 999px;
-    color: hsl(var(--cyan-400, 188 86% 53%));
-    background: rgb(13 202 218 / .045);
-    box-shadow: inset 0 0 0 7px rgb(13 202 218 / .045), 0 0 34px -20px rgb(13 202 218 / .9);
+    color: hsl(var(--nx-tone-info));
+    background: hsl(var(--nx-tone-info) / .045);
+    box-shadow: inset 0 0 0 7px hsl(var(--nx-tone-info) / .045), 0 0 34px -20px hsl(var(--nx-tone-info) / .9);
 }
-.nx-fleet-cockpit-header__mark::before { content: ""; position: absolute; inset: .45rem; border: 1px solid rgb(13 202 218 / .32); border-radius: inherit; }
+.nx-fleet-cockpit-header__mark::before { content: ""; position: absolute; inset: .45rem; border: 1px solid hsl(var(--nx-tone-info) / .32); border-radius: inherit; }
 .nx-fleet-cockpit-header__mark > svg { width: 2.35rem; height: 2.35rem; }
 .nx-fleet-cockpit-header__mark > span { position: absolute; right: .15rem; bottom: .5rem; display: flex; width: 1.35rem; height: 1.35rem; align-items: center; justify-content: center; border: 3px solid hsl(var(--background)); border-radius: 999px; background: hsl(var(--card)); }
 .nx-fleet-cockpit-header__eyebrow { margin-bottom: .55rem; color: hsl(var(--primary)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .62rem; font-weight: 800; letter-spacing: .28em; text-transform: uppercase; }
@@ -1021,7 +1025,7 @@ html[data-motion="minimal"] .nx-endpoint-briefing { animation: none; }
 .nx-fleet-cockpit-header__facts svg { width: .9rem; height: .9rem; }
 .nx-fleet-cockpit-header__state { display: grid; gap: .75rem; min-height: 6.8rem; border: 1px solid hsl(var(--border) / .7); border-radius: .9rem; padding: .9rem; background: hsl(var(--card) / .68); }
 .nx-fleet-cockpit-header__state-copy { display: flex; min-width: 0; align-items: flex-start; gap: .75rem; }
-.nx-fleet-cockpit-header__state-copy > span { display: inline-flex; width: 2.2rem; height: 2.2rem; flex: 0 0 auto; align-items: center; justify-content: center; border: 1px solid hsl(var(--amber-500, 38 92% 50%) / .24); border-radius: .65rem; color: #f2c141; background: hsl(var(--amber-500, 38 92% 50%) / .07); }
+.nx-fleet-cockpit-header__state-copy > span { display: inline-flex; width: 2.2rem; height: 2.2rem; flex: 0 0 auto; align-items: center; justify-content: center; border: 1px solid hsl(var(--nx-tone-caution) / .24); border-radius: .65rem; color: hsl(var(--nx-tone-caution)); background: hsl(var(--nx-tone-caution) / .07); }
 .nx-fleet-cockpit-header__state-copy > span.is-healthy { border-color: hsl(var(--primary) / .28); color: hsl(var(--primary)); background: hsl(var(--primary) / .08); }
 .nx-fleet-cockpit-header__state-copy > span.is-critical { border-color: hsl(var(--destructive) / .28); color: hsl(var(--destructive)); background: hsl(var(--destructive) / .075); }
 .nx-fleet-cockpit-header__state-copy svg { width: 1rem; height: 1rem; }
@@ -1059,7 +1063,7 @@ html[data-motion="minimal"] .nx-endpoint-briefing { animation: none; }
 .nx-fleet-telemetry { overflow: hidden; border: 1px solid hsl(var(--primary) / .4); border-radius: .9rem; background: hsl(var(--card) / .68); box-shadow: 0 0 30px -25px hsl(var(--primary)); }
 .nx-fleet-telemetry__head { display: flex; min-height: 2.9rem; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid hsl(var(--border) / .5); padding: .5rem .85rem; }
 .nx-fleet-telemetry__head > div { display: flex; align-items: center; gap: .55rem; min-width: 0; }
-.nx-fleet-telemetry__head svg { color: #12d98b; }
+.nx-fleet-telemetry__head svg { color: hsl(var(--nx-tone-positive)); }
 .nx-fleet-telemetry__head p { font-size: .76rem; font-weight: 750; }
 .nx-fleet-telemetry__head span, .nx-fleet-telemetry__head small { color: hsl(var(--muted-foreground)); font-size: .62rem; }
 .nx-fleet-telemetry__metrics { padding: .7rem; }
@@ -1072,7 +1076,7 @@ html[data-motion="minimal"] .nx-endpoint-briefing { animation: none; }
 .nx-fleet-filterbar__count { flex: 0 0 auto; padding-right: .35rem; color: hsl(var(--muted-foreground)); font-size: .65rem; white-space: nowrap; }
 .nx-fleet-attention-rail { position: sticky; top: 1rem; display: grid; gap: .65rem; border: 1px solid hsl(var(--border) / .6); border-radius: .85rem; padding: .7rem; background: hsl(var(--card) / .6); }
 .nx-fleet-attention-rail__heading { display: flex; align-items: flex-start; gap: .55rem; padding: .2rem .15rem .7rem; border-bottom: 1px solid hsl(var(--border) / .48); }
-.nx-fleet-attention-rail__heading > span { display: inline-flex; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: .55rem; color: #f0b938; background: hsl(var(--amber-500, 38 92% 50%) / .09); }
+.nx-fleet-attention-rail__heading > span { display: inline-flex; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: .55rem; color: hsl(var(--nx-tone-caution)); background: hsl(var(--nx-tone-caution) / .09); }
 .nx-fleet-attention-rail__heading svg { width: .9rem; height: .9rem; }
 .nx-fleet-attention-rail__heading p { font-size: .75rem; font-weight: 750; }
 .nx-fleet-attention-rail__heading small { display: block; margin-top: .15rem; color: hsl(var(--muted-foreground)); font-size: .6rem; line-height: 1.4; }
@@ -1168,17 +1172,17 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    border: 2px solid rgb(13 202 218 / .56);
+    border: 2px solid hsl(var(--nx-tone-info) / .56);
     border-radius: 999px;
-    color: hsl(var(--cyan-400, 188 86% 53%));
-    background: rgb(13 202 218 / .045);
-    box-shadow: inset 0 0 0 8px rgb(13 202 218 / .055), 0 0 38px -19px rgb(13 202 218 / .92);
+    color: hsl(var(--nx-tone-info));
+    background: hsl(var(--nx-tone-info) / .045);
+    box-shadow: inset 0 0 0 8px hsl(var(--nx-tone-info) / .055), 0 0 38px -19px hsl(var(--nx-tone-info) / .92);
 }
 .nx-device-cockpit-header__mark::before {
     content: "";
     position: absolute;
     inset: .48rem;
-    border: 1px solid hsl(var(--cyan-400, 188 86% 53%) / .38);
+    border: 1px solid hsl(var(--nx-tone-info) / .38);
     border-radius: inherit;
 }
 .nx-device-cockpit-header__mark > span {
@@ -1214,7 +1218,7 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     border-color: hsl(var(--primary) / .32);
     box-shadow: inset 0 1px 0 hsl(var(--foreground) / .045), 0 20px 52px -40px hsl(var(--primary) / .75);
 }
-.nx-device-action-summary__icon { display: inline-flex; width: 2.6rem; height: 2.6rem; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: .75rem; color: hsl(var(--nx-device-tone-caution)); background: hsl(var(--background) / .55); }
+.nx-device-action-summary__icon { display: inline-flex; width: 2.6rem; height: 2.6rem; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: .75rem; color: hsl(var(--nx-tone-caution)); background: hsl(var(--background) / .55); }
 .nx-device-action-summary__icon svg { width: 1.15rem; height: 1.15rem; }
 .nx-device-action-summary { min-width: 0; }
 .nx-device-action-summary p { font-size: .84rem; font-weight: 700; }
@@ -1243,11 +1247,11 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     padding: .55rem .9rem;
 }
 .nx-device-telemetry__title, .nx-device-telemetry__status { display: flex; align-items: center; gap: .65rem; }
-.nx-device-telemetry__title > svg { width: 1rem; height: 1rem; color: hsl(var(--nx-device-tone-positive)); }
+.nx-device-telemetry__title > svg { width: 1rem; height: 1rem; color: hsl(var(--nx-tone-positive)); }
 .nx-device-telemetry__title strong { font-size: .8rem; }
 .nx-device-telemetry__title span, .nx-device-telemetry__status small { color: hsl(var(--muted-foreground)); font-size: .66rem; }
-.nx-device-telemetry__status > span { display: inline-flex; align-items: center; gap: .35rem; color: hsl(var(--nx-device-tone-caution)); font-size: .67rem; font-weight: 700; }
-.nx-device-telemetry__status > span.is-observed { color: hsl(var(--nx-device-tone-positive)); }
+.nx-device-telemetry__status > span { display: inline-flex; align-items: center; gap: .35rem; color: hsl(var(--nx-tone-caution)); font-size: .67rem; font-weight: 700; }
+.nx-device-telemetry__status > span.is-observed { color: hsl(var(--nx-tone-positive)); }
 .nx-device-telemetry__status svg { width: .9rem; height: .9rem; }
 .nx-device-telemetry__status > svg { color: hsl(var(--muted-foreground)); }
 .nx-device-telemetry__status button { height: 2rem; gap: .35rem; font-size: .68rem; }
@@ -1277,7 +1281,7 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     outline: none;
 }
 .nx-device-telemetry__metric-label { display: flex; align-items: center; gap: .45rem; color: hsl(var(--muted-foreground)); font-size: .66rem; line-height: 1.2; }
-.nx-device-telemetry__metric-label > span { display: inline-flex; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: .55rem; color: hsl(var(--nx-device-tone-positive)); background: hsl(var(--nx-device-tone-positive) / .1); }
+.nx-device-telemetry__metric-label > span { display: inline-flex; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: .55rem; color: hsl(var(--nx-tone-positive)); background: hsl(var(--nx-tone-positive) / .1); }
 .nx-device-telemetry__metric-label svg { width: .95rem; height: .95rem; }
 .nx-device-telemetry__metric > p { margin-top: .38rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.22rem; font-weight: 750; letter-spacing: -.04em; }
 .nx-device-telemetry__metric:nth-child(n+5) { text-align: center; }
@@ -1298,13 +1302,13 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     transform-origin: left;
     animation: nx-device-meter-enter 520ms var(--nx-ease-out) both;
 }
-.nx-device-telemetry__metric[data-tone="amber"] .nx-device-telemetry__track span { background: hsl(var(--nx-device-tone-caution)); }
-.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__track span { background: hsl(var(--nx-device-tone-watch)); }
-.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__track span { background: hsl(var(--nx-device-tone-critical)); }
-.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-device-tone-critical)); }
-.nx-device-telemetry__metric[data-tone="cyan"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-device-tone-info)); }
+.nx-device-telemetry__metric[data-tone="amber"] .nx-device-telemetry__track span { background: hsl(var(--nx-tone-caution)); }
+.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__track span { background: hsl(var(--nx-tone-watch)); }
+.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__track span { background: hsl(var(--nx-tone-critical)); }
+.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-tone-critical)); }
+.nx-device-telemetry__metric[data-tone="cyan"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-tone-info)); }
 .nx-device-telemetry__metric[data-tone="amber"] .nx-device-telemetry__metric-label > span,
-.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-device-tone-caution)); }
+.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-tone-caution)); }
 .nx-device-telemetry__spark { width: 100%; height: .9rem; margin-top: .15rem; opacity: .65; }
 
 .nx-device-workspace-nav {
@@ -1370,7 +1374,7 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
 }
 .nx-device-subnav__item:hover { color: hsl(var(--foreground)); }
 .nx-device-subnav__item[data-active="true"] { color: hsl(var(--foreground)); }
-.nx-device-subnav__item[data-active="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: hsl(var(--nx-device-tone-positive)); box-shadow: 0 0 10px hsl(var(--nx-device-tone-positive)); }
+.nx-device-subnav__item[data-active="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: hsl(var(--nx-tone-positive)); box-shadow: 0 0 10px hsl(var(--nx-tone-positive)); }
 .nx-device-workspace-layout {
     display: grid;
     grid-template-columns: 14.6rem minmax(0, 1fr);
@@ -1454,9 +1458,9 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
 .nx-device-current-work__row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nx-device-current-work__row .nx-badge, .nx-device-current-work__row [class*="badge"] { width: fit-content; font-size: .6rem; }
 .nx-device-current-work__row svg { width: .72rem; height: .72rem; }
-.nx-device-current-work__row i { display: inline-block; width: .45rem; height: .45rem; margin-right: .35rem; border-radius: 999px; background: hsl(var(--nx-device-tone-positive)); }
-.nx-device-current-work__row i.is-medium, .nx-device-current-work__row i.is-high { background: hsl(var(--nx-device-tone-caution)); }
-.nx-device-current-work__row i.is-critical { background: hsl(var(--nx-device-tone-critical)); }
+.nx-device-current-work__row i { display: inline-block; width: .45rem; height: .45rem; margin-right: .35rem; border-radius: 999px; background: hsl(var(--nx-tone-positive)); }
+.nx-device-current-work__row i.is-medium, .nx-device-current-work__row i.is-high { background: hsl(var(--nx-tone-caution)); }
+.nx-device-current-work__row i.is-critical { background: hsl(var(--nx-tone-critical)); }
 .nx-device-current-work__empty { padding: .85rem .3rem; color: hsl(var(--muted-foreground)); font-size: .7rem; }
 .nx-device-current-work__row:hover,
 .nx-device-current-work__row:focus-visible {

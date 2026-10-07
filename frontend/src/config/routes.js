@@ -19,7 +19,10 @@ export const routeConfig = [
   { path: "/nexus-data-quality", component: page("NexusDataQualityPage"), auth: true, layout: true },
   { path: "/nexus-pulse", component: page("NexusPulsePage"), auth: true, layout: true },
   { path: "/nexus-proving-ground", component: page("NexusProvingGroundPage"), auth: true, layout: true },
-  { path: "/shadow-it", component: page("ShadowITPage"), auth: true, layout: true },
+  // The component name must match the file on disk exactly: this route resolves
+  // through a webpack dynamic-import context, which does not case-fold, so the
+  // mixed-case name previously used here failed to load on Linux builds.
+  { path: "/shadow-it", component: page("ShadowItPage"), auth: true, layout: true },
   { path: "/nexus-elevate", component: page("NexusElevatePage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/control-plane", component: page("NexusControlPlanePage"), auth: true, layout: true },
