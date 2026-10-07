@@ -72,6 +72,14 @@
         --nx-surface-shadow: 240 10% 2%;
         --nx-grid-line: 0 0% 100%;
 
+        /* Toast tones. The dark theme reads the signal tokens directly; the light
+           theme restates them below, because a 15% tint of a luminous hue over a
+           white card is not legible enough for a rail, a chip border or a glyph. */
+        --nx-toast-tone-success: var(--success);
+        --nx-toast-tone-warning: var(--warning);
+        --nx-toast-tone-critical: var(--destructive);
+        --nx-toast-tone-info: var(--info);
+
         /* One motion rhythm across Nexus: acknowledge, transition, reveal. */
         --nx-motion-instant: 100ms;
         --nx-motion-fast: 160ms;
@@ -119,6 +127,13 @@
         --nx-surface-border: 220 16% 86%;
         --nx-surface-shadow: 220 40% 30%;
         --nx-grid-line: 220 25% 18%;
+
+        /* Deepened so every toast tone keeps 3:1 against its own tinted chip and
+           reads as a signal rather than a pastel on the white card. */
+        --nx-toast-tone-success: 152 72% 26%;
+        --nx-toast-tone-warning: 26 92% 31%;
+        --nx-toast-tone-critical: 0 72% 45%;
+        --nx-toast-tone-info: 217 91% 40%;
     }
 }
 
@@ -420,47 +435,237 @@
     animation: nx-result-reveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Shared Nexus toast treatment: a compact, readable signal rather than a
-   generic floating card. Sonner owns motion and aria-live semantics. */
+/* Nexus toast surface. Sonner owns timers, stacking, swipe and aria-live; this
+   stylesheet owns every visual property, which is why the Toaster mounts with
+   `unstyled`. A toast is a compact acknowledgement: one tone rail, one tinted
+   glyph chip, content first.
+
+   Tones resolve to the theme-aware signal tokens, so the rail, the chip and the
+   icon can never disagree and both themes stay legible. Sonner uses ::before and
+   ::after on the toast itself for swipe hit-area and stack geometry, so the rail
+   is a real border: exactly one tone renders, in every toast state. */
 [data-sonner-toaster] .nx-toast {
-  position: relative;
-  min-width: min(25rem, calc(100vw - 2rem));
-  border-left: 3px solid hsl(var(--primary)) !important;
-  background-image: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--card) / .96) 72%, hsl(var(--primary) / .06) 140%) !important;
-  box-shadow: 0 18px 48px -26px rgba(0, 0, 0, .72) !important;
+    --nx-toast-tone: var(--primary);
+
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    /* Sonner keeps --width in step with its stacking maths; never hardcode it. */
+    width: min(var(--width, 22rem), calc(100vw - 2rem));
+    max-width: none;
+    min-width: 0;
+    padding: 0.75rem 0.8rem 0.75rem 0.9rem;
+    border: 1px solid hsl(var(--border) / 0.9);
+    border-left: 3px solid hsl(var(--nx-toast-tone));
+    border-radius: 0.85rem;
+    background-color: hsl(var(--card) / 0.97);
+    background-image: linear-gradient(
+        118deg,
+        hsl(var(--nx-toast-tone) / 0.12) 0%,
+        hsl(var(--nx-toast-tone) / 0.035) 38%,
+        transparent 72%
+    );
+    box-shadow:
+        inset 0 1px 0 hsl(var(--nx-grid-line) / 0.05),
+        0 18px 44px -28px hsl(var(--nx-surface-shadow) / 0.8);
+    color: hsl(var(--foreground));
+    font-size: 0.8125rem;
+    /* Sonner's toast transition owns enter/exit motion: never override it here. */
 }
-[data-sonner-toaster] .nx-toast::after {
-  content: "";
-  position: absolute;
-  right: -2.5rem;
-  bottom: -2.5rem;
-  width: 7rem;
-  height: 7rem;
-  border-radius: 999px;
-  background: hsl(var(--primary) / .08);
-  filter: blur(18px);
-  pointer-events: none;
+
+[data-sonner-toaster] .nx-toast:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    box-shadow: inset 0 1px 0 hsl(var(--nx-grid-line) / 0.05), 0 18px 44px -28px hsl(var(--nx-surface-shadow) / 0.8);
 }
-[data-sonner-toast][data-type="success"].nx-toast { border-left-color: #34d399 !important; }
-[data-sonner-toast][data-type="error"].nx-toast { border-left-color: #fb7185 !important; }
-[data-sonner-toast][data-type="warning"].nx-toast { border-left-color: #fbbf24 !important; }
+
+/* One tone per signal. `default`, `message` and `loading` stay on the brand hue. */
+[data-sonner-toaster] .nx-toast[data-type="success"] { --nx-toast-tone: var(--nx-toast-tone-success); }
+[data-sonner-toaster] .nx-toast[data-type="warning"] { --nx-toast-tone: var(--nx-toast-tone-warning); }
+[data-sonner-toaster] .nx-toast[data-type="error"] { --nx-toast-tone: var(--nx-toast-tone-critical); }
+[data-sonner-toaster] .nx-toast[data-type="info"] { --nx-toast-tone: var(--nx-toast-tone-info); }
+
 [data-sonner-toaster] .nx-toast__icon {
-  position: relative;
-  z-index: 1;
-  align-self: center !important;
-  justify-content: center !important;
-  line-height: 0;
+    display: flex;
+    flex: none;
+    align-self: center;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    border: 1px solid hsl(var(--nx-toast-tone) / 0.38);
+    border-radius: 0.55rem;
+    background: hsl(var(--nx-toast-tone) / 0.15);
+    color: hsl(var(--nx-toast-tone));
+    line-height: 0;
 }
+
+[data-sonner-toaster] .nx-toast__icon > * { flex-shrink: 0; }
+
 [data-sonner-toaster] .nx-toast__icon svg {
-  display: block;
-  width: 1rem;
-  height: 1rem;
-  stroke-width: 2.25;
+    display: block;
+    width: 0.95rem;
+    height: 0.95rem;
+    stroke-width: 2.25;
 }
-[data-sonner-toaster] .nx-toast__close { opacity: .72; transition: opacity .16s ease, transform .16s ease; }
-[data-sonner-toaster] .nx-toast__close svg { display: block; width: .8rem; height: .8rem; }
-[data-sonner-toaster] .nx-toast:hover .nx-toast__close { opacity: 1; transform: scale(1.04); }
-@media (max-width: 640px) { [data-sonner-toaster] .nx-toast { min-width: calc(100vw - 1.25rem); } }
+
+[data-sonner-toaster] .nx-toast__spinner { animation: nx-toast-spin 900ms linear infinite; }
+
+@keyframes nx-toast-spin { to { transform: rotate(360deg); } }
+
+[data-sonner-toaster] .nx-toast__content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    /* Clearance for the close control in the top-right corner. */
+    padding-right: 1.1rem;
+}
+
+[data-sonner-toaster] .nx-toast__title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: hsl(var(--foreground));
+}
+
+[data-sonner-toaster] .nx-toast__description {
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.5;
+    color: hsl(var(--muted-foreground));
+}
+
+[data-sonner-toaster] .nx-toast__close {
+    position: absolute;
+    /* Held inside the card: Sonner's default straddles the corner, where the
+       toast's own overflow clips it into a half-drawn box. */
+    top: 0.4rem;
+    right: 0.4rem;
+    left: auto;
+    transform: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.35rem;
+    height: 1.35rem;
+    padding: 0;
+    border: 1px solid hsl(var(--border) / 0.85);
+    border-radius: 0.45rem;
+    background: hsl(var(--card) / 0.9);
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+    opacity: 0.62;
+    transition:
+        opacity var(--nx-motion-fast) var(--nx-ease-out),
+        color var(--nx-motion-fast) var(--nx-ease-out),
+        border-color var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+[data-sonner-toaster] .nx-toast__close svg { display: block; width: 0.75rem; height: 0.75rem; }
+
+[data-sonner-toaster] .nx-toast:hover .nx-toast__close,
+[data-sonner-toaster] .nx-toast__close:focus-visible { opacity: 1; }
+
+[data-sonner-toaster] .nx-toast__close:hover {
+    color: hsl(var(--foreground));
+    border-color: hsl(var(--border));
+}
+
+[data-sonner-toaster] .nx-toast__action,
+[data-sonner-toaster] .nx-toast__cancel {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    height: 1.6rem;
+    padding: 0 0.6rem;
+    border: 1px solid transparent;
+    border-radius: 0.45rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        background-color var(--nx-motion-fast) var(--nx-ease-out),
+        color var(--nx-motion-fast) var(--nx-ease-out);
+}
+
+[data-sonner-toaster] .nx-toast__action {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+}
+
+[data-sonner-toaster] .nx-toast__action:hover { filter: brightness(1.08); }
+
+[data-sonner-toaster] .nx-toast__cancel {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    border-color: hsl(var(--border) / 0.8);
+}
+
+[data-sonner-toaster] .nx-toast__cancel:hover {
+    background: hsl(var(--accent));
+    color: hsl(var(--foreground));
+}
+
+/* Visual treatment: one tone language, three weights of glass. */
+[data-sonner-toaster] .nx-toast--nexus { backdrop-filter: blur(14px); }
+
+[data-sonner-toaster] .nx-toast--minimal {
+    background-image: none;
+    background-color: hsl(var(--card));
+    border-radius: 0.6rem;
+    box-shadow: 0 10px 26px -22px hsl(var(--nx-surface-shadow) / 0.7);
+}
+
+[data-sonner-toaster] .nx-toast--ops {
+    background-image: none;
+    background-color: hsl(var(--card));
+    border-radius: 0.6rem;
+    box-shadow: 0 16px 38px -26px hsl(var(--nx-surface-shadow) / 0.85);
+}
+
+/* Density. Compact also suits stacked toasts, so it trims the glyph as well. */
+[data-sonner-toaster] .nx-toast--comfortable { padding: 0.75rem 0.8rem 0.75rem 0.9rem; }
+
+[data-sonner-toaster] .nx-toast--dense {
+    gap: 0.55rem;
+    padding: 0.55rem 0.65rem 0.55rem 0.75rem;
+}
+
+[data-sonner-toaster] .nx-toast--dense .nx-toast__icon {
+    width: 1.45rem;
+    height: 1.45rem;
+    border-radius: 0.45rem;
+}
+
+[data-sonner-toaster] .nx-toast--dense .nx-toast__icon svg { width: 0.85rem; height: 0.85rem; }
+[data-sonner-toaster] .nx-toast--dense .nx-toast__title { font-size: 0.75rem; }
+[data-sonner-toaster] .nx-toast--dense .nx-toast__description { font-size: 0.7rem; }
+
+/* Replaces the Sonner rule that only applies while it styles the toast itself:
+   a collapsed background toast shows a clean edge instead of stacked text. */
+[data-sonner-toaster] .nx-toast[data-expanded="false"][data-front="false"] > * { opacity: 0; }
+
+/* The close control must stay reachable without hover. */
+@media (hover: none), (max-width: 640px) {
+    [data-sonner-toaster] .nx-toast__close { opacity: 1; }
+}
+
+html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__close,
+html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__action,
+html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__cancel { transition: none; }
+
+html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__spinner { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-sonner-toaster] .nx-toast__close,
+    [data-sonner-toaster] .nx-toast__action,
+    [data-sonner-toaster] .nx-toast__cancel { transition: none !important; }
+
+    [data-sonner-toaster] .nx-toast__spinner { animation: none !important; }
+}
 
 /* Canonical workspace header. OperationalPageHeader remains a compatibility
    wrapper so existing workspaces adopt this visual contract without duplicating
@@ -1370,50 +1575,6 @@ html[data-motion="minimal"] .nx-device-quick-actions__remote button { transition
 .nx-status-orb[data-status="offline"] {
     opacity: 0.52;
     filter: saturate(0.4);
-}
-
-.nx-toast {
-    position: relative;
-    overflow: visible;
-}
-
-.nx-toast::before {
-    content: "";
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    border-radius: 999px;
-    background: hsl(var(--primary));
-    opacity: 0.9;
-}
-
-.nx-toast[data-type="success"]::before { background: rgb(16 185 129); }
-.nx-toast[data-type="warning"]::before { background: rgb(245 158 11); }
-.nx-toast[data-type="error"]::before { background: rgb(244 63 94); }
-.nx-toast[data-type="info"]::before { background: rgb(56 189 248); }
-
-.nx-toast[data-type="success"] .nx-toast__icon { color: rgb(52 211 153); }
-.nx-toast[data-type="warning"] .nx-toast__icon { color: rgb(251 191 36); }
-.nx-toast[data-type="error"] .nx-toast__icon { color: rgb(251 113 133); }
-.nx-toast[data-type="info"] .nx-toast__icon { color: rgb(56 189 248); }
-
-.nx-toast__close {
-    opacity: 0;
-    transition: opacity var(--nx-motion-fast) var(--nx-ease-out), background-color var(--nx-motion-fast) var(--nx-ease-out);
-}
-
-.nx-toast:hover .nx-toast__close,
-.nx-toast:focus-within .nx-toast__close {
-    opacity: 1;
-}
-
-@media (max-width: 640px) {
-    .nx-toast__close { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .nx-toast,
-    .nx-toast__close { transition: none !important; }
 }
 
 /* Native Nexus controls: one predictable focus and hover language across forms. */
