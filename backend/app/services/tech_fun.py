@@ -1007,8 +1007,6 @@ async def work_lock_status(db: Any, user: dict, device_id: str) -> dict:
 
 async def handover(db: Any, user: dict, name: str) -> dict:
     """The 5 PM digest: what is active, what waits, what runs, who should take what."""
-    from app.services.scope_permissions import tenant_scoped_query
-
     now = _utcnow()
     active = await db.tickets.find(
         {"$or": [{"assigned_to": user.get("id")}, {"assigned_name": name}],

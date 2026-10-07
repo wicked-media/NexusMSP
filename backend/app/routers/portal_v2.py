@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 from urllib.parse import quote
 import hashlib
 import secrets

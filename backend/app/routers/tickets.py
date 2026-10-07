@@ -1,19 +1,18 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime, timezone, timedelta
 from hashlib import sha256
 import json
 import math
 import uuid
-import os
 import asyncio
 import logging
 from email_validator import EmailNotValidError, validate_email
 from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel, ConfigDict, Field
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
 from app.services.avatar_enrichment import attach_user_avatars
 from app.services.action_permissions import assert_action_permission, require_action
 from app.services.labour_types import labour_snapshot, resolve_labour_type
@@ -707,7 +706,6 @@ async def create_ticket(ticket_data: TicketCreate, current_user: dict = Depends(
             if ticket_data.priority == "medium":
                 ticket_data.priority = service_doc.get("default_priority", "medium")
             # Use service-defined SLA
-            sla_resp = float(service_doc.get("sla_response_hours") or 0)
             sla_resolve = float(service_doc.get("sla_resolve_hours") or 0)
             sla_hours[ticket_data.priority] = sla_resolve or sla_hours.get(ticket_data.priority, 8)
 

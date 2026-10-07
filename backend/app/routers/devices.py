@@ -1,12 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Body
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
 from app.services.action_permissions import require_action
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, assert_tenant_record_scope, platform_tenant_id, scoped_query, tenant_scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_tenant_record_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
@@ -932,7 +932,7 @@ async def get_asset_stats(current_user: dict = Depends(get_current_user)):
                     expired += 1
                 elif exp_dt < now + timedelta(days=90):
                     expiring_soon += 1
-            except:
+            except Exception:
                 pass
     by_type = {}
     for a in assets:
@@ -959,7 +959,7 @@ async def get_expiring_assets(current_user: dict = Depends(get_current_user)):
                     a["days_remaining"] = (exp_dt - now).days
                     a["is_expired"] = exp_dt < now
                     expiring.append(a)
-            except:
+            except Exception:
                 pass
     return sorted(expiring, key=lambda x: x.get("days_remaining", 999))
 

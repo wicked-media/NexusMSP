@@ -1,11 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional
 from datetime import datetime, timezone, timedelta
-import uuid
 import re
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token, password_policy_error
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user, hash_password, password_policy_error
 from app.services.action_permissions import (
     default_permissions_for_role,
     normalise_action_permissions,
@@ -226,7 +224,7 @@ async def get_technicians_overview(current_user: dict = Depends(get_current_user
                     sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
                     if sla_dt and sla_dt < datetime.now(timezone.utc):
                         overdue += 1
-                except:
+                except Exception:
                     pass
         week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = week_start - timedelta(days=week_start.weekday())
@@ -515,7 +513,7 @@ async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(ge
             if isinstance(sla, str):
                 try:
                     sla_dt = datetime.fromisoformat(sla.replace("Z", "+00:00"))
-                except:
+                except Exception:
                     sla_dt = None
             else:
                 sla_dt = sla
@@ -702,7 +700,7 @@ async def get_technician_leaderboard(current_user: dict = Depends(get_current_us
                     c = datetime.fromisoformat(str(t["created_at"]).replace("Z", "+00:00"))
                     r = datetime.fromisoformat(str(t["resolved_at"]).replace("Z", "+00:00"))
                     deltas.append((r - c).total_seconds() / 3600)
-                except:
+                except Exception:
                     pass
             if deltas:
                 avg_resolution = round(sum(deltas) / len(deltas), 1)

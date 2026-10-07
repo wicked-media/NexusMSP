@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 from datetime import datetime, timezone, timedelta
 import base64
 import binascii
@@ -10,7 +10,6 @@ import re
 from html import escape
 from app.database import db
 from app.auth import get_current_user
-from app.models import *
 from app.services.microsoft365_credentials import (
     has_microsoft365_client_secret,
     load_microsoft365_client_secret,

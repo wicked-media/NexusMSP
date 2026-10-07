@@ -17,7 +17,6 @@ import ipaddress
 import re
 import socket
 import time
-from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlparse
 

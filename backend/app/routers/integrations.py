@@ -1,10 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
-import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional, Any
+from datetime import datetime, timezone
+from app.database import db
+from app.auth import get_current_user
 from app.models import *
 from app.services.integrations import domotz_service, office365_service, acronis_service
 from app.services.microsoft365_credentials import has_microsoft365_client_secret

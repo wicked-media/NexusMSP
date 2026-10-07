@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException

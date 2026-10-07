@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
+from typing import Optional
 from datetime import datetime, timezone, timedelta
 from math import isfinite
 import uuid

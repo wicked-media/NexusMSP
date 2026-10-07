@@ -641,7 +641,7 @@ async def slash(payload: dict = Body(...), current_user: dict = Depends(get_curr
             }})
             await ticket_audit(t["id"], current_user, "assigned", f"Assigned to {u.get('name')} from Team Chat")
             return await _post_system_msg(channel_id, f"✅ {ticket_no} assigned to {u.get('name')}")
-        return await _post_system_msg(channel_id, f"❌ Couldn't assign — user or ticket not found")
+        return await _post_system_msg(channel_id, "❌ Couldn't assign — user or ticket not found")
 
     if cmd == "ticket" and len(args) >= 3:
         # /ticket TKT-001 status closed     |   /ticket TKT-001 priority high

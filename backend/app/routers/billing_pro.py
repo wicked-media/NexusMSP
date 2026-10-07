@@ -21,9 +21,8 @@ Adds endpoints for:
   - Retainer / pre-paid hours
   - Customer invoice portal comments / disputes
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
 import uuid
 import csv
 import io

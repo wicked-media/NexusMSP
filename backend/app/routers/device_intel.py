@@ -4,11 +4,10 @@ dossier, smart inbox, compare, and bulk-action engine.
 """
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import Optional
 import asyncio
 import base64
 import logging
-import os
 
 from app.database import db
 from app.routers.auth import get_current_user

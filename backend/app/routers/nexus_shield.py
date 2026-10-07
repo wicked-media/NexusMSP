@@ -5,7 +5,6 @@ monitoring policy.  It must never claim that a device has been remediated or
 isolated merely because a desired control is enabled in the workspace.
 """
 
-from datetime import datetime, timezone
 from typing import Any
 import uuid
 

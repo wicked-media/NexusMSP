@@ -1,9 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
-import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Optional, Any
+from datetime import datetime, timezone
+from app.database import db
+from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import (
     assert_tenant_record_scope,
@@ -11,10 +10,9 @@ from app.services.scope_permissions import (
     scope_query,
     tenant_scoped_query,
 )
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.activity import log_activity
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import (
-    REMOTE_POLICY_DEFAULTS,
     end_remote_session_record,
     heartbeat_remote_session,
     mark_remote_session_opened,
@@ -435,7 +433,7 @@ async def get_active_remote_sessions(current_user: dict = Depends(get_current_us
         try:
             started = datetime.fromisoformat(str(s["started_at"]).replace("Z", "+00:00"))
             s["live_duration_minutes"] = int((now - started).total_seconds() / 60)
-        except:
+        except Exception:
             s["live_duration_minutes"] = 0
         s.update(_native_session_freshness(s))
         s.update(_native_session_risk(s))

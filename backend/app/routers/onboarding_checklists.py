@@ -11,7 +11,6 @@ Routes stay thin: validation and transition policy live in
 
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,7 +22,6 @@ from app.services.onboarding_checklists import (
     apply_item_update,
     build_run_document,
     build_template_document,
-    template_view,
 )
 from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
 

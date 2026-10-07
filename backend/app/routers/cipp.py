@@ -23,7 +23,7 @@ from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.rustdesk_provider_security import redact_provider_payload
 from app.services.secret_store import decrypt_secret, encrypt_secret
-from app.services.scope_permissions import assert_client_scope, assert_global_scope, effective_scope, platform_tenant_id, scoped_query, tenant_scoped_query
+from app.services.scope_permissions import assert_client_scope, assert_global_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 from app.services.nexus_verify_execution import begin_verified_execution, complete_verified_execution, release_verified_execution
 from app.services.activity import log_activity
 from app.services.m365_provider_visibility import visible_m365_provider_tenant_ids

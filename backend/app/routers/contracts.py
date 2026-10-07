@@ -1,10 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
 from app.models import *
 
@@ -141,7 +141,7 @@ async def get_renewal_alerts(current_user: dict = Depends(get_current_user)):
                     if end_dt.tzinfo is None:
                         end_dt = end_dt.replace(tzinfo=timezone.utc)
                     days_left = (end_dt - now).days
-                except:
+                except Exception:
                     days_left = 0
             else:
                 days_left = 0
@@ -222,7 +222,7 @@ async def get_auto_renewal_proposals(current_user: dict = Depends(get_current_us
         try:
             end = datetime.strptime(c["end_date"][:10], "%Y-%m-%d")
             days_remaining = (end - now.replace(tzinfo=None)).days
-        except:
+        except Exception:
             days_remaining = 30
         
         proposals.append({
@@ -414,7 +414,7 @@ async def update_line_item(item_id: str, item_data: dict, current_user: dict = D
         raise HTTPException(status_code=400, detail="Use Replace asset or Return asset to change a locked asset")
     if 'quantity' in item_data and 'unit_price' in item_data:
         item_data['total'] = item_data['quantity'] * item_data['unit_price']
-    result = await db.line_items.update_one({"id": item_id}, {"$set": item_data})
+    await db.line_items.update_one({"id": item_id}, {"$set": item_data})
     await log_activity(current_user, "updated", "contract_line_item", item_id, existing.get("name", ""),
                        "Updated billing inclusion", changes=item_data, metadata={"contract_id": existing.get("contract_id")})
     return {"message": "Line item updated"}
@@ -600,11 +600,6 @@ async def apply_price_increase(contract_id: str, data: dict, current_user: dict 
     updated_ris = 0
     ris = await db.recurring_invoices.find({"contract_id": contract_id, "status": "active"}, {"_id": 0}).to_list(50)
     for ri in ris:
-        old_amount = float(ri.get("amount", 0))
-        if increase_pct > 0:
-            new_amount = round(old_amount * (1 + increase_pct / 100), 2)
-        else:
-            new_amount = round(old_amount + increase_flat, 2)
         # Update line items proportionally
         new_items = []
         for li in ri.get("line_items", []):

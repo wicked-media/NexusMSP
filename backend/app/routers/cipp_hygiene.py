@@ -20,7 +20,7 @@ import asyncio
 
 from app.database import db
 from app.auth import get_current_user
-from app.routers.cipp import _cipp_call, _get_config, _norm_tenants
+from app.routers.cipp import _cipp_call, _get_config
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import (
     assert_client_scope,

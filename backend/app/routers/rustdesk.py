@@ -505,7 +505,6 @@ async def get_all_remote_devices(current_user: dict = Depends(get_current_user))
     # Get all registered RustDesk device entries
     rd_devices = await db.rustdesk_devices.find(scoped_query(current_user), {"_id": 0}).to_list(500)
     rd_by_linked = {r.get("linked_device_id"): r for r in rd_devices if r.get("linked_device_id")}
-    rd_by_id = {r.get("id"): r for r in rd_devices}
 
     enriched = []
     for d in devices:
@@ -524,7 +523,6 @@ async def get_all_remote_devices(current_user: dict = Depends(get_current_user))
         enriched.append(entry)
 
     # Add standalone RustDesk entries not linked to a managed device
-    linked_ids = {r.get("linked_device_id") for r in rd_devices if r.get("linked_device_id")}
     for rd in rd_devices:
         if rd.get("linked_device_id") not in [d["id"] for d in devices]:
             enriched.append({
@@ -743,7 +741,6 @@ async def deploy_agent_to_device(device_id: str, current_user: dict = Depends(ge
     # Get agent settings for the API URL
     settings = await db.settings.find_one({"type": "patch_agent"}, {"_id": 0})
     api_url = settings.get("api_url", "") if settings else ""
-    agent_key = settings.get("agent_api_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
 
     deploy_cmd = f'powershell -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri \'{api_url}/patch-hub/agent/download-script\' -OutFile NexusOps-PatchAgent.ps1; .\\NexusOps-PatchAgent.ps1"'
 
@@ -795,7 +792,6 @@ async def bulk_deploy_agent(data: dict, current_user: dict = Depends(get_current
 
     settings = await db.settings.find_one({"type": "patch_agent"}, {"_id": 0})
     api_url = settings.get("api_url", "") if settings else ""
-    agent_key = settings.get("agent_api_key", f"nxagent-{uuid.uuid4().hex[:16]}") if settings else f"nxagent-{uuid.uuid4().hex[:16]}"
 
     devices = await db.devices.find({"id": {"$in": device_ids}}, {"_id": 0}).to_list(500)
     queued = 0

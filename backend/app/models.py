@@ -883,27 +883,6 @@ class SSLCertificate(BaseModel):
     last_check: Optional[datetime] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-# ============== VENDOR MANAGEMENT ==============
-
-class Vendor(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    category: str = "general"  # hardware, software, cloud, telecom, security, other
-    contact_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    website: Optional[str] = None
-    address: Optional[str] = None
-    account_number: Optional[str] = None
-    account_manager: Optional[str] = None
-    support_phone: Optional[str] = None
-    support_email: Optional[str] = None
-    support_portal: Optional[str] = None
-    notes: Optional[str] = None
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
 # ============== NETWORK MONITORING ==============
 
 class NetworkScan(BaseModel):

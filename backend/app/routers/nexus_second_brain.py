@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
 import hashlib
 import html
 import re

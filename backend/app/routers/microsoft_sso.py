@@ -299,7 +299,7 @@ async def microsoft_callback(request: Request, code: str = "", state: str = "", 
             status_code=302,
         )
 
-    except Exception as e:
+    except Exception:
         return RedirectResponse(
             url=f"{frontend_url}/login?sso_error=server_error",
             status_code=302,

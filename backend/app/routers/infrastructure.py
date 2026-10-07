@@ -1,10 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional
 from datetime import datetime, timezone, timedelta
-import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user, hash_password
 from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 from app.models import *
 
@@ -419,11 +417,11 @@ async def seed_data(current_user: dict = Depends(get_current_user)):
         severity = "info" if evt_type in ["agent_check_in", "login", "logout", "backup_completed"] else random.choice(["info", "warning", "error"])
         messages = {
             "agent_check_in": "Agent checked in successfully",
-            "login": f"User logged in via RDP",
+            "login": "User logged in via RDP",
             "logout": "User session ended",
-            "software_installed": f"Software package installed",
-            "patch_applied": f"Windows Update applied successfully",
-            "alert_triggered": f"High resource usage detected",
+            "software_installed": "Software package installed",
+            "patch_applied": "Windows Update applied successfully",
+            "alert_triggered": "High resource usage detected",
             "reboot": "System rebooted",
             "service_restart": "Service 'Spooler' restarted",
             "backup_completed": "Backup completed successfully (12.4 GB)",

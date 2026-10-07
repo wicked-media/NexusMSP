@@ -916,7 +916,7 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     elif comments >= 3: score += 15
     if mins >= 120: score += 30; signals.append(f"{mins}min logged already")
     elif mins >= 60: score += 15
-    if keyword_hits >= 3: score += 30; signals.append(f"Keywords: project/deploy/migrate")
+    if keyword_hits >= 3: score += 30; signals.append("Keywords: project/deploy/migrate")
     elif keyword_hits >= 1: score += 10
 
     # Existing quote/estimate?

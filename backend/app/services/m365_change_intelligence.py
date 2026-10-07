@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Iterable
 
-from app.services.m365_lifecycle import VERIFIED_PROVIDER_SOURCES, stable_tenant_id
+from app.services.m365_lifecycle import stable_tenant_id
 
 
 ACTION_LABELS = {

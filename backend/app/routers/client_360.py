@@ -9,7 +9,6 @@ Endpoints:
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 
 from app.database import db
 from app.auth import get_current_user

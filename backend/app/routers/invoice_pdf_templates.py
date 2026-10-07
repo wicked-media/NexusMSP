@@ -476,7 +476,6 @@ def _build_preset_doc(preset: dict, created_by: str = "system") -> dict:
 async def _ensure_presets_seeded():
     """Idempotently seed presets and clean duplicate read-only gallery entries."""
     for p in DESIGNER_PRESETS:
-        preset_id = f"tpl-{p['preset_key']}"
         matches = await db.invoice_pdf_templates.find({"preset_key": p["preset_key"], "is_preset": True}, {"_id": 1}).sort("_id", 1).to_list(20)
         if not matches:
             await db.invoice_pdf_templates.insert_one(_build_preset_doc(p))

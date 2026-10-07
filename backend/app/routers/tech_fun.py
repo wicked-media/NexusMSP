@@ -37,7 +37,7 @@ from app.services import (
     qol_tools,
     tech_fun,
 )
-from app.services.scope_permissions import platform_tenant_id, tenant_scoped_query
+from app.services.scope_permissions import platform_tenant_id
 from app.services.tech_rewards import points_summary
 
 router = APIRouter()

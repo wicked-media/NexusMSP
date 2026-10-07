@@ -3,7 +3,6 @@ pre-bill preview, pause with date range, and multi-source roll-up.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 from email.utils import parseaddr
 from html import escape
 from math import isfinite

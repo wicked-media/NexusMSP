@@ -1,13 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Optional
+from datetime import datetime, timezone
 import base64
 import hashlib
 import hmac
 import struct
 import time
-import uuid
-from app.database import db, AVATARS_DIR
+from app.database import db
 from app.auth import (
     cache_busted_avatar_url,
     create_token,
@@ -19,7 +18,7 @@ from app.auth import (
     user_is_active,
     verify_password,
 )
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.activity import log_activity
 from app.services.request_throttling import (
     LoginRateLimitExceeded,
     clear_login_attempts,

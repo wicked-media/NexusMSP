@@ -7,7 +7,6 @@ than being converted into friendly default scores.
 
 from datetime import datetime, timezone, timedelta
 from typing import Any
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 

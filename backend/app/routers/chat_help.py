@@ -1581,7 +1581,7 @@ async def help_copilot(payload: dict = Body(...), current_user: dict = Depends(g
         }
     except Exception as e:
         return {
-            "answer": f"AI temporarily unavailable. Top relevant articles below.",
+            "answer": "AI temporarily unavailable. Top relevant articles below.",
             "citations": [{"slug": c["slug"], "title": c["title"], "category": c.get("category")} for c in candidates],
             "fallback": True,
             "error": str(e)[:200],

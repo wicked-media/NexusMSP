@@ -5,7 +5,6 @@ sort, color, icon, pinned (top-bar), shared (visible to whole team).
 """
 
 from fastapi import APIRouter, Depends, Body, HTTPException
-from datetime import datetime, timezone
 import uuid
 
 from app.database import db

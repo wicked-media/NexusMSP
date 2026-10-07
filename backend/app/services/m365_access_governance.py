@@ -12,7 +12,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from app.services.m365_lifecycle import VERIFIED_PROVIDER_SOURCES, stable_tenant_id
+from app.services.m365_lifecycle import stable_tenant_id
 
 
 ACCESS_REVIEW_WINDOW_DAYS = 90

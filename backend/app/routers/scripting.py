@@ -1,11 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta, time
 from zoneinfo import ZoneInfo
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.routers.nexus_agent import require_agent_operator
 from app.services.scope_permissions import assert_client_scope, assert_record_scope, effective_scope, scoped_query
@@ -492,7 +491,7 @@ async def live_run_script(script_id: str, data: dict, current_user: dict = Depen
             if any(kw in stripped.lower() for kw in ["get-", "echo", "write-", "print", "select", "dir", "ls"]):
                 output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "output", "text": f"[OK] {stripped[:60]}... completed"})
             elif any(kw in stripped.lower() for kw in ["set-", "start-", "restart-", "stop-", "install", "remove", "new-"]):
-                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "success", "text": f"Operation completed successfully"})
+                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "success", "text": "Operation completed successfully"})
             elif any(kw in stripped.lower() for kw in ["try", "catch", "if", "else", "for", "while", "foreach"]):
                 pass  # Control flow - no output
             elif any(kw in stripped.lower() for kw in ["error", "throw", "fail"]):

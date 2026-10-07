@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 import os
 from app.database import db
@@ -78,7 +78,7 @@ async def save_acronis_config(data: dict, current_user: dict = Depends(get_curre
 async def test_acronis_connection(current_user: dict = Depends(get_current_user)):
     """Test Acronis API connection by authenticating."""
     try:
-        token = await acronis_service.authenticate()
+        await acronis_service.authenticate()
         return {"status": "connected", "message": "Successfully authenticated with Acronis Cyber Cloud"}
     except Exception as e:
         return {"status": "failed", "message": str(e)}

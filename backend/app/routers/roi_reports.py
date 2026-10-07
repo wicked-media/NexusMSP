@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends
 from datetime import datetime, timezone, timedelta
-import uuid
 from app.database import db
 from app.auth import get_current_user
 
@@ -15,7 +14,6 @@ async def generate_roi_report(client_id: str, current_user: dict = Depends(get_c
         return {"error": "Client not found"}
 
     now = datetime.now(timezone.utc)
-    month_ago = (now - timedelta(days=30)).isoformat()
     quarter_ago = (now - timedelta(days=90)).isoformat()
 
     # Ticket metrics (last quarter)

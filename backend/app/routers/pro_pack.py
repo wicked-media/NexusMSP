@@ -9,10 +9,9 @@ Stocktake mobile · SaaS Spend Tracker · 2FA TOTP.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
 import uuid, io, zipfile, secrets, base64, hashlib, hmac, struct, time, httpx
 from app.database import db
-from app.auth import get_current_user
+from app.auth import get_current_user, verify_password
 from app.services.activity import log_activity
 from app.services.notification_channels import (
     normalise_notification_channel_input,

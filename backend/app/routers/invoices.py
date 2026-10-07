@@ -1,14 +1,14 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import List, Optional, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
 import base64
 import hashlib
 import hmac
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity, ticket_audit
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import (
     assert_client_scope,
@@ -147,7 +147,7 @@ async def get_invoice_stats(current_user: dict = Depends(get_current_user)):
                 due = datetime.strptime(i["due_date"], "%Y-%m-%d")
                 if due < datetime.now():
                     overdue_count += 1
-            except:
+            except Exception:
                 pass
     total_revenue = sum(i.get("total", 0) for i in all_inv)
     total_collected = sum(i.get("amount_paid", 0) for i in all_inv)
@@ -1445,7 +1445,7 @@ async def get_enhanced_dashboard(current_user: dict = Depends(get_current_user))
         try:
             if datetime.strptime(i.get("due_date", "2099-01-01"), "%Y-%m-%d") < datetime.now():
                 overdue_inv += 1
-        except:
+        except Exception:
             pass
 
     # No-notes tickets
@@ -1473,7 +1473,7 @@ async def get_enhanced_dashboard(current_user: dict = Depends(get_current_user))
                 sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
                 if sla_dt and sla_dt < datetime.now(timezone.utc):
                     sla_breaches += 1
-            except:
+            except Exception:
                 pass
 
     mrr_result = await db.clients.aggregate([{"$group": {"_id": None, "total_mrr": {"$sum": "$mrr"}}}]).to_list(1)

@@ -1,6 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone
-import uuid
 from app.database import db
 from app.auth import get_current_user
 from app.services.scope_permissions import scoped_query

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import Optional
 from datetime import datetime, timezone
-import uuid, os, base64
+import uuid, base64
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension

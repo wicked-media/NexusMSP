@@ -147,7 +147,7 @@ async def update_estimate(estimate_id: str, data: dict, current_user: dict = Dep
 
 @router.put("/estimates/{estimate_id}/status")
 async def update_estimate_status(estimate_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    est = await _estimate_or_404(estimate_id, current_user)
+    await _estimate_or_404(estimate_id, current_user)
     new_status = data.get("status")
     valid = {"draft", "published", "sent", "approved", "declined", "expired", "converted"}
     if new_status not in valid:

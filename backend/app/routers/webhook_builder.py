@@ -6,7 +6,7 @@ from app.auth import get_current_user
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_global_scope
 from app.services.webhook_security import redact_webhook_for_response, validate_legacy_webhook_url
-import uuid, json, random
+import uuid, random
 
 router = APIRouter(prefix="/webhook-builder", tags=["webhook-builder"])
 

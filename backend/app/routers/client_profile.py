@@ -16,7 +16,6 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, R
 from fastapi.responses import Response
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 import re
 import uuid
 from app.database import db, ROOT_DIR, UPLOADS_DIR

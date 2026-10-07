@@ -1,9 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Response
-from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import os
-import asyncio
 import logging
 import mimetypes
 import re

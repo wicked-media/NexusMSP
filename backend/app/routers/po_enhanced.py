@@ -1,10 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from datetime import datetime, timezone
-from typing import Optional
 import uuid
 import os
-import asyncio
 import logging
 from app.database import db
 from app.auth import get_current_user

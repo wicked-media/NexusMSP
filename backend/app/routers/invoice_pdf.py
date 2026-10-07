@@ -463,7 +463,6 @@ def _generate_legacy_invoice_pdf(invoice, branding=None, theme_config=None, gene
 
     company_name = "NexusOps"
     primary_color = (59, 130, 246)
-    secondary_color = (139, 92, 246)
     accent_color = (6, 182, 212)
     invoice_footer = ""
     logo_path = None
@@ -471,7 +470,6 @@ def _generate_legacy_invoice_pdf(invoice, branding=None, theme_config=None, gene
     if branding:
         company_name = branding.get("company_name", "NexusOps")
         primary_color = _hex_to_rgb(branding.get("primary_color", "#3B82F6"))
-        secondary_color = _hex_to_rgb(branding.get("secondary_color", "#8B5CF6"), (139, 92, 246))
         accent_color = _hex_to_rgb(branding.get("accent_color", "#06B6D4"), (6, 182, 212))
         invoice_footer = _safe_latin(branding.get("invoice_footer_text", ""))
 
@@ -1036,7 +1034,6 @@ def _generate_legacy_estimate_pdf(estimate, branding=None, theme_config=None):
     pdf.set_auto_page_break(auto=True, margin=25)
     pdf.add_page()
 
-    theme = theme_config or {}
     company_name = "NexusOps"
     primary_color = (59, 130, 246)
     accent_color = (6, 182, 212)

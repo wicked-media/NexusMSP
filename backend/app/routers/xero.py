@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime, timezone, timedelta
 import uuid
 import random as _random_mod
-import base64
 import logging
 from math import isfinite
 _srand = _random_mod.SystemRandom()

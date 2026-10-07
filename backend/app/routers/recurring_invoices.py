@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 from pymongo.errors import DuplicateKeyError
@@ -186,7 +185,7 @@ async def get_recurring_stats(current_user: dict = Depends(get_current_user)):
             nd = datetime.strptime(r.get("next_generation", ""), "%Y-%m-%d").replace(tzinfo=timezone.utc)
             if nd <= week_end:
                 due_soon += 1
-        except:
+        except Exception:
             pass
     return {
         "total": len(all_ri), "active": len(active), "paused": len(paused),
@@ -941,7 +940,7 @@ async def _run_scheduler_now(current_user: dict) -> dict:
 def _calc_next_date(from_date_str: str, frequency: str) -> str:
     try:
         d = datetime.strptime(from_date_str, "%Y-%m-%d")
-    except:
+    except Exception:
         d = datetime.now(timezone.utc)
     if frequency == "weekly":
         d += timedelta(days=7)

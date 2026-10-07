@@ -6,7 +6,6 @@ does not claim to scan mail or alter a mailbox until a verified connector and
 an explicit approved response action exist.
 """
 
-from datetime import datetime, timezone
 from typing import Any
 import os
 import uuid
@@ -149,7 +148,6 @@ async def save_mail_shield_connector_settings(data: dict[str, Any], current_user
         raise HTTPException(status_code=422, detail="Use an HTTPS callback URL for the Microsoft evidence connector")
     if application_id and not CLIENT_ID_RE.fullmatch(application_id):
         raise HTTPException(status_code=422, detail="Application ID must be a Microsoft Entra application GUID")
-    existing = await db.nexus_mail_shield_connector_settings.find_one({"id": "global"}, {"_id": 0}) or {}
     now = _now()
     if secret:
         raise HTTPException(status_code=422, detail="Store the client secret in the deployment secret store as NEXUS_MAIL_SHIELD_CLIENT_SECRET; Nexus does not persist connector secrets in workflow settings")

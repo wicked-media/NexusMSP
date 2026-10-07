@@ -21,7 +21,7 @@ Endpoints (all prefixed /api):
   GET    /leads/{id}/tasks    POST/PUT/DELETE      Per-lead tasks/reminders
   POST   /leads/bulk-action                        Stage/owner/delete/sequence in bulk
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.auth import get_current_user
 from app.services.action_permissions import require_action
@@ -55,7 +55,6 @@ async def create_email_intake_item(*, current_user: dict, sender_email: str, sen
     if not email:
         raise ValueError("sender_email is required")
 
-    query = tenant_scoped_query(current_user, {"sender_email": email})
     lead_matches = await db.leads.find(
         tenant_scoped_query(current_user, {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}),
         {"_id": 0, "id": 1, "company_name": 1, "contact_name": 1, "email": 1},

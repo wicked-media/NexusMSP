@@ -1,12 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from typing import Optional
+from datetime import datetime, timezone
 import uuid
 import re
 from app.database import db, UPLOADS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
+from app.auth import get_current_user
 from app.services.scope_permissions import tenant_scoped_query, scoped_query
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.services.activity import log_activity, ticket_audit
 from app.models import *
 import barcode
 from barcode.writer import SVGWriter

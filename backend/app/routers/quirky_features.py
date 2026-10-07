@@ -30,8 +30,7 @@ Quirky data:
 from fastapi import APIRouter, Depends, HTTPException, Body
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
-import os, re, uuid, random
-from typing import Optional
+import os, uuid, random
 
 from app.database import db
 from app.auth import get_current_user

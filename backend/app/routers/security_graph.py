@@ -5,7 +5,6 @@ invent identities, privileges, services, or attack paths when connectors have
 not supplied that evidence.
 """
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query

@@ -4,16 +4,13 @@ Webhook events.
 
 All endpoints prefixed with /api by server.py auto-discovery.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List
 import os
 import re
 import uuid
 import json
 import logging
-import asyncio
 import math
 import hashlib
 

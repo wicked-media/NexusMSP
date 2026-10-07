@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 from app.database import db, UPLOADS_DIR
@@ -841,7 +841,7 @@ async def upload_po_attachment(
     note: str = Form(""),
     current_user: dict = Depends(get_current_user),
 ):
-    po = await _po_or_404(po_id, current_user)
+    await _po_or_404(po_id, current_user)
     extension = Path(file.filename or "").suffix.lower()
     if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx"}:
         raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Word, or Excel evidence file")

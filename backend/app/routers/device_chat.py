@@ -1,8 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Response
-from typing import Optional
 from datetime import datetime, timezone
 import uuid
-import os
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
 from app.services.scope_permissions import assert_record_scope
@@ -141,7 +139,7 @@ async def get_typing_status(device_id: str, current_user: dict = Depends(get_cur
                 last = last.replace(tzinfo=timezone.utc)
             if (now - last).total_seconds() < 10:
                 active.append(u)
-        except:
+        except Exception:
             pass
     return {"typing_users": active}
 

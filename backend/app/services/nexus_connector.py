@@ -17,10 +17,6 @@ services and always passes the Nexus Laws gate first.
 
 from __future__ import annotations
 
-from typing import Any
-
-from app.services.scope_permissions import platform_tenant_id
-
 # Capability verbs workflows are written against. Stable interface contract.
 CAPABILITIES: dict[str, dict] = {
     "identity.user.provision": {

@@ -237,11 +237,11 @@ async def _seed_core_data():
         severity = "info" if evt_type in ["agent_check_in", "login", "logout", "backup_completed"] else random.choice(["info", "warning", "error"])
         messages = {
             "agent_check_in": "Agent checked in successfully",
-            "login": f"User logged in via RDP",
+            "login": "User logged in via RDP",
             "logout": "User session ended",
-            "software_installed": f"Software package installed",
-            "patch_applied": f"Windows Update applied successfully",
-            "alert_triggered": f"High resource usage detected",
+            "software_installed": "Software package installed",
+            "patch_applied": "Windows Update applied successfully",
+            "alert_triggered": "High resource usage detected",
             "reboot": "System rebooted",
             "service_restart": "Service 'Spooler' restarted",
             "backup_completed": "Backup completed successfully (12.4 GB)",

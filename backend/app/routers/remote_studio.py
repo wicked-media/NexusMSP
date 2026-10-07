@@ -11,7 +11,6 @@ session content, credentials or endpoint data.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -21,10 +20,6 @@ from app.auth import get_current_user
 from app.database import db
 from app.services.remote_studio import (
     DEFAULT_PREFERENCES,
-    DEFAULT_DISPLAYS,
-    DEFAULT_MODES,
-    DENSITY_VALUES,
-    PANEL_KEYS,
     REMOTE_TOOLS,
     STUDIO_PRESETS,
     derive_suggestions,

@@ -5,7 +5,6 @@ to an enrolled online agent and become visible only when that endpoint returns
 its actual stdout, stderr and exit code.
 """
 
-from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException

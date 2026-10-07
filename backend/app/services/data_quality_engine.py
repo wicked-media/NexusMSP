@@ -411,7 +411,7 @@ def build_data_quality_snapshot(
                     category="operational",
                     severity="medium" if object_type == "ticket" else "low",
                     title=f"{object_type.title()} record has no usable summary",
-                    detail=f"The record is client-scoped but lacks the source fields technicians use to identify it in operational workflows.",
+                    detail="The record is client-scoped but lacks the source fields technicians use to identify it in operational workflows.",
                     route=route,
                     object_type=object_type,
                     object_id=record_id,

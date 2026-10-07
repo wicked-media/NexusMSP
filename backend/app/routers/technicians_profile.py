@@ -1,16 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import uuid
 from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
-from app.models import *
+from app.auth import get_current_user
+from app.services.activity import log_activity
 from app.services.upload_security import IMAGE_EXTENSIONS, safe_upload_extension
 
 router = APIRouter()
-
-import shutil
 
 # ============== AVATAR UPLOAD ==============
 
@@ -103,7 +99,7 @@ async def get_technician_status(tech_id: str, current_user: dict = Depends(get_c
         try:
             started = datetime.fromisoformat(str(s["started_at"]).replace("Z", "+00:00"))
             s["live_duration_minutes"] = int((now - started).total_seconds() / 60)
-        except:
+        except Exception:
             s["live_duration_minutes"] = 0
     
     # Enrich active sessions with client name from device

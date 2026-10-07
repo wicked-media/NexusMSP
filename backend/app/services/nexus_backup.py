@@ -203,7 +203,6 @@ def capture_release_readiness(
         if isinstance(value, str) and value.strip()
     }
     preflight = intent.get("preflight_result") if isinstance(intent.get("preflight_result"), dict) else {}
-    preflight_evidence = preflight.get("evidence") if isinstance(preflight.get("evidence"), dict) else {}
     if CAPABILITY_PREFLIGHT_V1 not in runtime:
         blockers.append("The endpoint has not reported the dedicated Nexus Backup preflight capability.")
     if preflight.get("status") != "inventory_only":
@@ -250,6 +249,7 @@ def public_protection_intent(
     capture_release: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     preflight = intent.get("preflight_result") if isinstance(intent.get("preflight_result"), dict) else {}
+    preflight_evidence = preflight.get("evidence") if isinstance(preflight.get("evidence"), dict) else {}
     return {
         "id": intent.get("id"),
         "tenant_id": intent.get("tenant_id"),

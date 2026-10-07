@@ -197,7 +197,7 @@ async def update_template(
         if key in data:
             updates[key] = data[key]
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    result = await db.doc_branding_templates.update_one({"id": template_id}, {"$set": updates})
+    await db.doc_branding_templates.update_one({"id": template_id}, {"$set": updates})
     updated = await db.doc_branding_templates.find_one({"id": template_id}, {"_id": 0})
     await log_activity(
         current_user,

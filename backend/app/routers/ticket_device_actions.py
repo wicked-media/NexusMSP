@@ -7,19 +7,17 @@ auditable in-context.
 """
 
 from fastapi import APIRouter, Depends, Body, HTTPException, Query, Request
-from datetime import datetime, timezone
 import uuid
 import logging
 import asyncio
 
 from app.database import db
 from app.routers.auth import get_current_user
-from app.routers.nexus_agent import queue_command_for_device, require_agent_operator, _audit as _agent_audit
+from app.routers.nexus_agent import queue_command_for_device, require_agent_operator
 from app.services.action_permissions import require_action
 from app.services.platform_foundation import request_correlation_id
 from app.services.remote_runtime import start_remote_session
 from app.services.scope_permissions import (
-    assert_client_scope,
     assert_tenant_record_scope,
     platform_tenant_id,
     scoped_query,

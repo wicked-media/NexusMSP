@@ -6,7 +6,6 @@ configuration, but operational data is returned only when it has been written by
 a verified Microsoft Graph/Partner Center synchronisation provider.
 """
 import asyncio
-from datetime import datetime, timezone
 from typing import Any
 import json
 import logging

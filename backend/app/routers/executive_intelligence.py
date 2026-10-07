@@ -350,11 +350,6 @@ async def _load_executive_state(user: dict) -> dict:
         row for row in time_entries
         if _within_window(row, threshold, ("date", "created_at", "started_at"))
     ]
-    recent_invoices = [
-        row for row in invoices
-        if _within_window(row, threshold, ("invoice_date", "issue_date", "created_at", "date"))
-    ]
-
     client_mrr = {client_id: 0.0 for client_id in client_ids}
     for contract in contracts:
         client_id = str(contract.get("client_id") or "")

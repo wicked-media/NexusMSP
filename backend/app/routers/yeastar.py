@@ -4,17 +4,16 @@ import logging
 import re
 import time
 import httpx
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pymongo.errors import DuplicateKeyError
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from typing import Optional, Any
+from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, scope_query
-from app.models import *
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

@@ -48,6 +48,9 @@ yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
 
+# Local runtime state written by the dev stack (service logs, PIDs).
+.local/
+
 # System files
 .DS_Store
 *.pem

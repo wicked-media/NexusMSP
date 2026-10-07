@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Response
-from typing import Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 import os
@@ -208,7 +207,7 @@ async def get_client_achievements(client_id: str, current_user: dict = Depends(g
         if isinstance(created_at, str):
             try:
                 created = datetime.fromisoformat(created_at)
-            except:
+            except Exception:
                 created = datetime.now(timezone.utc)
         else:
             created = created_at
@@ -428,7 +427,7 @@ async def get_auto_renewal_proposals(current_user: dict = Depends(get_current_us
         try:
             end = datetime.strptime(c["end_date"][:10], "%Y-%m-%d")
             days_remaining = (end - now.replace(tzinfo=None)).days
-        except:
+        except Exception:
             days_remaining = 30
         
         proposals.append({

@@ -1,7 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from datetime import datetime, timezone, timedelta
-from typing import Optional
-import uuid
 from app.database import db
 from app.auth import get_current_user
 from app.services.scope_permissions import scoped_query, tenant_scoped_query
@@ -210,8 +208,6 @@ async def service_revenue_report(current_user: dict = Depends(get_current_user))
 async def payment_collection_report(months: int = 12, current_user: dict = Depends(get_current_user)):
     """Payment collection trends and methods"""
     invoices = await db.invoices.find(_financial_scope(current_user, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(5000)
-    now = datetime.now(timezone.utc)
-
     methods = {}
     monthly_collections = {}
 
@@ -252,7 +248,7 @@ async def tax_summary_report(current_user: dict = Depends(get_current_user)):
         try:
             dt = datetime.fromisoformat(created)
             q = f"{dt.year}-Q{(dt.month - 1) // 3 + 1}"
-        except:
+        except Exception:
             q = f"{now.year}-Q{(now.month - 1) // 3 + 1}"
 
         if q not in quarterly:

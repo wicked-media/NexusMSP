@@ -1,10 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit
+from app.database import db
+from app.auth import get_current_user
 from app.services.nexus_timeline import TIMELINE_CATEGORIES, build_client_timeline
 from app.services.scope_permissions import (
     assert_global_scope,

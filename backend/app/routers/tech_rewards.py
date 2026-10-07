@@ -160,7 +160,6 @@ async def my_rewards(user_id: str | None = None, current_user: dict = Depends(ge
 @router.get("/tech-rewards/leaderboard")
 async def points_leaderboard(current_user: dict = Depends(get_current_user)):
     """Lifetime points-earned leaderboard across the team."""
-    tenant_id = platform_tenant_id(current_user)
     ledger = await db.tech_points_ledger.find(
         tenant_scoped_query(current_user, {}), {"_id": 0}
     ).to_list(5000)

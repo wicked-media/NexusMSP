@@ -565,7 +565,6 @@ async def pay_with_card(token: str, data: dict):
         amount=amount,
         idempotency_key=idempotency_key,
     )
-    payment_id = reservation["id"]
     # A completed initial request can return the same session for an explicit
     # retry without allocating a new Stripe Checkout session or transaction.
     if reused_attempt and reservation.get("stripe_session_id") and reservation.get("stripe_checkout_url"):
@@ -651,7 +650,6 @@ async def pay_with_becs(token: str, data: dict):
         amount=amount,
         idempotency_key=idempotency_key,
     )
-    payment_id = reservation["id"]
     if reused_attempt and reservation.get("stripe_payment_intent_id") and reservation.get("stripe_client_secret"):
         await _ensure_payment_transaction(
             link=link,

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends
 from app.database import db
 from app.auth import get_current_user
 from app.services.scope_permissions import (

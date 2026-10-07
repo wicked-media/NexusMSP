@@ -1,14 +1,13 @@
 import ipaddress
 import os
 import re
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional
+from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
 from app.services.scope_permissions import (
     assert_client_scope,
     assert_global_scope,
@@ -18,7 +17,6 @@ from app.services.scope_permissions import (
 from app.services.secret_store import decrypt_secret, encrypt_secret
 from app.services.module_permissions import require_module_permission
 from app.services.runtime_config import is_production
-from app.models import *
 
 import httpx
 
@@ -400,7 +398,7 @@ async def sync_site_from_controller(site_id: str, current_user: dict = Depends(g
         return {"success": True, "message": f"Synced {synced_devices} devices, {synced_clients} clients", "synced_devices": synced_devices, "synced_clients": synced_clients}
     except Exception as e:
         try: await client.aclose()
-        except: pass
+        except Exception: pass
         await db.network_sites.update_one({"id": site_id}, {"$set": {
             "status": "sync_failed",
             "last_sync_attempt": datetime.now(timezone.utc).isoformat(),

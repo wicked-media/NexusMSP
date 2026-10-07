@@ -1,10 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity
 from app.services.scope_permissions import assert_client_scope, platform_tenant_id, tenant_scoped_query
 from app.services.action_permissions import require_action
 from app.services.client_contacts import (
@@ -14,7 +12,6 @@ from app.services.client_contacts import (
     editable_contact,
     now_iso,
 )
-from app.models import *
 
 router = APIRouter()
 

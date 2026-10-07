@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
-from app.auth import get_current_user
 from app.database import ROOT_DIR, db
 from app.routers.nexus_agent import _verify_agent_token, queue_command_for_device, require_agent_operator
 from app.services.action_permissions import require_action

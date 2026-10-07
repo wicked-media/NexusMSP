@@ -1,11 +1,11 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Optional
+from datetime import datetime, timezone
 import uuid
 import httpx
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.activity import log_activity, ticket_audit
 from app.services.action_permissions import require_action
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
 from app.services.webhook_security import redact_webhook_for_response, validate_legacy_webhook_url

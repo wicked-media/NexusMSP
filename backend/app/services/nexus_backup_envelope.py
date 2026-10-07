@@ -43,7 +43,7 @@ def _key_pair() -> tuple[rsa.RSAPrivateKey, bytes]:
         raise RuntimeError("NEXUS_BACKUP_ENVELOPE_PRIVATE_KEY_PATH and NEXUS_BACKUP_ENVELOPE_PUBLIC_KEY_PATH are required in production")
     private = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     public = private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    _write_private(private_path := PRIVATE_KEY_PATH, private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    _write_private(PRIVATE_KEY_PATH, private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     PUBLIC_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
     PUBLIC_KEY_PATH.write_bytes(public)
     return private, public

@@ -11,8 +11,8 @@ Collections used:
   db.maintenance_window_runs  per-device per-action records
 """
 from fastapi import APIRouter, Depends, HTTPException
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any
 import os
 import uuid
 import json

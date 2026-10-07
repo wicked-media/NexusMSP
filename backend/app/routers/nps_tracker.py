@@ -6,7 +6,6 @@ customer-health signal.
 """
 
 from collections import defaultdict
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 

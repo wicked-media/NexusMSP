@@ -7,7 +7,6 @@ ownership before it can reach a provider endpoint.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import quote
 import uuid

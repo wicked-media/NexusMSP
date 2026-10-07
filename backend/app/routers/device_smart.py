@@ -3,13 +3,11 @@ Health Score, and Fleet-wide AI insights.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
-from typing import Optional
 import os
 import uuid
 import json
 import logging
 import asyncio
-import base64
 
 from app.database import db
 from app.auth import get_current_user

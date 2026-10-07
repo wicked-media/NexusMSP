@@ -230,7 +230,7 @@ async def unpin_message(msg_id: str, current_user: dict = Depends(get_current_us
 
 @router.get("/chat/channels/{channel_id}/pinned")
 async def list_pinned(channel_id: str, current_user: dict = Depends(get_current_user)):
-    channel = await require_channel_access(channel_id, current_user)
+    await require_channel_access(channel_id, current_user)
     rows = await db.chat_messages.find(tenant_scoped_query(current_user, {"channel_id": channel_id, "pinned": True}), {"_id": 0}).sort("ts", -1).to_list(50)
     return await attach_user_avatars(rows)
 
@@ -291,7 +291,7 @@ async def search_messages(q: str, channel_id: str = None, current_user: dict = D
 @router.post("/chat/channels/{channel_id}/upload")
 async def upload_file(channel_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
     """Body: {filename, content_type, base64}. Stores file inline + posts message with link."""
-    await require_channel_access(channel_id, current_user)
+    channel = await require_channel_access(channel_id, current_user)
     fname = Path((payload.get("filename") or "file").strip()).name[:200]
     ctype = payload.get("content_type") or "application/octet-stream"
     b64 = payload.get("base64") or ""

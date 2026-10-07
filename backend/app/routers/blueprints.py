@@ -27,6 +27,7 @@ Data model:
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
+import os
 import uuid
 
 from app.database import db
@@ -34,6 +35,7 @@ from app.auth import get_current_user
 from app.services.activity import log_activity
 from app.services.scope_permissions import (
     assert_client_scope,
+    assert_record_scope,
     assert_tenant_record_scope,
     platform_tenant_id,
     tenant_scoped_query,
