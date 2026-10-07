@@ -182,3 +182,25 @@ evidence with bounded retention; they must not be used as relationship keys or
 to reconstruct customer records. Metric labels and trace attributes exclude
 tenant, client, user, device, ticket, mutable provider identifiers, payloads,
 and secrets. Platform Operations owns access, retention, export, and deletion.
+
+# Voice (Yeastar) integration data boundary
+
+The Voice integration stores no new authoritative business record. Its data sits
+in three places, and the boundary between them is deliberate.
+
+| Data | Where it lives | Status |
+| --- | --- | --- |
+| PBX connection and billing policy, cached extensions, monitoring and queue health, sync history, billing snapshots, YCM discoveries, extension billing overrides | MongoDB `yeastar_pbxs`, `yeastar_extension_cache`, `yeastar_extension_overrides`, `yeastar_billing_snapshots`, `yeastar_sync_history`, `yeastar_ycm_discoveries` | Provider caches and Nexus-owned governance records. Never a second source of truth for a Nexus business entity. Each client PBX record carries its Nexus client binding, and every read and write applies that scope server-side. |
+| The reachable provider interface catalogue and its action gates | Application code (`app/services/yeastar/registry.py`) | Configuration, not customer data. Not persisted, not tenant-scoped, carries no credential and no provider payload. |
+| The PBX API access token | Process memory only | Deliberately not persisted. Yeastar permits eight concurrent tokens per PBX, so a shared cache would turn a short-lived provider credential into stored secret material. Moving it to a store is a persistence decision that needs an ownership entry here first. |
+
+Provider download URLs for recordings, voicemail and PBX backups are not
+persisted and are never returned to a browser. A URL that authorises a private
+customer-artifact download is resolved server-side, followed immediately, and
+relayed as bytes to an authenticated, client-scoped caller holding
+`voice.recording.listen`.
+
+A ticket raised from a call is an ordinary `tickets` document: `tickets` owns
+ticket truth, the PBX owns call detail records, and the ticket only references
+the call. Attributing a call to a customer uses the PBX's Nexus client binding,
+never a caller-supplied client identifier.
