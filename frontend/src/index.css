@@ -80,6 +80,15 @@
         --nx-toast-tone-critical: var(--destructive);
         --nx-toast-tone-info: var(--info);
 
+        /* Device detail tones. The dark theme keeps the cluster's original signal
+           hues; the light theme restates them below, because these neon glyph,
+           track and severity colours measured 1.78-2.13:1 on the white surface. */
+        --nx-device-tone-positive: 156 85% 46%;
+        --nx-device-tone-caution: 42 87% 58%;
+        --nx-device-tone-watch: 49 89% 60%;
+        --nx-device-tone-critical: 355 84% 61%;
+        --nx-device-tone-info: 187 85% 48%;
+
         /* One motion rhythm across Nexus: acknowledge, transition, reveal. */
         --nx-motion-instant: 100ms;
         --nx-motion-fast: 160ms;
@@ -134,6 +143,14 @@
         --nx-toast-tone-warning: 26 92% 31%;
         --nx-toast-tone-critical: 0 72% 45%;
         --nx-toast-tone-info: 217 91% 40%;
+
+        /* Deepened so device glyphs, severity dots and telemetry tracks clear the
+           3:1 non-text threshold and the agent status text clears 4.5:1. */
+        --nx-device-tone-positive: 152 72% 26%;
+        --nx-device-tone-caution: 26 92% 31%;
+        --nx-device-tone-watch: 32 95% 30%;
+        --nx-device-tone-critical: 0 72% 45%;
+        --nx-device-tone-info: 217 91% 40%;
     }
 }
 
@@ -1197,7 +1214,7 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     border-color: hsl(var(--primary) / .32);
     box-shadow: inset 0 1px 0 hsl(var(--foreground) / .045), 0 20px 52px -40px hsl(var(--primary) / .75);
 }
-.nx-device-action-summary__icon { display: inline-flex; width: 2.6rem; height: 2.6rem; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: .75rem; color: hsl(var(--amber-500, 38 92% 50%)); background: hsl(var(--background) / .55); }
+.nx-device-action-summary__icon { display: inline-flex; width: 2.6rem; height: 2.6rem; align-items: center; justify-content: center; border: 1px solid hsl(var(--border)); border-radius: .75rem; color: hsl(var(--nx-device-tone-caution)); background: hsl(var(--background) / .55); }
 .nx-device-action-summary__icon svg { width: 1.15rem; height: 1.15rem; }
 .nx-device-action-summary { min-width: 0; }
 .nx-device-action-summary p { font-size: .84rem; font-weight: 700; }
@@ -1226,11 +1243,11 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     padding: .55rem .9rem;
 }
 .nx-device-telemetry__title, .nx-device-telemetry__status { display: flex; align-items: center; gap: .65rem; }
-.nx-device-telemetry__title > svg { width: 1rem; height: 1rem; color: #12d98b; }
+.nx-device-telemetry__title > svg { width: 1rem; height: 1rem; color: hsl(var(--nx-device-tone-positive)); }
 .nx-device-telemetry__title strong { font-size: .8rem; }
 .nx-device-telemetry__title span, .nx-device-telemetry__status small { color: hsl(var(--muted-foreground)); font-size: .66rem; }
-.nx-device-telemetry__status > span { display: inline-flex; align-items: center; gap: .35rem; color: #f1ba36; font-size: .67rem; font-weight: 700; }
-.nx-device-telemetry__status > span.is-observed { color: #12d98b; }
+.nx-device-telemetry__status > span { display: inline-flex; align-items: center; gap: .35rem; color: hsl(var(--nx-device-tone-caution)); font-size: .67rem; font-weight: 700; }
+.nx-device-telemetry__status > span.is-observed { color: hsl(var(--nx-device-tone-positive)); }
 .nx-device-telemetry__status svg { width: .9rem; height: .9rem; }
 .nx-device-telemetry__status > svg { color: hsl(var(--muted-foreground)); }
 .nx-device-telemetry__status button { height: 2rem; gap: .35rem; font-size: .68rem; }
@@ -1260,7 +1277,7 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     outline: none;
 }
 .nx-device-telemetry__metric-label { display: flex; align-items: center; gap: .45rem; color: hsl(var(--muted-foreground)); font-size: .66rem; line-height: 1.2; }
-.nx-device-telemetry__metric-label > span { display: inline-flex; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: .55rem; color: #13d98b; background: hsl(158 82% 46% / .1); }
+.nx-device-telemetry__metric-label > span { display: inline-flex; width: 1.8rem; height: 1.8rem; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: .55rem; color: hsl(var(--nx-device-tone-positive)); background: hsl(var(--nx-device-tone-positive) / .1); }
 .nx-device-telemetry__metric-label svg { width: .95rem; height: .95rem; }
 .nx-device-telemetry__metric > p { margin-top: .38rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.22rem; font-weight: 750; letter-spacing: -.04em; }
 .nx-device-telemetry__metric:nth-child(n+5) { text-align: center; }
@@ -1281,13 +1298,13 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
     transform-origin: left;
     animation: nx-device-meter-enter 520ms var(--nx-ease-out) both;
 }
-.nx-device-telemetry__metric[data-tone="amber"] .nx-device-telemetry__track span { background: hsl(var(--amber-500, 38 92% 50%)); }
-.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__track span { background: #f4d13d; }
-.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__track span { background: hsl(var(--destructive)); }
-.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__metric-label > span { color: #f0525f; }
-.nx-device-telemetry__metric[data-tone="cyan"] .nx-device-telemetry__metric-label > span { color: #13cce4; }
+.nx-device-telemetry__metric[data-tone="amber"] .nx-device-telemetry__track span { background: hsl(var(--nx-device-tone-caution)); }
+.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__track span { background: hsl(var(--nx-device-tone-watch)); }
+.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__track span { background: hsl(var(--nx-device-tone-critical)); }
+.nx-device-telemetry__metric[data-tone="rose"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-device-tone-critical)); }
+.nx-device-telemetry__metric[data-tone="cyan"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-device-tone-info)); }
 .nx-device-telemetry__metric[data-tone="amber"] .nx-device-telemetry__metric-label > span,
-.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__metric-label > span { color: #f1bd34; }
+.nx-device-telemetry__metric[data-tone="yellow"] .nx-device-telemetry__metric-label > span { color: hsl(var(--nx-device-tone-caution)); }
 .nx-device-telemetry__spark { width: 100%; height: .9rem; margin-top: .15rem; opacity: .65; }
 
 .nx-device-workspace-nav {
@@ -1353,7 +1370,7 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
 }
 .nx-device-subnav__item:hover { color: hsl(var(--foreground)); }
 .nx-device-subnav__item[data-active="true"] { color: hsl(var(--foreground)); }
-.nx-device-subnav__item[data-active="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: #12d98b; box-shadow: 0 0 10px #12d98b; }
+.nx-device-subnav__item[data-active="true"]::after { content: ""; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: hsl(var(--nx-device-tone-positive)); box-shadow: 0 0 10px hsl(var(--nx-device-tone-positive)); }
 .nx-device-workspace-layout {
     display: grid;
     grid-template-columns: 14.6rem minmax(0, 1fr);
@@ -1437,9 +1454,9 @@ html[data-motion="minimal"] .nx-fleet-pulse [data-testid^="pulse-tile-"] { trans
 .nx-device-current-work__row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nx-device-current-work__row .nx-badge, .nx-device-current-work__row [class*="badge"] { width: fit-content; font-size: .6rem; }
 .nx-device-current-work__row svg { width: .72rem; height: .72rem; }
-.nx-device-current-work__row i { display: inline-block; width: .45rem; height: .45rem; margin-right: .35rem; border-radius: 999px; background: #20d889; }
-.nx-device-current-work__row i.is-medium, .nx-device-current-work__row i.is-high { background: #f1c13d; }
-.nx-device-current-work__row i.is-critical { background: #ef4a57; }
+.nx-device-current-work__row i { display: inline-block; width: .45rem; height: .45rem; margin-right: .35rem; border-radius: 999px; background: hsl(var(--nx-device-tone-positive)); }
+.nx-device-current-work__row i.is-medium, .nx-device-current-work__row i.is-high { background: hsl(var(--nx-device-tone-caution)); }
+.nx-device-current-work__row i.is-critical { background: hsl(var(--nx-device-tone-critical)); }
 .nx-device-current-work__empty { padding: .85rem .3rem; color: hsl(var(--muted-foreground)); font-size: .7rem; }
 .nx-device-current-work__row:hover,
 .nx-device-current-work__row:focus-visible {
