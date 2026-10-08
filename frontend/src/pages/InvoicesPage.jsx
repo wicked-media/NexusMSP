@@ -37,7 +37,10 @@ import { PaymentPromiseButton } from "@/components/ai/PaymentPromiseButton";
 import { InvoiceExplainerButton } from "@/components/ai/InvoiceExplainerButton";
 import { InvoiceAIBundle } from "@/components/ai/InvoiceAIBundle";
 import { InvoiceDetailSmartActions } from "@/components/invoices/InvoicesSmartBar";
+import SavedCardChargeDialog from "@/components/billing/SavedCardChargeDialog";
 import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { isInvoiceChargeable, savedCardSummary } from "@/lib/savedCardPayment";
 
 const PAYMENT_STATUS = {
   unpaid: { label: "Not Paid", class: "bg-red-500/20 text-red-400 border-red-500/30", icon: XCircle },
@@ -313,6 +316,10 @@ export default function InvoicesPage() {
   const [voidReason, setVoidReason] = useState("");
   const [voidingInvoice, setVoidingInvoice] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  // Saved cards, surfaced here as well as on the client Billing tab so a
+  // technician collecting money never has to leave the invoice they are on.
+  const [chargeCardInvoice, setChargeCardInvoice] = useState(null);
+  const [cardOnFile, setCardOnFile] = useState({ clientId: null, loading: false, methods: [], error: null });
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   const [pdfPreviewInvoice, setPdfPreviewInvoice] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -350,6 +357,8 @@ export default function InvoicesPage() {
   const canModifyInvoice = allowedActions.has("billing.invoice.modify");
   const canRecordPayment = allowedActions.has("billing.payment.record");
   const canVoidInvoice = allowedActions.has("billing.invoice.void");
+  const canChargeSavedCard = allowedActions.has("billing.payment_method.charge");
+  const canViewSavedCards = allowedActions.has("billing.payment_method.view");
 
   const fetchAll = useCallback(async ({ quiet = false } = {}) => {
     if (quiet) setRefreshing(true);
@@ -432,6 +441,50 @@ export default function InvoicesPage() {
       setEmailHistory(emailRes.data);
     } catch { setInvoiceActivity([]); setEmailHistory([]); setInvoiceActivityError("Invoice history could not be loaded."); }
   }, [headers]);
+
+  /**
+   * The card this invoice's customer has on file.
+   *
+   * A technician opening an invoice should be able to see that money can be
+   * collected on the stored card without first navigating to the client's
+   * Billing tab, so the reference is loaded with the invoice they are reading.
+   * A role without the payment-method permission is an expected answer, not a
+   * failure: it simply leaves the invoice workspace as it was before.
+   */
+  useEffect(() => {
+    const clientId = viewInvoice?.client_id || payingInvoice?.client_id || "";
+    if (!clientId || !canViewSavedCards) {
+      setCardOnFile({ clientId: null, loading: false, methods: [], error: null });
+      return;
+    }
+    let active = true;
+    setCardOnFile({ clientId, loading: true, methods: [], error: null });
+    axios.get(`${API}/clients/${encodeURIComponent(clientId)}/payment-methods`, { headers })
+      .then(response => {
+        if (active) setCardOnFile({ clientId, loading: false, methods: response.data?.methods || [], error: null });
+      })
+      .catch(error => {
+        if (!active) return;
+        const permissionDenied = error?.response?.status === 403;
+        setCardOnFile({
+          clientId,
+          loading: false,
+          methods: [],
+          error: permissionDenied ? null : apiErrorMessage(error, "Saved cards could not be loaded."),
+        });
+      });
+    return () => { active = false; };
+  }, [viewInvoice?.client_id, payingInvoice?.client_id, canViewSavedCards, headers]);
+
+  // The lookup answers for one customer at a time, so a chip is only rendered
+  // when the client it describes is the one on screen — never for a client whose
+  // request is still in flight or has already been replaced by another.
+  const savedCardFor = (clientId) => (clientId && cardOnFile.clientId === clientId ? savedCardSummary(cardOnFile.methods) : null);
+  // Before the answer for this customer has arrived the workspace must say it is
+  // still checking, never "no card on file" — an empty answer that has not been
+  // read yet is not the same fact as this customer having saved no card.
+  const cardLookupPendingFor = (clientId) => Boolean(canViewSavedCards && clientId && (cardOnFile.loading || cardOnFile.clientId !== clientId));
+  const cardLookupErrorFor = (clientId) => (clientId && cardOnFile.clientId === clientId ? cardOnFile.error : null);
 
   const openCreate = () => {
     setEditing(null);
@@ -900,9 +953,37 @@ export default function InvoicesPage() {
     );
   }
 
+  const chargeCardClientId = chargeCardInvoice?.client_id || "";
+  // The client's cards are reused when they were already read for the customer
+  // on screen; otherwise the dialog reads them itself and shows its own state.
+  const chargeDialogMethods = chargeCardClientId && cardOnFile.clientId === chargeCardClientId && !cardOnFile.loading
+    ? cardOnFile.methods
+    : null;
+  const openSavedCardCapture = () => {
+    if (!chargeCardClientId) return;
+    setChargeCardInvoice(null);
+    // Card capture is a provider-hosted session that returns to the client's
+    // Billing tab, so finish it in the one place that handles that return.
+    navigate(`/clients?client=${encodeURIComponent(chargeCardClientId)}&view=billing`);
+  };
+
   // ========== SHARED DIALOGS ==========
   const dialogs = (
     <>
+      {/* SAVED CARD CHARGE — reachable from the invoice workspace as well as the
+          client Billing tab, so money can be collected where the invoice is. */}
+      <SavedCardChargeDialog
+        open={Boolean(chargeCardInvoice)}
+        onOpenChange={next => { if (!next) setChargeCardInvoice(null); }}
+        base={`${API}/clients/${encodeURIComponent(chargeCardClientId)}/payment-methods`}
+        headers={headers}
+        clientName={chargeCardInvoice?.client_name || ""}
+        invoice={chargeCardInvoice}
+        methods={chargeDialogMethods}
+        onAddCard={openSavedCardCapture}
+        onCharged={() => fetchAll({ quiet: true })}
+      />
+
       {/* CREATE/EDIT */}
       <Dialog open={isFormOpen} onOpenChange={v => { setIsFormOpen(v); if (!v) setEditing(null); }}>
         <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col overflow-hidden border-cyan-400/25 bg-[linear-gradient(145deg,rgba(9,22,30,0.98),rgba(13,15,21,0.98))] p-0">
@@ -1093,6 +1174,16 @@ export default function InvoicesPage() {
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
             {payingInvoice && <div className="grid gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.035] p-4 sm:grid-cols-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-300">Invoice</p><p className="mt-1 font-mono text-sm font-semibold">{payingInvoice.invoice_number}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Client</p><p className="mt-1 truncate text-sm font-medium">{payingInvoice.client_name || "Unassigned client"}</p></div><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Remaining balance</p><p className="mt-1 text-sm font-semibold text-emerald-300">${Math.max(0, (payingInvoice.total || 0) - (payingInvoice.amount_paid || 0)).toFixed(2)}</p></div></div>}
+            {/* Recording a manual payment is the longer route when the customer
+                already has a card on file, so say so here rather than leaving the
+                technician to remember the client's Billing tab. */}
+            {payingInvoice && canChargeSavedCard && savedCardFor(payingInvoice.client_id) && isInvoiceChargeable(payingInvoice) && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-violet-400/25 bg-violet-500/[0.06] px-3 py-2.5 text-xs leading-5 text-violet-50" data-testid="manual-payment-saved-card-hint">
+                <CreditCard className="h-3.5 w-3.5 shrink-0 text-violet-200" />
+                <span><span className="font-medium">{savedCardFor(payingInvoice.client_id).label}</span> is saved for this customer — collect with the card instead of recording the payment by hand.</span>
+                <Button type="button" size="sm" variant="outline" className="ml-auto h-7 rounded-lg border-violet-400/35 bg-violet-500/[0.10] text-violet-100 hover:bg-violet-500/[0.16]" onClick={() => { setIsPaymentOpen(false); setChargeCardInvoice(payingInvoice); }} data-testid="manual-payment-charge-card-btn">Charge saved card</Button>
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <div className="flex items-center justify-between gap-2"><Label>Payment amount ($)</Label>
@@ -1410,6 +1501,13 @@ export default function InvoicesPage() {
     const PayIcon = PAYMENT_STATUS[pStatus]?.icon || XCircle;
     const balance = isSplitParent ? 0 : (inv.total || 0) - (inv.amount_paid || 0);
     const isOverdue = !isSplitParent && inv.due_date && isPast(parseISO(inv.due_date)) && pStatus !== "paid";
+    // The same eligibility rule the charge endpoint enforces decides whether the
+    // action is offered here, so the workspace cannot invite a charge the API
+    // would refuse.
+    const cardSummary = savedCardFor(inv.client_id);
+    const cardLookupPending = cardLookupPendingFor(inv.client_id);
+    const cardLookupError = cardLookupErrorFor(inv.client_id);
+    const canChargeCardForInvoice = canChargeSavedCard && Boolean(inv.client_id) && !isSplitParent && isInvoiceChargeable(inv);
 
     return (
       <div className="space-y-4" data-testid="invoice-detail">
@@ -1428,11 +1526,21 @@ export default function InvoicesPage() {
                 <p className="mt-1 text-xs text-zinc-400">{isSplitParent ? <><span>Source record retained for audit</span><span className="px-1.5 text-zinc-600">/</span><span className="text-violet-200">{(inv.split_billing?.allocations || []).length} payer invoice{(inv.split_billing?.allocations || []).length === 1 ? "" : "s"} issued</span></> : <>{inv.invoice_name && <><span>{inv.client_name || "Client invoice"}</span><span className="px-1.5 text-zinc-600">/</span></>}Due {inv.due_date ? format(parseISO(inv.due_date), "MMM d, yyyy") : "date not set"} <span className="px-1.5 text-zinc-600">/</span> Balance <span className={balance > 0 ? "font-mono text-amber-200" : "font-mono text-emerald-200"}>${Math.max(0, balance).toFixed(2)}</span></>}</p>
               </div>
               {canRecordPayment && balance > 0 && <Button variant="success" className="h-9 rounded-lg px-3" onClick={() => openPaymentDialog(inv)} data-testid="header-record-payment-btn"><Banknote className="mr-1.5 h-3.5 w-3.5" />Record payment</Button>}
+              {canChargeCardForInvoice && <Button variant="outline" className="h-9 rounded-lg border-violet-400/35 bg-violet-500/[0.12] px-3 text-violet-100 hover:border-violet-300/50 hover:bg-violet-500/[0.18]" onClick={() => setChargeCardInvoice(inv)} title={cardSummary ? `Charge ${cardSummary.label}` : "Charge this customer's saved card"} data-testid="header-charge-saved-card-btn"><CreditCard className="mr-1.5 h-3.5 w-3.5" />Charge saved card</Button>}
               {canModifyInvoice && !isSplitParent && <Button variant="info" size="sm" className="h-9 rounded-lg px-3" onClick={() => openInvoiceEmail(inv)} data-testid="header-email-invoice-btn"><Mail className="mr-1.5 h-3.5 w-3.5" />Email</Button>}
               <Button variant="outline" size="sm" className="h-9 rounded-lg border-white/[0.12] bg-black/10 px-3 text-zinc-100 hover:border-white/[0.20] hover:bg-white/[0.08]" onClick={() => handlePdfPreview(inv)} data-testid="header-preview-invoice-btn"><Eye className="mr-1.5 h-3.5 w-3.5" />Preview</Button>
             </div>
             <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-3">
               <span className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.10] px-2.5 py-1 text-xs font-medium text-emerald-100">{inv.client_name || "No customer"}</span>
+              {canViewSavedCards && inv.client_id && !isSplitParent && (cardLookupPending ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/[0.2] px-2.5 py-1 text-xs text-zinc-400" data-testid="invoice-card-on-file-loading"><Loader2 className="h-3 w-3 animate-spin" />Checking saved cards…</span>
+              ) : cardSummary ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.10] px-2.5 py-1 text-xs font-medium text-violet-100" data-testid="invoice-card-on-file" title={cardSummary.expiry}><CreditCard className="h-3 w-3" />Card on file {cardSummary.label}{cardSummary.isDefault ? " · default" : ""}</span>
+              ) : cardLookupError ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-rose-400/25 bg-rose-500/[0.08] px-2.5 py-1 text-xs text-rose-100" data-testid="invoice-card-on-file-error" title={cardLookupError || "Nexus could not confirm the saved cards for this customer."}><AlertTriangle className="h-3 w-3" />Saved cards unavailable</span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/[0.2] px-2.5 py-1 text-xs text-zinc-400" data-testid="invoice-card-on-file-none" title="This customer has no card saved for Nexus to charge."><CreditCard className="h-3 w-3" />No card on file</span>
+              ))}
               {inv.ticket_id && <Link to={`/tickets?ticket=${encodeURIComponent(inv.ticket_id)}`} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/25 bg-cyan-400/[0.08] px-2.5 py-1 text-xs font-medium text-cyan-100 transition hover:border-cyan-300/45 hover:bg-cyan-400/[0.14]" data-testid="invoice-linked-ticket"><Ticket className="h-3 w-3" />{inv.ticket_number || "Linked ticket"}</Link>}
               {isSplitParent && <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.08] px-2.5 py-1 text-xs font-medium text-violet-100"><Users className="h-3 w-3" />Split-billing ledger</span>}
               {inv.is_split_child && <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-400/25 bg-violet-500/[0.08] px-2.5 py-1 text-xs font-medium text-violet-100"><Users className="h-3 w-3" />Split payer invoice</span>}
@@ -1672,6 +1780,7 @@ export default function InvoicesPage() {
               <CardHeader className="border-b border-white/[0.07] pb-3"><CardTitle className="flex items-center gap-2 text-sm text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />Invoice controls</CardTitle></CardHeader>
               <CardContent className="space-y-2 [&>button]:h-9 [&>button]:justify-start [&>button]:rounded-lg">
                 {canRecordPayment && !isSplitParent && pStatus !== "paid" && <Button variant="success" className="w-full" onClick={() => openPaymentDialog(inv)} data-testid="record-payment-btn"><Banknote className="mr-1.5 h-4 w-4" />Record payment</Button>}
+                {canChargeCardForInvoice && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => setChargeCardInvoice(inv)} data-testid="charge-saved-card-btn"><CreditCard className="mr-1.5 h-4 w-4" />Charge saved card</Button>}
                 {canModifyInvoice && !isSplitParent && !inv.is_split_child && pStatus === "unpaid" && ["draft", "pending_approval"].includes(inv.status) && <Button variant="outline" className="w-full border-violet-400/30 bg-violet-500/[0.07] text-violet-100 hover:border-violet-300/45 hover:bg-violet-500/[0.14]" onClick={() => openSplitBilling(inv)} data-testid="split-billing-btn"><Users className="mr-1.5 h-4 w-4" />Split billing across clients</Button>}
                 {isSplitParent && <div className="rounded-lg border border-violet-400/25 bg-violet-500/[0.07] px-3 py-2 text-xs text-violet-100"><span className="font-medium">Payer invoices issued.</span> Open the Payer invoices tab to email each customer or record their payment.</div>}
                 <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground"><span className="font-medium text-sky-300">Xero</span> {xeroStatus.connected ? `Connected to ${xeroStatus.org_name || "your organisation"}. Reconcile payments after they are recorded.` : xeroStatus.configured ? "Setup is incomplete. Finish Xero OAuth before relying on sync or reconciliation." : "Not connected. Configure Xero before relying on sync or reconciliation."}</div>

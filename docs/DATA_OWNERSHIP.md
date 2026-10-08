@@ -204,3 +204,37 @@ A ticket raised from a call is an ordinary `tickets` document: `tickets` owns
 ticket truth, the PBX owns call detail records, and the ticket only references
 the call. Attributing a call to a customer uses the PBX's Nexus client binding,
 never a caller-supplied client identifier.
+
+# Customer card payments (saved payment methods)
+
+A saved customer card is not a Nexus datum. The card itself is authoritative at
+the payment provider; Nexus records a reference and the masked display fields
+the provider returns so an operator can choose a card without the raw instrument
+ever entering Nexus.
+
+| Data | Where it lives | Status |
+| --- | --- | --- |
+| Card number, security code, full expiry and the processor token | Stripe | Authoritative. Never sent to a Nexus server. Card capture happens on a Stripe-hosted session. |
+| Card reference, provider customer ID, and the masked display fields (brand, last four digits, expiry month/year, funding, country, default flag) | MongoDB `client_payment_methods`, plus `clients.stripe_customer_id` | Explicitly a replica reference. Each record carries its Nexus `client_id`; provider identifiers stay server-side and are never returned to a browser. Deleting the record detaches nothing by itself — detaching at the provider and closing the reference happen together, and a provider that has already forgotten a card is treated as a detached card. |
+| Payment attempt binding for a card charge (client, invoice, invoice collection, amount, currency, provider payment-intent ID, outcome) | MongoDB `payment_transactions` | Nexus-owned settlement evidence. It is the record the signed provider webhook matches before an invoice may change, exactly as for hosted checkout payments. |
+| Invoice balance and payment history | MongoDB `invoices` / `xero_invoices` | Authoritative for Nexus billing. |
+
+The browser never receives a provider payment-method ID, customer ID, API key or
+webhook secret. Saving a card returns only the masked reference; charging
+returns an outcome and the payment-transaction ID. Provider credentials are
+written to `payment_transactions` only as the binding the webhook needs.
+
+A card charge never settles an invoice on its own. The charge endpoint records
+the binding first, asks the provider to charge off-session, and leaves the
+invoice untouched; only a signature-verified `payment_intent.succeeded` event
+matching that binding may credit the balance. A card that cannot be charged
+because the issuer requires authentication is reported as such so an operator
+can send a payment link instead.
+
+Card capture and charging are reachable from two Nexus surfaces — the client
+Billing tab and the invoice workspace — and both call the same
+`/clients/{client_id}/payment-methods` endpoints. No surface holds its own copy
+of a card or its own charging path: each request is re-authorised server-side
+against the platform tenant, the stable `client_id`, the action permission and,
+for a charge, the invoice's own `client_id`, so the second surface adds an entry
+point and not an owner.
