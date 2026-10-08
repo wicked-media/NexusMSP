@@ -48,6 +48,8 @@ const SETTINGS_SECTIONS = [
   { key: "notifications", icon: Bell, label: "Notifications", description: "Choose which updates reach you" },
   { key: "schedule", icon: Clock, label: "Availability", description: "Working hours, on-call and auto-assignment" },
   { key: "display", icon: Palette, label: "Appearance", description: "Theme, density and local workspace preferences" },
+  { key: "webstudio", icon: Globe, label: "Web Studio", description: "Website and Safe Update Engine defaults" },
+  { key: "workspace", icon: Zap, label: "Workspace", description: "Landing view, tables and personal shortcuts" },
   { key: "badges", icon: Trophy, label: "Achievements", description: "Progress, badges and recent contribution" },
 ];
 
@@ -96,6 +98,11 @@ export default function TechSettingsPage() {
   // Display
   const [displayPrefs, setDisplayPrefs] = useState({});
 
+  // Web Studio + workspace portability (canonical, server-stored)
+  const [webStudioPrefs, setWebStudioPrefs] = useState(null);
+  const [workspacePrefs, setWorkspacePrefs] = useState(null);
+  const [savingPrefs, setSavingPrefs] = useState("");
+
   // Login Wallpaper
   const [wallpaperType, setWallpaperType] = useState("default");
   const [wallpaperUrl, setWallpaperUrl] = useState(null);
@@ -129,6 +136,8 @@ export default function TechSettingsPage() {
         axios.get(`${API}/user-settings/notifications`, { headers }),
         axios.get(`${API}/user-settings/working-hours`, { headers }),
         axios.get(`${API}/user-settings/display`, { headers }),
+        axios.get(`${API}/user-settings/web-studio`, { headers }),
+        axios.get(`${API}/user-settings/workspace`, { headers }),
       ]);
       const dataAt = (index, fallback) => results[index]?.status === "fulfilled" ? results[index].value.data : fallback;
       const profileData = dataAt(0, { name: user?.name || "", email: user?.email || "", role: user?.role || "technician" });
@@ -136,6 +145,8 @@ export default function TechSettingsPage() {
       const notificationData = dataAt(2, {});
       const hoursData = dataAt(3, null);
       const displayData = dataAt(4, {});
+      const webStudioData = dataAt(5, null);
+      const workspaceData = dataAt(6, null);
 
       setProfile(profileData);
       setProfileForm({
@@ -150,6 +161,8 @@ export default function TechSettingsPage() {
       setNotifPrefs(notificationData);
       setWorkHours(hoursData);
       setDisplayPrefs(displayData);
+      setWebStudioPrefs(webStudioData);
+      setWorkspacePrefs(workspaceData);
       if (displayData.theme && displayData.theme !== theme) toggleTheme();
       if (displayData.preset && THEME_PRESETS?.[displayData.preset]) setPreset(displayData.preset);
       if (displayData.accent && ACCENT_COLORS?.[displayData.accent]) setAccent(displayData.accent);
@@ -176,6 +189,32 @@ export default function TechSettingsPage() {
       } catch {}
     } catch { toast.error("Failed to load settings"); }
     finally { setLoading(false); }
+  };
+
+  const saveWebStudioPrefs = async () => {
+    if (!webStudioPrefs) return;
+    setSavingPrefs("webstudio");
+    try {
+      const { prefs_version, ...values } = webStudioPrefs;
+      const response = await axios.put(`${API}/user-settings/web-studio`, { ...values, expected_version: prefs_version }, { headers });
+      setWebStudioPrefs(response.data.web_studio_prefs ? { ...response.data.web_studio_prefs, prefs_version: response.data.prefs_version } : webStudioPrefs);
+      toast.success("Web Studio preferences saved");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to save Web Studio preferences");
+    } finally { setSavingPrefs(""); }
+  };
+
+  const saveWorkspacePrefs = async () => {
+    if (!workspacePrefs) return;
+    setSavingPrefs("workspace");
+    try {
+      const { prefs_version, ...values } = workspacePrefs;
+      const response = await axios.put(`${API}/user-settings/workspace`, { ...values, expected_version: prefs_version }, { headers });
+      setWorkspacePrefs(response.data.workspace_prefs ? { ...response.data.workspace_prefs, prefs_version: response.data.prefs_version } : workspacePrefs);
+      toast.success("Workspace preferences saved");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to save workspace preferences");
+    } finally { setSavingPrefs(""); }
   };
 
   const saveProfile = async () => {
@@ -912,6 +951,172 @@ export default function TechSettingsPage() {
                   <Button onClick={saveDisplay} data-testid="save-display-preferences"><CheckCircle className="mr-1.5 h-4 w-4" />Save appearance</Button>
                 </div>
 
+              </CardContent>
+            </Card>
+          )}
+
+          {/* WEB STUDIO TAB */}
+          {activeTab === "webstudio" && (
+            <Card data-testid="settings-webstudio-panel">
+              <CardHeader><CardTitle className="flex items-center gap-2"><Globe className="w-5 h-5" />Web Studio preferences</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {!webStudioPrefs ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading Web Studio preferences…</div>
+                ) : (
+                  <>
+                    <p className="text-xs leading-5 text-muted-foreground">These defaults follow you to any workstation because they are stored against your Nexus identity. They never change what you are permitted to do; approval and policy still decide that.</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Default view</Label>
+                        <Select value={webStudioPrefs.default_view} onValueChange={(default_view) => setWebStudioPrefs((p) => ({ ...p, default_view }))}>
+                          <SelectTrigger data-testid="webstudio-default-view"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="fleet">Fleet command centre</SelectItem>
+                            <SelectItem value="portfolio">Client portfolio</SelectItem>
+                            <SelectItem value="plugins">Plugin intelligence</SelectItem>
+                            <SelectItem value="updates">Update plans</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Default update policy</Label>
+                        <Select value={webStudioPrefs.default_update_policy} onValueChange={(default_update_policy) => setWebStudioPrefs((p) => ({ ...p, default_update_policy }))}>
+                          <SelectTrigger data-testid="webstudio-update-policy"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="manual">Manual — a technician applies each update</SelectItem>
+                            <SelectItem value="assisted">Assisted — Nexus prepares the plan for approval</SelectItem>
+                            <SelectItem value="policy_driven">Policy-driven — low-risk updates may run within limits</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Organisation policy overrides this default where updates are restricted.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Inventory refresh interval</Label>
+                        <Select value={String(webStudioPrefs.inventory_refresh_hours)} onValueChange={(value) => setWebStudioPrefs((p) => ({ ...p, inventory_refresh_hours: Number(value) }))}>
+                          <SelectTrigger data-testid="webstudio-refresh-hours"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="1">Every hour</SelectItem>
+                            <SelectItem value="4">Every 4 hours</SelectItem>
+                            <SelectItem value="12">Every 12 hours</SelectItem>
+                            <SelectItem value="24">Daily</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-3 pt-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <div><Label>Show only sites needing attention</Label><p className="text-xs text-muted-foreground">Open the fleet already filtered to work that needs a technician.</p></div>
+                          <Switch checked={Boolean(webStudioPrefs.show_only_attention)} onCheckedChange={(show_only_attention) => setWebStudioPrefs((p) => ({ ...p, show_only_attention }))} data-testid="webstudio-only-attention" />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div><Label>Confirm destructive website actions</Label><p className="text-xs text-muted-foreground">Keep a confirmation step before archiving or updating a site.</p></div>
+                          <Switch checked={Boolean(webStudioPrefs.confirm_destructive)} onCheckedChange={(confirm_destructive) => setWebStudioPrefs((p) => ({ ...p, confirm_destructive }))} data-testid="webstudio-confirm-destructive" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button onClick={saveWebStudioPrefs} disabled={savingPrefs === "webstudio"} data-testid="webstudio-save">
+                        {savingPrefs === "webstudio" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-1.5 h-4 w-4" />}Save Web Studio preferences
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Saved to your Nexus profile (version {webStudioPrefs.prefs_version ?? 0}).</span>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* WORKSPACE TAB */}
+          {activeTab === "workspace" && (
+            <Card data-testid="settings-workspace-panel">
+              <CardHeader><CardTitle className="flex items-center gap-2"><Zap className="w-5 h-5" />Workspace portability</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                {!workspacePrefs ? (
+                  <div className="flex items-center justify-center py-8 text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading workspace preferences…</div>
+                ) : (
+                  <>
+                    <p className="text-xs leading-5 text-muted-foreground">Your landing view, table density and shortcuts travel with your technician identity, so signing in on another workstation feels the same.</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Landing route</Label>
+                        <Select value={workspacePrefs.landing_route} onValueChange={(landing_route) => setWorkspacePrefs((p) => ({ ...p, landing_route }))}>
+                          <SelectTrigger data-testid="workspace-landing-route"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="/">Dashboard</SelectItem>
+                            <SelectItem value="/tickets">Tickets</SelectItem>
+                            <SelectItem value="/devices">Managed assets</SelectItem>
+                            <SelectItem value="/clients">Clients</SelectItem>
+                            <SelectItem value="/web-studio">Web Studio</SelectItem>
+                            <SelectItem value="/control-plane">Control Plane</SelectItem>
+                            <SelectItem value="/team-hub">Team Hub</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Table density</Label>
+                        <Select value={workspacePrefs.table_density} onValueChange={(table_density) => setWorkspacePrefs((p) => ({ ...p, table_density }))}>
+                          <SelectTrigger data-testid="workspace-table-density"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="normal">Normal</SelectItem>
+                            <SelectItem value="compact">Compact</SelectItem>
+                            <SelectItem value="comfortable">Comfortable</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Default page size</Label>
+                        <Select value={String(workspacePrefs.default_page_size)} onValueChange={(value) => setWorkspacePrefs((p) => ({ ...p, default_page_size: Number(value) }))}>
+                          <SelectTrigger data-testid="workspace-page-size"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="10">10 rows</SelectItem>
+                            <SelectItem value="25">25 rows</SelectItem>
+                            <SelectItem value="50">50 rows</SelectItem>
+                            <SelectItem value="100">100 rows</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Remote default view</Label>
+                        <Select value={workspacePrefs.remote_default_view} onValueChange={(remote_default_view) => setWorkspacePrefs((p) => ({ ...p, remote_default_view }))}>
+                          <SelectTrigger data-testid="workspace-remote-view"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="devices">Devices</SelectItem>
+                            <SelectItem value="sessions">Sessions</SelectItem>
+                            <SelectItem value="connection">Connection</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Personal shortcuts</Label>
+                      <p className="text-xs text-muted-foreground">Conflicts are refused by the server, so two actions can never share the same key.</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {[
+                          ["command_palette", "Command palette"],
+                          ["new_ticket", "New ticket"],
+                          ["search", "Search"],
+                          ["toggle_sidebar", "Toggle sidebar"],
+                          ["new_web_update_plan", "New Web Studio update plan"],
+                        ].map(([action, label]) => (
+                          <div key={action} className="flex items-center gap-2">
+                            <Label className="w-44 shrink-0 text-xs">{label}</Label>
+                            <Input
+                              value={(workspacePrefs.shortcuts || {})[action] || ""}
+                              onChange={(event) => setWorkspacePrefs((p) => ({ ...p, shortcuts: { ...(p.shortcuts || {}), [action]: event.target.value } }))}
+                              placeholder="e.g. Ctrl+K"
+                              data-testid={`workspace-shortcut-${action}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button onClick={saveWorkspacePrefs} disabled={savingPrefs === "workspace"} data-testid="workspace-save">
+                        {savingPrefs === "workspace" ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-1.5 h-4 w-4" />}Save workspace preferences
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Saved to your Nexus profile (version {workspacePrefs.prefs_version ?? 0}).</span>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           )}

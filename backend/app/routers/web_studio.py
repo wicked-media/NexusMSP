@@ -32,6 +32,15 @@ from app.services.action_permissions import require_action
 from app.services.secret_store import decrypt_secret, encrypt_secret
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, assert_record_scope, scoped_query
 from app.services.synergy_wholesale import SYNERGY_OPERATIONS, connector_status, execute as execute_synergy, public_catalogue, seal_action_parameters, unseal_action_parameters, validate_parameters
+from app.services.web_studio_fleet import (
+    build_update_plan,
+    fleet_plugin_intelligence,
+    fleet_summary,
+    normalise_plugin_inventory,
+    policy_allows_execution,
+    site_attention,
+    update_preflight,
+)
 
 
 router = APIRouter(tags=["Nexus Web Studio"])
@@ -160,6 +169,9 @@ class WebSiteInput(BaseModel):
     agreement_id: str = Field(default="", max_length=200)
     billing_status: Literal["not_linked", "included", "billable", "suspended"] = "not_linked"
     monthly_fee: float = Field(default=0, ge=0, le=1000000)
+    last_backup_at: str = Field(default="", max_length=40)
+    backup_status: Literal["unknown", "current", "stale", "failed"] = "unknown"
+    update_policy: Literal["manual", "assisted", "policy_driven"] = "manual"
     notes: str = Field(default="", max_length=4000)
 
 
@@ -179,6 +191,9 @@ class WebSiteUpdate(BaseModel):
     agreement_id: str | None = Field(default=None, max_length=200)
     billing_status: Literal["not_linked", "included", "billable", "suspended"] | None = None
     monthly_fee: float | None = Field(default=None, ge=0, le=1000000)
+    last_backup_at: str | None = Field(default=None, max_length=40)
+    backup_status: Literal["unknown", "current", "stale", "failed"] | None = None
+    update_policy: Literal["manual", "assisted", "policy_driven"] | None = None
     notes: str | None = Field(default=None, max_length=4000)
 
 
@@ -210,6 +225,22 @@ class WordPressConnectionInput(BaseModel):
 class WordPressActionInput(BaseModel):
     action: Literal["inventory", "plugin_update", "theme_update", "core_update", "backup_and_update"]
     target: str = Field(default="", max_length=300)
+    reason: str = Field(min_length=8, max_length=1000)
+
+
+class UpdatePlanItem(BaseModel):
+    kind: Literal["plugin", "theme", "core"] = "plugin"
+    plugin: str = Field(min_length=1, max_length=300)
+    name: str = Field(default="", max_length=300)
+    from_version: str = Field(default="", max_length=60)
+    to_version: str = Field(default="", max_length=60)
+    security_findings: int = Field(default=0, ge=0, le=10000)
+    requires_php: str = Field(default="", max_length=60)
+
+
+class UpdatePlanInput(BaseModel):
+    items: list[UpdatePlanItem] = Field(min_length=1, max_length=50)
+    policy: Literal["manual", "assisted", "policy_driven"] = "manual"
     reason: str = Field(min_length=8, max_length=1000)
 
 
@@ -305,10 +336,28 @@ async def _wordpress_inventory(site: dict) -> dict:
             plugin_data = plugins.json() if plugins.status_code == 200 else []
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Nexus could not reach the secured WordPress REST endpoint") from exc
-    return {"connected": True, "synced_at": _now(), "plugins": [
-        {"plugin": item.get("plugin"), "name": item.get("name"), "version": item.get("version"), "status": item.get("status"), "update": item.get("update")}
-        for item in plugin_data if isinstance(item, dict)
-    ], "plugin_inventory_available": plugins.status_code == 200}
+    themes_data = []
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+            themes = await client.get(f"{connection['api_url']}/wp/v2/themes?status=active", headers=headers)
+            if themes.status_code == 200 and isinstance(themes.json(), list):
+                themes_data = themes.json()
+    except httpx.HTTPError:
+        themes_data = []
+    normalised = normalise_plugin_inventory(plugin_data)
+    return {
+        "connected": True,
+        "synced_at": _now(),
+        "plugins": normalised,
+        "plugin_inventory_available": plugins.status_code == 200,
+        "plugin_count": len(normalised),
+        "plugin_updates": sum(1 for row in normalised if row["update_available"]),
+        "themes": [
+            {"stylesheet": item.get("stylesheet"), "name": item.get("name"), "version": item.get("version"),
+             "status": item.get("status"), "update_available": bool(item.get("theme_supports")) and bool(item.get("update"))}
+            for item in themes_data if isinstance(item, dict)
+        ],
+    }
 
 
 async def _site_or_404(site_id: str, user: dict, operation: str) -> dict:
@@ -532,6 +581,147 @@ async def get_wordpress_management(site_id: str, user: dict = Depends(get_curren
     return {"site_id": site_id, "client_id": site.get("client_id"), "billing": {key: site.get(key) for key in ("service_plan", "agreement_id", "billing_status", "monthly_fee", "renewal_date")},
             "health": site.get("website_health") or {},
             "connection": {"connected": bool(connection), "api_url": connection.get("api_url"), "username": connection.get("username")}, "inventory": inventory, "actions": actions}
+
+
+@router.get("/web-studio/fleet")
+async def get_web_studio_fleet(client_id: str | None = None, user: dict = Depends(get_current_user)):
+    """The WordPress fleet command centre: one governed view of every website.
+
+    Every figure is derived from evidence already stored on the website record.
+    A dimension that has never been assessed is reported as not assessed, so a
+    zero cannot be mistaken for a verified clean bill of health.
+    """
+    query: dict = {"archived_at": {"$exists": False}}
+    if client_id:
+        await assert_client_scope(user, client_id, operation="web_studio.read")
+        query["client_id"] = client_id
+    sites = await db.web_sites.find(scoped_query(user, query), {"_id": 0}).sort("updated_at", -1).to_list(1000)
+    summary = fleet_summary(sites)
+    fleet = [
+        {
+            **{key: site.get(key) for key in (
+                "id", "client_id", "client_name", "name", "primary_domain", "site_url", "platform",
+                "stage", "hosting_provider", "wordpress_version", "php_version", "update_policy",
+                "last_wordpress_sync_at", "last_backup_at", "backup_status", "last_health_check_at",
+            )},
+            "wordpress_connected": bool((site.get("wordpress_connection") or {}).get("api_url")),
+            "plugin_updates": sum(1 for row in normalise_plugin_inventory((site.get("wordpress_inventory") or {}).get("plugins")) if row["update_available"]),
+            "attention": site_attention(site),
+        }
+        for site in sites
+    ]
+    return {"summary": summary, "sites": fleet, "synergy": await _integration_status()}
+
+
+@router.get("/web-studio/plugins")
+async def get_web_studio_plugin_intelligence(client_id: str | None = None, user: dict = Depends(get_current_user)):
+    """Plugin intelligence across every scoped website the technician can see."""
+    query: dict = {"archived_at": {"$exists": False}}
+    if client_id:
+        await assert_client_scope(user, client_id, operation="web_studio.read")
+        query["client_id"] = client_id
+    sites = await db.web_sites.find(scoped_query(user, query), {"_id": 0}).to_list(1000)
+    return {"plugins": fleet_plugin_intelligence(sites), "site_count": len(sites)}
+
+
+@router.post("/web-studio/sites/{site_id}/update-plans")
+async def create_web_studio_update_plan(site_id: str, payload: UpdatePlanInput, user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    """Compose a Safe Update Engine plan. Creating a plan never changes WordPress."""
+    site = await _site_or_404(site_id, user, "web_studio.update_plan.create")
+    if site.get("platform") != "wordpress":
+        raise HTTPException(status_code=409, detail="This site is not recorded as a WordPress site")
+    plan = build_update_plan(site, [item.model_dump() for item in payload.items], policy=payload.policy)
+    plan.update({
+        "id": str(uuid.uuid4()),
+        "reason": payload.reason.strip(),
+        "created_by": user.get("email") or user.get("id"),
+        "created_by_id": user.get("id"),
+        "history": [{"at": plan["created_at"], "event": "created", "by": user.get("email") or user.get("id"), "status": plan["status"]}],
+    })
+    if not plan["preflight"]["allowed"]:
+        plan["status"] = "preflight_failed"
+    await db.web_update_plans.insert_one(plan)
+    await log_activity(
+        user,
+        "web_update_plan_created",
+        "web_update_plan",
+        plan["id"],
+        f"Safe Update plan · {site.get('name') or 'Website'}",
+        "Composed a Safe Update Engine plan; no WordPress change has been made",
+        metadata={"client_id": site.get("client_id"), "site_id": site_id, "risk": plan["risk"], "status": plan["status"], "items": len(plan["items"])},
+    )
+    return {key: value for key, value in plan.items() if key != "_id"}
+
+
+@router.get("/web-studio/sites/{site_id}/update-plans")
+async def list_web_studio_update_plans(site_id: str, user: dict = Depends(get_current_user)):
+    await _site_or_404(site_id, user, "web_studio.update_plan.read")
+    plans = await db.web_update_plans.find(scoped_query(user, {"site_id": site_id}), {"_id": 0}).sort("created_at", -1).to_list(100)
+    return {"plans": plans}
+
+
+@router.post("/web-studio/update-plans/{plan_id}/approve")
+async def approve_web_studio_update_plan(plan_id: str, user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    """Move an eligible plan from preflight to pending approval, then to approved.
+
+    A plan that failed preflight can never be approved, and approval is recorded
+    independently so a technician cannot self-authorise a risky deployment.
+    """
+    plan = await assert_record_scope(user, db.web_update_plans, plan_id, operation="web_studio.update_plan.approve", resource_name="Update plan")
+    if plan.get("status") not in {"preflight_passed", "pending_approval"}:
+        raise HTTPException(status_code=409, detail="Only a plan that passed preflight can be approved")
+    site = await db.web_sites.find_one({"id": plan.get("site_id")}, {"_id": 0})
+    if not site:
+        raise HTTPException(status_code=404, detail="The plan's website no longer exists")
+    current_preflight = update_preflight(site, plan.get("items") or [])
+    if not current_preflight["allowed"]:
+        await db.web_update_plans.update_one({"id": plan_id}, {"$set": {"status": "preflight_failed", "preflight": current_preflight}})
+        raise HTTPException(status_code=409, detail="Preflight no longer passes; refresh the connection, inventory and backup evidence")
+    approval = await create_approval({
+        "type": "wordpress_update_plan",
+        "title": f"WordPress Safe Update · {site.get('name') or plan.get('site_id')}",
+        "description": plan.get("reason") or "Safe Update Engine plan",
+        "client_id": site.get("client_id"),
+        "client_name": site.get("client_name", ""),
+        "ref_id": plan_id,
+        "ref_type": "web_update_plan",
+        "approver_role": "admin",
+    }, user)
+    await db.web_update_plans.update_one({"id": plan_id}, {"$set": {
+        "status": "approved",
+        "preflight": current_preflight,
+        "approval_id": approval["id"],
+        "approved_at": _now(),
+        "approved_by": user.get("email") or user.get("id"),
+    }, "$push": {"history": {"at": _now(), "event": "approved", "by": user.get("email") or user.get("id"), "status": "approved"}}})
+    await log_activity(user, "web_update_plan_approved", "web_update_plan", plan_id, site.get("name") or "Website", "Approved a Safe Update Engine plan for execution", metadata={"client_id": site.get("client_id"), "site_id": plan.get("site_id"), "approval_id": approval["id"]})
+    return {"id": plan_id, "status": "approved", "approval": {k: v for k, v in approval.items() if k != "_id"}, "preflight": current_preflight,
+            "execution": policy_allows_execution(plan.get("policy", "manual"), plan.get("risk", "low"), approved=True)}
+
+
+@router.post("/web-studio/update-plans/{plan_id}/execute")
+async def execute_web_studio_update_plan(plan_id: str, user: dict = Depends(require_action("synergy.wholesale.manage"))):
+    """Queue an approved plan for the Nexus WordPress control worker.
+
+    Nexus has no live connector capable of changing a customer's WordPress in
+    this deployment, so this endpoint records the approved intent and returns
+    an awaiting-worker state.  It never claims the update happened.
+    """
+    plan = await assert_record_scope(user, db.web_update_plans, plan_id, operation="web_studio.update_plan.execute", resource_name="Update plan")
+    if plan.get("status") != "approved":
+        raise HTTPException(status_code=409, detail="Only an approved plan can be queued for execution")
+    recommendation = policy_allows_execution(plan.get("policy", "manual"), plan.get("risk", "low"), approved=True)
+    claim = await db.web_update_plans.update_one(
+        {"id": plan_id, "status": "approved"},
+        {"$set": {"status": "awaiting_worker", "queued_at": _now(), "queued_by": user.get("email") or user.get("id"),
+                  "execution_mode": "nexus_wordpress_control_worker_required"},
+         "$push": {"history": {"at": _now(), "event": "queued", "by": user.get("email") or user.get("id"), "status": "awaiting_worker"}}},
+    )
+    if getattr(claim, "matched_count", 1) != 1:
+        raise HTTPException(status_code=409, detail="This plan changed state before it could be queued")
+    await log_activity(user, "web_update_plan_queued", "web_update_plan", plan_id, "Safe Update Engine", "Queued an approved plan for the WordPress control worker; no WordPress change has been made yet", metadata={"client_id": plan.get("client_id"), "site_id": plan.get("site_id"), "risk": plan.get("risk")})
+    return {"id": plan_id, "status": "awaiting_worker", "execution": recommendation,
+            "message": "Plan queued. A Nexus WordPress control worker must record the verified result before Nexus reports the update as applied."}
 
 
 @router.get("/web-studio/integrations/synergy-wholesale")

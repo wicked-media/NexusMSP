@@ -14,17 +14,23 @@ import { toast } from "sonner";
 import {
   Archive, BadgeCheck, CheckCircle2, CreditCard, ExternalLink,
   Globe2, LayoutTemplate, Loader2, PackageCheck, Plus, RefreshCw, ServerCog,
-  Settings2, ShieldCheck, TriangleAlert, Wrench,
+  Settings2, ShieldCheck, TriangleAlert, Wrench, Activity, ShieldAlert,
+  ArrowUpCircle, Hammer, ListChecks,
 } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import HeroTile from "@/components/HeroTile";
+import {
+  attentionQueue, fleetTiles, planStatusLabel, planStatusTone, pluginRows,
+  policyLabel, preflightSummary, riskTone, updatePlanItem, vulnerableSiteCount,
+} from "@/lib/webStudioFleet";
 
 const emptySite = {
   client_id: "", name: "", primary_domain: "", site_url: "", platform: "wordpress",
   stage: "discovery", hosting_provider: "synergy_wholesale", hosting_identifier: "",
   wordpress_version: "", php_version: "", owner_name: "", renewal_date: "",
-  service_plan: "", agreement_id: "", billing_status: "not_linked", monthly_fee: 0, notes: "",
+  service_plan: "", agreement_id: "", billing_status: "not_linked", monthly_fee: 0,
+  last_backup_at: "", backup_status: "unknown", update_policy: "manual", notes: "",
 };
 
 const stageTone = {
@@ -46,6 +52,10 @@ export default function WebStudioPage() {
   const { token } = useAuth();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [data, setData] = useState({ sites: [], summary: {}, synergy: {} });
+  const [fleet, setFleet] = useState({ summary: {}, sites: [] });
+  const [plugins, setPlugins] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const [planWorking, setPlanWorking] = useState("");
   const [clients, setClients] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -69,12 +79,16 @@ export default function WebStudioPage() {
     if (quiet) setRefreshing(true);
     else setLoading(true);
     try {
-      const [overview, clientResponse, contractsResponse] = await Promise.all([
+      const [overview, fleetResponse, pluginResponse, clientResponse, contractsResponse] = await Promise.all([
         axios.get(`${API}/web-studio/overview`, { headers }),
+        axios.get(`${API}/web-studio/fleet`, { headers }).catch(() => ({ data: { summary: {}, sites: [] } })),
+        axios.get(`${API}/web-studio/plugins`, { headers }).catch(() => ({ data: { plugins: [] } })),
         axios.get(`${API}/clients`, { headers }),
         axios.get(`${API}/contracts`, { headers }),
       ]);
       setData(overview.data || { sites: [], summary: {}, synergy: {} });
+      setFleet(fleetResponse.data || { summary: {}, sites: [] });
+      setPlugins(pluginResponse.data?.plugins || []);
       setClients(clientResponse.data?.clients || clientResponse.data || []);
       setContracts(contractsResponse.data || []);
     } catch (error) {
@@ -160,10 +174,15 @@ export default function WebStudioPage() {
   const openManagement = async (site) => {
     setManagedSite(site);
     setManagement(null);
+    setPlans([]);
     setManagementLoading(true);
     try {
-      const response = await axios.get(`${API}/web-studio/sites/${site.id}/management`, { headers });
+      const [response, planResponse] = await Promise.all([
+        axios.get(`${API}/web-studio/sites/${site.id}/management`, { headers }),
+        axios.get(`${API}/web-studio/sites/${site.id}/update-plans`, { headers }).catch(() => ({ data: { plans: [] } })),
+      ]);
       setManagement(response.data);
+      setPlans(planResponse.data?.plans || []);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Unable to load WordPress management");
     } finally {
@@ -173,6 +192,62 @@ export default function WebStudioPage() {
 
   const refreshManagement = async () => {
     if (managedSite) await openManagement(managedSite);
+  };
+
+  const createUpdatePlan = async () => {
+    if (!managedSite) return;
+    const rows = (management?.inventory?.plugins || []).filter((plugin) => plugin.update_available);
+    if (!rows.length) {
+      toast.error("No plugin updates are recorded for this site. Refresh inventory first.");
+      return;
+    }
+    setPlanWorking("create");
+    try {
+      const response = await axios.post(`${API}/web-studio/sites/${managedSite.id}/update-plans`, {
+        items: rows.map(updatePlanItem),
+        policy: managedSite.update_policy || "manual",
+        reason: "Safe Update Engine plan created from the current plugin inventory",
+      }, { headers });
+      setPlans((current) => [response.data, ...current]);
+      const summary = preflightSummary(response.data?.preflight);
+      toast[summary.passed ? "success" : "warning"](summary.passed
+        ? `Update plan ready for approval (${rows.length} item${rows.length === 1 ? "" : "s"})`
+        : `Update plan blocked: ${summary.headline}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to create the update plan");
+    } finally {
+      setPlanWorking("");
+    }
+  };
+
+  const approveUpdatePlan = async (plan) => {
+    setPlanWorking(plan.id);
+    try {
+      const response = await axios.post(`${API}/web-studio/update-plans/${plan.id}/approve`, {}, { headers });
+      setPlans((current) => current.map((row) => (row.id === plan.id ? { ...row, ...response.data, status: response.data.status } : row)));
+      const execution = response.data?.execution || {};
+      toast.success(execution.allowed
+        ? "Approved. This low-risk plan may run under the policy-driven limits."
+        : execution.reason || "Approved. A technician performs this update.");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to approve the update plan");
+      await refreshManagement();
+    } finally {
+      setPlanWorking("");
+    }
+  };
+
+  const queueUpdatePlan = async (plan) => {
+    setPlanWorking(`queue-${plan.id}`);
+    try {
+      const response = await axios.post(`${API}/web-studio/update-plans/${plan.id}/execute`, {}, { headers });
+      setPlans((current) => current.map((row) => (row.id === plan.id ? { ...row, status: response.data.status } : row)));
+      toast.success(response.data?.message || "Plan queued for the WordPress control worker.");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Unable to queue the update plan");
+    } finally {
+      setPlanWorking("");
+    }
   };
 
   const connectWordPress = async () => {
@@ -241,6 +316,9 @@ export default function WebStudioPage() {
   };
 
   const synergy = data.synergy || {};
+  const tiles = fleetTiles(fleet.summary);
+  const queue = attentionQueue(fleet.summary, fleet.sites);
+  const pluginIntel = pluginRows(plugins);
   if (loading) return <div className="flex h-64 items-center justify-center"><RefreshCw className="h-7 w-7 animate-spin text-cyan-400" /></div>;
 
   return <div className="space-y-6">
@@ -257,12 +335,25 @@ export default function WebStudioPage() {
       </>}
     />
 
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <HeroTile label="Websites" value={data.summary?.total || 0} icon={Globe2} glow="sky" subtitle="Client-linked delivery records" />
-      <HeroTile label="Live" value={data.summary?.live || 0} icon={ShieldCheck} glow="emerald" subtitle="Published and owned" />
-      <HeroTile label="In delivery" value={data.summary?.in_delivery || 0} icon={LayoutTemplate} glow="violet" subtitle="Design through launch" />
-      <HeroTile label="Maintenance" value={data.summary?.maintenance || 0} icon={ServerCog} glow="amber" subtitle="Active service work" />
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="web-studio-fleet-summary">
+      {tiles.map((tile) => (
+        <HeroTile
+          key={tile.key}
+          label={tile.label}
+          value={tile.unassessed ? "—" : tile.value}
+          animated={!tile.unassessed}
+          icon={tile.key === "security" ? ShieldAlert : tile.key === "updates" ? ArrowUpCircle : tile.key === "backups" ? ServerCog : Globe2}
+          glow={tile.glow}
+          subtitle={tile.subtitle}
+          testId={`fleet-tile-${tile.key}`}
+        />
+      ))}
     </div>
+    {(!fleet.summary?.assessed?.plugins || !fleet.summary?.assessed?.backups) && (
+      <p className="text-xs leading-5 text-muted-foreground" data-testid="web-studio-fleet-unassessed">
+        Nexus only counts what it has evidence for. Link a secured WordPress connection and record a backup window to move an unassessed dimension into a verified count.
+      </p>
+    )}
 
     <Card className={synergy.configured ? "border-emerald-500/20 bg-emerald-500/[0.025]" : "border-amber-500/25 bg-amber-500/[0.025]"} data-testid="web-studio-synergy-status">
       <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
@@ -284,6 +375,72 @@ export default function WebStudioPage() {
             <Link to="/settings?tab=integrations&anchor=synergy-wholesale-settings-card"><Settings2 className="mr-1.5 h-3.5 w-3.5" />{synergy.configured ? "Review connector" : "Connect Synergy"}</Link>
           </Button>
         </div>
+      </CardContent>
+    </Card>
+
+    {queue.length > 0 && (
+      <Card data-testid="web-studio-attention-queue">
+        <CardHeader className="border-b border-border/60">
+          <CardTitle className="flex items-center gap-2 text-base"><Activity className="h-4 w-4 text-amber-300" />Attention queue</CardTitle>
+          <CardDescription>Sites that need a technician before they need anything else, with the evidence behind each call.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="divide-y divide-border/60">
+            {queue.map((entry) => (
+              <div key={entry.site_id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate font-medium">{entry.site?.name || entry.site_id}</p>
+                    <Badge variant="outline" className={entry.tone.className}>{entry.tone.label}</Badge>
+                  </div>
+                  <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                    {entry.reasons.map((reason) => <li key={reason}>{reason}</li>)}
+                  </ul>
+                </div>
+                {entry.site?.platform === "wordpress" && (
+                  <Button size="sm" variant="outline" onClick={() => openManagement(entry.site)}>
+                    <Wrench className="mr-1.5 h-3.5 w-3.5" />Open in Web Studio
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    )}
+
+    <Card data-testid="web-studio-plugin-intelligence">
+      <CardHeader className="border-b border-border/60">
+        <CardTitle className="flex items-center gap-2 text-base"><PackageCheck className="h-4 w-4 text-cyan-300" />Plugin intelligence</CardTitle>
+        <CardDescription>Every plugin Nexus has seen across the scoped fleet, worst first. A plugin is only called vulnerable when a finding is recorded against it.</CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        {pluginIntel.length ? (
+          <div className="divide-y divide-border/60">
+            {pluginIntel.slice(0, 25).map((plugin) => (
+              <div key={plugin.plugin} className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{plugin.name || plugin.plugin}</p>
+                  <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">{plugin.plugin}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{plugin.sites_installed} site{plugin.sites_installed === 1 ? "" : "s"}</Badge>
+                  <Badge variant="outline" className={plugin.sites_with_updates ? "border-amber-500/30 text-amber-300" : "border-emerald-500/30 text-emerald-300"}>
+                    {plugin.sites_with_updates} update{plugin.sites_with_updates === 1 ? "" : "s"}
+                  </Badge>
+                  {plugin.security_findings > 0 && (
+                    <Badge variant="outline" className="border-rose-500/30 text-rose-300" data-testid={`plugin-findings-${plugin.plugin}`}>
+                      {plugin.security_findings} finding{plugin.security_findings === 1 ? "" : "s"} · {vulnerableSiteCount(plugin)} site{vulnerableSiteCount(plugin) === 1 ? "" : "s"}
+                    </Badge>
+                  )}
+                  <Badge variant="outline" className="text-muted-foreground">Licence {plugin.licence_status || "unknown"}</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="p-6 text-sm leading-6 text-muted-foreground">No plugin inventory has been synced yet. Link a secured WordPress connection on a site, then refresh its inventory to populate fleet intelligence.</p>
+        )}
       </CardContent>
     </Card>
 
@@ -346,7 +503,16 @@ export default function WebStudioPage() {
             </div>
           </WorkflowSection>
 
-          <WorkflowSection number="03" title="Commercial connection" description="Make the service status explicit. A billable value is service evidence—not an automatic invoice or contract change.">
+          <WorkflowSection number="03" title="Maintenance safety" description="Record the update policy and backup evidence the Safe Update Engine needs before it will let a plan leave the draft state.">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <SelectField label="Update policy" value={form.update_policy} onValueChange={(update_policy) => setForm((current) => ({ ...current, update_policy }))} options={["manual", "assisted", "policy_driven"]} />
+              <TextField label="Last verified backup" value={form.last_backup_at} onChange={(last_backup_at) => setForm((current) => ({ ...current, last_backup_at: last_backup_at ? new Date(last_backup_at).toISOString() : "" }))} type="datetime-local" />
+              <SelectField label="Backup status" value={form.backup_status} onValueChange={(backup_status) => setForm((current) => ({ ...current, backup_status }))} options={["unknown", "current", "stale", "failed"]} />
+            </div>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">A backup older than 24 hours does not satisfy preflight. Nexus never invents a backup time; record the real evidence, or the Safe Update Engine will block the plan and say why.</p>
+          </WorkflowSection>
+
+          <WorkflowSection number="04" title="Commercial connection" description="Make the service status explicit. A billable value is service evidence—not an automatic invoice or contract change.">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2"><Label>Linked agreement</Label><Select value={form.agreement_id || "__none"} onValueChange={(agreement_id) => setForm((current) => ({ ...current, agreement_id: agreement_id === "__none" ? "" : agreement_id }))}><SelectTrigger><SelectValue placeholder="No agreement linked" /></SelectTrigger><SelectContent><SelectItem value="__none">No agreement linked</SelectItem>{clientContracts.map((contract) => <SelectItem key={contract.id} value={contract.id}>{contract.name || contract.id}</SelectItem>)}</SelectContent></Select><p className="text-xs text-muted-foreground">Only active agreements for the selected client are available.</p></div>
               <SelectField label="Billing status" value={form.billing_status} onValueChange={(billing_status) => setForm((current) => ({ ...current, billing_status }))} options={["not_linked", "included", "billable", "suspended"]} />
@@ -355,14 +521,14 @@ export default function WebStudioPage() {
             </div>
           </WorkflowSection>
 
-          <WorkflowSection number="04" title="Technician handoff notes" description="Capture only the operational context a future technician needs; credentials stay in approved secure connection workflows.">
+          <WorkflowSection number="05" title="Technician handoff notes" description="Capture only the operational context a future technician needs; credentials stay in approved secure connection workflows.">
             <div className="space-y-2"><Label>Notes</Label><Textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} rows={5} placeholder="Launch considerations, maintenance boundaries, customer contacts or next actions…" /></div>
           </WorkflowSection>
         </div>
       </NexusWorkflowDialog>
     </Dialog>
 
-    <Dialog open={Boolean(managedSite)} onOpenChange={(open) => { if (!open) { setManagedSite(null); setManagement(null); setWordpressTarget(""); } }}>
+    <Dialog open={Boolean(managedSite)} onOpenChange={(open) => { if (!open) { setManagedSite(null); setManagement(null); setPlans([]); setWordpressTarget(""); } }}>
       <NexusWorkflowDialog
         eyebrow="WordPress operations"
         title={`Manage WordPress · ${managedSite?.name || "Website"}`}
@@ -383,6 +549,17 @@ export default function WebStudioPage() {
           target={wordpressTarget}
           setTarget={setWordpressTarget}
         />}
+        {management && !managementLoading && (
+          <SafeUpdateEngine
+            site={managedSite}
+            plugins={management.inventory?.plugins || []}
+            plans={plans}
+            working={planWorking}
+            onCreate={createUpdatePlan}
+            onApprove={approveUpdatePlan}
+            onQueue={queueUpdatePlan}
+          />
+        )}
       </NexusWorkflowDialog>
     </Dialog>
 
@@ -458,6 +635,70 @@ function WordPressManagement({ management, connectionOpen, healthChecking, onHea
     <div className="rounded-xl border border-border/70"><div className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-3"><div><p className="text-sm font-medium">Maintenance request history</p><p className="text-xs text-muted-foreground">Nexus records the requested action and approval state before a control worker touches WordPress.</p></div><Badge variant="outline">{management.actions?.length || 0} records</Badge></div>{management.actions?.length ? <div className="divide-y divide-border/50">{management.actions.map((action) => <div key={action.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"><div><p className="font-medium">{readable(action.action)}</p><p className="mt-0.5 text-xs text-muted-foreground">{action.target || "Whole site"} · {formatDate(action.created_at)}</p></div><Badge variant="outline" className={action.status === "completed" ? "border-emerald-500/30 text-emerald-300" : action.status.includes("failed") ? "border-rose-500/30 text-rose-300" : "border-amber-500/30 text-amber-300"}>{readable(action.status)}</Badge></div>)}</div> : <p className="p-4 text-sm text-muted-foreground">No maintenance requests have been retained for this site.</p>}</div>
     <div className="rounded-xl border border-amber-500/15 bg-amber-500/[0.035] p-4 text-sm leading-6 text-muted-foreground"><CheckCircle2 className="mr-2 inline h-4 w-4 text-amber-300" />A requested update is not an executed update. Nexus keeps the request approval-backed and awaits verified completion evidence from the WordPress control worker.</div>
   </div>;
+}
+
+function SafeUpdateEngine({ site, plugins, plans, working, onCreate, onApprove, onQueue }) {
+  const updatable = plugins.filter((plugin) => plugin.update_available);
+  const policy = site?.update_policy || "manual";
+  return <Card className="mt-5 border-cyan-500/15 bg-cyan-500/[0.02]" data-testid="safe-update-engine">
+    <CardHeader className="pb-3">
+      <CardTitle className="flex items-center gap-2 text-sm"><Hammer className="h-4 w-4 text-cyan-300" />Safe Update Engine</CardTitle>
+      <CardDescription>
+        Nexus discovers, checks and stages plugin updates, then waits for approval. It never reports an update as applied until a WordPress control worker records the verified result.
+        {" "}Policy in force: <span className="text-foreground">{policyLabel(policy)}</span>.
+      </CardDescription>
+    </CardHeader>
+    <CardContent className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={onCreate} disabled={Boolean(working) || !updatable.length} data-testid="safe-update-create">
+          {working === "create" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ArrowUpCircle className="mr-1.5 h-3.5 w-3.5" />}
+          Prepare plan for {updatable.length} update{updatable.length === 1 ? "" : "s"}
+        </Button>
+        {!updatable.length && <span className="text-xs text-muted-foreground">No plugin updates are recorded. Refresh inventory first.</span>}
+      </div>
+      {plans.length > 0 && (
+        <div className="rounded-xl border border-border/70 divide-y divide-border/60">
+          {plans.map((plan) => {
+            const summary = preflightSummary(plan.preflight);
+            const canApprove = ["preflight_passed", "pending_approval"].includes(plan.status);
+            const canQueue = plan.status === "approved";
+            return <div key={plan.id} className="space-y-2 p-4" data-testid={`update-plan-${plan.id}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className={planStatusTone(plan.status)}>{planStatusLabel(plan.status)}</Badge>
+                <Badge variant="outline" className={riskTone(plan.risk)}>{planStatusLabel(plan.risk)} risk</Badge>
+                <Badge variant="outline">{plan.items?.length || 0} item{plan.items?.length === 1 ? "" : "s"}</Badge>
+                <Badge variant="outline" className="text-muted-foreground">{policyLabel(plan.policy)}</Badge>
+                <span className="text-xs text-muted-foreground">{formatDate(plan.created_at)}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {canApprove && <Button size="sm" variant="outline" onClick={() => onApprove(plan)} disabled={Boolean(working)} data-testid={`update-plan-approve-${plan.id}`}>{working === plan.id ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ListChecks className="mr-1.5 h-3.5 w-3.5" />}Approve plan</Button>}
+                {canQueue && <Button size="sm" variant="outline" onClick={() => onQueue(plan)} disabled={Boolean(working)} data-testid={`update-plan-queue-${plan.id}`}>{working === `queue-${plan.id}` ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Hammer className="mr-1.5 h-3.5 w-3.5" />}Queue for control worker</Button>}
+              </div>
+              <div className={`rounded-lg border p-3 text-xs leading-5 ${summary.passed ? "border-emerald-500/20 bg-emerald-500/[0.04] text-emerald-200" : "border-amber-500/20 bg-amber-500/[0.04] text-amber-200"}`} data-testid={`update-plan-preflight-${plan.id}`}>
+                <p className="font-medium">Preflight: {summary.headline}</p>
+                {summary.detail && <p className="mt-1 text-muted-foreground">{summary.detail}</p>}
+                {(plan.preflight?.checks || []).length > 0 && (
+                  <ul className="mt-2 space-y-0.5 text-muted-foreground">
+                    {plan.preflight.checks.map((check) => <li key={check.key}>{check.state === "pass" ? "✓" : "✕"} {check.label}: {check.detail}</li>)}
+                  </ul>
+                )}
+              </div>
+              {(plan.items || []).length > 0 && (
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {plan.items.map((item) => <li key={item.plugin} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-foreground">{item.name || item.plugin}</span>
+                    <Badge variant="outline">{item.from_version || "?"} → {item.to_version || "?"}</Badge>
+                    <Badge variant="outline" className={riskTone(item.risk)}>{planStatusLabel(item.risk)}</Badge>
+                    {(item.risk_reasons || []).map((reason) => <span key={reason}>{reason}</span>)}
+                  </li>)}
+                </ul>
+              )}
+            </div>;
+          })}
+        </div>
+      )}
+    </CardContent>
+  </Card>;
 }
 
 function WorkflowSection({ number, title, description, children }) {
