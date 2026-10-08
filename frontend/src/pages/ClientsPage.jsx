@@ -50,11 +50,14 @@ import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/Workspa
 import WorkspaceControlBar from "@/components/WorkspaceControlBar";
 import WorkspaceToolsMenu from "@/components/WorkspaceToolsMenu";
 import {
+  CLIENT_HEALTH_BANDS,
   CLIENT_HEALTH_FILTER_OPTIONS,
   healthBand,
   resolveClientHealthBand,
 } from "@/lib/clientHealthBands";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
+import { LEARNING_VIEW, preferredTarget } from "@/lib/clientWorkspaceLearning";
+import { useClientWorkspaceLearning } from "@/hooks/useClientWorkspaceLearning";
 
 const EMPTY_CREATE_FORM = { name: "", industry: "", email: "", phone: "", website: "", tier: "", lifecycle: "active" };
 
@@ -195,39 +198,91 @@ function IntegrationChip({ type, active }) {
   );
 }
 
+const SIGNAL_TONES = {
+  rose: "border-rose-400/30 bg-rose-500/[0.09] text-rose-200",
+  amber: "border-amber-400/30 bg-amber-500/[0.09] text-amber-200",
+  sky: "border-sky-400/30 bg-sky-500/[0.09] text-sky-200",
+  emerald: "border-emerald-400/30 bg-emerald-500/[0.09] text-emerald-200",
+};
+
+function ClientSignalChip({ icon: Icon, label, tone = "sky" }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${SIGNAL_TONES[tone] || SIGNAL_TONES.sky}`}>
+      {Icon ? <Icon className="h-3 w-3" /> : null}
+      {label}
+    </span>
+  );
+}
+
+/**
+ * One account in the client directory.
+ *
+ * The card answers three questions in reading order: which account is this,
+ * what is its Nexus identity, and what does it need from a technician. Risk
+ * signals are shown only when they exist, so a clean account stays quiet
+ * instead of rendering a row of zeros.
+ */
 function ClientListItem({ client, selected, onClick }) {
-  const agentReporting = client.assets_assessed > 0;
+  const band = resolveClientHealthBand(client);
+  const assets = Number(client.asset_count) || 0;
+  const assessed = Number(client.assets_assessed) || 0;
+  const openTickets = Number(client.open_tickets) || 0;
+  const patches = Number(client.patch_pending) || 0;
+  const overdue = Number(client.overdue_count) || 0;
+  const agentReporting = assessed > 0;
+  const name = client.name || "Unnamed client";
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase() || "?";
+  const hasSignals = openTickets > 0 || patches > 0 || overdue > 0;
 
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-current={selected ? "true" : undefined}
       data-testid={`client-list-item-${client.id}`}
-      className={`w-full text-left flex items-center gap-3 border-b border-zinc-800/80 px-4 py-3.5 transition-colors
-        ${selected ? "bg-zinc-900 border-l-2 border-l-indigo-500 pl-[14px]" : "hover:bg-zinc-900/50 border-l-2 border-l-transparent pl-[14px]"}`}
+      className={`group relative w-full overflow-hidden rounded-2xl border p-3.5 pl-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40
+        ${selected
+          ? "border-primary/45 bg-primary/[0.06] shadow-[0_16px_34px_-24px_rgba(0,0,0,0.95)]"
+          : "border-border/55 bg-card/35 hover:-translate-y-0.5 hover:border-primary/25 hover:bg-card/70 hover:shadow-[0_16px_30px_-24px_rgba(0,0,0,0.95)]"}`}
     >
-      <HealthDial score={client.health_score} size={36} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-zinc-100 truncate">{client.name}</span>
-          {client.lifecycle && client.lifecycle !== "active" && (
-            <span className={`text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{client.lifecycle.replace("_", " ")}</span>
-          )}
+      <span aria-hidden="true" className={`absolute inset-y-3 left-0 w-[3px] rounded-r-full bg-primary transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`} />
+      <div className="flex items-start gap-3">
+        <div className="relative shrink-0">
+          <span className={`flex h-10 w-10 items-center justify-center rounded-xl border text-sm font-semibold ${band ? band.badge : "border-border/60 bg-muted/[0.15] text-muted-foreground"}`}>
+            {initials}
+          </span>
+          <span
+            aria-hidden="true"
+            className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background ${agentReporting ? "bg-emerald-400" : "bg-zinc-600"}`}
+          />
         </div>
-        <div className="mt-1 flex items-center gap-2.5 text-[11px] text-zinc-500">
-          {client.industry && <span className="truncate max-w-[108px]">{client.industry}</span>}
-          <span className={client.open_tickets > 10 ? "text-amber-400" : ""}><Ticket className="mr-0.5 inline h-3 w-3" />{client.open_tickets || 0} open</span>
-          <span><HardDrive className="mr-0.5 inline h-3 w-3" />{client.asset_count || 0} assets</span>
-          {client.patch_pending > 0 && <span className="text-amber-400"><Shield className="mr-0.5 inline h-3 w-3" />{client.patch_pending} patches</span>}
-          {client.overdue_count > 0 && <span className="text-rose-400"><AlertTriangle className="mr-0.5 inline h-3 w-3" />{client.overdue_count} overdue</span>}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-foreground">{name}</span>
+            {client.lifecycle && client.lifecycle !== "active" && (
+              <span className={`rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${LIFECYCLE_COLORS[client.lifecycle] || LIFECYCLE_COLORS.active}`}>{client.lifecycle.replace("_", " ")}</span>
+            )}
+          </div>
+          <p className="mt-1 truncate text-[11px] text-muted-foreground">
+            {client.industry ? `${client.industry} · ` : ""}{assets} managed {assets === 1 ? "endpoint" : "endpoints"}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {overdue > 0 && <ClientSignalChip icon={AlertTriangle} label={`${overdue} overdue`} tone="rose" />}
+            {patches > 0 && <ClientSignalChip icon={Shield} label={`${patches} patches`} tone="amber" />}
+            {openTickets > 0 && <ClientSignalChip icon={Ticket} label={`${openTickets} open`} tone={openTickets > 10 ? "amber" : "sky"} />}
+            <ClientSignalChip
+              label={agentReporting ? `Agent reporting ${assessed}/${assets}` : "No agent evidence"}
+              tone={agentReporting ? "emerald" : "sky"}
+            />
+            {!hasSignals && agentReporting && <ClientSignalChip label="No open risk signals" tone="emerald" />}
+          </div>
         </div>
-        <div className={`mt-1.5 flex items-center gap-1.5 text-[10px] font-medium ${agentReporting ? "text-emerald-400" : "text-zinc-500"}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${agentReporting ? "bg-emerald-400 shadow-[0_0_7px_rgba(52,211,153,0.65)]" : "bg-zinc-600"}`} />
-          {agentReporting ? `Agent reporting ${client.assets_assessed}/${client.asset_count || 0}` : "Agent not reporting"}
+
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <HealthDial score={client.health_score} size={38} />
+          <p className="font-mono text-[11px] font-medium text-foreground/90">${(Number(client.mrr) || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}<span className="ml-1 text-[9px] font-normal uppercase tracking-wide text-muted-foreground">MRR</span></p>
         </div>
-      </div>
-      <div className="shrink-0 text-right">
-        <p className="text-[10px] uppercase tracking-wide text-zinc-500">MRR</p>
-        <p className="mt-0.5 font-mono text-xs font-medium text-zinc-200">${(client.mrr || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
       </div>
     </button>
   );
@@ -247,6 +302,9 @@ export default function ClientsPage() {
   const tabFromUrl = searchParams.get("view");
   const onboardingPrompt = searchParams.get("onboarding") === "prompt";
   const headers = { Authorization: `Bearer ${token}` };
+  // What Nexus has learned about this technician's client-workspace habits. It
+  // is presentation only: a failed read leaves the designed order untouched.
+  const learning = useClientWorkspaceLearning(token);
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -281,6 +339,9 @@ export default function ClientsPage() {
 
   const changeDetailTab = useCallback((nextTab) => {
     const safeTab = CLIENT_TAB_VALUES.has(nextTab) ? nextTab : "overview";
+    // Opening a view is the evidence the workspace ranks itself from. It is
+    // recorded after the tab is validated, so only real Nexus views are counted.
+    learning.record(LEARNING_VIEW, safeTab);
     setDetailTab(safeTab);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -289,7 +350,7 @@ export default function ClientsPage() {
       else next.set("view", safeTab);
       return next;
     }, { replace: true });
-  }, [selectedId, setSearchParams]);
+  }, [selectedId, setSearchParams, learning]);
 
   const clearFilters = useCallback(() => {
     setSearch("");
@@ -519,8 +580,8 @@ export default function ClientsPage() {
 
         <div className="flex min-h-0 flex-1">
           {/* Master list */}
-          {!selectedClient && <aside className="flex w-full flex-col border-r border-zinc-800 bg-zinc-950 md:w-[42%] lg:w-[440px] lg:max-w-[44%]">
-            <WorkspaceControlBar className="block space-y-3 rounded-none border-x-0 border-t-0 border-zinc-800 px-4 py-4 shadow-none" data-testid="clients-directory-controls">
+          {!selectedClient && <aside className="flex w-full flex-col border-r border-border/60 bg-background md:w-[42%] lg:w-[440px] lg:max-w-[44%]">
+            <WorkspaceControlBar className="block space-y-3 rounded-none border-x-0 border-t-0 px-4 py-4 shadow-none" data-testid="clients-directory-controls">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Client directory</p>
@@ -541,7 +602,7 @@ export default function ClientsPage() {
               </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Select value={lifecycleFilter} onValueChange={setLifecycleFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-lifecycle"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-lifecycle"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All stages</SelectItem>
                     <SelectItem value="prospect">Prospect</SelectItem>
@@ -552,7 +613,7 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={riskFilter} onValueChange={setRiskFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-risk"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-risk"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {CLIENT_HEALTH_FILTER_OPTIONS.map((option) => (
                       <SelectItem key={option.value} value={option.value} data-testid={`filter-health-${option.value}`}>{option.label}</SelectItem>
@@ -560,7 +621,7 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={integrationFilter} onValueChange={setIntegrationFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-integration"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-integration"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All integrations</SelectItem>
                     <SelectItem value="acronis">Acronis linked</SelectItem>
@@ -571,7 +632,7 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 <Select value={tierFilter} onValueChange={setTierFilter}>
-                  <SelectTrigger className="h-6 text-[11px] bg-zinc-900 border-zinc-800 w-auto gap-1" data-testid="filter-tier"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-7 w-auto gap-1 border-border/70 bg-background/40 text-[11px]" data-testid="filter-tier"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All tiers</SelectItem>
                     <SelectItem value="untiered">Untiered</SelectItem>
@@ -586,8 +647,8 @@ export default function ClientsPage() {
                   </SelectContent>
                 </Select>
                 {hasActiveFilters && (
-                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10px] text-zinc-500" onClick={clearFilters} data-testid="clients-clear-filters-inline">
-                    <X className="w-2.5 h-2.5 mr-1" />Clear
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground" onClick={clearFilters} data-testid="clients-clear-filters-inline">
+                    <X className="mr-1 h-2.5 w-2.5" />Clear
                   </Button>
                 )}
               </div>
@@ -596,7 +657,7 @@ export default function ClientsPage() {
                 <span className="hidden lg:inline">/ search · J/K walk · ⌘N new</span>
               </div>
             </WorkspaceControlBar>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 space-y-2 overflow-y-auto p-3">
               {filtered.length === 0 ? (
                 (data.clients?.length || 0) === 0 ? (
                   <div className="p-8 text-center" data-testid="clients-empty-portfolio">
@@ -628,16 +689,32 @@ export default function ClientsPage() {
           <main className={`relative overflow-y-auto bg-zinc-900/30 ${selectedClient ? "w-full" : "flex-1"}`}>
             {!selectedClient ? (
               <div className="space-y-4 p-4 sm:p-5" data-testid="client-portfolio-home">
-                <section className="rounded-2xl border border-border/70 bg-card/35 p-5 shadow-sm">
+                <section className="overflow-hidden rounded-2xl border border-border/70 bg-[radial-gradient(circle_at_94%_6%,hsl(var(--primary)/0.16),transparent_34%),linear-gradient(140deg,hsl(var(--card)/0.72),hsl(var(--background)/0.5))] p-5 shadow-sm">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-primary">Portfolio focus</p>
                   <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">Work from the account that needs you next.</h2>
                   <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">The directory is ordered by recorded operational pressure. Open an account to see its clear next step, coverage gaps and complete evidence trail.</p>
+                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {CLIENT_HEALTH_BANDS.map((band) => {
+                      const count = (data.clients || []).filter((client) => resolveClientHealthBand(client)?.key === band.key).length;
+                      return (
+                        <div key={band.key} className={`rounded-xl border p-3 ${band.badge}`}>
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.13em] opacity-75">{band.label}</p>
+                          <p className="mt-1 text-xl font-semibold">{count}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(data.clients || []).some((client) => !resolveClientHealthBand(client)) && (
+                    <p className="mt-2 text-[11px] text-muted-foreground">
+                      {(data.clients || []).filter((client) => !resolveClientHealthBand(client)).length} account(s) have no service health score yet and are excluded from these bands.
+                    </p>
+                  )}
                 </section>
-                      <ClientPortfolioAttentionPanel
-                        attentionClients={attentionClients}
-                        onOpenClient={openClient}
-                        maxItems={5}
-                      />
+                <ClientPortfolioAttentionPanel
+                  attentionClients={attentionClients}
+                  onOpenClient={openClient}
+                  maxItems={5}
+                />
                 <section className="grid gap-4 xl:grid-cols-2" aria-label="Portfolio follow-up">
                   <RenewalWatchTable onOpen={openClient} />
                   <ClientPortfolioFollowUpsPanel
@@ -661,6 +738,7 @@ export default function ClientsPage() {
                 onboardingProgress={onboardingProgress}
                 onStartOnboarding={startClientOnboarding}
                 onContinueOnboarding={() => onboardingSession && navigate(`/onboarding?session=${encodeURIComponent(onboardingSession.id)}`)}
+                learning={learning}
               />
             )}
           </main>
@@ -752,7 +830,7 @@ export default function ClientsPage() {
   );
 }
 
-function ClientWorkspaceNavigation({ value, onChange }) {
+function ClientWorkspaceNavigation({ value, onChange, resolveEntry }) {
   const activeGroup = CLIENT_WORKSPACE_GROUPS.find((group) => group.tabs.some((tab) => tab.value === value)) || CLIENT_WORKSPACE_GROUPS[0];
   const ActiveIcon = activeGroup.icon;
 
@@ -762,11 +840,14 @@ function ClientWorkspaceNavigation({ value, onChange }) {
         {CLIENT_WORKSPACE_GROUPS.map((group) => {
           const Icon = group.icon;
           const active = group.id === activeGroup.id;
+          // A group opens the view this technician actually uses inside it; with
+          // no evidence it opens the declared first view, exactly as before.
+          const entry = resolveEntry?.(group);
           return (
             <button
               key={group.id}
               type="button"
-              onClick={() => onChange(group.tabs[0].value)}
+              onClick={() => onChange(entry?.value || group.tabs[0].value)}
               aria-pressed={active}
               className={`group flex min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition ${
                 active
@@ -780,7 +861,7 @@ function ClientWorkspaceNavigation({ value, onChange }) {
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-xs font-semibold">{group.label}</span>
-                <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.12em] opacity-60">{group.tabs.length} view{group.tabs.length === 1 ? "" : "s"}</span>
+                <span className="mt-0.5 block truncate text-[9px] uppercase tracking-[0.12em] opacity-60">{entry ? `Learned · ${entry.label}` : `${group.tabs.length} view${group.tabs.length === 1 ? "" : "s"}`}</span>
               </span>
             </button>
           );
@@ -1053,6 +1134,7 @@ function ClientDetailPane({
   onboardingProgress,
   onStartOnboarding,
   onContinueOnboarding,
+  learning,
 }) {
   const { token, user } = useAuth();
   const [clientLocal, setClientLocal] = useState(clientProp);
@@ -1090,6 +1172,17 @@ function ClientDetailPane({
       .finally(() => setServiceJobHistoryLoading(false));
   }, [clientProp?.id, token]);
   const client = clientLocal || clientProp;
+  // A workspace group opens the view this technician actually uses inside it.
+  // `null` means "nothing learned" — the group keeps its declared first view.
+  const resolveGroupEntry = (group) => {
+    const preferred = preferredTarget(group.tabs, {
+      surface: LEARNING_VIEW,
+      personal: learning?.personal,
+      team: learning?.team,
+      idOf: (tab) => tab.value,
+    });
+    return preferred ? { value: preferred.value, label: preferred.label } : null;
+  };
   const integrations = client.integrations || {};
   const clientMrr = Number(client.mrr) || 0;
   const clientOverdueAmount = Number(client.overdue_amount) || 0;
@@ -1272,7 +1365,14 @@ function ClientDetailPane({
           <div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Common work</p><p className="mt-1 text-sm text-muted-foreground">Start the work technicians need most; related actions stay available under More.</p></div>
           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"><CheckCircle2 className="h-3 w-3 text-emerald-400" />Every action remains linked to {client.name}</span>
         </div>
-        <ClientQuickActionsStrip client={client} onOpenWarRoom={() => setTab("warroom")} />
+        <ClientQuickActionsStrip
+          client={client}
+          onOpenWarRoom={() => setTab("warroom")}
+          personal={learning?.personal}
+          team={learning?.team}
+          onRecordAction={learning?.record}
+          onForgetLearning={learning?.forget}
+        />
       </section>}
 
       {/* Quick metrics strip */}
@@ -1321,7 +1421,7 @@ function ClientDetailPane({
 
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/25 shadow-sm">
-        <ClientWorkspaceNavigation value={tab} onChange={setTab} />
+        <ClientWorkspaceNavigation value={tab} onChange={setTab} resolveEntry={resolveGroupEntry} />
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           <TabsContent value="overview" className="mt-0 space-y-3">
