@@ -27,10 +27,10 @@ import { LOCAL_PREVIEW_TICKETS, isLocalTicketPreview, normaliseTriageQueue } fro
 import { toast } from "sonner";
 import {
   Inbox, Loader2, Plus, Trash2, AlertTriangle, CheckCircle, Save, Webhook, Send,
-  Heart, Calendar, Phone, KeySquare, Briefcase, BookOpen,
-  ShieldOff, ScanLine, BarChart3, BellRing, FileSpreadsheet, Activity, MapPin,
+  Heart, Calendar, KeySquare, Briefcase, BookOpen,
+  ShieldOff, ScanLine, BarChart3, BellRing, FileSpreadsheet,
   Sparkles, RefreshCw, GitMerge, Workflow, Layers, Zap, Users, Receipt, ChevronRight,
-  Shield, Clock, Copy, PhoneCall,
+  Shield, Clock,
 } from "lucide-react";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 
@@ -643,59 +643,6 @@ export function SaasSpendPage() {
   );
 }
 
-/* ============== DEFENDER HEALTH ============== */
-export function DefenderHealthPage() {
-  const { headers } = useApi();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const load = async ({ quiet = false } = {}) => {
-    if (quiet) setRefreshing(true);
-    else setLoading(true);
-    try {
-      const response = await axios.get(`${API}/pro-pack/defender-health`, { headers });
-      setData(response.data);
-      setLoadError("");
-    } catch {
-      const message = "Could not load endpoint protection posture.";
-      setLoadError(message);
-      if (quiet) toast.error(`${message} Current results remain visible.`);
-    } finally {
-      if (quiet) setRefreshing(false);
-      else setLoading(false);
-    }
-  };
-  useEffect(() => { load(); }, []); // eslint-disable-line
-  if (loading) return <WorkspaceLoadingState label="Loading Defender health" />;
-  if (!data) return <WorkspaceErrorState title="Endpoint protection posture is unavailable" description={loadError || "Defender health could not be loaded."} onRetry={load} retryLabel="Retry health check" />;
-  return (
-    <div className="p-6 space-y-4" data-testid="defender-health-page">
-      <PageHeader title="Defender / AV Health" subtitle="Endpoint anti-virus posture across all managed devices" icon={Activity}>
-        <Button variant="outline" size="sm" onClick={() => load({ quiet: true })} disabled={refreshing} data-testid="refresh-defender-health"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>
-      </PageHeader>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card><CardContent className="pt-4"><p className="text-[10px] uppercase">Total Devices</p><p className="text-3xl font-bold font-mono mt-1">{data.summary.total_devices}</p></CardContent></Card>
-        <Card className="border-emerald-500/30"><CardContent className="pt-4"><p className="text-[10px] uppercase text-emerald-300">Healthy</p><p className="text-3xl font-bold text-emerald-400 font-mono mt-1">{data.summary.healthy}</p></CardContent></Card>
-        <Card className="border-rose-500/30"><CardContent className="pt-4"><p className="text-[10px] uppercase text-rose-300">Unhealthy</p><p className="text-3xl font-bold text-rose-400 font-mono mt-1">{data.summary.unhealthy}</p></CardContent></Card>
-        <Card><CardContent className="pt-4"><p className="text-[10px] uppercase">Coverage</p><p className="text-3xl font-bold text-cyan-400 font-mono mt-1">{data.summary.coverage_pct}%</p></CardContent></Card>
-      </div>
-      <Card><CardContent className="p-0"><Table>
-        <TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Total</TableHead><TableHead>Healthy</TableHead><TableHead>Unhealthy</TableHead><TableHead>Unknown</TableHead></TableRow></TableHeader>
-        <TableBody>{data.by_client.map(c => (
-          <TableRow key={c.client_id}>
-            <TableCell>{c.client_name}</TableCell>
-            <TableCell className="font-mono">{c.total}</TableCell>
-            <TableCell className="font-mono text-emerald-400">{c.healthy}</TableCell>
-            <TableCell className="font-mono text-rose-400">{c.unhealthy}</TableCell>
-            <TableCell className="font-mono text-muted-foreground">{c.unknown}</TableCell>
-          </TableRow>
-        ))}</TableBody>
-      </Table></CardContent></Card>
-    </div>
-  );
-}
-
 /* ============== STOCKTAKE MOBILE ============== */
 export function StocktakeMobilePage() {
   const { headers } = useApi();
@@ -770,46 +717,6 @@ export function StocktakeMobilePage() {
           </div>
         </NexusWorkflowDialog>
       </Dialog>
-    </div>
-  );
-}
-
-/* ============== CRM PIPELINE ============== */
-export function CrmPipelinePage() {
-  const { headers } = useApi();
-  const [data, setData] = useState(null);
-  const fetch = () => axios.get(`${API}/pro-pack/crm/pipeline`, { headers }).then(r => setData(r.data));
-  useEffect(() => { fetch(); }, []); // eslint-disable-line
-  const move = async (id, stage) => {
-    try {
-      await axios.post(`${API}/pro-pack/crm/leads/${id}/move-stage`, { stage }, { headers });
-      toast.success(`Lead moved to ${stage}`);
-      fetch();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Could not move the lead");
-    }
-  };
-  if (!data) return <Loader2 className="w-6 h-6 mx-auto my-12 animate-spin" />;
-  return (
-    <div className="p-6 space-y-4" data-testid="crm-pipeline-page">
-      <PageHeader title="CRM Pipeline" subtitle={`Open pipeline value: $${data.total_pipeline_value.toLocaleString()}`} icon={MapPin} />
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-        {data.buckets.map(b => (
-          <Card key={b.stage} className={b.stage === "won" ? "border-emerald-500/30" : b.stage === "lost" ? "border-rose-500/30" : ""}>
-            <CardHeader className="pb-2"><CardTitle className="text-xs uppercase capitalize">{b.stage}<Badge variant="outline" className="ml-2 text-[9px]">{b.count}</Badge></CardTitle></CardHeader>
-            <CardContent className="space-y-2 px-2 pb-3">
-              <p className="text-[11px] text-muted-foreground font-mono">${b.value.toLocaleString()}</p>
-              {b.leads.map(L => (
-                <div key={L.id} className="text-xs p-2 rounded border bg-muted/30">
-                  <p className="font-medium truncate">{L.name}</p>
-                  <p className="text-[10px] text-muted-foreground">${(L.value || 0).toLocaleString()}</p>
-                  <Select onValueChange={s => move(L.id, s)}><SelectTrigger className="h-6 text-[10px] mt-1"><SelectValue placeholder="Move" /></SelectTrigger><SelectContent>{data.stages.filter(s => s !== L.stage).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
     </div>
   );
 }
@@ -988,38 +895,3 @@ export function FinancialAnalyticsHubPage() {
   );
 }
 
-/* ============== PHONE INTEGRATION SETTINGS ============== */
-export function PhoneIntegrationPage() {
-  const { headers } = useApi();
-  const [hookUrl] = useState(`${API}/pro-pack/phone/inbound`);
-  const [testOpen, setTestOpen] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
-  const copyWebhook = async () => {
-    try { await navigator.clipboard.writeText(hookUrl); toast.success("Webhook URL copied"); }
-    catch { toast.error("Could not copy the webhook URL"); }
-  };
-  const test = async () => {
-    setTesting(true);
-    try {
-      const r = await axios.post(`${API}/pro-pack/phone/inbound`, { caller_number: "+61400000000", caller_name: "Nexus test caller", callee_number: "+61800000000" }, { headers });
-      setTestResult(r.data); setTestOpen(false); toast.success(`Test ticket created: ${r.data.ticket_number}`);
-    } catch { toast.error("Test call could not create a ticket"); }
-    finally { setTesting(false); }
-  };
-  return (
-    <div className="space-y-5" data-testid="phone-integration-page">
-      <OperationalPageHeader eyebrow="Inbound communication" title="Phone System Integration" description="Turn approved PBX call events into a traceable ticket draft, matched to the caller’s client record whenever Nexus can prove the relationship." icon={Phone} tone="sky" actions={<Button size="sm" onClick={() => setTestOpen(true)} data-testid="test-phone-hook"><PhoneCall className="mr-1.5 h-4 w-4" />Run safe test</Button>} />
-      <Card className="border-sky-500/20"><CardContent className="pt-5 space-y-4">
-        <div className="flex items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-4"><Webhook className="mt-0.5 h-5 w-5 shrink-0 text-sky-300" /><div><p className="text-sm font-semibold">PBX-to-ticket intake</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Configure your trusted PBX integration to POST an incoming-call event here. Nexus creates a draft ticket with the call evidence, then a technician owns the response.</p></div></div>
-        <div><Label className="text-xs">Inbound webhook URL — POST this from your PBX:</Label>
-          <div className="flex gap-2"><code className="min-w-0 flex-1 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-xs leading-5 break-all">{hookUrl}</code><Button variant="outline" size="icon" onClick={copyWebhook} aria-label="Copy inbound webhook URL"><Copy className="h-4 w-4" /></Button></div>
-        </div>
-        <p className="text-xs text-muted-foreground">Body: <code className="font-mono">{`{caller_number, caller_name, callee_number}`}</code> — creates a draft ticket auto-linked to the caller's client.</p>
-        <div className="grid gap-3 sm:grid-cols-3">{[["1", "Receive call", "PBX posts a trusted inbound event."], ["2", "Match context", "Nexus matches caller number to client data."], ["3", "Create draft", "Ticket keeps caller, dialled number and time."]].map(([number, title, copy]) => <div key={number} className="rounded-lg border border-border/60 p-3"><span className="text-xs font-bold text-sky-300">{number}</span><p className="mt-2 text-sm font-medium">{title}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{copy}</p></div>)}</div>
-      </CardContent></Card>
-      {testResult && <Card className="border-emerald-500/25 bg-emerald-500/[0.05]"><CardContent className="flex flex-wrap items-center justify-between gap-3 pt-4"><div><p className="text-sm font-semibold text-emerald-200">Test event received and ticket drafted</p><p className="mt-1 text-xs text-muted-foreground">{testResult.ticket_number} is ready for a technician to review in the ticket queue.</p></div><Button variant="outline" size="sm" asChild><a href={`/tickets?ticket=${encodeURIComponent(testResult.ticket_id)}`}>Open test ticket</a></Button></CardContent></Card>}
-      <Dialog open={testOpen} onOpenChange={setTestOpen}><NexusWorkflowDialog eyebrow="Inbound communication" title="Run phone integration test" description="Nexus will submit a clearly marked test call and create one draft ticket. It does not dial a number or contact a customer." icon={PhoneCall} tone="sky" footer={<><Button variant="outline" onClick={() => setTestOpen(false)}>Cancel</Button><Button onClick={test} disabled={testing} data-testid="confirm-phone-hook-test">{testing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{testing ? "Creating test…" : "Create test ticket"}</Button></>}><div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-4 text-sm leading-6 text-muted-foreground"><p className="font-semibold text-foreground">What this proves</p><p className="mt-1">Nexus accepts the event shape and can turn it into a visible ticket draft. Configure the PBX webhook only after your integration credentials and network path are ready.</p></div></NexusWorkflowDialog></Dialog>
-    </div>
-  );
-}
