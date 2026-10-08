@@ -56,8 +56,8 @@ import {
   resolveClientHealthBand,
 } from "@/lib/clientHealthBands";
 import { apiErrorMessage } from "@/lib/apiErrorMessage";
-import { LEARNING_VIEW, preferredTarget } from "@/lib/clientWorkspaceLearning";
-import { useClientWorkspaceLearning } from "@/hooks/useClientWorkspaceLearning";
+import { LEARNING_WORKSPACES, LEARNING_VIEW, preferredTarget } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 
 const EMPTY_CREATE_FORM = { name: "", industry: "", email: "", phone: "", website: "", tier: "", lifecycle: "active" };
 
@@ -304,7 +304,7 @@ export default function ClientsPage() {
   const headers = { Authorization: `Bearer ${token}` };
   // What Nexus has learned about this technician's client-workspace habits. It
   // is presentation only: a failed read leaves the designed order untouched.
-  const learning = useClientWorkspaceLearning(token);
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.CLIENT);
   const [data, setData] = useState({ summary: null, clients: [] });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);

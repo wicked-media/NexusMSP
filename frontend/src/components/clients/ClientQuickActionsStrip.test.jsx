@@ -2,13 +2,13 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { toast } from "sonner";
-import { signalIndex } from "@/lib/clientWorkspaceLearning";
+import { signalIndex } from "@/lib/workspaceLearning";
 import ClientQuickActionsStrip from "./ClientQuickActionsStrip";
 
 // The `@/` alias is a webpack/craco alias with no jest mapping, so every aliased
 // import the strip makes is registered here. The ranking rules are the real
 // module: this test is about how the strip applies them.
-jest.mock("@/lib/clientWorkspaceLearning", () => jest.requireActual("../../lib/clientWorkspaceLearning"), { virtual: true });
+jest.mock("@/lib/workspaceLearning", () => jest.requireActual("../../lib/workspaceLearning"), { virtual: true });
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 jest.mock("react-router-dom", () => ({ useNavigate: jest.fn() }), { virtual: true });
 jest.mock("@/components/ui/button", () => ({

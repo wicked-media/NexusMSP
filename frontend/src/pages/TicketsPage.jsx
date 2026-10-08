@@ -62,6 +62,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
@@ -374,6 +376,10 @@ export default function TicketsPage() {
   const [createClientContacts, setCreateClientContacts] = useState([]);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Which detail views this technician (and the team) actually opens, so the tab
+  // bar can order itself. Deliberate tab choices are the evidence: landing on a
+  // ticket's default tab is not a choice, and recording it would freeze the bar.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.TICKETS);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -2489,6 +2495,10 @@ export default function TicketsPage() {
               <TicketWorkspaceTabs
                 activeTab={detailTab}
                 onTabChange={setDetailTab}
+                personal={learning.personal}
+                team={learning.team}
+                onRecordAction={learning.record}
+                onForgetLearning={learning.forget}
                 counts={{
                   conversation: ticketNotes.length + ticketEmails.length + ticketSms.length,
                   tasks: worksheetItems.length,
@@ -4172,6 +4182,10 @@ export default function TicketsPage() {
       <TicketModuleHeader
         title="Service Desk"
         subtitle={`${tickets.length} service records · Prioritise, assign and resolve client requests`}
+        personal={learning.personal}
+        team={learning.team}
+        onRecordAction={learning.record}
+        onForgetLearning={learning.forget}
         signal={criticalCount > 0 ? "critical" : staleCount > 0 ? "attention" : openCount > 0 ? "working" : "healthy"}
         signalLabel={criticalCount > 0 ? `${criticalCount} critical ticket${criticalCount === 1 ? "" : "s"}` : staleCount > 0 ? `${staleCount} ticket${staleCount === 1 ? "" : "s"} need an update` : openCount > 0 ? `${openCount} active ticket${openCount === 1 ? "" : "s"}` : "Queue is clear"}
         signalDescription="Live, access-scoped service evidence for the current queue."

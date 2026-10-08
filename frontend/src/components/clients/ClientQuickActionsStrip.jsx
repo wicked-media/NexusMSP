@@ -18,7 +18,7 @@ import {
   LEARNING_ACTION,
   learningHint,
   splitQuickActions,
-} from "@/lib/clientWorkspaceLearning";
+} from "@/lib/workspaceLearning";
 
 const NO_EVIDENCE = new Map();
 

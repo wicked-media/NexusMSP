@@ -2,7 +2,11 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { formatDistanceToNow } from "date-fns";
-import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, CheckCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Edit, Radar, Eye, Users, Terminal, Cloud, Sparkles, BarChart3, Zap, Flame, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock, CircleAlert, CircleCheck, Clock3 } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, CheckCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Edit, Radar, Eye, Users, Cloud, Sparkles, BarChart3, Zap, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock, CircleAlert, CircleCheck, Clock3 } from "lucide-react";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+import DeviceWorkspaceTabs from "@/components/devices/DeviceWorkspaceTabs";
+import ManagedAssetToolsMenu from "@/components/devices/ManagedAssetToolsMenu";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -13,7 +17,7 @@ import { Dialog } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import DeviceCommandStrip from "../components/devices/DeviceCommandStrip";
 import DeviceBulkBar from "../components/devices/DeviceBulkBar";
@@ -50,12 +54,6 @@ const ELEVATE_STATE_META = {
   unsupported_platform: { label: "Elevate unsupported", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-400" },
   paused: { label: "Elevate paused", className: "border-zinc-500/30 bg-zinc-500/15 text-zinc-400" },
 };
-const MANAGED_ASSET_TOOLS = [
-  { path: "/nexus-agent", label: "NexusOps Agent", icon: Terminal },
-  { path: "/maintenance-scheduler", label: "Maintenance", icon: CalendarClock },
-  { path: "/patch-tuesday", label: "Patch Tuesday", icon: Shield },
-];
-
 function toPercentage(value) {
   if (value === null || value === undefined || value === "") return null;
   const numeric = Number(value);
@@ -115,6 +113,9 @@ export default function DevicesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { token } = useAuth();
+  // Which managed-asset view and which desk tool this technician (and the team)
+  // actually opens. A deliberate choice is the evidence.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.DEVICES);
   const [devices, setDevices] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -497,34 +498,17 @@ export default function DevicesPage() {
       {/* Tabs */}
       <Tabs value={tab} onValueChange={setTab}>
         <div className="nx-fleet-workspace-tabs">
-          <TabsList className="nx-fleet-workspace-nav">
-            {[
-              { v: "pulse", l: "Fleet pulse", d: "Health and attention", Icon: Flame },
-              { v: "directory", l: "Asset register", d: "Inventory and actions", Icon: List },
-              { v: "insights", l: "Evidence", d: "Risk and lifecycle", Icon: BarChart3 },
-              { v: "map", l: "Site map", d: "Coverage by location", Icon: Cloud },
-            ].map(t => (
-              <TabsTrigger key={t.v} value={t.v}
-                className="nx-fleet-workspace-nav__item"
-                data-testid={`devices-tab-${t.v}`}>
-                <t.Icon />
-                <span><strong>{t.l}</strong><small>{t.d}</small></span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="nx-fleet-workspace-tabs__more" data-testid="managed-assets-more">
-                <MoreHorizontal className="h-3.5 w-3.5" /><span>Tools</span><ChevronDown className="h-3 w-3 opacity-60" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              {MANAGED_ASSET_TOOLS.map(tool => {
-                const Icon = tool.icon;
-                return <DropdownMenuItem key={tool.path} onSelect={() => navigate(tool.path)}><Icon className="mr-2 h-3.5 w-3.5" />{tool.label}</DropdownMenuItem>;
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <DeviceWorkspaceTabs
+            personal={learning.personal}
+            team={learning.team}
+            onRecordAction={learning.record}
+          />
+          <ManagedAssetToolsMenu
+            personal={learning.personal}
+            team={learning.team}
+            onRecordAction={learning.record}
+            onForgetLearning={learning.forget}
+          />
         </div>
 
         {/* Fleet Pulse */}

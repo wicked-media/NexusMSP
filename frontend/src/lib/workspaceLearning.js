@@ -1,10 +1,12 @@
 /**
- * Client workspace learning helpers.
+ * Learned workspace ordering helpers, shared by every Nexus workspace.
  *
- * The client workspace is larger than one screen: six navigation groups, more
- * than a dozen views, and ten quick actions. Nexus records which views a
- * technician opens and which actions they run, then uses that evidence to rank
- * the workspace — its own navigation, and which quick actions stay visible.
+ * Nexus workspaces are larger than one screen: the client workspace has six
+ * navigation groups and ten quick actions, the ticket workspace has twelve
+ * detail tabs and a desk-tools menu, the voice workspace has a catalogue of
+ * provider interfaces. Each workspace records which views a technician opens and
+ * which actions they run, then ranks itself with that evidence — its own
+ * navigation, and which actions stay visible.
  *
  * These helpers are deliberately pure and deliberately conservative:
  *
@@ -15,12 +17,31 @@
  *   - Personal evidence always outranks the team aggregate, so another
  *     technician's habits can never override yours.
  *
- * The learning is presentation only. It cannot reveal a client, grant access or
+ * Evidence is partitioned per workspace by the server, so these helpers never
+ * need to know which workspace they are ranking: the indexes they are handed
+ * already contain one workspace's evidence and nothing else. A view named
+ * `billing` in the invoice workspace is therefore never confused with an action
+ * named `billing` in the client workspace.
+ *
+ * The learning is presentation only. It cannot reveal a record, grant access or
  * promote an action the technician could not already run.
  */
 
 export const LEARNING_VIEW = "view";
 export const LEARNING_ACTION = "action";
+
+/**
+ * The workspaces that may remember how they are used. The backend owns the
+ * authoritative registry and rejects any slug that is not in it, so a typo here
+ * fails loudly in development instead of quietly creating a parallel memory.
+ */
+export const LEARNING_WORKSPACES = Object.freeze({
+  CLIENT: "client",
+  TICKETS: "tickets",
+  INVOICES: "invoices",
+  VOICE: "voice",
+  DEVICES: "devices",
+});
 
 /**
  * Signals needed before the workspace reorders itself. Set above a single
@@ -33,6 +54,26 @@ export const LEARNING_MIN_SIGNALS = 4;
 export const VISIBLE_ACTION_SLOTS = 3;
 
 const SURFACES = new Set([LEARNING_VIEW, LEARNING_ACTION]);
+
+/**
+ * Normalise a workspace target into the short lowercase identifier the server
+ * accepts (`^[a-z][a-z0-9_]{0,47}$`).
+ *
+ * Most workspaces already name their targets that way. The voice workspace is
+ * the exception: its provider interfaces are dotted identifiers such as
+ * `extension.list`, which describe the interface perfectly but are not legal
+ * slugs. Normalising in one place lets a component hand over the provider's own
+ * identifier while recording and ranking still resolve to one key — and it means
+ * an unusable target is dropped instead of being sent to the server to fail.
+ */
+export function learningSlug(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^[^a-z]+/, "")
+    .slice(0, 48)
+    .replace(/_+$/, "");
+}
 
 function safeCount(value) {
   const numeric = Number(value);
@@ -66,8 +107,9 @@ export function signalIndex(rows) {
 }
 
 function evidenceFor(surface, id, personal, team) {
-  if (!id) return { mine: 0, theirs: 0 };
-  const key = `${surface}:${String(id).trim().toLowerCase()}`;
+  const target = learningSlug(id);
+  if (!target) return { mine: 0, theirs: 0 };
+  const key = `${surface}:${target}`;
   return {
     mine: personal.get(key)?.count || 0,
     theirs: team.get(key)?.count || 0,
@@ -117,6 +159,50 @@ export function preferredTarget(items, options = {}) {
   const choice = ranked[0];
   if (choice === list[0]) return null;
   return choice;
+}
+
+/**
+ * The item with the strongest real evidence, or `null` when nothing has earned it.
+ *
+ * `preferredTarget` answers "should the workspace change anything?", which reads
+ * a declared-first item as "no change". Some surfaces need the other question —
+ * "which item has a technician actually chosen?" — because their designed
+ * default is not the declared-first item (the voice console opens on the
+ * read-only Extension roster rather than the alphabetically first family).
+ */
+export function mostUsed(items, {
+  surface,
+  personal = new Map(),
+  team = new Map(),
+  idOf,
+  minimum = LEARNING_MIN_SIGNALS,
+} = {}) {
+  const ranked = rankByUse(items, { surface, personal, team, idOf, minimum });
+  return ranked.find((item) => {
+    const { mine, theirs } = evidenceFor(surface, targetId(item, idOf), personal, team);
+    return mine >= minimum || theirs >= minimum;
+  }) || null;
+}
+
+/**
+ * The items the workspace has gathered enough evidence for.
+ *
+ * This is the "may leave the overflow menu" primitive: an item a technician or
+ * their team genuinely uses earns a place in the visible bar, and one that is
+ * not really used stays exactly where the workspace declared it.
+ */
+export function promotedItems(items, options = {}) {
+  const {
+    surface,
+    personal = new Map(),
+    team = new Map(),
+    idOf,
+    minimum = LEARNING_MIN_SIGNALS,
+  } = options;
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const { mine, theirs } = evidenceFor(surface, targetId(item, idOf), personal, team);
+    return mine >= minimum || theirs >= minimum;
+  });
 }
 
 /** Split quick actions into the visible strip and the overflow menu. */

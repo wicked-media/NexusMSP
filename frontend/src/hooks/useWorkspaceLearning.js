@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { API } from "@/App";
-import { signalIndex } from "@/lib/clientWorkspaceLearning";
+import { learningSlug, signalIndex } from "@/lib/workspaceLearning";
 
 const EMPTY_MEMORY = { personal: [], team: [], memory: null };
 
@@ -13,23 +13,28 @@ const EMPTY_MEMORY = { personal: [], team: [], memory: null };
 const SIGNAL_DEDUPE_MS = 5000;
 
 /**
- * What Nexus has learned about this technician's client workspace habits.
+ * What Nexus has learned about this technician's use of one workspace.
  *
- * Reading and recording are both best effort by design: the workspace has a
- * designed order and always works without memory, so a failed read leaves that
- * order in place and a failed write is not worth interrupting anybody's work
- * over. Forgetting is the exception — it changes what the workspace shows, so it
- * reports its own failure to the caller.
+ * The workspace is part of the request, so evidence from one workspace can never
+ * order another: a technician's habits in the ticket workspace do not reorder the
+ * invoice workspace. Reading and recording are both best effort by design — every
+ * workspace has a designed order and always works without memory, so a failed
+ * read leaves that order in place and a failed write is not worth interrupting
+ * anybody's work over. Forgetting is the exception: it changes what the workspace
+ * shows, so it reports its own failure to the caller.
  */
-export function useClientWorkspaceLearning(token) {
+export function useWorkspaceLearning(token, workspace) {
   const [memory, setMemory] = useState(EMPTY_MEMORY);
   const recentSignals = useRef(new Map());
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const base = `${API}/workspace-learning/${workspace}`;
 
   useEffect(() => {
-    if (!token) return undefined;
+    setMemory(EMPTY_MEMORY);
+    recentSignals.current.clear();
+    if (!token || !workspace) return undefined;
     let active = true;
-    axios.get(`${API}/client-workspace/learning`, { headers })
+    axios.get(base, { headers })
       .then(({ data }) => {
         if (!active) return;
         setMemory({
@@ -40,26 +45,28 @@ export function useClientWorkspaceLearning(token) {
       })
       .catch(() => { /* No memory yet: the workspace keeps its designed order. */ });
     return () => { active = false; };
-  }, [token, headers]);
+  }, [token, workspace, base, headers]);
 
   const record = useCallback((surface, target) => {
-    if (!token || !surface || !target) return;
-    const key = `${surface}:${String(target).trim().toLowerCase()}`;
+    if (!token || !workspace || !surface) return;
+    const slug = learningSlug(target);
+    if (!slug) return;
+    const key = `${surface}:${slug}`;
     const now = Date.now();
     const last = recentSignals.current.get(key) || 0;
     if (now - last < SIGNAL_DEDUPE_MS) return;
     recentSignals.current.set(key, now);
     axios
-      .post(`${API}/client-workspace/learning/signals`, { surface, target: key.slice(surface.length + 1) }, { headers })
+      .post(`${base}/signals`, { surface, target: slug }, { headers })
       .catch(() => { /* Learning is an enhancement; it never blocks the workspace. */ });
-  }, [token, headers]);
+  }, [token, workspace, base, headers]);
 
   const forget = useCallback(async () => {
-    const response = await axios.delete(`${API}/client-workspace/learning`, { headers });
+    const response = await axios.delete(base, { headers });
     recentSignals.current.clear();
     setMemory(EMPTY_MEMORY);
     return Number(response.data?.removed || 0);
-  }, [headers]);
+  }, [base, headers]);
 
   const personal = useMemo(() => signalIndex(memory.personal), [memory.personal]);
   const team = useMemo(() => signalIndex(memory.team), [memory.team]);
@@ -70,4 +77,4 @@ export function useClientWorkspaceLearning(token) {
   );
 }
 
-export default useClientWorkspaceLearning;
+export default useWorkspaceLearning;

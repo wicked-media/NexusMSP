@@ -2,12 +2,16 @@ import {
   LEARNING_ACTION,
   LEARNING_MIN_SIGNALS,
   LEARNING_VIEW,
+  LEARNING_WORKSPACES,
   learningHint,
+  learningSlug,
+  mostUsed,
   preferredTarget,
+  promotedItems,
   rankByUse,
   signalIndex,
   splitQuickActions,
-} from "./clientWorkspaceLearning";
+} from "./workspaceLearning";
 
 const rows = (surface, entries) => entries.map(([target, count]) => ({ surface, target, count, last_used_at: "2026-05-01T00:00:00+00:00" }));
 
@@ -16,7 +20,14 @@ const views = [
   { value: "subscriptions" },
 ];
 
-describe("client workspace learning helpers", () => {
+describe("workspace learning helpers", () => {
+  test("names exactly the workspaces the backend registry accepts", () => {
+    expect(Object.values(LEARNING_WORKSPACES).sort()).toEqual(
+      ["client", "devices", "invoices", "tickets", "voice"].sort(),
+    );
+  });
+
+
   test("indexes only well-formed evidence and ignores anything else", () => {
     const index = signalIndex([
       ...rows(LEARNING_VIEW, [["billing", 6]]),
@@ -115,6 +126,64 @@ describe("client workspace learning helpers", () => {
     expect(learned.visible.map((action) => action.id)).toEqual(["health", "device", "email"]);
     expect(learned.overflow.map((action) => action.id)).toEqual(["schedule", "invoice"]);
     expect(splitQuickActions(actions, { surface: LEARNING_ACTION, idOf: (action) => action.id, limit: 1 }).visible).toHaveLength(1);
+  });
+
+  test("only an item with real evidence may leave the overflow menu", () => {
+    const actions = [{ id: "device" }, { id: "email" }, { id: "health" }];
+    const idOf = (action) => action.id;
+    const thin = signalIndex(rows(LEARNING_ACTION, [["health", LEARNING_MIN_SIGNALS - 1]]));
+    const real = signalIndex(rows(LEARNING_ACTION, [["health", LEARNING_MIN_SIGNALS]]));
+    const team = signalIndex(rows(LEARNING_ACTION, [["email", 12]]));
+
+    expect(promotedItems(actions, { surface: LEARNING_ACTION, personal: thin, idOf })).toEqual([]);
+    expect(promotedItems(actions, { surface: LEARNING_ACTION, personal: real, idOf }).map(idOf)).toEqual(["health"]);
+    // A team staple is promoted even for a technician who has never used it.
+    expect(promotedItems(actions, { surface: LEARNING_ACTION, team, idOf }).map(idOf)).toEqual(["email"]);
+    // A name used in another surface of the same workspace is not evidence here.
+    expect(promotedItems(actions, { surface: LEARNING_VIEW, personal: real, idOf })).toEqual([]);
+  });
+
+  test("a target is stored under the one slug the server accepts", () => {
+    // The voice catalogue names its interfaces `extension.list`, which is how the
+    // console shows them but not a legal stored slug.
+    expect(learningSlug("extension.list")).toBe("extension_list");
+    expect(learningSlug("family_Call Reports")).toBe("family_call_reports");
+    expect(learningSlug("  Patch Tuesday ")).toBe("patch_tuesday");
+    // A leading digit or an empty value can never become a valid target.
+    expect(learningSlug("2fa")).toBe("fa");
+    expect(learningSlug("---")).toBe("");
+    expect(learningSlug(undefined)).toBe("");
+    expect(learningSlug("x".repeat(80)).length).toBeLessThanOrEqual(48);
+
+    // Evidence recorded under the provider's own identifier resolves when the
+    // workspace ranks it, so a dotted id is not silently dropped.
+    const personal = signalIndex(rows(LEARNING_VIEW, [["extension_list", 7]]));
+    const operations = [{ id: "extension.list" }, { id: "extension.get" }];
+    expect(rankByUse(operations, { surface: LEARNING_VIEW, personal, idOf: (item) => item.id })[0].id)
+      .toBe("extension.list");
+  });
+
+  test("mostUsed names the strongest evidence, or nothing when the workspace has none", () => {
+    const families = [{ category: "Call Reports" }, { category: "Extension" }];
+    const idOf = (family) => family.category;
+    // Stored evidence is always the normalised slug, so it matches however the
+    // caller names the item.
+    const thin = signalIndex(rows(LEARNING_VIEW, [["extension", LEARNING_MIN_SIGNALS - 1]]));
+    const real = signalIndex(rows(LEARNING_VIEW, [["extension", 5], ["call_reports", 9]]));
+
+    expect(mostUsed(families, { surface: LEARNING_VIEW, idOf })).toBeNull();
+    // The same threshold as every other ranking rule: nothing moves on a stray click.
+    expect(mostUsed(families, { surface: LEARNING_VIEW, personal: thin, idOf })).toBeNull();
+    expect(mostUsed(families, { surface: LEARNING_VIEW, personal: real, idOf }).category).toBe("Call Reports");
+    // A team staple is the answer for a technician who has never chosen one.
+    const team = signalIndex(rows(LEARNING_VIEW, [["extension", 12]]));
+    expect(mostUsed(families, { surface: LEARNING_VIEW, team, idOf }).category).toBe("Extension");
+    // The declared-first item counts too: unlike `preferredTarget`, this asks which
+    // item was chosen, not whether the workspace should change anything.
+    const declaredFirstWins = signalIndex(rows(LEARNING_VIEW, [["call_reports", 9]]));
+    expect(mostUsed(families, { surface: LEARNING_VIEW, personal: declaredFirstWins, idOf }).category)
+      .toBe("Call Reports");
+    expect(preferredTarget(families, { surface: LEARNING_VIEW, personal: declaredFirstWins, idOf })).toBeNull();
   });
 
   test("the workspace only claims to be adapted when it has the evidence", () => {

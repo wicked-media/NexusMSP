@@ -16,10 +16,69 @@ import {
   cellValue,
   resultRows,
 } from "@/lib/voiceCapability";
-import { AlertTriangle, Loader2, Play, Search, SquareTerminal } from "lucide-react";
+import { AlertTriangle, Loader2, Play, Search, Sparkles, SquareTerminal } from "lucide-react";
 import { toast } from "sonner";
+import {
+  LEARNING_ACTION,
+  LEARNING_VIEW,
+  learningHint,
+  learningSlug,
+  mostUsed,
+  rankByUse,
+} from "@/lib/workspaceLearning";
 
-export default function VoiceCapabilityConsole({ api, headers, pbxs = [], pbxId, onPbxChange }) {
+const NO_EVIDENCE = new Map();
+
+/**
+ * The remembered identifier for a capability family.
+ *
+ * Families are a different kind of choice from an interface, so they get their
+ * own prefix: a family named `Recording` and an interface named
+ * `recording.list` are two separate pieces of evidence, not one.
+ */
+const familyTarget = (category) => learningSlug(`family_${category}`);
+
+/**
+ * The provider's own identifiers are dotted (`extension.list`), which is how the
+ * catalogue names them and how the console shows them. The workspace memory
+ * stores short slugs, so the console converts once at each boundary — what it
+ * records and what it reads are then the same key.
+ */
+const operationTarget = (operation) => learningSlug(operation.id);
+
+/** The interface a family opens on when nothing has been chosen yet. */
+function firstRunnableIn(items = []) {
+  return items.find((item) => !item.proxied && item.access === "read")
+    || items.find((item) => !item.proxied)
+    || items[0];
+}
+
+/**
+ * PBX capability console.
+ *
+ * The catalogue is 139 interfaces behind ten families, which is more than one
+ * screen can show. Nexus remembers the family and the interface a technician
+ * actually works in and opens the console there, and orders the interfaces of
+ * the current family around that evidence, so a technician who lives in
+ * `extension.list` stops scrolling for it every time.
+ *
+ * Two safety rules are deliberately kept in front of the memory:
+ *
+ *   - With no evidence the console lands exactly where it always did, on the
+ *     read-only Extension roster, so a first visit cannot invite a command.
+ *   - A destructive or artifact-route interface is never preselected, however
+ *     often it is used; removing provider state stays one deliberate click away.
+ */
+export default function VoiceCapabilityConsole({
+  api,
+  headers,
+  pbxs = [],
+  pbxId,
+  onPbxChange,
+  personal = NO_EVIDENCE,
+  team = NO_EVIDENCE,
+  onRecordAction,
+}) {
   const [catalogue, setCatalogue] = useState(null);
   const [catalogueError, setCatalogueError] = useState(false);
   const [catalogueBusy, setCatalogueBusy] = useState(true);
@@ -54,41 +113,70 @@ export default function VoiceCapabilityConsole({ api, headers, pbxs = [], pbxId,
   // released as soon as the operator moves on.
   useEffect(() => () => { if (audio?.url) URL.revokeObjectURL(audio.url); }, [audio]);
 
+  const familyRankOptions = useMemo(
+    () => ({ surface: LEARNING_VIEW, personal, team, idOf: (item) => familyTarget(item.category) }),
+    [personal, team],
+  );
+  const operationRankOptions = useMemo(
+    () => ({ surface: LEARNING_VIEW, personal, team, idOf: operationTarget }),
+    [personal, team],
+  );
   const families = useMemo(() => catalogue?.categories || [], [catalogue]);
   // Opening on a family that only changes state would invite an accidental
-  // command, so the console lands on the extension roster like the workspace does.
-  const family = useMemo(
-    () => families.find((item) => item.category === category) || families.find((item) => item.category === "Extension") || families[0],
-    [families, category],
+  // command, so with no evidence the console lands on the extension roster, as
+  // it always has. Only real evidence moves it.
+  const rememberedFamily = useMemo(
+    () => (category ? null : mostUsed(families, familyRankOptions)),
+    [category, families, familyRankOptions],
   );
-  const familyOperations = useMemo(() => (family?.operations || []).filter((operation) => {
+  const family = useMemo(
+    () => families.find((item) => item.category === category) || rememberedFamily || families.find((item) => item.category === "Extension") || families[0],
+    [families, category, rememberedFamily],
+  );
+  // The strongest evidence about any interface of the current family, so the
+  // console can say honestly whether it landed somewhere it remembers.
+  const rememberedOperation = useMemo(
+    () => mostUsed(family?.operations || [], operationRankOptions),
+    [family, operationRankOptions],
+  );
+  const hint = learningHint({ surface: LEARNING_VIEW, personal, team });
+  const familyOperations = useMemo(() => rankByUse(family?.operations || [], operationRankOptions).filter((operation) => {
     const needle = operationQuery.trim().toLowerCase();
     if (!needle) return true;
     return `${operation.id} ${operation.summary}`.toLowerCase().includes(needle);
-  }), [family, operationQuery]);
+  }), [family, operationQuery, operationRankOptions]);
   const operation = useMemo(
     () => (family?.operations || []).find((item) => item.id === operationId),
     [family, operationId],
   );
 
-  // Keep a valid selection whenever the catalogue or the family changes.
+  // Keep a valid selection whenever the catalogue, the family or the memory
+  // changes. A remembered interface is only landed on when it cannot remove
+  // provider state, and only while the technician is still sitting on the
+  // family's safe default — a selection they made themselves is never taken away.
   useEffect(() => {
     if (!family) return;
-    if (family.operations.some((item) => item.id === operationId)) return;
-    const firstRunnable = family.operations.find((item) => !item.proxied && item.access === "read")
-      || family.operations.find((item) => !item.proxied)
-      || family.operations[0];
-    setOperationId(firstRunnable?.id || "");
+    const safeRemembered = rememberedOperation && !rememberedOperation.destructive && !rememberedOperation.proxied
+      ? rememberedOperation
+      : null;
+    if (family.operations.some((item) => item.id === operationId)) {
+      // The technician already has a valid interface open. Only the family's
+      // untouched safe default may be replaced by the remembered one.
+      if (!safeRemembered || operationId !== firstRunnableIn(family.operations)?.id) return;
+      if (safeRemembered.id === operationId) return;
+    }
+    setOperationId((safeRemembered || firstRunnableIn(family.operations))?.id || "");
     setValues({});
     setBody("");
     setResult(null);
-  }, [family, operationId]);
+  }, [family, operationId, rememberedOperation]);
 
   const selectOperation = (next) => {
     setOperationId(next.id);
     setValues({});
     setBody("");
     setResult(null);
+    onRecordAction?.(LEARNING_VIEW, operationTarget(next));
   };
 
   const declaredParams = operation?.params || [];
@@ -139,6 +227,9 @@ export default function VoiceCapabilityConsole({ api, headers, pbxs = [], pbxId,
       }
       setResult(response.data);
       setConfirmOpen(false);
+      // Running the interface is the evidence that it is genuinely used; a
+      // failed attempt is not, so nothing is recorded on the error path.
+      onRecordAction?.(LEARNING_ACTION, operationTarget(operation));
       toast.success(`${operation.id} completed against the PBX`);
     } catch (error) {
       setResult(null);
@@ -160,12 +251,26 @@ export default function VoiceCapabilityConsole({ api, headers, pbxs = [], pbxId,
 
   return <div className="grid gap-4 lg:grid-cols-[minmax(0,260px)_minmax(0,1fr)]" data-testid="voice-capability-console">
     <Card className="h-fit">
-      <CardHeader className="pb-3"><CardTitle className="text-sm">Capability families</CardTitle><CardDescription>{catalogue?.operation_count || 0} PBX interfaces · {catalogue?.write_count || 0} change state</CardDescription></CardHeader>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">Capability families</CardTitle>
+        <CardDescription>{catalogue?.operation_count || 0} PBX interfaces · {catalogue?.write_count || 0} change state</CardDescription>
+        {hint && (rememberedFamily || rememberedOperation) && (
+          <Badge
+            variant="outline"
+            data-testid="voice-capability-learning"
+            data-learning-tone={hint.tone}
+            title={hint.detail}
+            className="w-fit gap-1 border-sky-500/25 bg-sky-500/[0.07] text-[10px] font-medium text-sky-200"
+          >
+            <Sparkles className="h-3 w-3" />{hint.label}
+          </Badge>
+        )}
+      </CardHeader>
       <CardContent className="space-y-1 p-2 pt-0">
         {families.map((item) => <button
           type="button"
           key={item.category}
-          onClick={() => { setCategory(item.category); setOperationQuery(""); }}
+          onClick={() => { setCategory(item.category); setOperationQuery(""); onRecordAction?.(LEARNING_VIEW, familyTarget(item.category)); }}
           data-testid={`voice-capability-family-${item.category.toLowerCase().replaceAll(" ", "-")}`}
           className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${item.category === family?.category ? "bg-sky-500/10 text-sky-100" : "text-muted-foreground hover:bg-muted/60"}`}
         >

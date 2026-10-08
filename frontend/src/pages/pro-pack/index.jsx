@@ -16,6 +16,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TicketModuleHeader } from "@/components/tickets/TicketWorkspaceShell";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
@@ -51,7 +53,10 @@ const PageHeader = ({ title, subtitle, icon: Icon = Sparkles, children }) => (
 /* ============== TRIAGE QUEUE ============== */
 export function TriageQueuePage({ embedded = false }) {
   const { headers } = useApi();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
+  // Triage is a ticket module, so it shares the ticket workspace's learned
+  // memory for the desk-tools menu with the queue, SLA and dispatch modules.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.TICKETS);
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState(false);
@@ -79,6 +84,10 @@ export function TriageQueuePage({ embedded = false }) {
       {!embedded && <TicketModuleHeader
         title="Triage queue"
         subtitle={`${data.count} unassigned · oldest ${Math.floor(data.oldest_age_minutes / 60)}h ${data.oldest_age_minutes % 60}m · ordered for rapid ownership`}
+        personal={learning.personal}
+        team={learning.team}
+        onRecordAction={learning.record}
+        onForgetLearning={learning.forget}
         actions={
         <Button variant="outline" size="sm" onClick={load}><RefreshCw className="w-3.5 h-3.5 mr-1" />Refresh</Button>
         }

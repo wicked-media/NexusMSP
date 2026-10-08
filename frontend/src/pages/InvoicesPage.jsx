@@ -19,10 +19,13 @@ import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import InvoiceDetailTabs from "@/components/invoices/InvoiceDetailTabs";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import HeroTile from "@/components/HeroTile";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
@@ -325,6 +328,9 @@ export default function InvoicesPage() {
   const [pdfLoading, setPdfLoading] = useState(false);
   // Enhanced state
   const [detailTab, setDetailTab] = useState("items");
+  // Which invoice detail view this technician (and the team) actually opens, so
+  // the tab bar can order itself. Deliberate tab clicks are the evidence.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.INVOICES);
   const [emailHistory, setEmailHistory] = useState([]);
   const [emailDialog, setEmailDialog] = useState(false);
   const [emailForm, setEmailForm] = useState({ email: "", subject: "", message: "" });
@@ -1578,13 +1584,19 @@ export default function InvoicesPage() {
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
           <div className="space-y-4 xl:col-span-8">
             <Tabs value={detailTab} onValueChange={setDetailTab}>
-              <TabsList className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/[0.14] p-1">
-                <TabsTrigger value="items" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-items">Line Items</TabsTrigger>
-                <TabsTrigger value="payments" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-payments">Payments ({(inv.payments || []).length})</TabsTrigger>
-                {isSplitParent && <TabsTrigger value="split" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-violet-500/[0.14] data-[state=active]:text-violet-100" data-testid="tab-inv-split-billing">Payer invoices ({(inv.split_billing?.allocations || []).length})</TabsTrigger>}
-                <TabsTrigger value="emails" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-emails">Emails ({emailHistory.length})</TabsTrigger>
-                <TabsTrigger value="audit" className="h-9 shrink-0 rounded-lg px-3 text-xs data-[state=active]:bg-cyan-500/[0.14] data-[state=active]:text-cyan-100" data-testid="tab-inv-audit">Audit ({invoiceActivity.length})</TabsTrigger>
-              </TabsList>
+              <InvoiceDetailTabs
+                isSplitParent={isSplitParent}
+                counts={{
+                  payments: (inv.payments || []).length,
+                  split: (inv.split_billing?.allocations || []).length,
+                  emails: emailHistory.length,
+                  audit: invoiceActivity.length,
+                }}
+                personal={learning.personal}
+                team={learning.team}
+                onRecordAction={learning.record}
+                onForgetLearning={learning.forget}
+              />
 
               <TabsContent value="items">
                 <Card className="mt-2">

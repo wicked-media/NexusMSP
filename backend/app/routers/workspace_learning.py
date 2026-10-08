@@ -1,24 +1,28 @@
-"""Learned memory for the client workspace.
+"""Learned ordering memory for Nexus workspaces.
 
-The client workspace carries more views and actions than any single screen
-should show at once. Instead of guessing which ones "technicians use most",
-Nexus learns: every time a technician opens a workspace view or runs a quick
-action, one bounded counter advances. The workspace then ranks its own
-navigation and promotes the actions that are actually used, falling back to the
-designed order whenever there is no evidence — including on first use, and after
-a technician forgets their memory.
+Every Nexus workspace carries more views, tools and buttons than one screen
+should show at once — the client workspace has six navigation groups and ten
+quick actions, the ticket workspace has twelve detail tabs plus a desk-tools
+menu, the voice workspace has ten views behind a catalogue of Yeastar
+capabilities. Instead of guessing which ones "technicians use most", Nexus
+learns: every time a technician opens a workspace view or runs an action, one
+bounded counter advances. The workspace then ranks its own navigation and
+promotes the actions that are actually used, falling back to the designed order
+whenever there is no evidence — including on first use, and after a technician
+forgets their memory.
 
 What is stored is deliberately small and deliberately not customer data: one
-count and one last-used timestamp per (tenant, technician, surface, target).
-There is no client ID, no page content, no free text and no session detail, so
-a client-attributed behavioural profile is never created. Targets are restricted
-to short lowercase slugs, which keeps the key space bounded and stops anything
-arbitrary from being written here.
+count and one last-used timestamp per (tenant, technician, workspace, surface,
+target). There is no client ID, no record ID, no page content, no free text and
+no session detail, so a customer-attributed or per-record behavioural profile is
+never created. Workspaces and targets are restricted to short lowercase slugs,
+which keeps the key space bounded and stops anything arbitrary from being
+written here.
 
 Only aggregate counts are ever returned for the tenant: a technician can see
-what the team uses most, never who used it. Personal rows are readable only by
-the technician who created them, and every query is partitioned by the caller's
-Nexus platform tenant.
+what the team uses most in a workspace, never who used it. Personal rows are
+readable only by the technician who created them, and every query is partitioned
+by the caller's Nexus platform tenant.
 """
 
 from __future__ import annotations
@@ -35,16 +39,26 @@ from app.services.scope_permissions import platform_tenant_id, tenant_scoped_que
 
 router = APIRouter()
 
-# Only these two kinds of evidence are recorded. A "view" is a client workspace
-# view (a Nexus tab slug); an "action" is a quick action a technician ran.
+# The workspaces that may remember how they are used. A technician's habit in one
+# workspace never leaks into another: the workspace is part of the stored key and
+# part of every read. Adding a workspace is a deliberate, reviewable change here
+# rather than a silent typo creating a parallel key space in the database.
+WORKSPACES = ("client", "tickets", "invoices", "voice", "devices")
+
+# Only these two kinds of evidence are recorded. A "view" is a workspace view (a
+# Nexus tab or screen slug); an "action" is a tool, quick action or button a
+# technician ran.
 SURFACES = ("view", "action")
 
 _TARGET_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 
-# A technician can accumulate at most this many remembered targets per surface.
-# Beyond it the least recently used target is forgotten, so memory stays bounded
-# instead of growing with every UI value a future release introduces.
-_MAX_TARGETS_PER_SURFACE = 32
+# A technician can accumulate at most this many remembered targets per surface of
+# each workspace. Beyond it the least recently used target is forgotten, so
+# memory stays bounded instead of growing with every UI value a future release
+# introduces. The cap is per workspace and surface, so a large catalogue (the
+# voice workspace's provider interfaces) cannot evict the client workspace's
+# shortcuts.
+_MAX_TARGETS_PER_SURFACE = 48
 
 # Personal memory returned to the workspace, and the bounded window of the
 # tenant's most recent rows used to build the team aggregate. Both are caps on
@@ -55,6 +69,16 @@ _TEAM_WINDOW = 2000
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _clean_workspace(value: object) -> str:
+    workspace = str(value or "").strip().lower()
+    if workspace not in WORKSPACES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"workspace must be one of: {', '.join(WORKSPACES)}",
+        )
+    return workspace
 
 
 def _clean_surface(value: object) -> str:
@@ -104,45 +128,50 @@ def _team_aggregate(rows: list[dict]) -> list[dict]:
     return sorted(aggregate.values(), key=lambda item: (-item["count"], item["target"]))
 
 
-async def _prune_surface(user_id: str, tenant_id: str, surface: str) -> None:
+async def _prune_surface(user_id: str, tenant_id: str, workspace: str, surface: str) -> None:
     """Forget the least recently used targets once a surface exceeds its cap."""
-    cursor = db.client_workspace_signals.find(
-        {"tenant_id": tenant_id, "user_id": user_id, "surface": surface},
+    query = {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "workspace": workspace,
+        "surface": surface,
+    }
+    cursor = db.workspace_learning_signals.find(
+        query,
         {"_id": 0, "target": 1, "last_used_at": 1},
     ).sort("last_used_at", -1)
     rows = await cursor.to_list(_MAX_TARGETS_PER_SURFACE + 8)
     for stale in rows[_MAX_TARGETS_PER_SURFACE:]:
-        await db.client_workspace_signals.delete_one(
-            {
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "surface": surface,
-                "target": stale.get("target"),
-            }
-        )
+        await db.workspace_learning_signals.delete_one({**query, "target": stale.get("target")})
 
 
-@router.get("/client-workspace/learning")
-async def get_client_workspace_learning(current_user: dict = Depends(get_current_user)):
-    """Return the caller's own memory plus a tenant-wide aggregate of use.
+@router.get("/workspace-learning/{workspace}")
+async def get_workspace_learning(
+    workspace: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the caller's own memory for one workspace plus a tenant aggregate.
 
     The response carries counts only. Another technician's identity, client or
-    activity is never part of it.
+    activity is never part of it, and another workspace's evidence is never
+    included: the workspace is part of the read.
     """
+    workspace = _clean_workspace(workspace)
     user_id = str(current_user.get("id") or "")
     tenant_id = platform_tenant_id(current_user)
 
-    personal_rows = await db.client_workspace_signals.find(
-        tenant_scoped_query(current_user, {"user_id": user_id}),
+    personal_rows = await db.workspace_learning_signals.find(
+        tenant_scoped_query(current_user, {"workspace": workspace, "user_id": user_id}),
         {"_id": 0},
     ).sort("last_used_at", -1).to_list(_PERSONAL_ROWS)
 
-    team_rows = await db.client_workspace_signals.find(
-        tenant_scoped_query(current_user, {}),
+    team_rows = await db.workspace_learning_signals.find(
+        tenant_scoped_query(current_user, {"workspace": workspace}),
         {"_id": 0, "surface": 1, "target": 1, "count": 1, "last_used_at": 1},
     ).sort("last_used_at", -1).to_list(_TEAM_WINDOW)
 
     return {
+        "workspace": workspace,
         "personal": [_safe_row(row) for row in personal_rows],
         "team": _team_aggregate(team_rows),
         "memory": {
@@ -153,8 +182,9 @@ async def get_client_workspace_learning(current_user: dict = Depends(get_current
     }
 
 
-@router.post("/client-workspace/learning/signals")
-async def record_client_workspace_signal(
+@router.post("/workspace-learning/{workspace}/signals")
+async def record_workspace_signal(
+    workspace: str,
     payload: dict | None = None,
     current_user: dict = Depends(get_current_user),
 ):
@@ -164,6 +194,7 @@ async def record_client_workspace_signal(
     record or emails anyone, so it is not an audited business action; it is
     constrained to the caller's own tenant and user row.
     """
+    workspace = _clean_workspace(workspace)
     body = payload or {}
     surface = _clean_surface(body.get("surface"))
     target = _clean_target(body.get("target"))
@@ -172,13 +203,20 @@ async def record_client_workspace_signal(
     if not user_id:
         raise HTTPException(status_code=401, detail="Authenticated technician required")
 
-    await db.client_workspace_signals.update_one(
-        {"tenant_id": tenant_id, "user_id": user_id, "surface": surface, "target": target},
+    await db.workspace_learning_signals.update_one(
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "workspace": workspace,
+            "surface": surface,
+            "target": target,
+        },
         {
             "$inc": {"count": 1},
             "$set": {
                 "tenant_id": tenant_id,
                 "user_id": user_id,
+                "workspace": workspace,
                 "surface": surface,
                 "target": target,
                 "last_used_at": _now_iso(),
@@ -186,24 +224,28 @@ async def record_client_workspace_signal(
         },
         upsert=True,
     )
-    await _prune_surface(user_id, tenant_id, surface)
-    return {"recorded": True, "surface": surface, "target": target}
+    await _prune_surface(user_id, tenant_id, workspace, surface)
+    return {"recorded": True, "workspace": workspace, "surface": surface, "target": target}
 
 
-@router.delete("/client-workspace/learning")
-async def forget_client_workspace_learning(current_user: dict = Depends(get_current_user)):
-    """Forget everything Nexus has learned about this technician's workspace use."""
+@router.delete("/workspace-learning/{workspace}")
+async def forget_workspace_learning(
+    workspace: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Forget everything Nexus has learned about this technician in one workspace."""
+    workspace = _clean_workspace(workspace)
     user_id = str(current_user.get("id") or "")
-    result = await db.client_workspace_signals.delete_many(
-        tenant_scoped_query(current_user, {"user_id": user_id}),
+    result = await db.workspace_learning_signals.delete_many(
+        tenant_scoped_query(current_user, {"workspace": workspace, "user_id": user_id}),
     )
     removed = int(getattr(result, "deleted_count", 0) or 0)
     await log_activity(
         current_user,
-        "client_workspace_learning.forgotten",
+        "workspace_learning.forgotten",
         "user",
         user_id,
         entity_name=current_user.get("name") or current_user.get("email") or "",
-        details=f"Forgot {removed} learned client workspace signal(s)",
+        details=f"Forgot {removed} learned {workspace} workspace signal(s)",
     )
-    return {"removed": removed}
+    return {"workspace": workspace, "removed": removed}

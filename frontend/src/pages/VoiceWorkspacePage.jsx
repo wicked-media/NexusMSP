@@ -20,16 +20,20 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import VoiceCapabilityConsole from "@/components/voice/VoiceCapabilityConsole";
+// The voice view bar owns the view catalogue; the workspace only needs the slugs
+// to validate a deep link against.
+import VoiceWorkspaceTabs, { VOICE_TABS } from "@/components/voice/VoiceWorkspaceTabs";
 import {
   Activity, AlertTriangle, Building2, CheckCircle2, Cloud, CreditCard, ExternalLink,
-  Loader2, Phone, Plus, Radio, RefreshCw, Search, Settings, Users, Wifi, WifiOff,
+  Loader2, Phone, Plus, Radio, RefreshCw, RotateCcw, Search, Settings, Users, Wifi, WifiOff,
 } from "lucide-react";
+import { LEARNING_VIEW, LEARNING_WORKSPACES, learningHint } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 
-const VOICE_TABS = ["dashboard", "calls", "capabilities", "monitoring", "pbxs", "extensions", "billing", "sync", "activity", "diagnostics"];
 const emptyPbxForm = {
   client_id: "", name: "", pbx_url: "", client_api_id: "", client_secret: "",
   billing_policy: "all_enabled", agreement_mapping: "", product_mapping: "",
@@ -51,6 +55,9 @@ export default function VoiceWorkspacePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Which voice view this technician (and the team) actually opens, so the tab
+  // bar can order itself. A deliberate tab click is the evidence.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.VOICE);
   const [workspace, setWorkspace] = useState(null);
   const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState("dashboard");
@@ -424,6 +431,21 @@ export default function VoiceWorkspacePage() {
   const ycmClaimed = ycmDiscoveries.filter((item) => item.claimed_pbx_id).length;
   const ycmAwaitingClaim = ycmDiscoveries.length - ycmClaimed;
   const ycmLiveApiPending = allPbxs.filter((pbx) => pbx.connection_mode === "ycm_discovered" && !pbx.has_credentials).length;
+  const voiceCounts = { pbxs: pbxs.length, extensions: scopedExtensions.length };
+  // The view bar shows this itself; the workspace menu only needs to know whether
+  // there is anything to forget.
+  const voiceHint = learningHint({ surface: LEARNING_VIEW, personal: learning.personal, team: learning.team });
+
+  const forgetVoiceLearning = async () => {
+    try {
+      const removed = await learning.forget();
+      toast.success(`${removed || 0} learned view signal${removed === 1 ? "" : "s"} forgotten`, {
+        description: "The voice tabs are back to the Nexus default order and will learn again from your next visit.",
+      });
+    } catch {
+      toast.error("Nexus could not forget the learned ordering. Nothing has been changed.");
+    }
+  };
 
   return <div className="space-y-5" data-testid="voice-workspace-page">
     <OperationalPageHeader
@@ -437,6 +459,9 @@ export default function VoiceWorkspacePage() {
           <WorkspaceActionMenuItem icon={ExternalLink} onSelect={() => navigate("/help/voice-yeastar-pbx-onboarding")} testId="voice-open-setup-guide">Setup guide</WorkspaceActionMenuItem>
           <WorkspaceActionMenuItem icon={Cloud} onSelect={() => setYcmOpen(true)} testId="voice-open-ycm">YCM fleet</WorkspaceActionMenuItem>
           <WorkspaceActionMenuItem icon={Wifi} onSelect={() => testScopedPbxs(pbxs)} testId="voice-test-connection">Test PBXs</WorkspaceActionMenuItem>
+          {voiceHint && (
+            <WorkspaceActionMenuItem icon={RotateCcw} onSelect={forgetVoiceLearning} testId="voice-forget-learning">Forget learned ordering</WorkspaceActionMenuItem>
+          )}
         </WorkspaceActionMenu>
         <Button variant="outline" size="sm" onClick={() => runSync()} disabled={!!busy} data-testid="voice-sync"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy === "sync" ? "animate-spin" : ""}`} />Sync now</Button>
         <Button size="sm" onClick={openAddPbx} disabled={!!busy} data-testid="voice-add-pbx"><Plus className="mr-1.5 h-3.5 w-3.5" />Add PBX</Button>
@@ -467,9 +492,12 @@ export default function VoiceWorkspacePage() {
     </Card>
 
     <Tabs value={tab} onValueChange={(next) => updateRoute(next)}>
-      <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
-        <TabsTrigger value="dashboard">Dashboard</TabsTrigger><TabsTrigger value="calls">Call history</TabsTrigger><TabsTrigger value="capabilities">PBX operations</TabsTrigger><TabsTrigger value="monitoring">Live monitor</TabsTrigger><TabsTrigger value="pbxs">PBXs ({pbxs.length})</TabsTrigger><TabsTrigger value="extensions">Extensions ({scopedExtensions.length})</TabsTrigger><TabsTrigger value="billing">Billing</TabsTrigger><TabsTrigger value="sync">Sync history</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger><TabsTrigger value="diagnostics">API diagnostics</TabsTrigger>
-      </TabsList>
+      <VoiceWorkspaceTabs
+        counts={voiceCounts}
+        personal={learning.personal}
+        team={learning.team}
+        onRecordAction={learning.record}
+      />
 
       <TabsContent value="calls" className="mt-4 space-y-4">
         <Card className="border-cyan-500/20"><CardContent className="grid gap-3 p-4 lg:grid-cols-[1.1fr_1.2fr_0.8fr_0.8fr_auto] lg:items-end">
@@ -503,7 +531,7 @@ export default function VoiceWorkspacePage() {
       </TabsContent>
 
       <TabsContent value="capabilities" className="mt-4">
-        <VoiceCapabilityConsole api={API} headers={headers} pbxs={monitorablePbxs} pbxId={monitoringPbxId} onPbxChange={setMonitoringPbxId} />
+        <VoiceCapabilityConsole api={API} headers={headers} pbxs={monitorablePbxs} pbxId={monitoringPbxId} onPbxChange={setMonitoringPbxId} personal={learning.personal} team={learning.team} onRecordAction={learning.record} />
       </TabsContent>
 
       <TabsContent value="dashboard" className="mt-4 grid gap-4 lg:grid-cols-3">
