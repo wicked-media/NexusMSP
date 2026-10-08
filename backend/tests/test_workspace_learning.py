@@ -171,6 +171,32 @@ def test_workspace_names_normalise_to_their_registered_slug(monkeypatch):
     assert database.workspace_learning_signals.rows[0]["workspace"] == "tickets"
 
 
+def test_every_registered_workspace_remembers_itself_and_only_itself(monkeypatch):
+    """The registry is a contract, so the whole registry is pinned, not one name.
+
+    A workspace is added deliberately here when a workspace gains a ranking
+    surface; the same slug must then own its own rows and must never read another
+    workspace's evidence, including the newest member (purchase orders).
+    """
+    database, _ = _prepare(monkeypatch)
+
+    for workspace in workspace_learning.WORKSPACES:
+        run(workspace_learning.record_workspace_signal(
+            workspace, {"surface": "view", "target": "queue"}, TECH,
+        ))
+
+    assert sorted(row["workspace"] for row in database.workspace_learning_signals.rows) == sorted(
+        workspace_learning.WORKSPACES
+    )
+
+    procurement = run(workspace_learning.get_workspace_learning("purchase_orders", TECH))
+    assert [row["target"] for row in procurement["personal"]] == ["queue"]
+
+    invoices = run(workspace_learning.get_workspace_learning("invoices", TECH))
+    assert [row["target"] for row in invoices["personal"]] == ["queue"]
+
+
+
 def test_signal_rejects_an_unknown_surface_and_never_stores_it(monkeypatch):
     database, _ = _prepare(monkeypatch)
 

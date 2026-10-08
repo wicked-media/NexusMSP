@@ -30,7 +30,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
-import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import PurchaseOrderToolsMenu from "@/components/purchase-orders/PurchaseOrderToolsMenu";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { resolveDocumentPdfUrl } from "@/lib/documentPdfCapabilities";
@@ -145,6 +147,9 @@ function SearchableSelect({
 export default function PurchaseOrdersPage() {
   const navigate = useNavigate();
   const { token, user } = useAuth();
+  // The procurement desk tools remember what this technician actually opens, so
+  // the tool they live in stops being the fourth thing they scan for.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.PURCHASE_ORDERS);
   const [searchParams, setSearchParams] = useSearchParams();
   const [pos, setPos] = useState([]);
   const [products, setProducts] = useState([]);
@@ -1646,13 +1651,17 @@ export default function PurchaseOrdersPage() {
           <Button variant="outline" size="sm" onClick={fetchData} disabled={refreshing} data-testid="refresh-purchase-orders">
             <RefreshCw className={`w-4 h-4 mr-1 ${refreshing ? "animate-spin" : ""}`} />Refresh
           </Button>
-          <WorkspaceActionMenu testId="po-workspace-tools">
-            <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }} testId="po-analytics-btn">Analytics</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={Building2} onSelect={() => navigate("/vendors")} testId="po-tools-vendors">Vendors</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={BarChart3} onSelect={() => navigate("/vendor-scorecard")} testId="po-tools-vendor-scorecard">Vendor scorecard</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={Settings2} onSelect={() => setApprovalPolicyOpen(true)} testId="po-tools-approval-policy">Approval policy</WorkspaceActionMenuItem>
-            <WorkspaceActionMenuItem icon={BellRing} onSelect={handleCheckEscalations} testId="check-escalations-btn">Check escalations</WorkspaceActionMenuItem>
-          </WorkspaceActionMenu>
+          <PurchaseOrderToolsMenu
+            onOpenAnalytics={() => { setAnalyticsTab("analytics"); setSpendAnalytics(null); }}
+            onOpenVendors={() => navigate("/vendors")}
+            onOpenVendorScorecard={() => navigate("/vendor-scorecard")}
+            onOpenApprovalPolicy={() => setApprovalPolicyOpen(true)}
+            onCheckEscalations={handleCheckEscalations}
+            personal={learning.personal}
+            team={learning.team}
+            onRecordAction={learning.record}
+            onForgetLearning={learning.forget}
+          />
           <Button size="sm" onClick={() => openCreate(null)} data-testid="create-po-btn"><Plus className="w-4 h-4 mr-1.5" />New purchase order</Button>
         </>}
       />

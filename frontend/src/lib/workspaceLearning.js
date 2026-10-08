@@ -25,6 +25,9 @@
  *
  * The learning is presentation only. It cannot reveal a record, grant access or
  * promote an action the technician could not already run.
+ *
+ * A workspace slug must exist in the server's registry before it can remember
+ * anything, so these names are the contract, not a label.
  */
 
 export const LEARNING_VIEW = "view";
@@ -41,6 +44,7 @@ export const LEARNING_WORKSPACES = Object.freeze({
   INVOICES: "invoices",
   VOICE: "voice",
   DEVICES: "devices",
+  PURCHASE_ORDERS: "purchase_orders",
 });
 
 /**

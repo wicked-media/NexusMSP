@@ -23,7 +23,7 @@ const views = [
 describe("workspace learning helpers", () => {
   test("names exactly the workspaces the backend registry accepts", () => {
     expect(Object.values(LEARNING_WORKSPACES).sort()).toEqual(
-      ["client", "devices", "invoices", "tickets", "voice"].sort(),
+      ["client", "devices", "invoices", "purchase_orders", "tickets", "voice"].sort(),
     );
   });
 

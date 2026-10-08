@@ -19,6 +19,7 @@ import TicketServiceTierWidget from "@/components/tickets/TicketServiceTierWidge
 import TicketServiceKitPanel from "@/components/tickets/TicketServiceKitPanel";
 import TicketServiceKitDialog from "@/components/tickets/TicketServiceKitDialog";
 import TicketElevateEvidence from "@/components/tickets/TicketElevateEvidence";
+import FlowIntelligencePanel from "@/components/tickets/FlowIntelligencePanel";
 import { TicketModuleHeader, TicketToolAction, TicketToolsCenter, TicketWorkspaceTabs } from "@/components/tickets/TicketWorkspaceShell";
 import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
@@ -2747,6 +2748,11 @@ export default function TicketsPage() {
               {/* AUDIT TAB */}
               <TabsContent value="audit">
                 <TicketAuditTab auditLog={auditLog} />
+              </TabsContent>
+
+              {/* OUTCOME & FLOW TAB */}
+              <TabsContent value="flow" className="space-y-4">
+                <FlowIntelligencePanel ticketId={viewingTicket.id} headers={headers} />
               </TabsContent>
 
               <TabsContent value="timeline">

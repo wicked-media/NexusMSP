@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DollarSign, Ticket, Clock } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import SupportDebtPanel from "@/components/billing/SupportDebtPanel";
 
 export default function CostPerTicketPage() {
   const { token } = useAuth();
@@ -84,6 +85,8 @@ export default function CostPerTicketPage() {
           </Tabs>
         </CardContent>
       </Card>
+
+      <SupportDebtPanel headers={{ Authorization: `Bearer ${token}` }} />
     </div>
   );
 }

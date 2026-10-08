@@ -18,6 +18,9 @@ import HeroTile from "@/components/HeroTile";
 import EventBackbonePanel from "@/components/control-plane/EventBackbonePanel";
 import MicrosoftActionCentre from "@/components/control-plane/MicrosoftActionCentre";
 import MicrosoftCapabilityMap from "@/components/control-plane/MicrosoftCapabilityMap";
+import FrictionRadarCard from "@/components/flow/FrictionRadarCard";
+import WishEngineCard from "@/components/control-plane/WishEngineCard";
+import ForgeDesignCard from "@/components/control-plane/ForgeDesignCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -611,7 +614,13 @@ function FoundationPanel({ data, loading, reload, rebuildCore, coreRebuilding, h
 
       <ProductRoadmapBoard roadmap={data.roadmap} />
 
+      <FrictionRadarCard headers={headers} onChanged={reload} />
+
+      <WishEngineCard headers={headers} onChanged={reload} />
+
       <IdeaVault registry={data.idea_registry} headers={headers} onChanged={reload} />
+
+      <ForgeDesignCard headers={headers} onChanged={reload} />
 
       <EventBackbonePanel contract={data.event_contract} />
 

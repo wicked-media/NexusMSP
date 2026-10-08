@@ -13,7 +13,7 @@ import {
 import {
   Activity, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, FileText, Gauge,
   LayoutList, MapPinned, MessageSquare, MoreHorizontal, Paperclip, RotateCcw,
-  ShieldCheck, ShoppingCart, Sparkles, Wrench,
+  ShieldCheck, ShoppingCart, Sparkles, Target, Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -180,6 +180,7 @@ const MORE_TABS = [
   { value: "items", label: "Products & billing", icon: Wrench, countKey: "items" },
   { value: "procurement", label: "Procurement & cost", icon: ShoppingCart, countKey: "procurement" },
   { value: "children", label: "Related tickets", icon: LayoutList, countKey: "children" },
+  { value: "flow", label: "Outcome & flow", icon: Target },
   { value: "audit", label: "Audit log", icon: ShieldCheck },
 ];
 

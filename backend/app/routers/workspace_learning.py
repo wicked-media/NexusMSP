@@ -43,7 +43,7 @@ router = APIRouter()
 # workspace never leaks into another: the workspace is part of the stored key and
 # part of every read. Adding a workspace is a deliberate, reviewable change here
 # rather than a silent typo creating a parallel key space in the database.
-WORKSPACES = ("client", "tickets", "invoices", "voice", "devices")
+WORKSPACES = ("client", "tickets", "invoices", "voice", "devices", "purchase_orders")
 
 # Only these two kinds of evidence are recorded. A "view" is a workspace view (a
 # Nexus tab or screen slug); an "action" is a tool, quick action or button a
@@ -158,7 +158,6 @@ async def get_workspace_learning(
     """
     workspace = _clean_workspace(workspace)
     user_id = str(current_user.get("id") or "")
-    tenant_id = platform_tenant_id(current_user)
 
     personal_rows = await db.workspace_learning_signals.find(
         tenant_scoped_query(current_user, {"workspace": workspace, "user_id": user_id}),
