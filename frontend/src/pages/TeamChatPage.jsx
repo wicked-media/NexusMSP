@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { Link, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,7 +21,6 @@ import NexusWorkspaceHeader from "@/components/NexusWorkspaceHeader";
 import { toast } from "sonner";
 import {
   Activity,
-  AlertCircle,
   ArrowRightLeft,
   ArrowLeft,
   AtSign,
@@ -62,6 +60,7 @@ import {
   VolumeX,
   X,
   XCircle,
+  Keyboard,
 } from "lucide-react";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import {
@@ -78,33 +77,50 @@ import {
   normaliseDirectChatRequest,
 } from "@/lib/chatConnections";
 import { applyChatFormat } from "@/lib/richChatMessage";
-import { readFileAsBase64 } from "@/lib/teamChatFormat";
+import { notificationSummary, readFileAsBase64 } from "@/lib/teamChatFormat";
 import {
   ChannelAvatar,
-  ConversationRow,
   CustomerConnectionPulse,
   DirectRequestDecisionForm,
   DirectRequestInbox,
   NexusOperationsPulse,
-  PresenceLabel,
   TechnicianAvatar,
 } from "@/components/teamChat/TeamChatShared";
 import { MessageRow } from "@/components/teamChat/TeamChatMessages";
 import {
   ComposerButton,
-  ConversationSkeleton,
   ConversationWelcome,
   DayDivider,
   EmptyWorkspace,
   FilesView,
-  InfoPanel,
   NewConversationDialog,
   PinnedView,
   SearchResults,
   SuggestionPanel,
   ThreadPanel,
   TypingIndicator,
+  JumpToLatestBar,
+  NewMessagesDivider,
 } from "@/components/teamChat/TeamChatPanels";
+import ConversationRail from "@/components/teamChat/ConversationRail";
+import ContextRail from "@/components/teamChat/ContextRail";
+import ChatShortcutsDialog from "@/components/teamChat/ChatShortcutsDialog";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+import { learningHint } from "@/lib/workspaceLearning";
+import {
+  CHAT_ACTION,
+  CHAT_VIEW,
+  CHAT_WORKSPACE,
+  channelLearningTarget,
+  isTypingTarget,
+  rankChatSurfaces,
+  readRecentConversations,
+  rememberRecentConversation,
+  shortcutHint,
+  surfaceTarget,
+  unreadAnchorIndex,
+  writeRecentConversations,
+} from "@/components/teamChat/chatLearning";
 
 const CHAT_SETTINGS_KEY = "nexus_chat_settings";
 const DEFAULT_CHAT_SETTINGS = { density: "comfy", enterToSend: true, showTimestamps: true, showAvatars: true, accent: "emerald" };
@@ -142,6 +158,42 @@ const SLASH_COMMANDS = [
   { cmd: "help", args: "", description: "List commands" },
 ];
 const SLASH_NAMES = new Set(SLASH_COMMANDS.map(command => command.cmd));
+
+/**
+ * The declared chat surfaces.
+ *
+ * Chat remembers which section, rail tab and quick action a technician actually
+ * opens and ranks these with that evidence (`chatLearning.js`). The order here is
+ * the designed order, so a first-time technician sees exactly what was authored —
+ * and nothing is ever removed, only reordered.
+ */
+const CHAT_SECTIONS = [
+  { value: "activity", label: "Inbox", icon: Activity, badge: "unread" },
+  { value: "chat", label: "Direct", icon: MessageCircle },
+  { value: "customer", label: "Clients", icon: Building2, badge: "requests" },
+  { value: "teams", label: "Channels", icon: Users },
+  { value: "work", label: "Work rooms", icon: FileText },
+];
+const CHAT_TABS = [
+  { value: "posts", label: "Messages", icon: MessageCircle, count: "messages" },
+  { value: "files", label: "Files", icon: FileText, count: "files" },
+  { value: "pins", label: "Pinned", icon: Pin, count: "pinned" },
+];
+const CHAT_WORK_ACTIONS = [
+  { id: "link_ticket", label: "Link ticket", icon: FileText, command: "/ticket " },
+  { id: "link_invoice", label: "Link invoice", icon: FileText, command: "/invoice " },
+  { id: "link_purchase_order", label: "Link purchase order", icon: FileText, command: "/po " },
+  { id: "add_internal_note", label: "Add internal note", icon: Edit3, command: "/note " },
+  { id: "page_on_call", label: "Page on-call", icon: Bell, command: "/page ", destructive: true },
+];
+const CHAT_EMPTY_STATES = {
+  activity: { title: "You are all caught up", body: "New mentions and unread conversations appear here. Nexus never invents activity to fill this space." },
+  chat: { title: "No direct conversations yet", body: "Start a private chat with a technician. Existing conversations reopen instead of duplicating." },
+  saved: { title: "Nothing saved yet", body: "Save a conversation from its options menu to keep the ones you return to at hand." },
+  customer: { title: "No customer conversations", body: "Approved customer conversations appear here after a technician reviews the request." },
+  teams: { title: "No channels match", body: "Create a channel for a service, project or incident stream, or clear the filter." },
+  work: { title: "No work rooms yet", body: "A Ticket Pass creates a secure room around the work, with the handover attached." },
+};
 
 const workItemLabel = busyState => {
   if (!busyState) return "Available";
@@ -237,6 +289,20 @@ export default function TeamChatPage() {
   const openedThreadRef = useRef("");
   const manuallyUnreadChannelIdsRef = useRef(new Set());
 
+  // What chat has learned about this technician's use of this workspace. The
+  // memory is presentation only: it can reorder a section, tab or quick action,
+  // never reveal a conversation or grant access. With no evidence the workspace
+  // keeps its declared order and claims nothing.
+  const chatLearning = useWorkspaceLearning(token, CHAT_WORKSPACE);
+  const recordChatSignal = chatLearning.record;
+  const [recentConversations, setRecentConversations] = useState(() => readRecentConversations(window.localStorage));
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [highlightMessageId, setHighlightMessageId] = useState("");
+  const [unreadAnchorCount, setUnreadAnchorCount] = useState(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const channelsRef = useRef([]);
+  const highlightTimerRef = useRef(0);
+
   const activeChannel = channels.find(channel => channel.id === activeId);
   const presenceFor = userId => presence[userId]?.led || "offline";
   const myPresence = presenceFor(user?.id);
@@ -248,6 +314,20 @@ export default function TeamChatPage() {
   const canRenameActiveChannel = canEditActiveChannel;
 
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  useEffect(() => { channelsRef.current = channels; }, [channels]);
+  useEffect(() => { writeRecentConversations(window.localStorage, recentConversations); }, [recentConversations]);
+  useEffect(() => () => window.clearTimeout(highlightTimerRef.current), []);
+
+  // Opening a section or a rail tab is what the workspace learns from. Neither
+  // signal can change access: they only decide the order of a list.
+  useEffect(() => {
+    const target = surfaceTarget(`section_${mode}`);
+    if (target) recordChatSignal(CHAT_VIEW, target);
+  }, [mode, recordChatSignal]);
+  useEffect(() => {
+    const target = activeId ? surfaceTarget(`tab_${activeTab}`) : "";
+    if (target) recordChatSignal(CHAT_VIEW, target);
+  }, [activeId, activeTab, recordChatSignal]);
 
   const loadWorkspace = useCallback(async ({ quiet = false } = {}) => {
     if (!token) return;
@@ -363,8 +443,14 @@ export default function TeamChatPage() {
     setThread(null);
     setChannelEditorOpen(false);
     setActiveTab("posts");
+    setHighlightMessageId("");
     nearBottomRef.current = true;
+    setShowJumpToLatest(false);
     if (!activeId) return undefined;
+    // Read the unread count before the channel is marked read, so the "new
+    // messages" marker is derived from the conversation's own evidence rather
+    // than guessed after the fact.
+    setUnreadAnchorCount(Number(channelsRef.current.find(channel => channel.id === activeId)?.unread_count || 0));
     refreshChannel();
   }, [activeId, refreshChannel]);
 
@@ -473,8 +559,36 @@ export default function TeamChatPage() {
   const groupedMessages = useMemo(() => groupChatMessages(messages), [messages]);
   const visibleChannels = useMemo(() => filterChatChannels(channels, mode, query), [channels, mode, query]);
 
+  // The unread marker comes from the count captured when the conversation was
+  // opened, applied to the messages actually loaded. When the two cannot be
+  // reconciled there is no marker, rather than a marker in the wrong place.
+  const unreadAnchorId = useMemo(() => {
+    const index = unreadAnchorIndex(messages, unreadAnchorCount);
+    return index >= 0 ? messages[index]?.id || "" : "";
+  }, [messages, unreadAnchorCount]);
+
+  const scrollToLatest = () => {
+    nearBottomRef.current = true;
+    setShowJumpToLatest(false);
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  };
+
+  const recordWorkAction = action => {
+    const target = surfaceTarget(action.id);
+    if (target) recordChatSignal(CHAT_ACTION, target);
+  };
+
   const selectChannel = channelId => {
     manuallyUnreadChannelIdsRef.current.delete(channelId);
+    const opened = channels.find(channel => channel.id === channelId);
+    const target = channelLearningTarget(opened);
+    if (target) recordChatSignal(CHAT_VIEW, target);
+    setRecentConversations(current => rememberRecentConversation(current, {
+      id: channelId,
+      name: opened ? channelDisplayName(opened) : "",
+      kind: opened?.kind || "team",
+      at: new Date().toISOString(),
+    }));
     setActiveId(channelId);
     setSearchParams({ channel: channelId }, { replace: true });
     setSearchResults(null);
@@ -823,6 +937,104 @@ export default function TeamChatPage() {
     toast.message(`Opened unread conversation: ${channelDisplayName(nextUnread)}.`);
   };
 
+  /** Move through the visible list from the keyboard, opening as it goes. */
+  const stepConversation = direction => {
+    if (visibleChannels.length === 0) return;
+    const index = visibleChannels.findIndex(channel => channel.id === activeId);
+    const next = visibleChannels[(index === -1 ? 0 : index + direction + visibleChannels.length) % visibleChannels.length];
+    if (!next || next.id === activeId) return;
+    selectChannel(next.id);
+  };
+
+  // The keyboard contract below is installed once. It reads the newest handlers
+  // through a ref, so moving through conversations does not tear down and re-add
+  // the window listener on every render.
+  const shortcutHandlers = useRef({ jumpToUnread, stepConversation });
+  useEffect(() => {
+    shortcutHandlers.current = { jumpToUnread, stepConversation };
+  });
+
+  const rankedSections = useMemo(
+    () => rankChatSurfaces(CHAT_SECTIONS, { surface: CHAT_VIEW, learning: chatLearning, idOf: section => surfaceTarget(`section_${section.value}`) }),
+    [chatLearning],
+  );
+  const rankedTabs = useMemo(
+    () => rankChatSurfaces(CHAT_TABS, { surface: CHAT_VIEW, learning: chatLearning, idOf: tab => surfaceTarget(`tab_${tab.value}`) }),
+    [chatLearning],
+  );
+  const rankedWorkActions = useMemo(
+    () => rankChatSurfaces(CHAT_WORK_ACTIONS, { surface: CHAT_ACTION, learning: chatLearning, idOf: action => surfaceTarget(action.id) }),
+    [chatLearning],
+  );
+  const chatLearningHint = learningHint({ surface: CHAT_VIEW, personal: chatLearning.personal, team: chatLearning.team });
+
+  const forgetChatLearning = async () => {
+    try {
+      const removed = await chatLearning.forget();
+      setRecentConversations([]);
+      writeRecentConversations(window.localStorage, []);
+      toast.success(`${removed || 0} learned chat signal${removed === 1 ? "" : "s"} forgotten`, {
+        description: "Sections, rail tabs and quick actions are back to the Nexus default order, and the reopen list on this device was cleared.",
+      });
+    } catch {
+      toast.error("Nexus could not forget the learned chat ordering. Nothing has been changed.");
+    }
+  };
+
+  const focusMessage = messageId => {
+    if (!messageId) return;
+    setHighlightMessageId(messageId);
+    window.clearTimeout(highlightTimerRef.current);
+    window.requestAnimationFrame(() => {
+      scrollRef.current?.querySelector(`[data-message-id="${messageId}"]`)?.scrollIntoView({ block: "center" });
+    });
+    highlightTimerRef.current = window.setTimeout(() => setHighlightMessageId(""), 2600);
+  };
+
+  // One keyboard contract for the workspace. Anything typed into a field belongs
+  // to the field, so single-key shortcuts are ignored there rather than stealing
+  // a technician's input.
+  useEffect(() => {
+    const onKeyDown = event => {
+      if (isTypingTarget(event.target)) {
+        if (event.key === "Escape") event.target?.blur?.();
+        return;
+      }
+      const modified = event.metaKey || event.ctrlKey;
+      if (modified && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setShowMessageSearch(true);
+        return;
+      }
+      if (event.altKey && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        event.preventDefault();
+        shortcutHandlers.current.stepConversation(event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (event.altKey && event.key.toLowerCase() === "u") {
+        event.preventDefault();
+        shortcutHandlers.current.jumpToUnread();
+        return;
+      }
+      if (event.key === "/") {
+        event.preventDefault();
+        composerRef.current?.focus();
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+      if (event.key === "Escape") {
+        if (thread) { setThread(null); return; }
+        if (showInfo) setShowInfo(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showInfo, thread]);
+
   const deleteChannel = async () => {
     if (!activeChannel) return;
     if (!window.confirm(`Archive #${channelDisplayName(activeChannel)}? Posts stay preserved and an owner or admin can restore it.`)) return;
@@ -922,87 +1134,67 @@ export default function TeamChatPage() {
 
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d141b] text-zinc-100 shadow-[0_24px_70px_-40px_rgba(0,0,0,0.95)]">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-      <aside className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} w-full md:w-[288px] xl:w-[320px] shrink-0 flex-col border-r border-white/[0.07] bg-[#111a22]`}>
-        <div className="border-b border-white/[0.07] px-4 pb-3 pt-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">Messages</p>
-              <h2 className="text-xl font-semibold text-white">{mode === "activity" ? "Inbox" : mode === "saved" ? "Saved" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : mode === "customer" ? "Client conversations" : "Direct chats"}</h2>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setMode("saved")} aria-pressed={mode === "saved"} aria-label="Saved conversations" className={`h-9 w-9 rounded-lg p-0 ${mode === "saved" ? "bg-amber-500/10 text-amber-200" : "text-zinc-400 hover:bg-white/[0.08] hover:text-white"}`}>
-                <Bookmark className="h-4 w-4" />
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.08] hover:text-white" data-testid="collaboration-workspace-tools" aria-label="Chat workspace tools">
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem asChild><Link to="/live-chat"><MessageCircle className="mr-2 h-4 w-4" />Client live chat</Link></DropdownMenuItem>
-                  <DropdownMenuItem asChild><Link to="/script-ticket"><FileText className="mr-2 h-4 w-4" />Ticket automations</Link></DropdownMenuItem>
-                  <DropdownMenuItem asChild><Link to="/voice"><Phone className="mr-2 h-4 w-4" />Voice services</Link></DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={openArchivedChannels}><RefreshCw className="mr-2 h-4 w-4" />Archived channels</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-1 rounded-xl bg-black/20 p-1" aria-label="Chat sections">
-            {[
-              ["activity", "Inbox", Activity, unread],
-              ["chat", "Direct", MessageCircle, 0],
-              ["customer", "Clients", Building2, pendingDirectRequests.length],
-              ["teams", "Channels", Users, 0],
-              ["work", "Work rooms", FileText, 0],
-            ].map(([value, label, Icon, badge]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setMode(value)}
-                aria-current={mode === value ? "page" : undefined}
-                className={`relative flex h-8 items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 ${mode === value ? "bg-cyan-500/[0.14] text-cyan-100 shadow-sm shadow-cyan-950/30" : "text-zinc-500 hover:bg-white/[0.05] hover:text-zinc-200"}`}
-              >
-                <Icon className="h-3.5 w-3.5" />{label}
-                {badge > 0 && <span className="rounded-full bg-rose-500 px-1.5 text-[9px] font-bold leading-4 text-white">{badge > 99 ? "99+" : badge}</span>}
-              </button>
-            ))}
-          </div>
-          <div className="relative mt-3">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-            <Input
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              placeholder="Filter conversations"
-              className="h-9 border-white/5 bg-black/20 pl-9 pr-9 text-sm placeholder:text-zinc-600 focus-visible:ring-emerald-500/50"
-              data-testid="chat-search"
-            />
-            {searching ? (
-              <Loader2 className="absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-emerald-400" />
-            ) : query ? (
-              <button
-                type="button"
-                onClick={() => { setQuery(""); setSearchResults(null); }}
-                className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-zinc-500 transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
-                aria-label="Clear chat search"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-          </div>
-        </div>
+      {/* The conversation rail owns the section strip, the filter, the list and the
+          presence footer. On a narrow viewport it yields to the open conversation
+          and comes back from the header's back button. */}
+      <div className={`${mobileConversationOpen ? "hidden md:flex" : "flex"} min-h-0 shrink-0`}>
+        <ConversationRail
+          modes={rankedSections.map(section => ({
+            value: section.value,
+            label: section.label,
+            icon: section.icon,
+            badge: section.badge === "unread" ? unread : section.badge === "requests" ? pendingDirectRequests.length : 0,
+          }))}
+          mode={mode}
+          onMode={value => { setMode(value); setSearchResults(null); }}
+          title={mode === "activity" ? "Inbox" : mode === "saved" ? "Saved" : mode === "teams" ? "Channels" : mode === "work" ? "Work rooms" : mode === "customer" ? "Client conversations" : "Direct chats"}
+          subtitle={query ? `${visibleChannels.length} matching “${query}”` : `${unread} unread · ${activePeople} active now`}
+          query={query}
+          onQuery={setQuery}
+          searching={searching}
+          onClearSearch={() => { setQuery(""); setSearchResults(null); }}
+          onNew={() => setShowNewDialog(true)}
+          tools={(
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-9 w-9 rounded-lg p-0 text-zinc-400 hover:bg-white/[0.08] hover:text-white" data-testid="collaboration-workspace-tools" aria-label="Chat workspace tools">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem asChild><Link to="/live-chat"><MessageCircle className="mr-2 h-4 w-4" />Client live chat</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/script-ticket"><FileText className="mr-2 h-4 w-4" />Ticket automations</Link></DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/voice"><Phone className="mr-2 h-4 w-4" />Voice services</Link></DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={openArchivedChannels}><RefreshCw className="mr-2 h-4 w-4" />Archived channels</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          savedActive={mode === "saved"}
+          onToggleSaved={() => setMode(mode === "saved" ? "teams" : "saved")}
+          error={error}
+          onRetry={() => loadWorkspace()}
+          loading={loading}
+          channels={visibleChannels}
+          activeId={activeId}
+          onSelect={selectChannel}
+          presenceFor={presenceFor}
+          recentChannels={recentConversations.filter(entry => channels.some(channel => channel.id === entry.id))}
+          onSelectRecent={id => (channels.some(channel => channel.id === id) ? selectChannel(id) : toast.message("That conversation is no longer available."))}
+          learningHint={chatLearningHint}
+          onForgetLearning={forgetChatLearning}
+          empty={CHAT_EMPTY_STATES[mode] || CHAT_EMPTY_STATES.teams}
+          currentUser={user}
+          myPresence={myPresence}
+          presenceDetail={workItemLabel(presence[user?.id]?.busy_state)}
+          onStatusChange={updateStatus}
+        />
+      </div>
 
-        {error && (
-          <div className="m-3 flex items-start gap-2 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-200">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><span className="flex-1">{error}</span>
-            <button type="button" onClick={() => loadWorkspace()} className="shrink-0 rounded-md px-1.5 py-1 font-medium text-rose-100 transition hover:bg-rose-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50">Retry</button>
-          </div>
-        )}
-
-        <ScrollArea className="flex-1">
-          <div className="p-2">
-            {mode === "customer" && (
+      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col bg-[#0d141b]`}>
+        {mode === "customer" && (
+          <div className="border-b border-cyan-500/15 bg-[#101922] p-3 md:px-5" data-testid="customer-request-region">
+            <div className="mx-auto max-w-4xl">
               <DirectRequestInbox
                 requests={pendingDirectRequests}
                 state={directRequestState}
@@ -1011,57 +1203,9 @@ export default function TeamChatPage() {
                 onRetry={() => loadDirectRequests()}
                 onReview={openDirectRequestDialog}
               />
-            )}
-            {loading ? (
-              <ConversationSkeleton />
-            ) : visibleChannels.length === 0 ? (
-              <div className="px-6 py-16 text-center">
-                <MessageCircle className="mx-auto mb-3 h-9 w-9 text-zinc-700" />
-                <p className="text-sm font-medium text-zinc-300">{mode === "activity" ? "You’re all caught up" : "No conversations found"}</p>
-                <p className="mt-1 text-xs text-zinc-600">{mode === "activity" ? "New mentions and unread chats appear here." : mode === "work" ? "Ticket Pass creates a secure room around the work." : mode === "customer" ? "Approved customer conversations appear here after a technician reviews the request." : "Start a chat or create a team channel."}</p>
-              </div>
-            ) : visibleChannels.map(channel => (
-              <ConversationRow
-                key={channel.id}
-                channel={channel}
-                active={channel.id === activeId}
-                presence={presenceFor(channel.other_user_id)}
-                onClick={() => selectChannel(channel.id)}
-              />
-            ))}
+            </div>
           </div>
-        </ScrollArea>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-3 border-t border-white/5 px-4 py-3 text-left hover:bg-white/[0.03]" data-testid="chat-status-menu">
-              <TechnicianAvatar name={user?.name} avatarUrl={user?.avatar} className="h-9 w-9" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{user?.name}</p>
-                <PresenceLabel status={myPresence} detail={workItemLabel(presence[user?.id]?.busy_state)} />
-              </div>
-              <ChevronDown className="h-4 w-4 text-zinc-600" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuLabel>Set your status</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {[
-              ["", "active", "Available"],
-              ["dnd", "dnd", "Do not disturb"],
-              ["break", "break", "On a break"],
-              ["away", "away", "Appear away"],
-            ].map(([value, status, label]) => (
-              <DropdownMenuItem key={status} onClick={() => updateStatus(value)}>
-                <span className={`h-2.5 w-2.5 rounded-full ${PRESENCE_META[status].dot}`} />{label}
-                {myPresence === status && <Check className="ml-auto h-4 w-4" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </aside>
-
-      <main className={`${mobileConversationOpen ? "flex" : "hidden md:flex"} min-h-0 min-w-0 flex-1 flex-col bg-[#0d141b]`}>
+        )}
         {!activeChannel ? (
           <EmptyWorkspace onNew={() => setShowNewDialog(true)} />
         ) : (
@@ -1108,6 +1252,7 @@ export default function TeamChatPage() {
                   </div>
                 )}
                 {typingUsers.length > 0 && <span className="hidden text-xs text-cyan-200 lg:block">{typingUsers.map(row => row.user_name).join(", ")} typing…</span>}
+                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title={`Keyboard shortcuts — ${shortcutHint()}`} data-testid="chat-shortcuts-btn"><Keyboard className="h-4 w-4" /></Button>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => setChatSettingsOpen(true)} aria-label="Chat settings" title="Chat settings" data-testid="chat-settings-btn"><SlidersHorizontal className="h-4 w-4" /></Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1135,15 +1280,20 @@ export default function TeamChatPage() {
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 text-zinc-400 hover:text-white" onClick={() => { setShowInfo(current => !current); setThread(null); }} aria-label="Conversation details"><PanelRightOpen className="h-4 w-4" /></Button>
               </div>
               <div className="flex h-10 items-end gap-5 text-sm">
-                {[
-                  ["posts", "Messages", MessageCircle, messages.filter(message => !message.thread_id).length],
-                  ["files", "Files", FileText, files.length],
-                  ["pins", "Pinned", Pin, pinned.length],
-                ].map(([value, label, Icon, count]) => (
-                  <button key={value} onClick={() => { setActiveTab(value); setSearchResults(null); }} className={`flex h-10 items-center gap-1.5 border-b-2 px-1 transition ${activeTab === value ? "border-emerald-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}>
-                    <Icon className="h-3.5 w-3.5" />{label}{count > 0 && <span className="text-[10px] text-zinc-600">{count}</span>}
-                  </button>
-                ))}
+                {rankedTabs.map(tab => {
+                  const count = tab.count === "messages" ? messages.filter(message => !message.thread_id).length : tab.count === "files" ? files.length : pinned.length;
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.value}
+                      onClick={() => { setActiveTab(tab.value); setSearchResults(null); }}
+                      aria-current={activeTab === tab.value ? "true" : undefined}
+                      className={`flex h-10 items-center gap-1.5 border-b-2 px-1 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 ${activeTab === tab.value ? "border-emerald-500 text-white" : "border-transparent text-zinc-500 hover:text-zinc-200"}`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />{tab.label}{count > 0 && <span className="text-[10px] text-zinc-600">{count}</span>}
+                    </button>
+                  );
+                })}
               </div>
             </header>
 
@@ -1156,7 +1306,17 @@ export default function TeamChatPage() {
             )}
 
             {searchResults ? (
-              <SearchResults results={searchResults} onSelect={result => { selectChannel(result.channel_id); openThread({ id: result.thread_id || result.id }); }} onClose={() => setSearchResults(null)} />
+              <SearchResults
+                results={searchResults}
+                onSelect={result => {
+                  selectChannel(result.channel_id);
+                  // Mark the message the search actually matched, so a jump from
+                  // results lands on evidence rather than on a bare conversation.
+                  focusMessage(result.thread_id || result.id);
+                  openThread({ id: result.thread_id || result.id });
+                }}
+                onClose={() => setSearchResults(null)}
+              />
             ) : activeTab === "files" ? (
               <FilesView files={files} onDownload={downloadFile} />
             ) : activeTab === "pins" ? (
@@ -1165,47 +1325,72 @@ export default function TeamChatPage() {
               <>
                 <div
                   ref={scrollRef}
-                  onScroll={event => { const node = event.currentTarget; nearBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120; }}
-                  className="flex-1 overflow-y-auto"
+                  onScroll={event => {
+                    const node = event.currentTarget;
+                    const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+                    nearBottomRef.current = atBottom;
+                    setShowJumpToLatest(!atBottom && messages.length > 0);
+                  }}
+                  className="relative flex-1 overflow-y-auto"
                   data-testid="chat-message-list"
+                  role="log"
+                  aria-live="polite"
+                  aria-relevant="additions"
+                  aria-label={`Messages in ${channelDisplayName(activeChannel)}`}
                 >
                   {channelLoading && messages.length === 0 ? (
                     <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-emerald-400" /></div>
                   ) : groupedMessages.length === 0 ? (
-                    <ConversationWelcome channel={activeChannel} />
+                    <ConversationWelcome
+                      channel={activeChannel}
+                      onCommand={draftOperationalCommand}
+                      onOpenDetails={() => { setShowInfo(true); setThread(null); }}
+                    />
                   ) : (
                     <div className="mx-auto max-w-4xl px-3 py-5 md:px-8">
-                      {groupedMessages.map(group => group.type === "day" ? (
-                        <DayDivider key={group.key} label={formatDay(group.day)} />
-                      ) : (
-                        <MessageRow
-                          key={group.key}
-                          message={group.message}
-                          compact={group.compact}
-                          own={group.message.user_id === user?.id}
-                          settings={chatSettings}
-                           currentUserId={user?.id}
-                           headers={headers}
-                           presence={presence}
-                           readReceipts={readReceipts}
-                          editing={editingId === group.message.id}
-                          editingText={editingText}
-                          onEditingText={setEditingText}
-                          onStartEdit={() => { setEditingId(group.message.id); setEditingText(group.message.body); }}
-                          onCancelEdit={() => setEditingId(null)}
-                          onSaveEdit={saveEdit}
-                          onDelete={() => deleteMessage(group.message.id)}
-                          onPin={() => togglePin(group.message)}
-                          onThread={() => openThread(group.message)}
-                          onCopyMessageLink={() => copyMessageLink(group.message)}
-                          onReact={emoji => toggleReaction(group.message.id, emoji)}
-                          emojiOpen={emojiTarget === group.message.id}
-                          onEmojiOpen={() => setEmojiTarget(group.message.id)}
-                          onEmojiClose={() => setEmojiTarget(null)}
-                          onDownload={downloadFile}
-                        />
+                      {groupedMessages.map(group => (
+                        <Fragment key={group.key}>
+                          {group.type === "message" && group.message.id === unreadAnchorId && (
+                            <NewMessagesDivider count={unreadAnchorCount} />
+                          )}
+                          {group.type === "day" ? (
+                            <DayDivider label={formatDay(group.day)} />
+                          ) : (
+                            <MessageRow
+                              message={group.message}
+                              compact={group.compact}
+                              own={group.message.user_id === user?.id}
+                              settings={chatSettings}
+                              currentUserId={user?.id}
+                              headers={headers}
+                              presence={presence}
+                              readReceipts={readReceipts}
+                              editing={editingId === group.message.id}
+                              editingText={editingText}
+                              onEditingText={setEditingText}
+                              onStartEdit={() => { setEditingId(group.message.id); setEditingText(group.message.body); }}
+                              onCancelEdit={() => setEditingId(null)}
+                              onSaveEdit={saveEdit}
+                              onDelete={() => deleteMessage(group.message.id)}
+                              onPin={() => togglePin(group.message)}
+                              onThread={() => openThread(group.message)}
+                              onCopyMessageLink={() => copyMessageLink(group.message)}
+                              onReact={emoji => toggleReaction(group.message.id, emoji)}
+                              emojiOpen={emojiTarget === group.message.id}
+                              onEmojiOpen={() => setEmojiTarget(group.message.id)}
+                              onEmojiClose={() => setEmojiTarget(null)}
+                              onDownload={downloadFile}
+                              highlighted={highlightMessageId === group.message.id}
+                            />
+                          )}
+                        </Fragment>
                       ))}
                       {typingUsers.length > 0 && <TypingIndicator users={typingUsers} />}
+                    </div>
+                  )}
+                  {showJumpToLatest && (
+                    <div className="px-3 pb-3 md:px-8">
+                      <JumpToLatestBar count={unreadAnchorCount} onClick={scrollToLatest} />
                     </div>
                   )}
                 </div>
@@ -1294,12 +1479,22 @@ export default function TeamChatPage() {
                         <DropdownMenuContent align="start" className="w-52">
                           <DropdownMenuLabel>Turn this conversation into work</DropdownMenuLabel>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => draftOperationalCommand("/ticket ")}><FileText className="mr-2 h-3.5 w-3.5" />Link ticket</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => draftOperationalCommand("/invoice ")}><FileText className="mr-2 h-3.5 w-3.5" />Link invoice</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => draftOperationalCommand("/po ")}><FileText className="mr-2 h-3.5 w-3.5" />Link purchase order</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => draftOperationalCommand("/note ")}><Edit3 className="mr-2 h-3.5 w-3.5" />Add internal note</DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-rose-300 focus:text-rose-200" onClick={() => draftOperationalCommand("/page ")}><Bell className="mr-2 h-3.5 w-3.5" />Page on-call</DropdownMenuItem>
+                          {rankedWorkActions.map((action, index) => {
+                            const Icon = action.icon;
+                            const last = index === rankedWorkActions.length - 1;
+                            return (
+                              <Fragment key={action.id}>
+                                {last && <DropdownMenuSeparator />}
+                                <DropdownMenuItem
+                                  className={action.destructive ? "text-rose-300 focus:text-rose-200" : undefined}
+                                  onClick={() => { recordWorkAction(action); draftOperationalCommand(action.command); }}
+                                  data-testid={`chat-work-action-${action.id}`}
+                                >
+                                  <Icon className="mr-2 h-3.5 w-3.5" />{action.label}
+                                </DropdownMenuItem>
+                              </Fragment>
+                            );
+                          })}
                         </DropdownMenuContent>
                       </DropdownMenu>
                       <button type="button" onClick={() => draftOperationalCommand("/summarize")} className="rounded-md px-2 py-1 font-medium text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-100">Summarise</button>
@@ -1339,7 +1534,26 @@ export default function TeamChatPage() {
       </main>
 
       {showInfo && activeChannel && (
-        <InfoPanel channel={activeChannel} users={users} presenceFor={presenceFor} currentUserId={user?.id} canManage={canEditActiveChannel} headers={headers} onUpdated={() => loadWorkspace({ quiet: true })} onClose={() => setShowInfo(false)} />
+        <ContextRail
+          channel={activeChannel}
+          users={users}
+          presenceFor={presenceFor}
+          currentUserId={user?.id}
+          canManage={canEditActiveChannel}
+          headers={headers}
+          onUpdated={() => loadWorkspace({ quiet: true })}
+          onClose={() => setShowInfo(false)}
+          pinned={pinned}
+          files={files}
+          onDownload={downloadFile}
+          onOpenThread={openThread}
+          onJumpToUnread={jumpToUnread}
+          onMarkUnread={markConversationUnread}
+          onToggleSaved={() => updateConversationPreference("is_saved", !activeChannel.is_saved)}
+          onToggleMuted={() => updateConversationPreference("is_muted", !activeChannel.is_muted)}
+          notifySummary={notificationSummary(activeChannel)}
+          context={operationalContext}
+        />
       )}
       {thread && (
         <ThreadPanel
@@ -1361,6 +1575,12 @@ export default function TeamChatPage() {
         />
       )}
 
+      <ChatShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+        learningHint={chatLearningHint}
+        onForgetLearning={forgetChatLearning}
+      />
       <NewConversationDialog
         open={showNewDialog}
         onOpenChange={setShowNewDialog}

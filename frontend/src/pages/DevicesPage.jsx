@@ -5,6 +5,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Server, Monitor, Laptop, Wifi, Plus, Search, RefreshCw, CheckCircle, ChevronRight, LayoutGrid, List, Shield, Download, Loader2, Edit, Radar, Eye, Users, Cloud, Sparkles, BarChart3, Zap, Rows3, AlignJustify, Maximize2, MessageSquare, MoreHorizontal, ChevronDown, CalendarClock, CircleAlert, CircleCheck, Clock3 } from "lucide-react";
 import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
 import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+import { canExecuteAgentCommands } from "@/lib/nexusAgentHelpers";
 import DeviceWorkspaceTabs from "@/components/devices/DeviceWorkspaceTabs";
 import ManagedAssetToolsMenu from "@/components/devices/ManagedAssetToolsMenu";
 import { Card, CardContent } from "../components/ui/card";
@@ -29,6 +30,7 @@ import TopTalkersPanel from "../components/devices/TopTalkersPanel";
 import OfflineWatch from "../components/devices/OfflineWatch";
 import SavedViewsBar from "../components/devices/SavedViewsBar";
 import QuickScriptDialog from "../components/devices/QuickScriptDialog";
+import AppUpdatesDialog from "../components/devices/AppUpdatesDialog";
 import RiskHeatmapCanvas from "../components/devices/RiskHeatmapCanvas";
 import LifecycleTimeline from "../components/devices/LifecycleTimeline";
 import AnomalyInbox from "../components/devices/AnomalyInbox";
@@ -112,7 +114,7 @@ const emptyForm = { name: "", client_id: "", device_type: "workstation", os: "Wi
 export default function DevicesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   // Which managed-asset view and which desk tool this technician (and the team)
   // actually opens. A deliberate choice is the evidence.
   const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.DEVICES);
@@ -142,11 +144,15 @@ export default function DevicesPage() {
   const [tab, setTab] = useState("pulse");
   const [density, setDensity] = useState("comfortable"); // comfortable | compact | dense
   const [quickScriptOpen, setQuickScriptOpen] = useState(false);
+  const [appUpdatesDevice, setAppUpdatesDevice] = useState(null);
   const [pulseCount, setPulseCount] = useState(0);
   const [isLinkingAcronis, setIsLinkingAcronis] = useState(false);
   const [maintenanceWindow, setMaintenanceWindow] = useState(null);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Applying a pending application update runs an audited command on a customer
+  // endpoint, so the control is gated on the same permission as every other agent action.
+  const canRunAgentCommands = canExecuteAgentCommands(user);
   const filterSource = searchParams.get("source");
   const maintenanceWindowId = searchParams.get("maintenanceWindow");
 
@@ -828,6 +834,11 @@ export default function DevicesPage() {
                             data-testid={`row-diagnose-${d.id}`}>
                             <Sparkles className="w-3 h-3 text-fuchsia-400" />
                           </Button>
+                          {d.nexus_agent_id && (
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200" title="Pending application updates (winget)" aria-label={`Pending application updates for ${d.name}`} onClick={() => setAppUpdatesDevice(d)} data-testid={`row-app-updates-${d.id}`}>
+                              <Download className="h-3 w-3" />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Edit asset identity" onClick={() => openEdit(d)}><Edit className="w-3 h-3" /></Button>
                         </div>
                       </TableCell>
@@ -915,6 +926,9 @@ export default function DevicesPage() {
                         compact
                         testid={`card-remote-${d.id}`}
                       />
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] text-cyan-300 hover:bg-cyan-500/15 hover:text-cyan-200" title="Pending application updates (winget)" onClick={() => setAppUpdatesDevice(d)} data-testid={`card-app-updates-${d.id}`}>
+                        <Download className="mr-1 h-3 w-3" />Apps
+                      </Button>
                       <ChevronRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                   </div>
@@ -1005,6 +1019,15 @@ export default function DevicesPage() {
 
       {/* Quick Script bulk dialog */}
       <QuickScriptDialog open={quickScriptOpen} onClose={() => setQuickScriptOpen(false)} deviceIds={selectedDevices} />
+
+      {/* Pending application updates (winget) for one endpoint. The dialog reads the
+          agent's last reported scan and queues an audited upgrade command. */}
+      <AppUpdatesDialog
+        open={Boolean(appUpdatesDevice)}
+        onOpenChange={(next) => { if (!next) setAppUpdatesDevice(null); }}
+        device={appUpdatesDevice}
+        canExecute={canRunAgentCommands}
+      />
 
       {/* Cmd+K command palette */}
       </div>

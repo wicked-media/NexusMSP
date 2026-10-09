@@ -61,6 +61,28 @@ func (c *Client) SetClientIdentity(certificatePath, privateKeyPath string) error
 	return nil
 }
 
+// IdentityMode reports which transport identity the client is presenting, so the
+// agent can report its own recovery state honestly.
+func (c *Client) IdentityMode() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if transport, ok := c.http.Transport.(*http.Transport); ok && transport.TLSClientConfig != nil && len(transport.TLSClientConfig.Certificates) > 0 {
+		return "mtls"
+	}
+	return "token"
+}
+
+// ResetClientIdentity drops the presented device certificate and returns the
+// client to bearer-token transport. It is the agent's recovery path when a
+// certificate is expired, revoked or unusable: staying off the control plane
+// because the certificate is broken is worse than falling back to the token the
+// endpoint already holds, and the server still authorises every request.
+func (c *Client) ResetClientIdentity() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.http.Transport = nil
+}
+
 // Do issues an authenticated JSON request and decodes the response.
 // `result` may be nil if you don't need the body.
 func (c *Client) Do(method, path string, body any, result any) error {

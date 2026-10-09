@@ -74,9 +74,14 @@ test("the light theme deepens the tones instead of reusing the luminous tokens",
 test("the rail cannot render twice and never fights Sonner's pseudo-elements", () => {
   // Sonner uses ::before/::after on the toast itself for swipe and stack geometry.
   expect(css).not.toMatch(/\.nx-toast(?:\[[^\]]*\])?::(?:before|after)/);
-  // Exactly one rail declaration for the toast itself, and it is tone-driven.
-  const rails = css
-    .split("\n")
+  // Exactly one rail on the toast itself, and it is tone-driven. Scoped to the
+  // `.nx-toast` rules rather than grepping the whole sheet: other surfaces have
+  // their own, unrelated rails (the knowledge reader draws one beside a runbook
+  // command and a quote), and a file-wide grep mistook those for a duplicated
+  // toast rail. Every toast rule variant is still covered, so this is the same
+  // guarantee with fewer false positives.
+  const rails = [...css.matchAll(/\.nx-toast[^{}]*\{([^}]*)\}/g)]
+    .flatMap((match) => match[1].split("\n"))
     .filter((line) => line.includes("border-left: 3px solid"));
   expect(rails).toHaveLength(1);
   expect(rails[0]).toContain("hsl(var(--nx-toast-tone))");

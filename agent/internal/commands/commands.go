@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"nexusagent/internal/appupdate"
 	"nexusagent/internal/canary"
 	"nexusagent/internal/config"
 	"nexusagent/internal/identity"
@@ -34,6 +35,7 @@ type Loop struct {
 	seenNonces  map[string]time.Time
 	replayPath  string
 	replayLimit int
+	appUpdates  *appupdate.Monitor
 }
 
 func NewLoop(tr *transport.Client, cfg *config.Config, fallback time.Duration) *Loop {
@@ -52,6 +54,12 @@ func NewLoop(tr *transport.Client, cfg *config.Config, fallback time.Duration) *
 	loop.loadReplayCache()
 	return loop
 }
+
+// SetAppUpdates connects the application-update monitor so a queued
+// `winget_upgrade` command can be executed against it. It is nil in tests and in
+// builds without the monitor, and the command reports that honestly rather than
+// pretending an update ran.
+func (l *Loop) SetAppUpdates(monitor *appupdate.Monitor) { l.appUpdates = monitor }
 
 type commandPayload struct {
 	Script        string   `json:"script,omitempty"`
@@ -74,6 +82,11 @@ type commandPayload struct {
 	Destination   string   `json:"destination,omitempty"`
 	SourcePath    string   `json:"source_path,omitempty"`
 	Directory     string   `json:"directory,omitempty"`
+	// Application updates. `ids` names packages and `all` targets every pending
+	// upgrade the endpoint reported. The agent resolves either into a fixed winget
+	// argument vector; it never accepts a command line from the caller.
+	IDs []string `json:"ids,omitempty"`
+	All bool     `json:"all,omitempty"`
 }
 
 type commandAuthorization struct {
@@ -463,6 +476,42 @@ func (l *Loop) execute(c cmdItem) (res cmdResult) {
 		} else if err != nil {
 			res.Status = "error"
 		}
+
+	case "winget_upgrade":
+		monitor := l.appUpdates
+		if monitor == nil {
+			res.Status = "error"
+			res.Stderr = "application updates are not available in this agent build"
+			return res
+		}
+		// An upgrade runs on its own budget: the command's generic 120-second
+		// ceiling would kill a package download that is legitimately still running.
+		upgradeCtx, upgradeCancel := context.WithTimeout(context.Background(), appupdate.UpgradeTimeout+time.Minute)
+		defer upgradeCancel()
+		result, _ := monitor.Upgrade(upgradeCtx, c.Payload.IDs, c.Payload.All)
+		encoded, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			encoded = []byte(`{"outcome":"` + result.Outcome + `"}`)
+		}
+		res.Stdout = truncate(string(encoded), 16*1024)
+		switch result.Outcome {
+		case appupdate.OutcomeInstalled:
+			res.Status = "ok"
+		case appupdate.OutcomePartial:
+			// Partly done is not done: the operator is told which packages failed.
+			res.Status = "error"
+			res.Stderr = "some requested application updates did not install"
+		case appupdate.OutcomeBlocked:
+			res.Status = "error"
+			res.Stderr = result.Detail
+		case appupdate.OutcomeUnsupported:
+			res.Status = "error"
+			res.Stderr = "winget is not available on this endpoint"
+		default:
+			res.Status = "error"
+		}
+		log.Printf("[cmd] winget_upgrade outcome=%s requested=%d", result.Outcome, len(result.Requested))
+		return res
 
 	case "reboot":
 		go func() {

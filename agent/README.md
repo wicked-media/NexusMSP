@@ -73,8 +73,63 @@ Run `install.bat` as Administrator.
 - `internal/commands/`         — command poller + executor
 - `internal/telemetry/`        — system inventory collectors
 - `internal/transport/`        — HTTP client (with auth, retry)
+- `internal/selfheal/`         — connectivity self-awareness, repair ladder, Windows performance guard
 - `internal/localbroker/`      — narrow, service-owned localhost bridge for companions
 - `internal/updater/`          — signed update verification and staged swap/rollback
+
+## Self-healing
+
+The agent knows whether it is still phoning home, repairs what it can by itself,
+and keeps its own endpoint performing. Full design, safety gates and the operating
+runbook live in [docs/AGENT_SELF_HEALING.md](../docs/AGENT_SELF_HEALING.md).
+
+- **Connectivity awareness.** Every heartbeat result — success and failure — is fed
+  into a watchdog that reports `connected` / `degraded` / `disconnected` / `rejected`
+  with the classified cause, outage length and the actions it took. NexusMSP learns
+  an endpoint was offline from the endpoint itself, with the reason attached.
+- **A repair ladder that learns.** Read-only probe first, then local identity/policy
+  repair, certificate renewal, transport fallback, once-a-day re-enrollment and an
+  optional service restart. A rung is credited only when contact actually returns, so
+  the agent converges on the action that works *on this endpoint* for the cause it
+  saw.
+- **Endpoint performance guard.** CPU, memory and free-space signals are compared
+  against a baseline learned on the endpoint itself (never a fixed number), plus
+  cached `DISM /CheckHealth` component-store health. Sustained degradation triggers
+  the built-in Windows repair: `DISM /RestoreHealth` (payload from Windows Update),
+  then `sfc /scannow`, then `DISM /CheckHealth` to verify.
+- **Learning is endpoint-local.** `self-heal-state.json` in the agent base directory
+  records outcomes, the outage history, the performance baseline and repair results.
+  A corrupt or missing file is replaced with a fresh profile rather than stopping the
+  agent. This is bookkeeping about the agent itself; NexusMSP owns the audit trail.
+
+Windows component repair is **off by default** and only runs when the signed
+platform policy (or an explicit installer configuration on a pilot machine) enables
+it, the agent is elevated, the optional maintenance window allows it, and the learned
+cooldown and daily cap permit it. Every blocked attempt records why. The package
+never builds a shell command string: each step is an absolute `System32` executable
+with fixed arguments.
+
+## Application updates (winget)
+
+The agent uses winget, the package manager Windows ships, for the two things the
+platform could not previously see:
+
+- **What is pending.** `internal/appupdate/` lists upgradable packages with
+  `winget upgrade --include-unknown` and reports a bounded list as heartbeat
+  evidence, so an operator can see an endpoint's pending application updates
+  before anyone calls the service desk. A scan walks the winget sources, so it is
+  cached and refreshed in the background — a heartbeat never waits for winget.
+- **Apply them.** A technician applies a selected package, or everything pending,
+  from the device menu, which queues an audited `winget_upgrade` command. The
+  agent resolves it into a fixed argument vector, one winget run per package, and
+  reports what actually happened: a failed run is never reported as installed.
+
+Automatic installation is **off by default**. It runs only when the signed
+policy's `winget.auto_update_enabled` is set with a non-empty `allowed_ids`
+allow-list, and then at most once a day inside the configured window. An empty
+allow-list means none, never all. A package identifier is always refused unless it
+has an identifier's shape, so an id can never become an argument to another
+program.
 
 ## Nexus Elevate (native endpoint privilege approvals)
 

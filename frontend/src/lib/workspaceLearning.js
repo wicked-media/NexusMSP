@@ -45,6 +45,19 @@ export const LEARNING_WORKSPACES = Object.freeze({
   VOICE: "voice",
   DEVICES: "devices",
   PURCHASE_ORDERS: "purchase_orders",
+  // The conversation workspace learns which channels, threads and tools a
+  // technician actually opens. This slug exists in the server registry
+  // (backend/app/routers/workspace_learning.py), which is the authority.
+  CHAT: "chat",
+  // The documentation reader (Knowledge Base, Help Centre and the hub in front
+  // of them) learns which guides and articles a technician opens, under the
+  // shared store like every other workspace. It was browser-local until this
+  // slug existed: the guides that a reader finds useful are exactly the guides a
+  // colleague should be shown, and a technician who changes machine should not
+  // start from the authored order again. The kind is part of the target slug
+  // (components/knowledge/knowledgeLearning.js) so a guide and an article with
+  // the same name are never the same piece of evidence.
+  DOCUMENTATION: "documentation",
 });
 
 /**
@@ -110,7 +123,7 @@ export function signalIndex(rows) {
   return index;
 }
 
-function evidenceFor(surface, id, personal, team) {
+export function evidenceFor(surface, id, personal = new Map(), team = new Map()) {
   const target = learningSlug(id);
   if (!target) return { mine: 0, theirs: 0 };
   const key = `${surface}:${target}`;
@@ -147,6 +160,31 @@ export function rankByUse(items, {
   const rest = scored.filter((entry) => entry.tier === 2);
   known.sort((left, right) => left.tier - right.tier || right.count - left.count || left.index - right.index);
   return [...known, ...rest].map((entry) => entry.item);
+}
+
+/**
+ * The items this technician opened most recently, newest first.
+ *
+ * Only the caller's own evidence is read. The team aggregate carries a
+ * last-used timestamp, but it answers "when did anyone last use this" — showing
+ * it as one technician's reading history would attribute a colleague's activity
+ * to them, so a workspace that means *you* must pass `personal`.
+ */
+export function recentlyUsed(items, {
+  surface,
+  personal = new Map(),
+  idOf,
+  limit = 5,
+} = {}) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const target = learningSlug(targetId(item, idOf));
+      return { item, entry: target ? personal.get(`${surface}:${target}`) : null };
+    })
+    .filter(({ entry }) => Boolean(entry))
+    .sort((left, right) => String(right.entry.lastUsedAt || "").localeCompare(String(left.entry.lastUsedAt || "")))
+    .slice(0, Math.max(0, Number(limit) || 0))
+    .map(({ item }) => item);
 }
 
 /**

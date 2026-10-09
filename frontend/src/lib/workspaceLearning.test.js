@@ -9,6 +9,7 @@ import {
   preferredTarget,
   promotedItems,
   rankByUse,
+  recentlyUsed,
   signalIndex,
   splitQuickActions,
 } from "./workspaceLearning";
@@ -22,8 +23,12 @@ const views = [
 
 describe("workspace learning helpers", () => {
   test("names exactly the workspaces the backend registry accepts", () => {
+    // This list mirrors WORKSPACES in backend/app/routers/workspace_learning.py,
+    // which is the authority: the server rejects a slug it does not know. A
+    // workspace added there must be added on both sides, so the assertion is
+    // deliberately exhaustive rather than a subset check.
     expect(Object.values(LEARNING_WORKSPACES).sort()).toEqual(
-      ["client", "devices", "invoices", "purchase_orders", "tickets", "voice"].sort(),
+      ["chat", "client", "devices", "documentation", "invoices", "purchase_orders", "tickets", "voice"].sort(),
     );
   });
 
@@ -126,6 +131,26 @@ describe("workspace learning helpers", () => {
     expect(learned.visible.map((action) => action.id)).toEqual(["health", "device", "email"]);
     expect(learned.overflow.map((action) => action.id)).toEqual(["schedule", "invoice"]);
     expect(splitQuickActions(actions, { surface: LEARNING_ACTION, idOf: (action) => action.id, limit: 1 }).visible).toHaveLength(1);
+  });
+
+  test("recently used is this technician's own history, newest first", () => {
+    const items = [{ value: "billing" }, { value: "subscriptions" }, { value: "schedule" }];
+    const personal = signalIndex([
+      { surface: LEARNING_VIEW, target: "billing", count: 3, last_used_at: "2026-05-01T00:00:00+00:00" },
+      { surface: LEARNING_VIEW, target: "schedule", count: 1, last_used_at: "2026-06-01T00:00:00+00:00" },
+    ]);
+    const team = signalIndex([
+      { surface: LEARNING_VIEW, target: "subscriptions", count: 40, last_used_at: "2026-07-01T00:00:00+00:00" },
+    ]);
+
+    // A team staple is not this technician's history however recently the team
+    // touched it: a "you were reading this" list must never show one technician
+    // another technician's activity.
+    expect(recentlyUsed(items, { surface: LEARNING_VIEW, personal, team, idOf: (item) => item.value })
+      .map((item) => item.value)).toEqual(["schedule", "billing"]);
+    expect(recentlyUsed(items, { surface: LEARNING_VIEW, personal, idOf: (item) => item.value, limit: 1 })
+      .map((item) => item.value)).toEqual(["schedule"]);
+    expect(recentlyUsed(items, { surface: LEARNING_VIEW, idOf: (item) => item.value })).toEqual([]);
   });
 
   test("only an item with real evidence may leave the overflow menu", () => {

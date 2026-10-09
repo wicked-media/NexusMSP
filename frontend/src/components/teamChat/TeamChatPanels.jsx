@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import {
+  ArrowDown,
   Bell,
   Building2,
   Check,
@@ -23,6 +24,7 @@ import {
   Plus,
   Search,
   Send,
+  Sparkles,
   X,
 } from "lucide-react";
 import { chatAuthorName, channelDisplayName, repairDisplayText } from "@/lib/teamChatHelpers";
@@ -48,7 +50,7 @@ export function SearchResults({ results, onSelect, onClose }) {
   return <div className="flex-1 overflow-y-auto p-5 md:p-8"><div className="mx-auto max-w-4xl"><div className="mb-5 flex items-center justify-between"><div><h3 className="text-lg font-semibold">Search results</h3><p className="text-sm text-zinc-500">{results.length} matching messages</p></div><Button variant="ghost" size="sm" onClick={onClose} aria-label="Close search results"><X className="h-4 w-4" /></Button></div>{results.length === 0 ? <EmptyContent icon={Search} title="No matches" body="Try a different person, ticket, or phrase." /> : <div className="space-y-2">{results.map(result => <button key={result.id} onClick={() => onSelect(result)} className="w-full rounded-xl border border-white/5 bg-white/[0.02] p-4 text-left hover:border-cyan-500/30 hover:bg-white/[0.04]"><div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">{result.channel_kind === "team" ? <Hash className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}<span>{result.channel_name}</span><span>·</span><span>{chatAuthorName(result.user_name, result.is_system)}</span><span>·</span><span>{formatRelative(result.ts)}</span></div><p className="line-clamp-3 text-sm text-zinc-300">{repairDisplayText(result.body)}</p></button>)}</div>}</div></div>;
 }
 
-export function InfoPanel({ channel, users, presenceFor, currentUserId, canManage, headers, onUpdated, onClose }) {
+export function ConversationDetails({ channel, users, presenceFor, currentUserId, canManage, headers, onUpdated, onClose }) {
   const memberIds = useMemo(
     () => channel.kind === "team" && !channel.is_private ? users.map(user => user.id) : channel.member_ids || [],
     [channel.is_private, channel.kind, channel.member_ids, users],
@@ -101,13 +103,29 @@ export function InfoPanel({ channel, users, presenceFor, currentUserId, canManag
     }
   };
   return (
-    <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
-      <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close conversation details"><X className="h-4 w-4" /></Button></div>
+    <>
+      {onClose && <div className="flex h-16 items-center justify-between border-b border-white/5 px-4"><h3 className="font-semibold">Conversation details</h3><Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose} aria-label="Close conversation details"><X className="h-4 w-4" /></Button></div>}
       {canManageMembers && <div className="border-b border-white/5 bg-cyan-500/[0.04] p-4"><div className="mb-2 flex items-center justify-between"><p className="text-xs font-medium text-cyan-100">Private member access</p><span className="text-[10px] text-zinc-500">Owner</span></div><div className="flex gap-2"><select value="" onChange={event => addMember(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Add a technician…</option>{users.filter(candidate => !draftMemberIds.includes(candidate.id)).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={saveMembers} disabled={savingMembers} className="h-9 shrink-0 bg-emerald-600 px-3 text-xs hover:bg-emerald-500">{savingMembers ? "Saving" : "Save"}</Button></div><div className="mt-2 flex flex-wrap gap-1">{draftMemberIds.map(id => { const member = users.find(candidate => candidate.id === id); return member ? <span key={id} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/20 py-1 pl-2 pr-1 text-[10px] text-zinc-300">{member.name}{id !== currentUserId && <button type="button" onClick={() => removeMember(id)} className="rounded-full p-0.5 text-zinc-500 hover:bg-rose-500/15 hover:text-rose-300" title={`Remove ${member.name}`}><X className="h-3 w-3" /></button>}</span> : null; })}</div></div>}
       {canTransferOwnership && <div className="border-b border-white/5 bg-amber-500/[0.035] p-4"><p className="text-xs font-medium text-amber-100">Channel ownership</p><p className="mt-1 text-[11px] text-zinc-500">Transfer management responsibility to an active technician.</p><div className="mt-2 flex gap-2"><select value={nextOwnerId} onChange={event => setNextOwnerId(event.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-white/10 bg-[#252832] px-2 text-xs text-zinc-300"><option value="">Choose new owner…</option>{users.filter(candidate => candidate.id !== channel.created_by).map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><Button onClick={transferOwnership} disabled={!nextOwnerId || transferringOwner} className="h-9 shrink-0 bg-amber-600 px-3 text-xs hover:bg-amber-500">{transferringOwner ? "Saving" : "Transfer"}</Button></div></div>}
       <div className="border-b border-white/5 bg-white/[0.015] px-4 py-3"><div className="flex items-center gap-2 text-xs text-zinc-400"><Bell className="h-3.5 w-3.5 text-cyan-300" /><span>Notifications: {notificationSummary(channel)}</span></div></div>
       {channel.kind === "client_direct" && <div className="border-b border-cyan-500/15 bg-cyan-500/[0.045] p-4" data-testid="customer-connection-details"><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" /><div className="min-w-0"><p className="text-xs font-medium text-cyan-100">Approved customer connection</p><p className="mt-1 truncate text-sm text-zinc-100">{channel.customer_name || channelDisplayName(channel)}</p>{channel.customer_email && <p className="mt-0.5 truncate text-[11px] text-zinc-500">{channel.customer_email}</p>}<p className="mt-2 text-[10px] leading-4 text-zinc-500">Private customer access is limited to this technician and remains linked to the approval record.</p></div></div></div>}
       <ScrollArea className="flex-1"><div className="p-5 text-center"><ChannelAvatar channel={channel} presence={channel.other_user_id ? presenceFor(channel.other_user_id) : null} size="md" /><h4 className="mt-3 text-lg font-semibold">{channelDisplayName(channel)}</h4><p className="mt-1 text-xs text-zinc-500">{channel.is_private ? "Private" : "Company-wide"} · {channel.member_count || memberIds.length} members</p>{channel.description && <p className="mt-4 rounded-lg bg-white/[0.03] p-3 text-left text-sm text-zinc-400">{channel.description}</p>}</div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Members</p><div className="space-y-1">{memberIds.map(id => { const member = users.find(candidate => candidate.id === id); if (!member) return null; return <div key={id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-white/[0.03]"><TechnicianAvatar name={member.name} avatarUrl={member.avatar} className="h-8 w-8" /><div className="min-w-0 flex-1 text-left"><p className="truncate text-sm">{member.name}</p><PresenceLabel status={presenceFor(id)} /></div></div>; })}</div></div><div className="border-t border-white/5 p-4"><p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">Channel history</p>{activity.length === 0 ? <p className="text-xs text-zinc-600">No recorded channel changes yet.</p> : <div className="space-y-2">{activity.map(event => <div key={event.id} className="rounded-lg bg-white/[0.025] p-2.5 text-xs"><p className="text-zinc-300">{event.actor_name} · {String(event.event_type || "change").replaceAll(".", " ")}</p><p className="mt-0.5 text-[10px] text-zinc-600">{formatRelative(event.created_at)}</p></div>)}</div>}</div></ScrollArea>
+    </>
+  );
+}
+
+/**
+ * The details rail as a standalone panel.
+ *
+ * Kept as the single-container wrapper so a page can still open the classic
+ * right-hand panel, while the chat context rail embeds the same
+ * `ConversationDetails` content inside its own tabbed surface. One set of
+ * server-validated membership and ownership calls, two presentations.
+ */
+export function InfoPanel(props) {
+  return (
+    <aside className="fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col border-l border-white/5 bg-[#1d1f26] shadow-2xl md:static md:inset-auto" data-testid="chat-info-panel">
+      <ConversationDetails {...props} />
     </aside>
   );
 }
@@ -181,9 +199,100 @@ export function UserPicker({ candidates, selected, onToggle }) {
   return <ScrollArea className="h-64 rounded-lg border border-white/5"><div className="p-1">{candidates.map(candidate => { const checked = selected.includes(candidate.id); return <button key={candidate.id} onClick={() => onToggle(candidate.id)} className={`flex w-full items-center gap-3 rounded-lg p-2 text-left ${checked ? "bg-cyan-500/15" : "hover:bg-white/[0.04]"}`}><TechnicianAvatar name={candidate.name} avatarUrl={candidate.avatar} className="h-9 w-9" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{candidate.name}</p><p className="truncate text-xs text-zinc-600">{candidate.email}</p></div>{checked && <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500"><Check className="h-3 w-3" /></span>}</button>; })}{candidates.length === 0 && <p className="p-8 text-center text-sm text-zinc-600">No teammates found</p>}</div></ScrollArea>;
 }
 
-export function ConversationWelcome({ channel }) {
-  return <div className="flex h-full min-h-[360px] flex-col items-center justify-center px-6 text-center"><ChannelAvatar channel={channel} presence={null} size="md" /><h3 className="mt-4 text-xl font-semibold">Welcome to {channelDisplayName(channel)}</h3><p className="mt-2 max-w-md text-sm text-zinc-500">{channel.description || (channel.kind === "team" ? "Share the operational context that keeps everyone aligned." : "This private conversation is ready when you are.")}</p></div>;
+/**
+ * The empty conversation, which is a teaching surface rather than a blank pane.
+ *
+ * Every starter here drafts a Nexus command the technician can edit before it
+ * sends, so an empty channel shows how work gets linked instead of only saying
+ * "no messages yet". The copy never calls this intelligence: it is a lookup into
+ * tickets, invoices and this channel's own history.
+ */
+export function ConversationWelcome({ channel, onCommand, onOpenDetails }) {
+  const isTeam = channel.kind === "team";
+  const quickStarts = isTeam
+    ? [
+      { label: "Link a ticket", detail: "Attach the work this channel is about", command: "/ticket " },
+      { label: "Link an invoice", detail: "Keep billing context in the thread", command: "/invoice " },
+      { label: "Add an internal note", detail: "Record context on the linked ticket", command: "/note " },
+    ]
+    : [
+      { label: "Link a ticket", detail: "Attach the work this conversation covers", command: "/ticket " },
+      { label: "Choose a purchase order", detail: "Reference the parts or licences involved", command: "/po " },
+      { label: "Add an internal note", detail: "Record context on the linked ticket", command: "/note " },
+    ];
+  return (
+    <div className="flex h-full min-h-[420px] flex-col items-center justify-center px-6 py-8 text-center">
+      <ChannelAvatar channel={channel} presence={null} size="md" />
+      <h3 className="mt-4 text-xl font-semibold">Welcome to {channelDisplayName(channel)}</h3>
+      <p className="mt-2 max-w-md text-sm text-zinc-500">
+        {channel.description || (isTeam ? "Share the operational context that keeps everyone aligned." : "This private conversation is ready when you are.")}
+      </p>
+      {onCommand && (
+        <div className="mt-6 w-full max-w-lg">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-600">Start with the work</p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {quickStarts.map((starter) => (
+              <button
+                key={starter.label}
+                type="button"
+                onClick={() => onCommand(starter.command)}
+                className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3 text-left transition hover:border-emerald-400/30 hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                data-testid={`chat-quick-start-${starter.command.trim().replace("/", "")}`}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
+                <p className="mt-1.5 text-xs font-medium text-zinc-100">{starter.label}</p>
+                <p className="mt-0.5 text-[10px] leading-4 text-zinc-500">{starter.detail}</p>
+              </button>
+            ))}
+          </div>
+          <p className="mt-3 text-[10px] leading-4 text-zinc-600">Each starter drafts a Nexus command you can edit before sending. Type / for the full command list.</p>
+        </div>
+      )}
+      {onOpenDetails && (
+        <Button variant="ghost" size="sm" className="mt-4 h-8 text-[11px] text-zinc-400" onClick={onOpenDetails}>
+          Open conversation context
+        </Button>
+      )}
+    </div>
+  );
 }
+
+/** Marker for where the unread messages begin, derived from the conversation's own count. */
+export function NewMessagesDivider({ count }) {
+  return (
+    <div className="my-4 flex items-center gap-3" role="separator" aria-label={`${count} unread message${count === 1 ? "" : "s"}`} data-testid="chat-new-messages-divider">
+      <span className="h-px flex-1 bg-rose-500/40" />
+      <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-200">
+        {count} new message{count === 1 ? "" : "s"}
+      </span>
+      <span className="h-px flex-1 bg-rose-500/40" />
+    </div>
+  );
+}
+
+/**
+ * The "you are reading history" affordance.
+ *
+ * Appears only when the reader is genuinely scrolled away from the newest
+ * message, so it never covers the live conversation. It reports the count from
+ * the same unread evidence the divider uses.
+ */
+export function JumpToLatestBar({ count, onClick }) {
+  return (
+    <div className="pointer-events-none sticky bottom-3 z-20 flex justify-center">
+      <button
+        type="button"
+        onClick={onClick}
+        className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-[#16202a] px-3.5 py-2 text-[11px] font-medium text-emerald-100 shadow-xl shadow-black/40 transition hover:border-emerald-300/50 hover:bg-[#1b2833] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+        data-testid="chat-jump-to-latest"
+      >
+        <ArrowDown className="h-3.5 w-3.5" />
+        {count > 0 ? `${count} new message${count === 1 ? "" : "s"}` : "Jump to the latest message"}
+      </button>
+    </div>
+  );
+}
+
 
 export function EmptyWorkspace({ onNew }) {
   return <div className="flex flex-1 flex-col items-center justify-center p-8 text-center"><div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-emerald-500/15"><MessageCircle className="h-9 w-9 text-emerald-400" /></div><h2 className="mt-5 text-2xl font-semibold">Nexus Chat, built for the work</h2><p className="mt-2 max-w-md text-sm text-zinc-500">Keep private conversations, operational channels, files, and ticket context in one secure workspace.</p><Button onClick={onNew} className="mt-5 bg-emerald-600 hover:bg-emerald-500"><Plus className="mr-2 h-4 w-4" />Start collaborating</Button></div>;
@@ -202,7 +311,7 @@ export function DayDivider({ label }) {
 }
 
 export function TypingIndicator({ users }) {
-  return <div className="ml-12 mt-2 flex items-center gap-2 text-xs text-zinc-500"><span className="flex -space-x-1">{users.slice(0, 3).map(person => <TechnicianAvatar key={person.user_id} name={person.user_name} avatarUrl={person.avatar_url || person.avatar} className="h-6 w-6 border border-[#1d1f26]" fallbackClassName="text-[8px]" />)}</span><span className="flex gap-1 rounded-full bg-white/5 px-3 py-2"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:240ms]" /></span>{users.map(person => person.user_name).join(", ")} typing</div>;
+  return <div className="ml-12 mt-2 flex items-center gap-2 text-xs text-zinc-500" role="status" aria-live="polite"><span className="flex -space-x-1">{users.slice(0, 3).map(person => <TechnicianAvatar key={person.user_id} name={person.user_name} avatarUrl={person.avatar_url || person.avatar} className="h-6 w-6 border border-[#1d1f26]" fallbackClassName="text-[8px]" />)}</span><span className="flex gap-1 rounded-full bg-white/5 px-3 py-2"><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:120ms]" /><i className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:240ms]" /></span>{users.map(person => person.user_name).join(", ")} typing</div>;
 }
 
 export function ComposerButton({ icon: Icon, label, onClick }) {

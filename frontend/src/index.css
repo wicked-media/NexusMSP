@@ -2640,3 +2640,410 @@ html[data-motion="minimal"] .nx-queue-row-flash { animation: none; transition: n
     .nx-sla-overdue,
     .nx-queue-row-flash { animation: none; transition: none; }
 }
+
+/* ============================================================================
+   Knowledge & Help reading surface
+   ----------------------------------------------------------------------------
+   The document language for the Knowledge Base and Help Centre. Kept at the end
+   of the sheet and additive only: every existing rule above stays exactly as it
+   was, and each class here is opted into by the reading kit, so nothing else in
+   Nexus is restyled by accident. The typography is deliberately closer to a
+   printed technical document than to a product screen — the reader is meant to
+   be read, scanned by heading and printed for a change window.
+   ========================================================================= */
+
+.nx-reading-progress {
+    position: relative;
+    height: 3px;
+    width: 100%;
+    overflow: hidden;
+    background: hsl(var(--border) / 0.5);
+}
+
+.nx-reading-progress__bar {
+    display: block;
+    height: 100%;
+    background-image: linear-gradient(90deg, hsl(var(--nx-tone-positive)), hsl(var(--nx-tone-info)) 60%, hsl(var(--primary)));
+    transition: width 120ms linear;
+}
+
+/* Table of contents: quiet until it is useful, and never louder than the article. */
+.nx-guide-toc {
+    padding: .6rem .5rem;
+    border: 1px solid hsl(var(--border) / .8);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, hsl(var(--card) / .92), hsl(var(--card) / .62));
+}
+
+.nx-guide-toc__title {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    margin: 0 0 .4rem !important;
+    padding: 0 .45rem;
+    color: hsl(var(--muted-foreground));
+    font-size: .62rem;
+    font-weight: 800;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+}
+
+.nx-guide-toc__list {
+    margin: 0 !important;
+    padding: 0 !important;
+    list-style: none !important;
+}
+
+.nx-guide-toc__link {
+    display: block;
+    padding: .32rem .5rem;
+    border-left: 2px solid transparent;
+    border-radius: .45rem;
+    color: hsl(var(--muted-foreground));
+    font-size: .74rem;
+    line-height: 1.35;
+    text-decoration: none !important;
+    transition: color .16s ease, background-color .16s ease, border-color .16s ease;
+}
+
+.nx-guide-toc__link:hover {
+    color: hsl(var(--foreground));
+    background: hsl(var(--primary) / .08);
+}
+
+.nx-guide-toc__link.is-active {
+    border-left-color: hsl(var(--nx-tone-info));
+    color: hsl(var(--nx-tone-info));
+    background: hsl(var(--nx-tone-info) / .1);
+    font-weight: 600;
+}
+
+.nx-guide-toc__item--nested .nx-guide-toc__link {
+    padding-left: 1.1rem;
+    font-size: .7rem;
+    opacity: .85;
+}
+
+/* Provenance strip: who maintains this, when it moved, how long it takes. */
+.nx-guide-provenance {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: .55rem;
+    margin: 0 !important;
+    padding: .7rem .8rem;
+    border: 1px solid hsl(var(--border) / .75);
+    border-radius: 1rem;
+    background: hsl(var(--muted) / .22);
+}
+
+.nx-guide-provenance dt {
+    color: hsl(var(--muted-foreground));
+    font-size: .58rem;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+.nx-guide-provenance dd {
+    margin: .2rem 0 0;
+    font-size: .78rem;
+    font-weight: 600;
+    color: hsl(var(--foreground));
+}
+
+/* Feedback and memory strips share one shape so they never look like an alert. */
+.nx-guide-feedback,
+.nx-knowledge-memory {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .75rem;
+    padding: .8rem 1rem;
+    border: 1px solid hsl(var(--border) / .8);
+    border-radius: 1rem;
+    background: linear-gradient(180deg, hsl(var(--card) / .9), hsl(var(--muted) / .18));
+}
+
+.nx-knowledge-memory {
+    border-color: hsl(var(--nx-tone-caution) / .3);
+    background: hsl(var(--nx-tone-caution) / .06);
+}
+
+/* The end of a search that found nothing: a place to go, not a dead end. */
+.nx-knowledge-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .6rem;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    border: 1px dashed hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card) / .55);
+}
+
+.nx-knowledge-empty__icon {
+    display: grid;
+    place-items: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: .9rem;
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--muted) / .35);
+}
+
+/* ----------------------------------------------------------------------------
+   The document itself.
+   Applied to sanitised knowledge HTML and to a rendered Markdown guide body.
+   Every selector is scoped, so a table or a heading elsewhere in Nexus keeps the
+   styling it already had.
+   -------------------------------------------------------------------------- */
+
+.nx-guide-doc {
+    color: hsl(var(--foreground));
+    font-size: .875rem;
+    line-height: 1.75;
+}
+
+.nx-guide-doc > * + * {
+    margin-top: 1rem;
+}
+
+.nx-guide-doc p,
+.nx-guide-doc li {
+    max-width: 78ch;
+    color: hsl(var(--muted-foreground));
+}
+
+.nx-guide-doc h1,
+.nx-guide-doc h2 {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: 2rem 0 .6rem !important;
+    padding-bottom: .45rem;
+    border-bottom: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground));
+    font-size: 1.1rem;
+    font-weight: 700;
+    scroll-margin-top: 6rem;
+}
+
+.nx-guide-doc h2:before {
+    content: "\203A";
+    display: grid;
+    width: 1.2rem;
+    height: 1.2rem;
+    place-items: center;
+    border-radius: .32rem;
+    color: hsl(var(--nx-tone-info));
+    background: hsl(var(--nx-tone-info) / .14);
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.nx-guide-doc h3 {
+    margin: 1.5rem 0 .4rem !important;
+    color: hsl(var(--nx-tone-positive));
+    font-size: .95rem;
+    font-weight: 700;
+    scroll-margin-top: 6rem;
+}
+
+.nx-guide-doc h4 {
+    margin: 1.2rem 0 .3rem !important;
+    font-size: .85rem;
+    font-weight: 700;
+    scroll-margin-top: 6rem;
+}
+
+.nx-guide-doc a {
+    color: hsl(var(--nx-tone-info));
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.nx-guide-doc strong {
+    color: hsl(var(--foreground));
+}
+
+.nx-guide-doc ul,
+.nx-guide-doc ol {
+    padding-left: 1.15rem;
+}
+
+.nx-guide-doc ul {
+    list-style: disc;
+}
+
+.nx-guide-doc ol {
+    list-style: decimal;
+}
+
+.nx-guide-doc li + li {
+    margin-top: .35rem;
+}
+
+.nx-guide-doc li::marker {
+    color: hsl(var(--nx-tone-info));
+}
+
+.nx-guide-doc code {
+    padding: .1rem .35rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: .35rem;
+    background: hsl(var(--muted) / .5);
+    font-size: .8em;
+}
+
+.nx-guide-doc pre {
+    overflow-x: auto;
+    padding: .9rem 1rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: .75rem;
+    background: hsl(var(--nx-surface));
+    font-size: .78rem;
+    line-height: 1.6;
+}
+
+.nx-guide-doc pre code {
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+/* A shell command in a runbook is a thing to copy, so it reads like one. */
+.nx-guide-doc pre:has(code) {
+    position: relative;
+    border-left: 3px solid hsl(var(--nx-tone-info));
+}
+
+.nx-guide-doc blockquote {
+    margin: 1rem 0 !important;
+    padding: .75rem 1rem;
+    border-left: 3px solid hsl(var(--nx-tone-positive));
+    border-radius: 0 .6rem .6rem 0;
+    background: hsl(var(--nx-tone-positive) / .08);
+}
+
+.nx-guide-doc blockquote p {
+    color: hsl(var(--nx-tone-positive));
+}
+
+.nx-guide-doc table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    border-radius: .65rem;
+    font-size: .78rem;
+}
+
+.nx-guide-doc th {
+    padding: .55rem .7rem;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--primary) / .14);
+    font-size: .65rem;
+    letter-spacing: .06em;
+    text-align: left;
+    text-transform: uppercase;
+}
+
+.nx-guide-doc td {
+    padding: .55rem .7rem;
+    border: 1px solid hsl(var(--border));
+    color: hsl(var(--muted-foreground));
+}
+
+.nx-guide-doc img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid hsl(var(--border));
+    border-radius: .7rem;
+}
+
+.nx-guide-doc hr {
+    margin: 1.75rem 0;
+    border: 0;
+    border-top: 1px solid hsl(var(--border));
+}
+
+html[data-motion="minimal"] .nx-reading-progress__bar,
+html[data-motion="minimal"] .nx-guide-toc__link {
+    transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nx-reading-progress__bar,
+    .nx-guide-toc__link { transition: none; }
+}
+
+/* ----------------------------------------------------------------------------
+   Printing a guide.
+   A technician prints a procedure to work from it away from the screen, so the
+   print output keeps the document and drops the workspace around it. Both reader
+   roots are named choices: the Help reader marks itself, the Knowledge reader is
+   identified by its own test id.
+   -------------------------------------------------------------------------- */
+
+/* Print is its own context: the paper is white and the ink is fixed, so these
+   literals are deliberate and must not follow the on-screen theme. */
+@media print {
+    body * {
+        visibility: hidden !important;
+    }
+
+    .nx-guide-print,
+    .nx-guide-print *,
+    [data-testid="kb-article-view"],
+    [data-testid="kb-article-view"] * {
+        visibility: visible !important;
+    }
+
+    .nx-guide-print,
+    [data-testid="kb-article-view"] {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: #fff !important;
+        box-shadow: none !important;
+    }
+
+    .nx-guide-print *,
+    [data-testid="kb-article-view"] * {
+        color: #0f172a !important;
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+
+    .nx-guide-print .nx-guide-doc pre,
+    [data-testid="kb-article-view"] .nx-guide-doc pre {
+        border: 1px solid #cbd5e1 !important;
+        background: #f8fafc !important;
+    }
+
+    .nx-guide-print .nx-guide-toc,
+    .nx-guide-print .nx-guide-feedback,
+    .nx-guide-print .nx-reading-progress,
+    .nx-guide-print button,
+    [data-testid="kb-article-view"] button,
+    [data-testid="kb-article-view"] .nx-reading-progress {
+        display: none !important;
+    }
+
+    .nx-guide-print .nx-guide-doc h2,
+    [data-testid="kb-article-view"] .nx-guide-doc h2 {
+        border-bottom-color: #cbd5e1 !important;
+        break-after: avoid;
+    }
+
+    .nx-guide-print .nx-guide-doc li,
+    [data-testid="kb-article-view"] .nx-guide-doc li {
+        break-inside: avoid;
+    }
+}

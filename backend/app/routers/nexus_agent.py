@@ -7,12 +7,14 @@ Endpoints:
     POST /api/nexus-agent/heartbeat
     GET  /api/nexus-agent/commands/poll
     POST /api/nexus-agent/command-result
+    GET  /api/nexus-agent/ping             - authenticated, side-effect-free reachability probe
 
   ADMIN-FACING (auth via JWT Bearer):
     GET    /api/nexus-agent/agents
     GET    /api/nexus-agent/agents/{device_id}
     POST   /api/nexus-agent/agents/{device_id}/command
     GET    /api/nexus-agent/agents/{device_id}/commands
+    GET    /api/nexus-agent/agents/{device_id}/app-updates - pending winget application updates
     POST   /api/nexus-agent/installers/build           - generate installer for a client
     GET    /api/nexus-agent/installers/{token}/download - download installer ZIP (public, token-protected)
     GET    /api/nexus-agent/binary/latest              - latest agent .exe (public)
@@ -903,6 +905,15 @@ class HeartbeatPayload(BaseModel):
     identity: dict = Field(default_factory=dict)
     policy_evidence: dict = Field(default_factory=dict)
     self_repair: dict = Field(default_factory=dict)
+    # Self-healing evidence: control-plane reachability, the repair ladder the
+    # agent ran and its Windows performance guard. Informational only; the
+    # privileged Windows component repair is gated by policy and the
+    # windows_self_heal_enabled operator setting.
+    self_heal: dict = Field(default_factory=dict)
+    # Pending application updates the endpoint observed with its own winget scan.
+    # Informational evidence: a listed package is reported as upgradable by the
+    # endpoint, never asserted as installed by the platform.
+    app_updates: dict = Field(default_factory=dict)
     update_evidence: dict = Field(default_factory=dict)
     native_remote_evidence: dict = Field(default_factory=dict)
     backup_evidence: dict = Field(default_factory=dict)
@@ -921,7 +932,21 @@ class IdentityRenewRequest(BaseModel):
 
 
 class CommandRequest(BaseModel):
-    kind: Literal["run_script", "run_powershell", "run_cmd", "reboot", "shutdown", "kill_process", "ping", "agent_repair"]
+    kind: Literal[
+        "run_script",
+        "run_powershell",
+        "run_cmd",
+        "reboot",
+        "shutdown",
+        "kill_process",
+        "ping",
+        "agent_repair",
+        # Application updates. `payload.ids` targets named packages and
+        # `payload.all` targets every pending upgrade the endpoint reported. The
+        # endpoint resolves the package IDs itself through winget; the API never
+        # forwards a caller-built command line.
+        "winget_upgrade",
+    ]
     payload: dict = Field(default_factory=dict)
     include_offline: bool = False
 
@@ -962,10 +987,16 @@ class NexusAgentSettings(BaseModel):
     splashtop_deploy_code_default: str = Field(default="", max_length=500)
     auto_update_enabled: bool = True
     self_repair_enabled: bool = True
+    # Fail closed: this authorises the agent to repair the customer's Windows
+    # component store with DISM and SFC, so it is never on by default.
+    windows_self_heal_enabled: bool = False
     require_signed_updates: Literal[True] = True
     require_mtls: bool = False
     winget_enabled: bool = False
     winget_allowed_ids: list[str] = Field(default_factory=list, max_length=100)
+    # Fail closed: this authorises an endpoint to install approved application
+    # updates on its own, so it is never on until an operator turns it on.
+    winget_auto_update_enabled: bool = False
 
 
 # ----------------------------------------------------------------------
@@ -1232,6 +1263,144 @@ def _patch_evidence_update(snapshot: dict[str, Any], observed_at: str) -> dict[s
     return agent_runtime.patch_evidence_update(snapshot, observed_at)
 
 
+def _bounded_non_negative_int(value: Any, maximum: int = 86_400_000) -> int:
+    """Coerce a reported counter without trusting the endpoint's arithmetic."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return min(max(parsed, 0), maximum)
+
+
+def _self_heal_evidence_update(payload: dict[str, Any], observed_at: str) -> dict[str, Any]:
+    """Sanitise reported self-healing evidence before it reaches a device record.
+
+    The agent reports what it observed and what it repaired. Nothing endpoint-side
+    is stored verbatim: every field is whitelisted, length-capped and coerced so a
+    malformed or hostile heartbeat cannot pollute the record, inflate a counter or
+    raise inside the heartbeat handler. Command output is deliberately dropped —
+    the record keeps outcomes, not raw DISM/SFC text.
+    """
+    performance = payload.get("performance") if isinstance(payload.get("performance"), dict) else {}
+    reasons = performance.get("reasons") if isinstance(performance.get("reasons"), list) else []
+    try:
+        score = float(performance.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    repairs = payload.get("repairs") if isinstance(payload.get("repairs"), list) else []
+    return {
+        "state": str(payload.get("state") or "unknown")[:40],
+        "cause": str(payload.get("cause") or "")[:40],
+        "consecutive_failures": _bounded_non_negative_int(payload.get("consecutive_failures"), 100_000),
+        "outage_seconds": _bounded_non_negative_int(payload.get("outage_seconds")),
+        "last_success": str(payload.get("last_success") or "")[:64],
+        "outages_recovered": _bounded_non_negative_int(payload.get("outages_recovered"), 100_000),
+        "performance": {
+            "band": str(performance.get("band") or "unknown")[:40],
+            "score": round(score, 3),
+            "samples": _bounded_non_negative_int(performance.get("samples"), 1_000_000),
+            "reasons": [str(reason)[:120] for reason in reasons if isinstance(reason, (str, int, float))][:8],
+        },
+        "repairs": [
+            {
+                "started_at": str(repair.get("started_at") or "")[:64],
+                "status": str(repair.get("status") or "unknown")[:40],
+                "verified": bool(repair.get("verified")),
+                "reboot_required": bool(repair.get("reboot_required")),
+                "duration_seconds": _bounded_non_negative_int(repair.get("duration_seconds")),
+            }
+            for repair in repairs[:5]
+            if isinstance(repair, dict)
+        ],
+        "reported_at": observed_at,
+    }
+
+
+# How long a reported application scan stays useful. An endpoint that has not
+# scanned inside this window is reported as stale evidence rather than as a
+# current result.
+APP_UPDATES_STALE_AFTER = timedelta(hours=24)
+
+# A device record keeps a bounded slice of what the endpoint reported. The agent
+# already caps its own list; this is the server-side ceiling that does not trust it.
+MAX_REPORTED_APP_UPDATES = 200
+
+# A winget package identifier is a dotted or dashed vendor identifier such as
+# `Microsoft.Edge`. The endpoint validates this again immediately before it runs
+# winget; the API refuses anything else so a device record can never hold a value
+# that looks like a command line for a later consumer to misuse.
+_APP_PACKAGE_ID_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-"
+)
+
+
+def _is_app_package_id(value: str) -> bool:
+    if not 1 <= len(value) <= 200:
+        return False
+    if value[0] in "._+-":
+        return False
+    return all(character in _APP_PACKAGE_ID_CHARS for character in value)
+
+
+def _app_updates_evidence_update(payload: dict[str, Any], observed_at: str) -> dict[str, Any]:
+    """Sanitise a reported application-update scan before it reaches a device record.
+
+    The endpoint reports what its own winget scan saw. Nothing it sends is stored
+    verbatim: package identifiers and names are whitelisted by shape, length-capped
+    and bounded in number, the count is derived here rather than trusted, and raw
+    winget output is never accepted. A malformed or hostile heartbeat therefore
+    cannot inflate a count, store an unbounded list or raise inside the handler.
+    """
+    raw_packages = payload.get("packages") if isinstance(payload.get("packages"), list) else []
+    packages: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in raw_packages[:MAX_REPORTED_APP_UPDATES]:
+        if not isinstance(item, dict):
+            continue
+        package_id = str(item.get("id") or "").strip()[:200]
+        if not _is_app_package_id(package_id) or package_id.lower() in seen:
+            continue
+        seen.add(package_id.lower())
+        packages.append({
+            "id": package_id,
+            "name": str(item.get("name") or package_id).strip()[:200],
+            "current": str(item.get("current") or "").strip()[:60],
+            "available": str(item.get("available") or "").strip()[:60],
+        })
+    reported_count = _bounded_non_negative_int(payload.get("package_count"), 100_000)
+    return {
+        "status": str(payload.get("status") or "unknown")[:40],
+        "observed_at": str(payload.get("observed_at") or "")[:64],
+        # The stored count is the number of packages this record actually holds, so
+        # a count can never disagree with the list an operator reads.
+        "package_count": len(packages) if packages else reported_count,
+        "truncated": bool(payload.get("truncated")) or reported_count > len(packages),
+        "error": str(payload.get("error") or "")[:200],
+        "packages": packages,
+        "reported_at": observed_at,
+    }
+
+
+@router.get("/nexus-agent/ping")
+async def agent_ping(
+    x_agent_token: str | None = Header(None),
+    x_client_cert_fingerprint: str | None = Header(None, alias="X-Client-Cert-Fingerprint"),
+):
+    """Authenticated, side-effect-free reachability probe.
+
+    A self-healing endpoint has to tell "the network is down" apart from "my own
+    loop is stuck" and from "my credentials were rejected". This answers that
+    without claiming or acknowledging a queued command, so a probe can never
+    consume or hide work that an operator queued.
+    """
+    agent = await _verify_agent_token(db, x_agent_token, x_client_cert_fingerprint)
+    return {
+        "ok": True,
+        "server_time": _now(),
+        "device_id": str(agent.get("id") or ""),
+    }
+
+
 @router.post("/nexus-agent/heartbeat")
 async def heartbeat(
     p: HeartbeatPayload,
@@ -1265,6 +1434,10 @@ async def heartbeat(
             "repairs": list(p.self_repair.get("repairs") or [])[:20],
             "reported_at": now,
         }
+    if p.self_heal:
+        update["self_heal"] = _self_heal_evidence_update(p.self_heal, now)
+    if p.app_updates:
+        update["app_updates"] = _app_updates_evidence_update(p.app_updates, now)
     if p.update_evidence:
         update["update_evidence"] = {
             "status": str(p.update_evidence.get("status") or "unknown")[:50],
@@ -2120,6 +2293,8 @@ async def trust_overview(user=Depends(get_current_user)):
             "device_identity": 1,
             "policy_evidence": 1,
             "self_repair": 1,
+            "self_heal": 1,
+            "app_updates": 1,
             "update_evidence": 1,
         },
     ).sort("last_seen", -1).to_list(length=10_000)
@@ -2353,6 +2528,44 @@ async def agent_commands(
     await _agent_in_scope(device_id, user, "agent.command.read")
     cur = db.nexus_agent_commands.find({"device_id": device_id}, {"_id": 0}).sort("created_at", -1)
     return await cur.to_list(length=limit)
+
+
+@router.get("/nexus-agent/agents/{device_id}/app-updates")
+async def agent_app_updates(device_id: str, user=Depends(require_agent_operator)):
+    """Pending application updates one endpoint reported from its own winget scan.
+
+    This is reported evidence, not a promise: a package appears here because the
+    endpoint said winget could upgrade it, and `observed_at` says when. An
+    endpoint that has never scanned answers 404 rather than an empty list, so
+    "nothing to update" is never confused with "no evidence yet".
+    """
+    agent = await _agent_in_scope(device_id, user, "agent.app_updates.read")
+    # Read the evidence field explicitly instead of relying on whatever projection
+    # the scope helper happened to select, so this endpoint cannot silently report
+    # "no scan yet" for an endpoint that has scanned.
+    record = await db.nexus_agents.find_one({"id": agent.get("id") or device_id}, {"_id": 0, "app_updates": 1}) or {}
+    evidence = record.get("app_updates") if isinstance(record.get("app_updates"), dict) else {}
+    if not evidence:
+        raise HTTPException(404, "this endpoint has not reported an application scan yet")
+    observed_at = str(evidence.get("observed_at") or "")
+    stale = True
+    if observed_at:
+        try:
+            stale = datetime.fromisoformat(observed_at.replace("Z", "+00:00")) < (
+                datetime.now(timezone.utc) - APP_UPDATES_STALE_AFTER
+            )
+        except ValueError:
+            stale = True
+    packages = evidence.get("packages") if isinstance(evidence.get("packages"), list) else []
+    return {
+        "device_id": device_id,
+        "observed_at": observed_at,
+        "status": str(evidence.get("status") or "unknown"),
+        "package_count": int(evidence.get("package_count") or len(packages)),
+        "packages": packages,
+        "stale": stale,
+        "error": str(evidence.get("error") or ""),
+    }
 
 
 # ----------------------------------------------------------------------
@@ -2975,10 +3188,12 @@ async def get_settings(user=Depends(require_agent_admin)):
         "splashtop_deploy_code_default": s.get("splashtop_deploy_code_default", ""),
         "auto_update_enabled": s.get("auto_update_enabled", True),
         "self_repair_enabled": s.get("self_repair_enabled", True),
+        "windows_self_heal_enabled": s.get("windows_self_heal_enabled", False),
         "require_signed_updates": s.get("require_signed_updates", True),
         "require_mtls": s.get("require_mtls", False),
         "winget_enabled": s.get("winget_enabled", False),
         "winget_allowed_ids": s.get("winget_allowed_ids", []),
+        "winget_auto_update_enabled": s.get("winget_auto_update_enabled", False),
         "agent_version": AGENT_VERSION,
         "agent_binary_exists": AGENT_BINARY_PATH.exists(),
         "agent_binary_sha256": _binary_info()["sha256"],
@@ -3013,10 +3228,12 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
             "splashtop_deploy_code_default": payload.splashtop_deploy_code_default,
             "auto_update_enabled": payload.auto_update_enabled,
             "self_repair_enabled": payload.self_repair_enabled,
+            "windows_self_heal_enabled": payload.windows_self_heal_enabled,
             "require_signed_updates": payload.require_signed_updates,
             "require_mtls": payload.require_mtls,
             "winget_enabled": payload.winget_enabled,
             "winget_allowed_ids": [item.strip() for item in payload.winget_allowed_ids if item.strip()],
+            "winget_auto_update_enabled": payload.winget_auto_update_enabled,
             "updated_at": _now(),
             "updated_by": user.get("email") or user.get("id"),
         }},
@@ -3027,9 +3244,11 @@ async def put_settings(payload: NexusAgentSettings, user=Depends(require_agent_a
         "poll_secs": payload.poll_secs,
         "auto_update_enabled": payload.auto_update_enabled,
         "self_repair_enabled": payload.self_repair_enabled,
+        "windows_self_heal_enabled": payload.windows_self_heal_enabled,
         "require_signed_updates": payload.require_signed_updates,
         "require_mtls": payload.require_mtls,
         "winget_enabled": payload.winget_enabled,
+        "winget_auto_update_enabled": payload.winget_auto_update_enabled,
         "by": user.get("email") or user.get("id"),
     })
     return {"ok": True}
@@ -3049,6 +3268,8 @@ async def stats(user=Depends(get_current_user)):
             "device_identity": 1,
             "policy_evidence": 1,
             "self_repair": 1,
+            "self_heal": 1,
+            "app_updates": 1,
             "update_evidence": 1,
         },
     ).to_list(length=10_000)

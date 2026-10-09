@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"nexusagent/internal/config"
@@ -180,6 +182,39 @@ func svcStart() error {
 func svcStop() error {
 	out, err := exec.Command("sc", "stop", svcName).CombinedOutput()
 	if err != nil {
+		return fmt.Errorf("sc stop: %v: %s", err, string(out))
+	}
+	return nil
+}
+
+// svcRestart restarts the agent's own service after the self-heal ladder has
+// exhausted everything else. A process cannot start itself again once it has
+// stopped, so a short-lived detached helper asks the Service Control Manager to
+// start the service a few seconds later.
+//
+// The command line is a fixed constant. Only the compiled service name is used,
+// no caller-supplied value is ever interpolated into it, and both executables are
+// absolute paths under System32 rather than anything resolved through PATH. This
+// rung is off unless a signed policy or the installer configuration explicitly
+// enables it.
+func svcRestart() error {
+	root := os.Getenv("SystemRoot")
+	if strings.TrimSpace(root) == "" {
+		root = `C:\Windows`
+	}
+	system32 := filepath.Join(root, "System32")
+	commandLine := fmt.Sprintf("ping -n 8 127.0.0.1 >nul & \"%s\" start %s", filepath.Join(system32, "sc.exe"), svcName)
+	helper := exec.Command(filepath.Join(system32, "cmd.exe"), "/c", commandLine)
+	helper.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NO_WINDOW | windows.DETACHED_PROCESS,
+	}
+	if err := helper.Start(); err != nil {
+		return fmt.Errorf("schedule agent service restart: %w", err)
+	}
+	// The helper must outlive this process, so it is released rather than waited on.
+	_ = helper.Process.Release()
+	if out, err := exec.Command(filepath.Join(system32, "sc.exe"), "stop", svcName).CombinedOutput(); err != nil {
 		return fmt.Errorf("sc stop: %v: %s", err, string(out))
 	}
 	return nil

@@ -284,6 +284,40 @@ def build_agent_policy(
             "verify_policy_checksum": True,
             "repair_companion_shortcuts": True,
         },
+        # Agent self-healing. Reachability tracking and performance observation
+        # are always available; the Windows component repair (DISM
+        # /RestoreHealth, then sfc /scannow) is a privileged change to a
+        # customer endpoint, so it stays opt-in and is only ever switched on by
+        # this signed policy or by an explicit install configuration on a
+        # standalone pilot. The window and rate limit are constants so the
+        # policy document stays deterministic and cacheable.
+        "self_heal": {
+            "enabled": bool(settings.get("self_repair_enabled", True)),
+            "windows_repair_enabled": bool(settings.get("windows_self_heal_enabled", False)),
+            "windows_repair_max_runs_per_day": 1,
+            "windows_repair_cooldown_hours": 24,
+            "windows_repair_window_start_hour": 2,
+            "windows_repair_window_end_hour": 5,
+            "windows_repair_enforce_window": False,
+            # Restarting the agent's own service is the last rung of the repair
+            # ladder and the most disruptive, so it is off unless a deployment
+            # deliberately asks for it.
+            "allow_service_restart": False,
+        },
+        # Application updates. The endpoint may always report what its own winget
+        # scan found; installing a package changes a customer's machine, so
+        # automatic installation stays off until an operator enables it. The
+        # allow-list is carried here so the endpoint can refuse a package the
+        # deployment never approved even if it is asked to install it.
+        "winget": {
+            "enabled": bool(settings.get("winget_enabled", False)),
+            "auto_update_enabled": bool(settings.get("winget_auto_update_enabled", False)),
+            "allowed_ids": [
+                str(item).strip()
+                for item in (settings.get("winget_allowed_ids") or [])
+                if str(item).strip()
+            ][:100],
+        },
         "dns": {
             "mode": dns_profile.get("mode", "visibility"),
             "deployment_id": dns_profile.get("deployment_id", ""),

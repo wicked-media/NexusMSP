@@ -46,7 +46,15 @@ import {
 } from "@/lib/teamChatFormat";
 import { TechnicianAvatar } from "@/components/teamChat/TeamChatShared";
 
-export function MessageRow({ message, compact, own, settings, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload }) {
+/**
+ * The reactions a technician reaches for most, offered on the message itself.
+ *
+ * One click instead of open-the-picker-then-choose, which is the difference
+ * between acknowledging a message and ignoring it on a busy desk.
+ */
+const QUICK_REACTIONS = ["👍", "✅", "❤️", "👀"];
+
+export function MessageRow({ message, compact, own, settings, currentUserId, headers, presence, readReceipts, editing, editingText, onEditingText, onStartEdit, onCancelEdit, onSaveEdit, onDelete, onPin, onThread, onCopyMessageLink, onReact, emojiOpen, onEmojiOpen, onEmojiClose, onDownload, highlighted }) {
   const [hovered, setHovered] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   if (message.is_system) {
@@ -62,7 +70,10 @@ export function MessageRow({ message, compact, own, settings, currentUserId, hea
     );
   }
   return (
-    <div className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? `border ${OWN_BUBBLE_ACCENT[settings?.accent] || OWN_BUBBLE_ACCENT.emerald}` : "hover:bg-cyan-500/[0.025]"} ${settings?.density === "compact" ? (compact ? "mt-0" : "mt-1") : (compact ? "mt-0.5" : "mt-2")} ${message.pending ? "opacity-60" : ""}`} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setActionsOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setActionsOpen(false); }}>
+    <div
+      className={`group relative flex gap-3 rounded-xl px-2 py-2 transition-colors ${own ? `border ${OWN_BUBBLE_ACCENT[settings?.accent] || OWN_BUBBLE_ACCENT.emerald}` : "hover:bg-cyan-500/[0.025]"} ${settings?.density === "compact" ? (compact ? "mt-0" : "mt-1") : (compact ? "mt-0.5" : "mt-2")} ${message.pending ? "opacity-60" : ""} ${highlighted ? "ring-2 ring-cyan-400/45" : ""}`}
+      data-message-id={message.id}
+    > onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onFocusCapture={() => setActionsOpen(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) setActionsOpen(false); }}>
       <div className="w-9 shrink-0">{!compact && settings?.showAvatars !== false && <TechnicianAvatar name={message.user_name} avatarUrl={message.avatar_url || message.avatar} className="h-9 w-9" />}</div>
       <div className="min-w-0 flex-1">
         {!compact && <div className="mb-1 flex items-center gap-2"><span className="text-sm font-semibold text-zinc-200">{message.user_name}</span>{settings?.showTimestamps !== false && <span className="text-[10px] text-zinc-500">{formatTime(message.ts)}</span>}{message.edited && <span className="text-[9px] text-zinc-500">Edited</span>}{message.pinned && <Pin className="h-3 w-3 text-amber-400" />}</div>}
@@ -85,6 +96,22 @@ export function MessageRow({ message, compact, own, settings, currentUserId, hea
       )}
       {(hovered || actionsOpen) && !editing && !message.pending && !message.deleted && (onReact || onThread || onCopyMessageLink || onPin || onStartEdit || onDelete) && (
         <div className="absolute right-3 top-0 flex -translate-y-1/2 items-center rounded-lg border border-white/10 bg-[#252832] p-0.5 shadow-xl">
+          {onReact && (
+            <>
+              {QUICK_REACTIONS.map(emoji => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => onReact(emoji)}
+                  aria-label={`React with ${emoji}`}
+                  className="rounded-md px-1 py-0.5 text-sm transition hover:scale-110 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60"
+                >
+                  {emoji}
+                </button>
+              ))}
+              <span className="mx-0.5 h-4 w-px bg-white/10" aria-hidden="true" />
+            </>
+          )}
           {onReact && <MessageAction icon={Smile} label="React" onClick={onEmojiOpen} />}
           {onThread && <MessageAction icon={Reply} label="Reply" onClick={onThread} />}
           {onCopyMessageLink && <MessageAction icon={LinkIcon} label="Copy message link" onClick={onCopyMessageLink} />}

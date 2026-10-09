@@ -4,7 +4,9 @@ Every Nexus workspace carries more views, tools and buttons than one screen
 should show at once — the client workspace has six navigation groups and ten
 quick actions, the ticket workspace has twelve detail tabs plus a desk-tools
 menu, the voice workspace has ten views behind a catalogue of Yeastar
-capabilities. Instead of guessing which ones "technicians use most", Nexus
+capabilities, and the documentation reader carries two libraries whose order is
+meaningless until somebody has read something. Instead of guessing which ones
+"technicians use most", Nexus
 learns: every time a technician opens a workspace view or runs an action, one
 bounded counter advances. The workspace then ranks its own navigation and
 promotes the actions that are actually used, falling back to the designed order
@@ -43,7 +45,20 @@ router = APIRouter()
 # workspace never leaks into another: the workspace is part of the stored key and
 # part of every read. Adding a workspace is a deliberate, reviewable change here
 # rather than a silent typo creating a parallel key space in the database.
-WORKSPACES = ("client", "tickets", "invoices", "voice", "devices", "purchase_orders")
+# `documentation` is the Knowledge & Help reader. It stores which guide or
+# knowledge article a technician opens, so the library order, the continue-
+# reading rail and the related-reading list follow use instead of guessing, and
+# the tenant aggregate lets a new technician benefit from what the team reads.
+WORKSPACES = (
+    "client",
+    "tickets",
+    "invoices",
+    "voice",
+    "devices",
+    "purchase_orders",
+    "chat",
+    "documentation",
+)
 
 # Only these two kinds of evidence are recorded. A "view" is a workspace view (a
 # Nexus tab or screen slug); an "action" is a tool, quick action or button a
