@@ -7,11 +7,13 @@ drifting back to generic report layouts.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Iterable
 from xml.sax.saxutils import escape
 
+from app.database import UPLOADS_DIR
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -70,6 +72,28 @@ def _safe_color(value: Any, fallback: colors.Color) -> colors.Color:
         return colors.HexColor(str(value))
     except (TypeError, ValueError):
         return fallback
+
+
+def _branding_logo_path(branding: dict[str, Any]) -> str | None:
+    """Return a verified local branding logo suitable for ReportLab.
+
+    Branding values are URLs because they are also consumed by the web UI.  A
+    generated document must never fetch an arbitrary URL while rendering, so
+    it only resolves the filename inside Nexus' managed branding directory.
+    SVG uploads remain valid web assets; ReportLab simply falls back to the
+    typographic masthead when it cannot render their format.
+    """
+    for key in ("invoice_logo_url", "company_logo_url", "letterhead_logo_url"):
+        raw_url = str(branding.get(key) or "").strip()
+        if not raw_url:
+            continue
+        filename = Path(raw_url.split("?", 1)[0]).name
+        if not filename:
+            continue
+        candidate = UPLOADS_DIR / "branding" / filename
+        if candidate.is_file():
+            return str(candidate)
+    return None
 
 
 def _timestamp(value: Any) -> str:
@@ -209,7 +233,22 @@ def render_nexus_document_pdf(
     primary = _safe_color(branding.get("primary_color", "#14B8A6"), colors.HexColor("#14B8A6"))
     company_name = _as_text(branding.get("company_name") or "NexusMSP")
     document_theme = branding.get("document_theme", "executive")
+    document_density = str(branding.get("document_density") or "standard").lower()
+    if document_density not in {"compact", "standard", "spacious"}:
+        document_density = "standard"
+    density_scale = {"compact": 0.86, "standard": 1, "spacious": 1.14}[document_density]
+    branding_logo_path = _branding_logo_path(branding)
     body_width = 178 * mm
+    kind_text = _as_text(document_kind).lower()
+    if "procurement" in kind_text or "purchase order" in kind_text:
+        header_context = "NEXUSMSP PROCUREMENT CONTROL"
+        footer_context = "retained procurement record"
+    elif "invoice" in kind_text or "commercial" in kind_text:
+        header_context = "NEXUSMSP COMMERCIAL RECORD"
+        footer_context = "retained commercial record"
+    else:
+        header_context = "NEXUSMSP CLIENT EVIDENCE"
+        footer_context = "confidential managed service evidence"
 
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -225,7 +264,7 @@ def render_nexus_document_pdf(
     base_styles = getSampleStyleSheet()
     styles = {
         "eyebrow": ParagraphStyle("NexusDocumentEyebrow", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=8, leading=10, textColor=primary, spaceAfter=5),
-        "title": ParagraphStyle("NexusDocumentTitle", parent=base_styles["Title"], fontName="Helvetica-Bold", fontSize=25 if document_theme == "executive" else 22, leading=29, textColor=INK, spaceAfter=5),
+        "title": ParagraphStyle("NexusDocumentTitle", parent=base_styles["Title"], fontName="Helvetica-Bold", fontSize=(25 if document_theme == "executive" else 22) * density_scale, leading=29 * density_scale, textColor=INK, spaceAfter=5),
         "subtitle": ParagraphStyle("NexusDocumentSubtitle", parent=base_styles["Normal"], fontName="Helvetica", fontSize=10, leading=15, textColor=SLATE),
         "meta": ParagraphStyle("NexusDocumentMeta", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=7.3, leading=10, textColor=SLATE),
         "metric_label": ParagraphStyle("NexusDocumentMetricLabel", parent=base_styles["Normal"], fontName="Helvetica-Bold", fontSize=7, leading=9, textColor=MUTED),
@@ -273,10 +312,10 @@ def render_nexus_document_pdf(
             ("INNERGRID", (0, 0), (-1, -1), 0.65, LINE),
             ("LINEABOVE", (0, 0), (-1, 0), 2.5, primary),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 9),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
-            ("TOPPADDING", (0, 0), (-1, -1), 9),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9 * density_scale),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9 * density_scale),
+            ("TOPPADDING", (0, 0), (-1, -1), 9 * density_scale),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 9 * density_scale),
         ]))
         story.extend([metric_table, Spacer(1, 6 * mm)])
 
@@ -311,22 +350,41 @@ def render_nexus_document_pdf(
         canvas.setFillColor(colors.HexColor("#BFDBFE"))
         canvas.setFont("Helvetica-Bold", 7)
         canvas.drawString(16 * mm, page_height - 20 * mm, _as_text(document_kind).upper())
+        header_text_right = page_width - 16 * mm
+        if branding_logo_path:
+            try:
+                logo_width = 20 * mm
+                canvas.drawImage(
+                    branding_logo_path,
+                    header_text_right - logo_width,
+                    page_height - 30 * mm,
+                    width=logo_width,
+                    height=18 * mm,
+                    preserveAspectRatio=True,
+                    anchor="c",
+                    mask="auto",
+                )
+                header_text_right -= logo_width + 5 * mm
+            except Exception:
+                # A valid web logo can still be an SVG or an unsupported image
+                # codec. Keep the document readable rather than failing a PDF.
+                pass
         canvas.setFillColor(WHITE)
         canvas.setFont("Helvetica", 7)
-        canvas.drawRightString(page_width - 16 * mm, page_height - 13 * mm, "NEXUSMSP CLIENT EVIDENCE")
+        canvas.drawRightString(header_text_right, page_height - 13 * mm, header_context)
         canvas.setFillColor(colors.HexColor("#BFDBFE"))
-        canvas.drawRightString(page_width - 16 * mm, page_height - 20 * mm, f"PAGE {doc.page}")
+        canvas.drawRightString(header_text_right, page_height - 20 * mm, f"PAGE {doc.page}")
         canvas.setStrokeColor(LINE)
         canvas.setLineWidth(0.45)
         canvas.line(16 * mm, 13 * mm, page_width - 16 * mm, 13 * mm)
         canvas.setFillColor(MUTED)
         canvas.setFont("Helvetica", 7)
-        canvas.drawString(16 * mm, 8 * mm, f"{company_name} | Confidential managed service evidence")
+        canvas.drawString(16 * mm, 8 * mm, f"{company_name} | {footer_context.title()}")
         actor = _as_text(generated_by) if generated_by else "NexusMSP"
         canvas.drawRightString(
             page_width - 16 * mm,
             8 * mm,
-            f"Generated by {actor} | {_timestamp(datetime.utcnow().isoformat())}",
+            f"Generated by {actor} | {_timestamp(datetime.now(timezone.utc).isoformat())}",
         )
         canvas.restoreState()
 
@@ -339,6 +397,7 @@ def render_nexus_purchase_order_pdf(
     *,
     branding: dict[str, Any] | None = None,
     generated_by: str | None = None,
+    document_profile: dict[str, Any] | None = None,
 ) -> bytes:
     """Render a procurement document using the Nexus report document language.
 
@@ -347,6 +406,7 @@ def render_nexus_purchase_order_pdf(
     facing commercial document from looking like a separate product.
     """
     po = purchase_order or {}
+    profile = document_profile or {}
     line_items = po.get("line_items") or []
     formatted_items: list[dict[str, Any]] = []
     ordered_quantity = 0.0
@@ -395,11 +455,27 @@ def render_nexus_purchase_order_pdf(
     ]
     if po.get("notes"):
         sections.append(("Notes", po.get("notes")))
+    if profile.get("terms"):
+        sections.append(("Terms & conditions", profile.get("terms")))
+    for extra_section in profile.get("extra_sections") or []:
+        if not isinstance(extra_section, dict):
+            continue
+        title = _as_text(extra_section.get("title") or "Additional information")
+        content = extra_section.get("content")
+        if content not in (None, ""):
+            sections.append((title, content))
+
+    document_label = _as_text(profile.get("label") or "Purchase Order")
+    subtitle_parts = [
+        _as_text(profile.get("subtitle") or ""),
+        _as_text(po.get("vendor") or "Vendor not recorded"),
+        f"Delivery {_as_text(delivery)}",
+    ]
 
     return render_nexus_document_pdf(
-        title=f"Purchase Order {po_number}",
+        title=f"{document_label} {po_number}",
         document_kind="Procurement record",
-        subtitle=f"{_as_text(po.get('vendor') or 'Vendor not recorded')} | Delivery { _as_text(delivery) }",
+        subtitle=" | ".join(part for part in subtitle_parts if part),
         metadata=[
             ("PO", po_number),
             ("Status", status),
@@ -414,7 +490,7 @@ def render_nexus_purchase_order_pdf(
         ],
         sections=sections,
         branding=branding,
-        footer="This purchase order is a retained NexusMSP procurement record. Validate supplier acceptance before fulfilment.",
+        footer=profile.get("footer") or "This purchase order is a retained NexusMSP procurement record. Validate supplier acceptance before fulfilment.",
         generated_by=generated_by,
     )
 
@@ -424,6 +500,7 @@ def render_nexus_invoice_pdf(
     *,
     branding: dict[str, Any] | None = None,
     generated_by: str | None = None,
+    document_profile: dict[str, Any] | None = None,
 ) -> bytes:
     """Render invoices in the shared Nexus client-document language.
 
@@ -433,6 +510,7 @@ def render_nexus_invoice_pdf(
     reports, purchase orders and portal audit records.
     """
     record = invoice or {}
+    profile = document_profile or {}
 
     def as_number(value: Any) -> float:
         try:
@@ -444,6 +522,7 @@ def render_nexus_invoice_pdf(
         return f"${as_number(value):,.2f}"
 
     invoice_number = _as_text(record.get("invoice_number") or record.get("id") or "Draft")
+    invoice_header = _as_text((branding or {}).get("invoice_header_text") or "").strip()
     total = as_number(record.get("total"))
     paid = as_number(record.get("amount_paid"))
     balance = max(total - paid, 0)
@@ -490,11 +569,23 @@ def render_nexus_invoice_pdf(
         } for payment in payments]))
     if record.get("notes"):
         sections.append(("Notes", record.get("notes")))
+    if profile.get("terms"):
+        sections.append(("Terms & conditions", profile.get("terms")))
+    for extra_section in profile.get("extra_sections") or []:
+        if not isinstance(extra_section, dict):
+            continue
+        title = _as_text(extra_section.get("title") or "Additional information")
+        content = extra_section.get("content")
+        if content not in (None, ""):
+            sections.append((title, content))
+
+    document_label = _as_text(profile.get("label") or "Tax Invoice")
+    profile_subtitle = _as_text(profile.get("subtitle") or "").strip()
 
     return render_nexus_document_pdf(
-        title=f"Invoice {invoice_number}",
+        title=f"{document_label} {invoice_number}",
         document_kind="Tax invoice",
-        subtitle=f"{_as_text(record.get('client_name') or 'Client account')} | {status}",
+        subtitle=" | ".join(part for part in [profile_subtitle, invoice_header, _as_text(record.get("client_name") or "Client account"), status] if part),
         metadata=[
             ("Invoice", invoice_number),
             ("Issued", record.get("issued_date") or record.get("created_at")),
@@ -509,7 +600,7 @@ def render_nexus_invoice_pdf(
         ],
         sections=sections,
         branding=branding,
-        footer=(branding or {}).get("invoice_footer_text") or "This invoice is a retained NexusMSP commercial record. Please quote the invoice number with any enquiry.",
+        footer=profile.get("footer") or (branding or {}).get("invoice_footer_text") or "This invoice is a retained NexusMSP commercial record. Please quote the invoice number with any enquiry.",
         generated_by=generated_by,
     )
 

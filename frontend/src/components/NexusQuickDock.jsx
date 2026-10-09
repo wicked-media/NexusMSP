@@ -4,6 +4,7 @@ import {
   Bot,
   Calculator,
   Check,
+  ChevronDown,
   Clock3,
   Code2,
   Copy,
@@ -86,6 +87,7 @@ export default function NexusQuickDock() {
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [tool, setTool] = useState("home");
+  const [utilitiesOpen, setUtilitiesOpen] = useState(false);
   const [scratchpad, setScratchpad] = useState(() => readLocal(SCRATCHPAD_KEY));
   const [copied, setCopied] = useState(false);
   const [timerState, setTimerState] = useState(readTimerState);
@@ -134,6 +136,7 @@ export default function NexusQuickDock() {
   useEffect(() => {
     setOpen(false);
     setTool("home");
+    setUtilitiesOpen(false);
   }, [location.pathname]);
 
   const timerDisplay = useMemo(() => formatQuickTimer(elapsed), [elapsed]);
@@ -240,7 +243,7 @@ export default function NexusQuickDock() {
           type="button"
           onClick={() => setOpen(true)}
           className="group fixed bottom-4 right-4 z-40 flex h-11 w-11 items-center overflow-hidden rounded-full border border-primary/25 bg-card/95 text-primary shadow-[-12px_10px_38px_-20px_hsl(var(--primary)/0.8)] backdrop-blur-xl transition-[width,transform] duration-200 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:bottom-auto sm:right-0 sm:top-[46%] sm:h-24 sm:-translate-y-1/2 sm:rounded-l-2xl sm:rounded-r-none sm:border-r-0 sm:hover:w-[116px] sm:hover:translate-x-0 sm:hover:scale-100 sm:focus-visible:w-[116px]"
-          aria-label="Open Nexus Quick Dock"
+          aria-label="Open Nexus Assist"
           data-testid="quick-dock-toggle"
         >
           <span className="relative flex w-11 shrink-0 items-center justify-center">
@@ -248,7 +251,7 @@ export default function NexusQuickDock() {
             {chatUnread > 0 && <span className="absolute -right-0.5 -top-2 h-2 w-2 rounded-full bg-rose-500" />}
           </span>
           <span className="hidden whitespace-nowrap pr-3 text-left text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground sm:block">
-            Quick Dock
+            Nexus Assist
           </span>
         </button>
       )}
@@ -256,7 +259,7 @@ export default function NexusQuickDock() {
       {open && (
         <aside
           className="nx-assistant-drawer fixed bottom-2 right-2 z-40 flex max-h-[calc(100dvh-1rem)] w-[380px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-2xl border border-primary/20 bg-card/95 text-foreground shadow-[-22px_24px_70px_-34px_hsl(var(--primary)/0.85)] backdrop-blur-2xl sm:bottom-auto sm:right-4 sm:top-1/2 sm:max-h-[82vh] sm:max-w-[calc(100vw-2rem)] sm:-translate-y-1/2"
-          aria-label="Nexus Quick Dock"
+          aria-label="Nexus Assist"
           data-testid="quick-dock-panel"
         >
           <div className="border-b border-border/80 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.15),transparent_44%)] px-4 py-3.5">
@@ -266,11 +269,11 @@ export default function NexusQuickDock() {
                   <Sparkles className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">Nexus Quick Dock</p>
-                  <p className="text-[10px] text-muted-foreground">Work without leaving this page · Ctrl + .</p>
+                  <p className="text-sm font-semibold">Nexus Assist</p>
+                  <p className="text-[10px] text-muted-foreground">Find the next best step without leaving this page · Ctrl + .</p>
                 </div>
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} aria-label="Close Nexus Quick Dock">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} aria-label="Close Nexus Assist">
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -285,20 +288,38 @@ export default function NexusQuickDock() {
 
             {tool === "home" && (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  <QuickAction icon={Search} label="Search everything" detail="Ctrl + K" onClick={openCommand} testId="quick-dock-search" />
-                  <QuickAction icon={Bot} label="Nexus AI" detail="Ask with live context" onClick={openCopilot} testId="quick-dock-ai" />
-                  <QuickAction icon={MessageCircle} label="Team chat" detail="Live collaboration" onClick={openChat} badge={chatUnread} testId="quick-dock-chat" />
-                  <QuickAction icon={Clock3} label="Quick timer" detail={timerState.startedAt ? timerDisplay : elapsed ? `${timerDisplay} paused` : "Track work anywhere"} onClick={() => setTool("timer")} testId="quick-dock-timer" />
-                  <QuickAction icon={NotebookPen} label="Scratchpad" detail={scratchpad ? "Local note saved" : "Keep working context"} onClick={() => setTool("notes")} testId="quick-dock-notes" />
-                  <QuickAction icon={Calculator} label="Calculator" detail="Fast commercial maths" onClick={() => setTool("calculator")} testId="quick-dock-calculator" />
-                  <QuickAction icon={Code2} label="Scripts" detail="Open technician library" onClick={() => go("/scripting")} testId="quick-dock-scripts" />
-                  <QuickAction icon={TimerReset} label="Time tracking" detail="Create audited entry" onClick={() => go("/time-tracking")} testId="quick-dock-time-tracking" />
-                  <QuickAction icon={Focus} label="Focus mode" detail="Hide navigation noise" onClick={enterFocusMode} testId="quick-dock-focus-mode" />
-                  <QuickAction icon={Wand2} label="Magic Wand" detail="Improve this workspace" onClick={() => setTool("magic")} testId="quick-dock-magic-wand" />
-                </div>
+                <section aria-label="Primary Nexus actions">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Start here</p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <QuickAction icon={Wand2} label="Next action" detail="Review the best safe step" onClick={() => setTool("magic")} testId="quick-dock-magic-wand" />
+                    <QuickAction icon={Search} label="Search Nexus" detail="Records, workspaces and actions" onClick={openCommand} testId="quick-dock-search" />
+                    <QuickAction icon={Bot} label="Ask Nexus" detail="Use the current work context" onClick={openCopilot} testId="quick-dock-ai" />
+                  </div>
+                </section>
+                <section className="mt-3" aria-label="Utility tools">
+                  <button
+                    type="button"
+                    onClick={() => setUtilitiesOpen((current) => !current)}
+                    className="flex w-full items-center justify-between rounded-xl border border-border/70 bg-background/45 px-3 py-2.5 text-left transition hover:border-primary/30 hover:bg-primary/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                    aria-expanded={utilitiesOpen}
+                  >
+                    <span><span className="block text-xs font-semibold text-foreground">Utilities</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Chat, time, notes, calculator and technician tools</span></span>
+                    <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${utilitiesOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {utilitiesOpen && (
+                    <div className="mt-2 grid grid-cols-2 gap-2" data-testid="quick-dock-utilities">
+                      <QuickAction icon={MessageCircle} label="Team chat" detail="Live collaboration" onClick={openChat} badge={chatUnread} testId="quick-dock-chat" />
+                      <QuickAction icon={Clock3} label="Quick timer" detail={timerState.startedAt ? timerDisplay : elapsed ? `${timerDisplay} paused` : "Track work anywhere"} onClick={() => setTool("timer")} testId="quick-dock-timer" />
+                      <QuickAction icon={NotebookPen} label="Scratchpad" detail={scratchpad ? "Local note saved" : "Keep working context"} onClick={() => setTool("notes")} testId="quick-dock-notes" />
+                      <QuickAction icon={Calculator} label="Calculator" detail="Fast commercial maths" onClick={() => setTool("calculator")} testId="quick-dock-calculator" />
+                      <QuickAction icon={Code2} label="Scripts" detail="Open technician library" onClick={() => go("/scripting")} testId="quick-dock-scripts" />
+                      <QuickAction icon={TimerReset} label="Time tracking" detail="Create audited entry" onClick={() => go("/time-tracking")} testId="quick-dock-time-tracking" />
+                      <QuickAction icon={Focus} label="Focus mode" detail="Hide navigation noise" onClick={enterFocusMode} testId="quick-dock-focus-mode" />
+                    </div>
+                  )}
+                </section>
                 <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-                  Quick tools never silently alter a client record. Actions that require scope, approval or audit open their full Nexus workflow.
+                  Nexus Assist never silently alters a client record. Actions that require scope, approval or audit open their full Nexus workflow.
                 </p>
               </>
             )}

@@ -14,15 +14,12 @@ import uuid
 router = APIRouter(tags=["Backup Center"])
 
 
-def _backup_client_match(row: dict, client_id: str, client_name: str = "") -> bool:
+def _backup_client_match(row: dict, client_id: str) -> bool:
     if not client_id:
         return True
-    aliases = {client_id.strip().lower(), client_name.strip().lower()} - {""}
-    values = {
-        str(row.get("client_id") or "").strip().lower(),
-        str(row.get("client_name") or "").strip().lower(),
-    }
-    return bool(aliases & values)
+    # Recovery evidence is a customer boundary. A display name is mutable and
+    # can be shared, so it must never act as an alternate relationship key.
+    return str(row.get("client_id") or "").strip() == client_id.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -348,15 +345,23 @@ async def backup_assurance_overview(client_id: str = "", current_user: dict = De
         if not client:
             raise HTTPException(status_code=404, detail="Selected customer was not found")
     client_name = (client or {}).get("company_name") or (client or {}).get("name") or ""
-    jobs = await db.backup_jobs.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
-    if not jobs:
+    evidence_query = scoped_query(
+        current_user,
+        {"client_id": client_id} if client_id else {},
+        site_field=None,
+    )
+    jobs = await db.backup_jobs.find(evidence_query, {"_id": 0}).to_list(2000)
+    # Provider tenant IDs have not been proven to map to a restricted
+    # technician's Nexus client scope.  Do not substitute an all-provider
+    # fallback when a scoped local read is empty.
+    if not jobs and not client_id and effective_scope(current_user)["mode"] == "all":
         jobs = await _build_overview_from_acronis()
-    records = await db.backup_records.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(5000)
-    tests = await db.backup_verifications.find(scoped_query(current_user, {}, site_field=None), {"_id": 0}).to_list(2000)
+    records = await db.backup_records.find(evidence_query, {"_id": 0}).to_list(5000)
+    tests = await db.backup_verifications.find(evidence_query, {"_id": 0}).to_list(2000)
     if client_id:
-        jobs = [row for row in jobs if _backup_client_match(row, client_id, client_name)]
-        records = [row for row in records if _backup_client_match(row, client_id, client_name)]
-        tests = [row for row in tests if _backup_client_match(row, client_id, client_name)]
+        jobs = [row for row in jobs if _backup_client_match(row, client_id)]
+        records = [row for row in records if _backup_client_match(row, client_id)]
+        tests = [row for row in tests if _backup_client_match(row, client_id)]
     simulations_query = scoped_query(
         current_user,
         {"client_id": client_id} if client_id else {},
@@ -408,11 +413,10 @@ async def create_recovery_simulation(data: dict, current_user: dict = Depends(ge
     else:
         raise HTTPException(status_code=422, detail="Dependencies must be a comma-separated list")
 
-    jobs = await db.backup_jobs.find({}, {"_id": 0}).to_list(2000)
-    if not jobs:
-        jobs = await _build_overview_from_acronis()
-    records = await db.backup_records.find({}, {"_id": 0}).to_list(5000)
-    tests = await db.backup_verifications.find({}, {"_id": 0}).to_list(2000)
+    evidence_scope = scoped_query(current_user, {"client_id": client_id}, site_field=None)
+    jobs = await db.backup_jobs.find(evidence_scope, {"_id": 0}).to_list(2000)
+    records = await db.backup_records.find(evidence_scope, {"_id": 0}).to_list(5000)
+    tests = await db.backup_verifications.find(evidence_scope, {"_id": 0}).to_list(2000)
     client_name = client.get("company_name") or client.get("name") or "Customer"
     result = simulate_recovery(
         client_id=client_id,

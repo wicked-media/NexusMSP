@@ -3,19 +3,20 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 import { format, formatDistanceToNow } from "date-fns";
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from "recharts";
-import { ArrowLeft, Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, ShieldAlert, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Pencil, Building2, Search, MessageSquare } from "lucide-react";
+import { Server, Monitor, Laptop, Wifi, Shield, ShieldCheck, HardDrive, Cpu, MemoryStick, Activity, Clock, RefreshCw, Terminal, Download, AlertTriangle, CheckCircle, XCircle, Info, ChevronRight, Globe, Network, Lock, Eye, Package, Wrench, Tag, MapPin, User, Calendar, ExternalLink, Ticket, Plus, Pencil, Building2, Search, MessageSquare, Archive, GitMerge, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Tabs, TabsContent } from "../components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Separator } from "../components/ui/separator";
 import { Progress } from "../components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
+import { Dialog } from "../components/ui/dialog";
 import { Label } from "../components/ui/label";
 import { Input } from "../components/ui/input";
+import { Textarea } from "../components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 import RemoteAccessButton from "../components/devices/RemoteAccessButton";
 import WatchDeviceButton from "../components/devices/WatchDeviceButton";
 import DeviceBackupPlansPanel from "../components/devices/DeviceBackupPlansPanel";
@@ -27,12 +28,14 @@ import ChangeGuardianDialog from "../components/devices/ChangeGuardianDialog";
 import StatusOrb from "../components/devices/StatusOrb";
 import NexusPageSkeleton from "../components/feedback/NexusPageSkeleton";
 import HeroTile from "../components/HeroTile";
+import { WorkspaceErrorState } from "@/components/WorkspaceState";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
+import { canStartWorkSession, workSessionPath } from "@/lib/workSessionNavigation";
 
 import { API, useAuth } from "../App";
 
 const DEVICE_ICONS = { server: Server, workstation: Monitor, laptop: Laptop, network: Wifi, mobile: Laptop };
-const STATUS_COLORS = { online: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", offline: "bg-red-500/10 text-red-500 border-red-500/20", warning: "bg-amber-500/10 text-amber-500 border-amber-500/20" };
 const SEVERITY_COLORS = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", important: "bg-amber-500/10 text-amber-500", warning: "bg-amber-500/10 text-amber-500", info: "bg-blue-500/10 text-blue-500", error: "bg-red-500/10 text-red-500" };
 const PATCH_STATUS = { installed: "bg-emerald-500/10 text-emerald-500", pending: "bg-amber-500/10 text-amber-500", failed: "bg-red-500/10 text-red-500" };
 const EVENT_ICONS = { agent_check_in: Activity, login: User, logout: User, software_installed: Package, patch_applied: Download, alert_triggered: AlertTriangle, reboot: RefreshCw, service_restart: Wrench, backup_completed: HardDrive, script_executed: Terminal };
@@ -50,16 +53,30 @@ export default function DeviceDetailPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [diskHealth, setDiskHealth] = useState([]);
-  const [rdLiveStatus, setRdLiveStatus] = useState(null);
   const [patchWindowOpen, setPatchWindowOpen] = useState(false);
+  const [patchRingDialogOpen, setPatchRingDialogOpen] = useState(false);
+  const [patchRingOptions, setPatchRingOptions] = useState([]);
+  const [patchRingSelection, setPatchRingSelection] = useState("");
+  const [patchRingReason, setPatchRingReason] = useState("");
+  const [patchRingBusy, setPatchRingBusy] = useState(false);
   const [safetyCheckOpen, setSafetyCheckOpen] = useState(false);
   const [deviceEditorOpen, setDeviceEditorOpen] = useState(false);
   const [deviceEditorBusy, setDeviceEditorBusy] = useState(false);
   const [clientOptions, setClientOptions] = useState([]);
   const [deviceEditor, setDeviceEditor] = useState({ name: "", client_id: "", assigned_user: "", location: "" });
   const [softwareSearch, setSoftwareSearch] = useState("");
+  const [cockpitSearch, setCockpitSearch] = useState("");
+  const [lifecycleDialog, setLifecycleDialog] = useState(null);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [mergeCandidates, setMergeCandidates] = useState([]);
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [mergePreview, setMergePreview] = useState(null);
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [mergeConfirmation, setMergeConfirmation] = useState("");
 
   const openLiveSupport = async () => {
     try {
@@ -74,6 +91,7 @@ export default function DeviceDetailPage() {
   };
 
   const fetchDetail = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await axios.get(`${API}/devices/${deviceId}/detail`, { headers: { Authorization: `Bearer ${token}` } });
       setData(res.data);
@@ -84,48 +102,15 @@ export default function DeviceDetailPage() {
       } catch {}
     } catch (e) {
       console.error(e);
+      setLoadError(e.response?.status === 404
+        ? "This asset is no longer available in your permitted managed estate. It may have been retired, removed, or moved outside your current scope."
+        : "Nexus could not retrieve this managed asset. No device records have been changed.");
     } finally {
       setLoading(false);
     }
   }, [deviceId, token]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
-
-  // Poll RustDesk live status for this device
-  useEffect(() => {
-    const fetchRdStatus = async () => {
-      try {
-        const res = await axios.get(`${API}/rustdesk/live/status-map`, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.data?.status_map && data?.device?.rustdesk_id) {
-          setRdLiveStatus(res.data.status_map[data.device.rustdesk_id] || null);
-        }
-      } catch {}
-    };
-    fetchRdStatus();
-    const interval = setInterval(fetchRdStatus, 15000);
-    return () => clearInterval(interval);
-  }, [token, data?.device?.rustdesk_id]);
-
-  const downloadAgentScript = async (osType) => {
-    try {
-      const res = await axios.get(`${API}/devices/${deviceId}/agent-script?os_type=${osType}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: "blob",
-      });
-      const ext = osType === "windows" ? "ps1" : "sh";
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `nexusops-agent-${deviceId}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-      toast.success(`${osType === "windows" ? "PowerShell" : "Bash"} agent script downloaded`);
-    } catch {
-      toast.error("Failed to download agent script");
-    }
-  };
 
   const openDeviceEditor = async () => {
     if (!data?.device) return;
@@ -159,10 +144,176 @@ export default function DeviceDetailPage() {
     finally { setDeviceEditorBusy(false); }
   };
 
+  const openPatchRingDialog = async () => {
+    setPatchRingSelection(data?.device?.patch_ring || "__unassigned__");
+    setPatchRingReason("");
+    setPatchRingDialogOpen(true);
+    try {
+      const response = await axios.get(`${API}/patch-compliance/rings`, { headers: { Authorization: `Bearer ${token}` } });
+      setPatchRingOptions(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      setPatchRingOptions([]);
+      toast.error(error.response?.data?.detail || "Nexus could not load the patch rollout register");
+    }
+  };
+
+  const savePatchRing = async () => {
+    if (patchRingReason.trim().length < 3) {
+      toast.error("Record why this asset is changing rollout group");
+      return;
+    }
+    setPatchRingBusy(true);
+    try {
+      const response = await axios.put(`${API}/devices/${deviceId}/patch-ring`, {
+        patch_ring: patchRingSelection === "__unassigned__" ? "" : patchRingSelection,
+        reason: patchRingReason.trim(),
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(response.data?.message || "Patch rollout group updated");
+      setPatchRingDialogOpen(false);
+      fetchDetail();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Nexus could not update the patch rollout group");
+    } finally {
+      setPatchRingBusy(false);
+    }
+  };
+
+  const closeLifecycleDialog = (force = false) => {
+    if (lifecycleBusy && !force) return;
+    setLifecycleDialog(null);
+    setLifecycleReason("");
+    setMergeTargetId("");
+    setMergePreview(null);
+    setMergeConfirmation("");
+  };
+
+  const openLifecycleDialog = async (mode) => {
+    setLifecycleDialog(mode);
+    setLifecycleReason("");
+    setMergeTargetId("");
+    setMergePreview(null);
+    setMergeConfirmation("");
+    if (mode !== "merge") return;
+    setMergeLoading(true);
+    try {
+      const response = await axios.get(`${API}/devices/${deviceId}/merge-candidates`, { headers: { Authorization: `Bearer ${token}` } });
+      setMergeCandidates(Array.isArray(response.data?.candidates) ? response.data.candidates : []);
+    } catch (error) {
+      setMergeCandidates([]);
+      toast.error(error.response?.data?.detail || "Nexus could not load merge candidates");
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
+  const selectMergeTarget = async (survivorId) => {
+    setMergeTargetId(survivorId);
+    setMergePreview(null);
+    if (!survivorId) return;
+    setMergeLoading(true);
+    try {
+      const response = await axios.get(`${API}/devices/${deviceId}/merge-preview`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { survivor_id: survivorId },
+      });
+      setMergePreview(response.data || null);
+    } catch (error) {
+      setMergeTargetId("");
+      toast.error(error.response?.data?.detail || "Nexus could not prepare a safe merge preview");
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
+  const archiveManagedAsset = async () => {
+    if (lifecycleReason.trim().length < 3) {
+      toast.error("Add a short archive reason for the next technician");
+      return;
+    }
+    setLifecycleBusy(true);
+    try {
+      await axios.post(`${API}/devices/${deviceId}/archive`, { reason: lifecycleReason.trim() }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Managed asset archived with its evidence retained");
+      closeLifecycleDialog(true);
+      fetchDetail();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Nexus could not archive this managed asset");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const restoreManagedAsset = async () => {
+    setLifecycleBusy(true);
+    try {
+      await axios.post(`${API}/devices/${deviceId}/restore`, {}, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success("Managed asset restored. Nexus will wait for a trusted check-in before marking it online.");
+      fetchDetail();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Nexus could not restore this managed asset");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const mergeManagedAsset = async () => {
+    const sourceName = data?.device?.name || "";
+    if (!mergeTargetId || !mergePreview) {
+      toast.error("Select a surviving asset and review its merge impact first");
+      return;
+    }
+    if (lifecycleReason.trim().length < 3) {
+      toast.error("Record why these assets are duplicates");
+      return;
+    }
+    if (mergeConfirmation.trim() !== sourceName) {
+      toast.error(`Type ${sourceName} to confirm the duplicate record`);
+      return;
+    }
+    setLifecycleBusy(true);
+    try {
+      const response = await axios.post(`${API}/devices/${deviceId}/merge`, {
+        survivor_id: mergeTargetId,
+        reason: lifecycleReason.trim(),
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(response.data?.already_merged ? "This duplicate was already consolidated" : "Duplicate asset merged with history retained");
+      closeLifecycleDialog(true);
+      navigate(`/devices/${encodeURIComponent(response.data?.survivor_id || mergeTargetId)}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Nexus could not merge these managed assets");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
+  const purgeManagedAsset = async () => {
+    setLifecycleBusy(true);
+    try {
+      await axios.delete(`${API}/devices/${deviceId}`, { headers: { Authorization: `Bearer ${token}` }, data: { reason: lifecycleReason.trim() } });
+      toast.success("Empty manual asset record permanently deleted");
+      closeLifecycleDialog(true);
+      navigate("/devices");
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "This asset cannot be permanently deleted");
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
   if (loading) return <NexusPageSkeleton label="Loading managed asset" />;
+  if (!data && loadError) return <WorkspaceErrorState title="Managed asset is unavailable" description={loadError} onSecondaryAction={() => navigate("/devices")} secondaryLabel="Back to managed assets" onRetry={fetchDetail} retryLabel="Retry asset load" />;
   if (!data) return <div className="text-center py-20 text-muted-foreground">Device not found</div>;
 
   const dev = data.device;
+  const isArchived = Boolean(dev.archived) || dev.status === "archived";
+  const effectiveStatus = isArchived ? "archived" : dev.status;
+  const observedAt = dev.last_heartbeat || dev.last_seen || dev.telemetry_at || dev.observed_at;
+  const observedDate = observedAt ? new Date(observedAt) : null;
+  const telemetryState = !observedDate || Number.isNaN(observedDate.getTime())
+    ? "not_collected"
+    : Date.now() - observedDate.getTime() <= 15 * 60 * 1000 ? "observed" : "stale";
+  const displayStatus = isArchived ? "archived" : telemetryState === "stale" ? "stale" : effectiveStatus;
+  const statusOrb = displayStatus === "stale" ? "warning" : displayStatus;
   const DevIcon = DEVICE_ICONS[dev.device_type] || Monitor;
   const perfData = (data.performance || []).slice().reverse().filter((_, i) => i % 6 === 0).map(p => ({
     time: p.timestamp ? format(new Date(p.timestamp), "HH:mm") : "",
@@ -179,131 +330,279 @@ export default function DeviceDetailPage() {
 
   const complianceAssessed = Boolean(dev.security_assessed_at);
   const complianceColor = !complianceAssessed ? "text-muted-foreground" : (dev.compliance_score || 0) >= 90 ? "text-emerald-500" : (dev.compliance_score || 0) >= 70 ? "text-amber-500" : "text-red-500";
-  const SecurityIcon = (dev.compliance_score || 0) >= 90 ? ShieldCheck : (dev.compliance_score || 0) >= 70 ? Shield : ShieldAlert;
   const cpuUsage = Math.round(dev.cpu_usage || 0);
   const memoryUsage = Math.round(dev.memory_usage || 0);
   const diskUsage = Math.round(dev.disk_usage || 0);
-  const deviceSignal = (rdLiveStatus || dev.status) === "offline"
+  const deviceSignal = isArchived
+    ? "calm"
+    : effectiveStatus === "offline"
     ? "critical"
+    : telemetryState !== "observed"
+      ? "attention"
     : (dev.alerts_count || 0) > 0 || cpuUsage >= 90 || memoryUsage >= 90 || diskUsage >= 90
       ? "attention"
-      : (rdLiveStatus || dev.status) === "online"
+      : effectiveStatus === "online"
         ? "healthy"
         : "recommendation";
   const usageGlow = (value) => value >= 90 ? "rose" : value >= 70 ? "amber" : "emerald";
   const adapters = data.network_adapters || [];
   const activeAdapter = adapters.find(adapter => adapter.status === "up") || adapters.find(adapter => adapter.ip_address) || null;
   const software = data.software || [];
+  const activeWorkTickets = (data.tickets || []).filter(canStartWorkSession);
+  const agentControlPath = `/nexus-agent?deviceId=${encodeURIComponent(dev.id)}${dev.client_id ? `&clientId=${encodeURIComponent(dev.client_id)}` : ""}`;
+  const hasLinkedAgent = Boolean(dev.nexus_agent_id);
+  const agentEligiblePlatform = /windows/i.test(`${dev.os || ""} ${dev.os_version || ""}`);
+  const networkControlPath = `/networking?deviceId=${encodeURIComponent(dev.id)}${dev.client_id ? `&clientId=${encodeURIComponent(dev.client_id)}` : ""}`;
+  const agentToolsReady = !isArchived && hasLinkedAgent && telemetryState === "observed";
+  const agentControlState = isArchived
+    ? { label: "History retained", detail: "Operational controls are disabled while the asset is archived.", tone: "text-muted-foreground" }
+    : !agentEligiblePlatform && !hasLinkedAgent
+      ? { label: "Network-managed endpoint", detail: "This platform does not run Nexus Agent. Manage it through the network workspace and retain its monitoring evidence here.", tone: "text-sky-700 dark:text-sky-300" }
+    : !hasLinkedAgent
+      ? { label: "Agent not linked", detail: "Link Nexus Agent to enable remote support, terminal and file controls.", tone: "text-amber-600 dark:text-amber-300" }
+      : telemetryState === "observed"
+        ? { label: "Endpoint control ready", detail: "Remote, terminal and file actions are available from this trusted observation.", tone: "text-emerald-600 dark:text-emerald-300" }
+        : { label: "Verification required", detail: "Refresh or wait for a current Agent check-in before opening live endpoint controls.", tone: "text-amber-600 dark:text-amber-300" };
   const softwareQuery = softwareSearch.trim().toLowerCase();
   const filteredSoftware = software.filter(item => !softwareQuery || [item.name, item.publisher, item.version, item.category].some(value => String(value || "").toLowerCase().includes(softwareQuery)));
   const softwareInventoryAt = software.reduce((latest, item) => item.last_inventory_at && (!latest || item.last_inventory_at > latest) ? item.last_inventory_at : latest, null);
+  const pendingPatchRecords = (data.patches || []).filter((patchItem) => {
+    const status = String(patchItem.status || "").trim().toLowerCase();
+    return !["installed", "applied", "complete", "completed", "superseded"].includes(status);
+  });
+  const cockpitQuery = cockpitSearch.trim().toLowerCase();
+  const cockpitMatches = (values) => !cockpitQuery || values.some(value => String(value || "").toLowerCase().includes(cockpitQuery));
+  const cockpitAlerts = (data.alerts || []).filter(item => cockpitMatches([item.severity, item.alert_type, item.message, item.source]));
+  const cockpitPatches = pendingPatchRecords.filter(item => cockpitMatches([item.kb_number, item.kb_id, item.kb_article, item.title, item.description, item.category, item.status]));
+  const cockpitTickets = (data.tickets || []).filter(item => cockpitMatches([item.ticket_number, item.title, item.status, item.priority, item.assigned_to]));
+  const deviceSections = [
+    {
+      id: "overview",
+      label: "Overview",
+      description: "Health and next steps",
+      icon: Monitor,
+      defaultTab: "overview",
+      tabs: [
+        { value: "overview", label: "Current work" },
+        { value: "events", label: "Service history" },
+        { value: "device-details", label: "Device details" },
+        { value: "asset-story", label: "Related items" },
+      ],
+    },
+    {
+      id: "operations",
+      label: "Operations",
+      description: "Tickets and sessions",
+      icon: Activity,
+      defaultTab: "tickets",
+      tabs: [
+        { value: "tickets", label: `Tickets (${data.tickets?.length || 0})` },
+        { value: "remote-sessions", label: `Sessions (${data.remote_sessions?.length || 0})` },
+        { value: "performance", label: "Performance" },
+        { value: "backups", label: "Backups" },
+      ],
+    },
+    {
+      id: "inventory",
+      label: "Inventory",
+      description: "Software and patches",
+      icon: Package,
+      defaultTab: "software",
+      tabs: [
+        { value: "software", label: `Software (${data.software?.length || 0})` },
+        { value: "patches", label: `Patches (${data.patches?.length || 0})` },
+        { value: "network", label: "Network" },
+      ],
+    },
+    {
+      id: "security",
+      label: "Security",
+      description: "Protection posture",
+      icon: Shield,
+      defaultTab: "security",
+      tabs: [{ value: "security", label: "Security posture" }],
+    },
+    {
+      id: "history",
+      label: "History",
+      description: "Audit evidence",
+      icon: Clock,
+      defaultTab: "events",
+      tabs: [
+        { value: "audit-log", label: "Audit log" },
+        { value: "time-machine", label: "Time machine" },
+      ],
+    },
+  ];
+  const activeDeviceSection = deviceSections.find(section => section.tabs.some(tab => tab.value === activeTab)) || deviceSections[0];
+  const lastObservedLabel = observedDate && !Number.isNaN(observedDate.getTime())
+    ? formatDistanceToNow(observedDate, { addSuffix: true })
+    : "No endpoint evidence";
+  const telemetryItems = [
+    { label: "CPU", value: `${cpuUsage}%`, icon: Cpu, percent: cpuUsage, tone: usageGlow(cpuUsage), chartKey: "cpu", chartColor: "#16d78b" },
+    { label: "Memory", value: `${memoryUsage}%`, icon: MemoryStick, percent: memoryUsage, tone: memoryUsage >= 90 ? "rose" : "yellow", chartKey: "memory", chartColor: "#f4d13d" },
+    { label: "Disk", value: `${diskUsage}%`, icon: HardDrive, percent: diskUsage, tone: usageGlow(diskUsage), chartKey: "disk", chartColor: "#f0a33a" },
+    { label: "Uptime", value: dev.uptime_hours != null ? `${Math.floor(dev.uptime_hours / 24)}d ${Math.round(dev.uptime_hours % 24)}h` : "—", icon: Clock, tone: "cyan" },
+    { label: "Alert", value: dev.alerts_count || data.alerts?.length || 0, icon: AlertTriangle, tone: (dev.alerts_count || data.alerts?.length || 0) > 0 ? "rose" : "emerald", tab: "events" },
+    { label: "Patches", value: dev.pending_patches || pendingPatchRecords.length, icon: Download, tone: "cyan", tab: "patches", testId: "patches" },
+    { label: "Tickets", value: data.tickets?.length || 0, icon: Ticket, tone: "cyan", tab: "tickets" },
+    { label: "Session", value: data.remote_sessions?.length || 0, icon: Monitor, tone: "cyan", tab: "remote-sessions" },
+    { label: "Software", value: software.length, icon: Package, tone: "cyan", tab: "software" },
+    { label: "Patches available", value: data.patches?.length || 0, icon: ShieldCheck, tone: "emerald", tab: "patches", testId: "patches-available" },
+  ];
 
   return (
-    <div className="nx-page-stage space-y-5 sm:space-y-6" data-testid="device-detail-page">
-      {/* Device identity */}
-      <section className="nx-device-header nx-ambient-surface relative overflow-hidden rounded-2xl p-4 sm:p-5" data-nx-signal={deviceSignal}>
-        <div className="mb-4 flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
-          Managed asset
-          <span className="text-muted-foreground">· Live endpoint record</span>
+    <div className="nx-page-stage nx-device-cockpit space-y-4" data-testid="device-detail-page">
+      <nav className="nx-device-breadcrumb" aria-label="Device breadcrumb">
+        <button type="button" onClick={() => navigate("/clients")}>Clients</button><ChevronRight />
+        <button type="button" onClick={() => navigate(dev.client_id ? `/clients?client=${encodeURIComponent(dev.client_id)}` : "/clients")}>{dev.client_name || "Unassigned client"}</button><ChevronRight />
+        <button type="button" onClick={() => navigate("/devices")}>Devices</button><ChevronRight />
+        <strong>{dev.name}</strong>
+        <div className="nx-device-breadcrumb__tools">
+          <label className="nx-device-record-search"><Search /><span className="sr-only">Search this device</span><input value={cockpitSearch} onChange={(event) => setCockpitSearch(event.target.value)} placeholder="Search this device…" data-testid="device-record-search" /></label>
+          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Device options"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={openDeviceEditor}><Pencil className="mr-2 h-4 w-4" />Edit identity</DropdownMenuItem><DropdownMenuItem onSelect={() => setActiveTab("audit-log")}><Clock className="mr-2 h-4 w-4" />View audit log</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
         </div>
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/devices")} data-testid="back-to-devices"><ArrowLeft className="w-5 h-5" /></Button>
-          <div className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border shadow-sm ${STATUS_COLORS[rdLiveStatus || dev.status]}`}>
-            <DevIcon className="w-7 h-7" />
-            <span className="absolute -right-0.5 -top-0.5 rounded-full border-2 border-background"><StatusOrb status={rdLiveStatus || dev.status} size={10} /></span>
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-2xl font-bold tracking-tight" data-testid="device-name">{dev.name}</h1>
-              <span className={`inline-flex items-center gap-1.5 text-xs font-medium capitalize ${(rdLiveStatus || dev.status) === "online" ? "text-emerald-700 dark:text-emerald-400" : (rdLiveStatus || dev.status) === "offline" ? "text-zinc-600 dark:text-zinc-400" : "text-amber-700 dark:text-amber-400"}`} data-testid="device-status"><StatusOrb status={rdLiveStatus || dev.status} size={8} />{rdLiveStatus || dev.status}</span>
-              {rdLiveStatus && rdLiveStatus !== dev.status && (
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-medium">LIVE</span>
-              )}
-              {complianceAssessed && (
-                <Badge variant="outline" className={complianceColor + " border-current/20"}>
-                  <SecurityIcon className="w-3 h-3 mr-1" />{dev.compliance_score}% Compliant
-                </Badge>
-              )}
+      </nav>
+
+      <section className="nx-device-cockpit-header" data-nx-signal={deviceSignal}>
+        <div className="nx-device-cockpit-header__layout">
+          <div className="nx-device-cockpit-header__identity">
+            <div className="nx-device-cockpit-header__mark">
+              <DevIcon className="h-10 w-10" strokeWidth={1.45} aria-hidden="true" />
+              <span title={`Device ${displayStatus}`}><StatusOrb status={statusOrb} size={9} /></span>
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1" data-sensitive="ip-address"><Globe className="h-3.5 w-3.5" />{dev.ip_address || "No IP reported"}</span>
-              <span className="flex items-center gap-1"><Monitor className="h-3.5 w-3.5" />{dev.os} {dev.os_version || ""}</span>
-              <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{dev.location || "No location"}</span>
-              <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" />{dev.client_name || "Unassigned client"}</span>
-              <span className="flex items-center gap-1"><User className="h-3.5 w-3.5" />{dev.assigned_user || "Unassigned user"}</span>
+            <div className="min-w-0">
+              <div className="nx-device-cockpit-header__eyebrow">Device cockpit</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-3xl font-bold tracking-[-0.045em]" data-testid="device-name">{dev.name}</h1>
+                <Badge variant="outline" className={`capitalize ${displayStatus === "online" ? "border-emerald-500/30 text-emerald-400" : displayStatus === "stale" ? "border-amber-500/30 text-amber-400" : "border-zinc-500/30 text-zinc-400"}`} data-testid="device-status"><StatusOrb status={statusOrb} size={7} /><span className="ml-1.5">{displayStatus}</span></Badge>
+                {isArchived && <Badge variant="outline" className="border-zinc-500/25 bg-zinc-500/[0.08] text-zinc-400">Retained history</Badge>}
+              </div>
+              <div className="nx-device-cockpit-header__facts">
+                <span><Monitor />{dev.os} {dev.os_version || ""}</span>
+                <span data-sensitive="ip-address"><Globe />{dev.ip_address || "No IP reported"}</span>
+                <span><MapPin />{dev.location || "No location"}</span>
+                <span><Building2 />{dev.client_name || "Unassigned client"}</span>
+                <span><User />{dev.assigned_user || "Unassigned user"}</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="nx-device-action-bar flex flex-wrap gap-2 rounded-xl p-2 xl:max-w-[620px] xl:justify-end">
-          <Button size="sm" onClick={openLiveSupport} className="bg-emerald-600 hover:bg-emerald-500" data-testid="start-device-live-chat"><MessageSquare className="mr-1 h-4 w-4" />Start live chat</Button>
-          <Button size="sm" variant="outline" className="border-sky-500/30 text-sky-700 hover:bg-sky-500/10 dark:text-sky-300" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)} data-testid="create-device-ticket"><Ticket className="mr-1 h-4 w-4" />New ticket</Button>
-          {dev.client_id && <Button size="sm" variant="outline" onClick={() => navigate(`/clients?client=${encodeURIComponent(dev.client_id)}`)} data-testid="open-device-client"><Building2 className="mr-1 h-4 w-4" />Open client</Button>}
-          <Button variant="outline" size="sm" onClick={openDeviceEditor} data-testid="edit-device-identity"><Pencil className="mr-1 h-4 w-4" />Edit</Button>
-          <Button variant="outline" size="sm" className="border-cyan-500/30 text-cyan-700 hover:bg-cyan-500/10 dark:text-cyan-200" onClick={() => setSafetyCheckOpen(true)} data-testid="device-safe-to-touch"><ShieldCheck className="mr-1 h-4 w-4" />Safe to touch?</Button>
-          <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
-          <RemoteAccessButton
-            device={dev}
-            status={rdLiveStatus || dev.status}
-            testid="remote-access-btn"
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" data-testid="download-agent-btn"><Download className="w-4 h-4 mr-1" />Agent</Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => downloadAgentScript("windows")} data-testid="download-agent-windows">
-                <Monitor className="w-4 h-4 mr-2" />Windows (PowerShell)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => downloadAgentScript("linux")} data-testid="download-agent-linux">
-                <Terminal className="w-4 h-4 mr-2" />Linux / macOS (Bash)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={fetchDetail}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-        </div>
+          <div className={`nx-device-action-bar ${isArchived ? "is-archived" : ""}`}>
+            <span className="nx-device-action-summary__icon">{isArchived ? <Archive /> : telemetryState === "observed" ? <ShieldCheck /> : <AlertTriangle />}</span>
+            <div className="nx-device-action-summary">
+              <p>{isArchived ? "This device is archived" : telemetryState === "observed" ? "Endpoint evidence is current" : "Snapshot requires verification"}</p>
+              <span>{isArchived ? "Archived records are removed from active fleet views; their evidence remains intact." : telemetryState === "observed" ? `Last trusted observation ${lastObservedLabel}.` : `The latest endpoint snapshot is ${telemetryState === "stale" ? "stale" : "not available"}. Verify before high-impact work.`}</span>
+            </div>
+            {isArchived ? (dev.merged_into_id ? <Button className="nx-device-primary-action" onClick={() => navigate(`/devices/${encodeURIComponent(dev.merged_into_id)}`)} data-testid="open-device-merge-survivor"><GitMerge />Open surviving asset</Button> : <Button className="nx-device-primary-action" onClick={restoreManagedAsset} disabled={lifecycleBusy} data-testid="restore-device"><RotateCcw />Restore device</Button>) : <Button className="nx-device-primary-action" onClick={fetchDetail} data-testid="verify-device-evidence"><RefreshCw />Refresh evidence</Button>}
+            <button type="button" className="nx-device-action-bar__link" onClick={() => setActiveTab(isArchived ? "audit-log" : "device-details")}>{isArchived ? "View archive details" : "View evidence details"}<ChevronRight /></button>
+          </div>
         </div>
       </section>
 
-      {/* Quick Stats Row */}
-      <div className="grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6" data-testid="device-hero-tiles">
-        <HeroTile label="CPU" value={cpuUsage} suffix="%" icon={Cpu} glow={usageGlow(cpuUsage)} subtitle={cpuUsage >= 90 ? "Critical load" : cpuUsage >= 70 ? "Elevated load" : "Normal load"} testId="device-stat-cpu" />
-        <HeroTile label="Memory" value={memoryUsage} suffix="%" icon={MemoryStick} glow={usageGlow(memoryUsage)} subtitle={memoryUsage >= 90 ? "Critical pressure" : memoryUsage >= 70 ? "Elevated pressure" : "Normal pressure"} testId="device-stat-memory" />
-        <HeroTile label="Disk" value={diskUsage} suffix="%" icon={HardDrive} glow={usageGlow(diskUsage)} subtitle={diskUsage >= 90 ? "Capacity critical" : diskUsage >= 70 ? "Capacity watch" : "Capacity healthy"} testId="device-stat-disk" />
-        <HeroTile label="Uptime" value={dev.uptime_hours != null ? `${Math.floor(dev.uptime_hours / 24)}d ${Math.round(dev.uptime_hours % 24)}h` : "—"} icon={Clock} glow="cyan" subtitle={dev.last_reboot ? `Rebooted ${formatDistanceToNow(new Date(dev.last_reboot), { addSuffix: true })}` : "Reboot time unavailable"} animated={false} testId="device-stat-uptime" />
-        <HeroTile label="Alerts" value={dev.alerts_count || 0} icon={AlertTriangle} glow={(dev.alerts_count || 0) > 0 ? "rose" : "emerald"} subtitle={(dev.alerts_count || 0) > 0 ? "Needs attention" : "No active alerts"} testId="device-stat-alerts" />
-        <HeroTile label="Patches" value={dev.pending_patches || 0} icon={Download} glow={(dev.pending_patches || 0) > 0 ? "amber" : "emerald"} subtitle={(dev.pending_patches || 0) > 0 ? "Pending approval" : "No updates pending"} testId="device-stat-patches" />
-      </div>
+      <section className="nx-device-telemetry" data-testid="device-hero-tiles">
+        <div className="nx-device-telemetry__head">
+          <div className="nx-device-telemetry__title"><Activity /><strong>{telemetryState === "observed" ? "Live device telemetry" : "Last reported telemetry"}</strong><span>Last reported snapshot ({telemetryState === "observed" ? "current" : telemetryState === "stale" ? "stale" : "not collected"})</span></div>
+          <div className="nx-device-telemetry__status"><span className={`is-${telemetryState}`}><AlertTriangle />{telemetryState === "observed" ? "Snapshot is current" : telemetryState === "stale" ? "Snapshot is stale" : "No snapshot collected"}</span><small>Last seen: {lastObservedLabel}</small><Info /><Button variant="outline" size="sm" onClick={fetchDetail} data-testid="refresh-device-detail"><RefreshCw />Refresh</Button></div>
+        </div>
+        <div className="nx-device-telemetry__grid">
+          {telemetryItems.map(item => {
+            const MetricIcon = item.icon;
+            const MetricElement = item.tab ? "button" : "div";
+            return <MetricElement key={item.label} type={item.tab ? "button" : undefined} className={`nx-device-telemetry__metric ${item.tab ? "is-link" : ""}`} data-tone={item.tone} onClick={item.tab ? () => setActiveTab(item.tab) : undefined} data-testid={`device-stat-${item.testId || item.label.toLowerCase().replace(/\s/g, "-")}`}>
+              <div className="nx-device-telemetry__metric-label"><span><MetricIcon /></span>{item.label}</div>
+              <p>{item.value}</p>
+              {typeof item.percent === "number" && <><div className="nx-device-telemetry__track"><span style={{ width: `${Math.min(100, Math.max(0, item.percent))}%` }} /></div>{perfData.length > 1 && <div className="nx-device-telemetry__spark"><ResponsiveContainer width="100%" height="100%"><AreaChart data={perfData}><Area type="monotone" dataKey={item.chartKey} stroke={item.chartColor} fill={item.chartColor} fillOpacity={0.04} strokeWidth={1.2} dot={false} isAnimationActive /></AreaChart></ResponsiveContainer></div>}</>}
+            </MetricElement>;
+          })}
+        </div>
+      </section>
 
-      {/* Tabs */}
-      <DeviceDossier deviceId={dev.id} headers={{ Authorization: `Bearer ${token}` }} API={API} />
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="nx-device-record-body">
+        <div className="nx-device-workspace-layout">
+          <aside className="nx-device-quick-actions" aria-label="Device quick actions">
+            <div className="nx-device-quick-actions__heading">
+              <Activity className="h-5 w-5 text-cyan-400" />
+              <div><p>Quick actions</p><span>Common tasks for this device</span></div>
+            </div>
+            {isArchived ? <Button className="nx-device-quick-actions__primary justify-start" onClick={restoreManagedAsset} disabled={lifecycleBusy}><RotateCcw className="mr-2 h-4 w-4" />Restore device</Button> : activeWorkTickets.length === 1 ? <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(workSessionPath(activeWorkTickets[0]))}><Wrench className="mr-2 h-4 w-4" />Start work</Button> : <Button className="nx-device-quick-actions__primary justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Plus className="mr-2 h-4 w-4" />Create ticket</Button>}
+            <div className="nx-device-quick-actions__remote"><RemoteAccessButton device={dev} status={displayStatus} testid="remote-access-btn" /></div>
+            {!isArchived && (hasLinkedAgent ? <Button variant="outline" className="justify-start" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady} title={!agentToolsReady ? "Refresh or wait for a current Nexus Agent check-in before opening terminal and file controls" : undefined}><Terminal className="mr-2 h-4 w-4" />{agentToolsReady ? "Terminal & files" : "Agent verification required"}</Button> : agentEligiblePlatform ? <Button variant="outline" className="justify-start" onClick={() => navigate(agentControlPath)}><Terminal className="mr-2 h-4 w-4" />Link Nexus Agent</Button> : <Button variant="outline" className="justify-start" onClick={() => navigate(networkControlPath)}><Network className="mr-2 h-4 w-4" />Network controls</Button>)}
+            {activeTab !== "tickets" && <Button variant="outline" className="justify-start" onClick={() => navigate(`/tickets?clientId=${encodeURIComponent(dev.client_id || "")}&device_id=${encodeURIComponent(dev.id)}&new=1`)}><Ticket className="mr-2 h-4 w-4" />Create linked ticket</Button>}
+            <Button variant="outline" className="justify-start" onClick={() => setSafetyCheckOpen(true)}><ShieldCheck className="mr-2 h-4 w-4" />Safe-to-touch check</Button>
+            {!isArchived && <Button variant="outline" className="justify-start" onClick={() => setPatchWindowOpen(true)}><Calendar className="mr-2 h-4 w-4" />Schedule maintenance</Button>}
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab("patches")}><Download className="mr-2 h-4 w-4" />Check patches</Button>
+            <Button variant="outline" className="justify-start" onClick={() => setActiveTab("backups")}><HardDrive className="mr-2 h-4 w-4" />View backups</Button>
+            <Button variant="outline" className="justify-start" onClick={openDeviceEditor}><Pencil className="mr-2 h-4 w-4" />Edit identity</Button>
+            <WatchDeviceButton deviceId={dev.id} token={token} deviceName={dev.name} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="outline" className="justify-between" data-testid="device-lifecycle-menu"><span className="flex items-center"><MoreHorizontal className="mr-2 h-4 w-4" />More actions</span><ChevronRight className="h-4 w-4" /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-64">
+                <DropdownMenuItem onSelect={openLiveSupport}><MessageSquare className="mr-2 h-4 w-4" />Start live support</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => navigate(agentControlPath)}><Terminal className="mr-2 h-4 w-4" />Nexus Agent control plane</DropdownMenuItem>
+                {!isArchived && <DropdownMenuItem onSelect={() => openLifecycleDialog("archive")} data-testid="archive-device-menu"><Archive className="mr-2 h-4 w-4" />Archive asset</DropdownMenuItem>}
+                {!isArchived && <DropdownMenuItem onSelect={() => openLifecycleDialog("merge")} data-testid="merge-device-menu"><GitMerge className="mr-2 h-4 w-4" />Merge duplicate</DropdownMenuItem>}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => openLifecycleDialog("purge")} data-testid="purge-device-menu"><Trash2 className="mr-2 h-4 w-4" />Permanently delete…</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </aside>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="nx-device-tabs" data-testid="device-tabs" aria-label="Device workspace sections">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="asset-story" data-testid="device-asset-story-tab">Asset Story</TabsTrigger>
-          <TabsTrigger value="time-machine" data-testid="device-time-machine-tab">Time Machine</TabsTrigger>
-          <TabsTrigger value="performance">Performance</TabsTrigger>
-          <TabsTrigger value="tickets">Tickets ({data.tickets?.length || 0})</TabsTrigger>
-          <TabsTrigger value="remote-sessions" data-testid="device-remote-tab">Sessions ({data.remote_sessions?.length || 0})</TabsTrigger>
-          <TabsTrigger value="software">Software ({data.software?.length || 0})</TabsTrigger>
-          <TabsTrigger value="patches">Patches ({data.patches?.length || 0})</TabsTrigger>
-          <TabsTrigger value="security">Security</TabsTrigger>
-          <TabsTrigger value="network">Network</TabsTrigger>
-          <TabsTrigger value="events">Events ({data.events?.length || 0})</TabsTrigger>
-          <TabsTrigger value="backups" data-testid="device-backups-tab">Backups</TabsTrigger>
-          <TabsTrigger value="audit-log" data-testid="device-audit-tab">Audit Log</TabsTrigger>
-        </TabsList>
+          <div className="min-w-0">
+            <div className="nx-device-subnav" aria-label={`${activeDeviceSection.label} views`}>
+              {activeDeviceSection.tabs.map(tab => <button key={tab.value} type="button" className="nx-device-subnav__item" data-active={activeTab === tab.value ? "true" : "false"} aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)} data-testid={`device-view-${tab.value}`}>{tab.label}</button>)}
+            </div>
 
-        {/* OVERVIEW TAB */}
-        <TabsContent value="overview" className="space-y-4 mt-4">
+        {/* CURRENT WORK TAB */}
+        <TabsContent value="overview" className="mt-3 space-y-3">
+          <Card className="nx-device-control-readiness" data-testid="device-control-readiness">
+            <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2"><ShieldCheck className="h-4 w-4 text-cyan-500" /><p className="text-sm font-semibold">{agentControlState.label}</p></div>
+                <p className={`mt-1 text-xs ${agentControlState.tone}`}>{agentControlState.detail}</p>
+              </div>
+              {!isArchived && <div className="flex flex-wrap gap-2">
+                {hasLinkedAgent ? <Button size="sm" variant="outline" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(dev.id)}`)} disabled={!agentToolsReady}><Terminal className="mr-1.5 h-3.5 w-3.5" />Terminal & files</Button> : agentEligiblePlatform ? <Button size="sm" variant="outline" onClick={() => navigate(agentControlPath)}><Terminal className="mr-1.5 h-3.5 w-3.5" />Link Agent</Button> : <Button size="sm" variant="outline" onClick={() => navigate(networkControlPath)}><Network className="mr-1.5 h-3.5 w-3.5" />Network controls</Button>}
+                <Button size="sm" variant="outline" onClick={() => setPatchWindowOpen(true)}><Calendar className="mr-1.5 h-3.5 w-3.5" />Maintenance</Button>
+                <Button size="sm" variant="outline" onClick={() => navigate(hasLinkedAgent || agentEligiblePlatform ? agentControlPath : networkControlPath)}>{hasLinkedAgent || agentEligiblePlatform ? <Wrench className="mr-1.5 h-3.5 w-3.5" /> : <Network className="mr-1.5 h-3.5 w-3.5" />}{hasLinkedAgent || agentEligiblePlatform ? "Agent controls" : "Network workspace"}</Button>
+              </div>}
+            </CardContent>
+          </Card>
+          <Card className="nx-device-current-work overflow-hidden">
+            <CardContent className="divide-y divide-border/50 p-0">
+              <section className="nx-device-current-work__section">
+                <div className="nx-device-current-work__title"><AlertTriangle className="h-5 w-5 text-rose-500" /><div><p>Alerts ({data.alerts?.length || 0})</p><span>Active alerts from the last reported snapshot.</span></div><button type="button" onClick={() => setActiveTab("events")}>View all<ChevronRight /></button></div>
+                <div className="nx-device-current-work__body">
+                  <div className="nx-device-current-work__columns is-alert"><span>Severity</span><span>Alert</span><span>Source</span><span>Last seen</span></div>
+                  {cockpitAlerts.length === 0 ? <p className="nx-device-current-work__empty">{cockpitQuery ? "No alerts match this device search." : "No active alerts are recorded."}</p> : cockpitAlerts.slice(0, 2).map((alert, index) => <button key={alert.id || index} type="button" className="nx-device-current-work__row is-alert" onClick={() => setActiveTab("events")}><Badge className={`${SEVERITY_COLORS[alert.severity] || "bg-muted text-muted-foreground"} capitalize`}><AlertTriangle />{alert.severity || "alert"}</Badge><span>{cleanDeviceText(alert.message || alert.alert_type || "Endpoint alert")}</span><span>{alert.source || alert.alert_type || "Monitoring"}</span><span>{alert.last_seen || alert.updated_at ? formatDistanceToNow(new Date(alert.last_seen || alert.updated_at), { addSuffix: true }) : lastObservedLabel}</span></button>)}
+                </div>
+              </section>
+              <section className="nx-device-current-work__section">
+                <div className="nx-device-current-work__title"><Download className="h-5 w-5 text-cyan-400" /><div><p>Patches ({dev.pending_patches || pendingPatchRecords.length})</p><span>Available patches from the last scan.</span></div><button type="button" onClick={() => setActiveTab("patches")}>View all<ChevronRight /></button></div>
+                <div className="nx-device-current-work__body">
+                  <div className="nx-device-current-work__columns is-patch"><span>KB / Update</span><span>Description</span><span>Classification</span><span>Status</span></div>
+                  {cockpitPatches.length === 0 ? <p className="nx-device-current-work__empty">{cockpitQuery ? "No patches match this device search." : "No pending patches are recorded."}</p> : cockpitPatches.slice(0, 2).map((patchItem, index) => <button key={patchItem.id || index} type="button" className="nx-device-current-work__row is-patch" onClick={() => setActiveTab("patches")}><span className="font-mono">{patchItem.kb_number || patchItem.kb_id || patchItem.kb_article || patchItem.name || `Update ${index + 1}`}</span><span>{cleanDeviceText(patchItem.title || patchItem.description || "Patch record")}</span><span>{patchItem.category || patchItem.classification || "Security"}</span><Badge className="border border-amber-500/30 bg-amber-500/10 text-amber-300">{patchItem.status || "Available"}</Badge></button>)}
+                </div>
+              </section>
+              <section className="nx-device-current-work__section">
+                <div className="nx-device-current-work__title"><Ticket className="h-5 w-5 text-cyan-400" /><div><p>Tickets ({data.tickets?.length || 0})</p><span>Recent and open tickets for this device.</span></div><button type="button" onClick={() => setActiveTab("tickets")}>View all<ChevronRight /></button></div>
+                <div className="nx-device-current-work__body">
+                  <div className="nx-device-current-work__columns is-ticket"><span>ID</span><span>Title</span><span>Status</span><span>Priority</span><span>Updated</span></div>
+                  {cockpitTickets.length === 0 ? <p className="nx-device-current-work__empty">{cockpitQuery ? "No tickets match this device search." : "No tickets are linked to this asset."}</p> : cockpitTickets.slice(0, 3).map((ticketItem, index) => <button key={ticketItem.id || index} type="button" className="nx-device-current-work__row is-ticket" onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(ticketItem.ticket_number || ticketItem.id)}`)}><span className="font-mono">{ticketItem.ticket_number || `Ticket ${index + 1}`}</span><span>{ticketItem.title || "Untitled ticket"}</span><Badge variant="outline" className="capitalize">{(ticketItem.status || "unknown").replace(/_/g, " ")}</Badge><span className="capitalize"><i className={`is-${ticketItem.priority || "low"}`} />{ticketItem.priority || "Low"}</span><span>{ticketItem.updated_at || ticketItem.created_at ? formatDistanceToNow(new Date(ticketItem.updated_at || ticketItem.created_at), { addSuffix: true }) : "Not recorded"}</span></button>)}
+                </div>
+              </section>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* DEVICE DETAILS TAB */}
+        <TabsContent value="device-details" className="space-y-4 mt-4">
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-12 space-y-4 xl:col-span-8">
               {/* Hardware Info */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Cpu className="w-4 h-4" />Hardware Specifications</CardTitle></CardHeader>
+              <Card className="overflow-hidden rounded-2xl border-border/60 shadow-sm">
+                <CardHeader className="border-b border-border/50 bg-muted/20 pb-4"><CardTitle className="text-sm flex items-center gap-2"><Cpu className="w-4 h-4 text-cyan-500" />Hardware Specifications</CardTitle><p className="text-xs text-muted-foreground">The physical identity and reported capacity of this endpoint.</p></CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-3 pt-4 text-sm sm:grid-cols-2 [&>div]:min-w-0 [&>div]:rounded-xl [&>div]:border [&>div]:border-border/40 [&>div]:bg-muted/15 [&>div]:p-3 [&>div]:break-words [&>div]:transition-colors [&>div:hover]:bg-muted/30 [&>div>span:first-child]:mb-1.5">
                     <div><span className="text-muted-foreground block text-xs">Manufacturer</span><span className="font-medium">{dev.manufacturer || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Model</span><span className="font-medium">{dev.model || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Serial Number</span><span className="font-mono text-xs" data-sensitive="serial-number">{dev.serial_number || "N/A"}</span></div>
@@ -317,10 +616,10 @@ export default function DeviceDetailPage() {
               </Card>
 
               {/* OS Info */}
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Monitor className="w-4 h-4" />Operating System</CardTitle></CardHeader>
+              <Card className="overflow-hidden rounded-2xl border-border/60 shadow-sm">
+                <CardHeader className="border-b border-border/50 bg-muted/20 pb-4"><CardTitle className="text-sm flex items-center gap-2"><Monitor className="w-4 h-4 text-violet-400" />Operating System</CardTitle><p className="text-xs text-muted-foreground">Reported platform, domain membership and agent version.</p></CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 pt-4 text-sm sm:grid-cols-2 lg:grid-cols-3 [&>div]:min-w-0 [&>div]:rounded-xl [&>div]:border [&>div]:border-border/40 [&>div]:bg-muted/15 [&>div]:p-3 [&>div]:break-words [&>div]:transition-colors [&>div:hover]:bg-muted/30 [&>div>span:first-child]:mb-1.5">
                     <div><span className="text-muted-foreground block text-xs">OS</span><span className="font-medium">{dev.os}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Version</span><span className="font-medium">{dev.os_version || "N/A"}</span></div>
                     <div><span className="text-muted-foreground block text-xs">Build</span><span className="font-mono text-xs">{dev.os_build || "N/A"}</span></div>
@@ -430,8 +729,9 @@ export default function DeviceDetailPage() {
               </Card>
             </div>
 
-            {/* Sidebar */}
+            {/* Context rail */}
             <div className="col-span-12 space-y-4 xl:col-span-4">
+              <DeviceDossier deviceId={dev.id} headers={{ Authorization: `Bearer ${token}` }} API={API} />
               {/* Assignment & Identity */}
               <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm">Assignment</CardTitle></CardHeader>
@@ -520,17 +820,17 @@ export default function DeviceDetailPage() {
                 <Link to={`/tickets?device_id=${deviceId}`}><Button variant="outline" size="sm"><Plus className="w-3 h-3 mr-1" />Create Ticket for Device</Button></Link>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
-              <Table>
+            <CardContent className="overflow-x-auto p-0">
+              <Table className="min-w-[760px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Ticket #</TableHead><TableHead>Title</TableHead><TableHead>Priority</TableHead>
-                    <TableHead>Status</TableHead><TableHead>Assigned</TableHead><TableHead>Created</TableHead>
+                    <TableHead>Status</TableHead><TableHead>Assigned</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Work</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(data.tickets || []).length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No tickets linked to this device</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No tickets linked to this device</TableCell></TableRow>
                   ) : (data.tickets || []).map((t, i) => {
                     const priorityColor = { critical: "bg-red-500/10 text-red-500", high: "bg-orange-500/10 text-orange-500", medium: "bg-amber-500/10 text-amber-500", low: "bg-blue-500/10 text-blue-500" };
                     const statusColor = { open: "border-blue-500/30 text-blue-500", in_progress: "border-amber-500/30 text-amber-500", resolved: "border-emerald-500/30 text-emerald-500", closed: "border-gray-500/30 text-gray-400", on_hold: "border-orange-500/30 text-orange-500" };
@@ -542,6 +842,9 @@ export default function DeviceDetailPage() {
                         <TableCell><Badge variant="outline" className={`${statusColor[t.status] || ""} text-[10px] capitalize`}>{(t.status || "").replace("_", " ")}</Badge></TableCell>
                         <TableCell className="text-sm">{t.assigned_name || "Unassigned"}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{t.created_at ? formatDistanceToNow(new Date(t.created_at), { addSuffix: true }) : "-"}</TableCell>
+                        <TableCell className="text-right">
+                          {canStartWorkSession(t) ? <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-violet-700 hover:bg-violet-500/10 hover:text-violet-800 dark:text-violet-200 dark:hover:text-violet-100" onClick={(event) => { event.stopPropagation(); navigate(workSessionPath(t)); }} data-testid={`start-device-ticket-work-${t.id || i}`}><Wrench className="mr-1.5 h-3.5 w-3.5" />Start work</Button> : <span className="text-xs text-muted-foreground">—</span>}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -652,7 +955,7 @@ export default function DeviceDetailPage() {
             <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-3">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/10"><Package className="h-4 w-4 text-violet-400" /></div>
-                <div><p className="text-sm font-medium">{software.length} discovered applications</p><p className="text-xs text-muted-foreground">{softwareInventoryAt ? `Inventory collected ${formatDistanceToNow(new Date(softwareInventoryAt), { addSuffix: true })}` : "Awaiting the first software inventory"}</p></div>
+                <div><p className="text-sm font-medium">{software.length} discovered applications</p><p className="text-xs text-muted-foreground">{softwareInventoryAt ? `Inventory collected ${formatDistanceToNow(new Date(softwareInventoryAt), { addSuffix: true })}` : software.length > 0 ? "Inventory snapshot available · collection time not reported" : "Awaiting the first software inventory"}</p></div>
               </div>
               <div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={softwareSearch} onChange={e => setSoftwareSearch(e.target.value)} placeholder="Search name, publisher, version…" className="h-9 pl-8 text-xs" data-testid="device-software-search" /></div>
             </CardContent>
@@ -690,6 +993,18 @@ export default function DeviceDetailPage() {
 
         {/* PATCHES TAB */}
         <TabsContent value="patches" className="mt-4 space-y-4">
+          <Card className="border-violet-500/20 bg-violet-500/[0.03]">
+            <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-medium text-sm">Patch rollout group</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{dev.patch_ring ? `${dev.patch_ring} is recorded for this asset.` : "No rollout group is recorded for this asset."} Assignment records intent only; Nexus will not queue an update until an execution provider is connected.</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => navigate("/patch-compliance")}>Policy register</Button>
+                <Button size="sm" variant="outline" onClick={openPatchRingDialog} data-testid="device-assign-patch-ring"><ShieldCheck className="mr-1.5 h-4 w-4" />Assign group</Button>
+              </div>
+            </CardContent>
+          </Card>
           <Card className="border-cyan-500/20 bg-cyan-500/[0.03]">
             <CardContent className="py-3 flex items-center justify-between gap-4">
               <div><p className="font-medium text-sm">Patch deployment is maintenance-window controlled</p><p className="text-xs text-muted-foreground">{dev.pending_patches || 0} Windows updates currently pending. Review the list, then schedule an approved window.</p></div>
@@ -1004,43 +1319,182 @@ export default function DeviceDetailPage() {
             </CardContent>
           </Card>
         </TabsContent>
+          </div>
+        </div>
+        <div className="nx-device-workspace-nav" data-testid="device-tabs" aria-label="Device workspace sections">
+          {deviceSections.map(section => {
+            const SectionIcon = section.icon;
+            const selected = activeDeviceSection.id === section.id;
+            return <button key={section.id} type="button" className="nx-device-workspace-nav__item" data-active={selected ? "true" : "false"} aria-pressed={selected} onClick={() => setActiveTab(section.defaultTab)}>
+              <SectionIcon className="h-7 w-7" />
+              <span><strong>{section.label}</strong><small>{section.description}</small></span>
+            </button>;
+          })}
+        </div>
       </Tabs>
 
       <Dialog open={deviceEditorOpen} onOpenChange={setDeviceEditorOpen}>
-        <DialogContent className="max-w-md" aria-describedby="device-identity-description">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4 text-violet-400" />Edit device identity</DialogTitle>
-            <DialogDescription id="device-identity-description">Update the device name, owning client, assigned user, and physical location.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label className="text-xs">Device name</Label>
-              <Input value={deviceEditor.name} onChange={e => setDeviceEditor(prev => ({ ...prev, name: e.target.value }))} className="mt-1" data-testid="edit-device-name" />
+        <NexusWorkflowDialog
+          eyebrow="Managed asset · record identity"
+          title="Edit device identity"
+          description="Update the details technicians use to identify and route work for this endpoint. Live health, network and agent signals remain protected."
+          icon={Pencil}
+          tone="cyan"
+          data-testid="edit-device-identity-workflow"
+          footer={<><Button variant="outline" onClick={() => setDeviceEditorOpen(false)} disabled={deviceEditorBusy}>Cancel</Button><Button onClick={saveDeviceIdentity} disabled={deviceEditorBusy} data-testid="save-device-identity">{deviceEditorBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <Pencil className="mr-1.5 h-4 w-4" />}Save identity</Button></>}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04] p-3 text-xs leading-relaxed text-muted-foreground">
+              <span className="font-medium text-foreground">Safe to edit here:</span> name, owning client, assigned user and location. Agent-reported hardware, health and connection details are intentionally kept separate so the record stays trustworthy.
             </div>
             <div>
-              <Label className="text-xs">Owning client</Label>
+              <Label htmlFor="edit-device-name">Device name</Label>
+              <Input id="edit-device-name" value={deviceEditor.name} onChange={e => setDeviceEditor(prev => ({ ...prev, name: e.target.value }))} className="mt-1.5" data-testid="edit-device-name" />
+            </div>
+            <div>
+              <Label>Owning client</Label>
               <Select value={deviceEditor.client_id || "__none__"} onValueChange={value => setDeviceEditor(prev => ({ ...prev, client_id: value === "__none__" ? "" : value }))}>
-                <SelectTrigger className="mt-1" data-testid="edit-device-client"><SelectValue placeholder="Select a client" /></SelectTrigger>
+                <SelectTrigger className="mt-1.5" data-testid="edit-device-client"><SelectValue placeholder="Select a client" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">No client assigned</SelectItem>
                   {clientOptions.map(client => <SelectItem key={client.id} value={client.id}>{client.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label className="text-xs">Assigned user</Label>
-              <Input value={deviceEditor.assigned_user} onChange={e => setDeviceEditor(prev => ({ ...prev, assigned_user: e.target.value }))} placeholder="e.g. Aaron Steele" className="mt-1" data-testid="edit-device-assigned-user" />
-            </div>
-            <div>
-              <Label className="text-xs">Location</Label>
-              <Input value={deviceEditor.location} onChange={e => setDeviceEditor(prev => ({ ...prev, location: e.target.value }))} placeholder="e.g. Home office" className="mt-1" data-testid="edit-device-location" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="edit-device-assigned-user">Assigned user</Label>
+                <Input id="edit-device-assigned-user" value={deviceEditor.assigned_user} onChange={e => setDeviceEditor(prev => ({ ...prev, assigned_user: e.target.value }))} placeholder="e.g. Aaron Steele" className="mt-1.5" data-testid="edit-device-assigned-user" />
+              </div>
+              <div>
+                <Label htmlFor="edit-device-location">Location</Label>
+                <Input id="edit-device-location" value={deviceEditor.location} onChange={e => setDeviceEditor(prev => ({ ...prev, location: e.target.value }))} placeholder="e.g. Home office" className="mt-1.5" data-testid="edit-device-location" />
+              </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeviceEditorOpen(false)} disabled={deviceEditorBusy}>Cancel</Button>
-            <Button onClick={saveDeviceIdentity} disabled={deviceEditorBusy} data-testid="save-device-identity">{deviceEditorBusy ? <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}Save changes</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={patchRingDialogOpen} onOpenChange={(open) => !patchRingBusy && setPatchRingDialogOpen(open)}>
+        <NexusWorkflowDialog
+          eyebrow="Patch compliance · rollout intent"
+          title="Assign patch rollout group"
+          description="Choose a confirmed tenant policy group for this asset. This is an auditable assignment only; no update command is sent or scheduled."
+          icon={ShieldCheck}
+          tone="violet"
+          data-testid="assign-patch-ring-workflow"
+          footer={<><Button variant="outline" onClick={() => setPatchRingDialogOpen(false)} disabled={patchRingBusy}>Cancel</Button><Button onClick={savePatchRing} disabled={patchRingBusy || patchRingReason.trim().length < 3} data-testid="save-device-patch-ring">{patchRingBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-1.5 h-4 w-4" />}Save rollout group</Button></>}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] p-3 text-xs leading-relaxed text-muted-foreground">Only confirmed policy-register groups are available. Removing the group also leaves an audit entry; it does not change agent settings or cancel a maintenance window.</div>
+            <div>
+              <Label htmlFor="device-patch-ring">Rollout group</Label>
+              <Select value={patchRingSelection} onValueChange={setPatchRingSelection} disabled={patchRingBusy}>
+                <SelectTrigger id="device-patch-ring" className="mt-1.5" data-testid="device-patch-ring"><SelectValue placeholder="Select a rollout group" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unassigned__">No rollout group</SelectItem>
+                  {patchRingOptions.map((ring) => <SelectItem key={ring.id || ring.name} value={ring.name}>{ring.name} · {ring.device_count || 0} assigned</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {patchRingOptions.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No confirmed rollout groups are available to this account. Create one in the Patch Compliance policy register first.</p>}
+            </div>
+            <div>
+              <Label htmlFor="device-patch-ring-reason">Why is this assignment changing?</Label>
+              <Textarea id="device-patch-ring-reason" className="mt-1.5 min-h-24" value={patchRingReason} onChange={(event) => setPatchRingReason(event.target.value)} maxLength={1000} placeholder="e.g. New endpoint validated for the staged pilot group" data-testid="device-patch-ring-reason" />
+            </div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={lifecycleDialog === "archive"} onOpenChange={(open) => !open && closeLifecycleDialog()}>
+        <NexusWorkflowDialog
+          eyebrow="Managed asset lifecycle"
+          title="Archive managed asset"
+          description={`Retire ${dev.name} from active fleet views while retaining its device identity, operational history and audit trail.`}
+          icon={Archive}
+          tone="amber"
+          data-testid="archive-device-workflow"
+          footer={<><Button variant="outline" onClick={closeLifecycleDialog} disabled={lifecycleBusy}>Keep active</Button><Button onClick={archiveManagedAsset} disabled={lifecycleBusy || lifecycleReason.trim().length < 3} className="bg-amber-600 text-white hover:bg-amber-500">{lifecycleBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <Archive className="mr-1.5 h-4 w-4" />}Archive asset</Button></>}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">What Nexus will retain</p>
+              <p className="mt-1.5 leading-relaxed">Tickets, alerts, remote sessions, telemetry and the original asset identity remain auditable. If a Nexus Agent is installed, archiving does not uninstall or alter it; it simply prevents the archived record from being treated as an active managed asset.</p>
+            </div>
+            <div>
+              <Label htmlFor="device-archive-reason">Why is this asset being archived?</Label>
+              <Textarea id="device-archive-reason" className="mt-2 min-h-24" value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} placeholder="e.g. Device replaced and handed to approved e-waste provider" data-testid="archive-device-reason" />
+            </div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={lifecycleDialog === "merge"} onOpenChange={(open) => !open && closeLifecycleDialog()}>
+        <NexusWorkflowDialog
+          eyebrow="Data quality · managed assets"
+          title="Merge duplicate managed asset"
+          description="Choose the record that should remain active. Nexus archives the duplicate and retains every original history link instead of rewriting evidence."
+          icon={GitMerge}
+          tone="violet"
+          className="max-w-2xl"
+          data-testid="merge-device-workflow"
+          footer={<><Button variant="outline" onClick={closeLifecycleDialog} disabled={lifecycleBusy}>Cancel</Button><Button onClick={mergeManagedAsset} disabled={lifecycleBusy || !mergeTargetId || !mergePreview || lifecycleReason.trim().length < 3 || mergeConfirmation.trim() !== dev.name}>{lifecycleBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <GitMerge className="mr-1.5 h-4 w-4" />}Merge into selected asset</Button></>}
+        >
+          <div className="space-y-5">
+            <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.05] p-4 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground">Source: {dev.name}</p>
+              <p className="mt-1.5 leading-relaxed">Only an asset under the same client can survive the merge. Agent-linked records can only remain as the surviving identity, so live endpoint provenance is never severed.</p>
+            </div>
+            <div>
+              <Label htmlFor="device-merge-survivor">Keep this managed asset active</Label>
+              <Select value={mergeTargetId} onValueChange={selectMergeTarget} disabled={mergeLoading || lifecycleBusy}>
+                <SelectTrigger id="device-merge-survivor" className="mt-2" data-testid="merge-device-survivor"><SelectValue placeholder={mergeLoading ? "Finding safe candidates…" : "Select the surviving asset"} /></SelectTrigger>
+                <SelectContent>
+                  {mergeCandidates.map((candidate) => <SelectItem key={candidate.id} value={candidate.id}>{candidate.name} · {candidate.serial_number || candidate.manufacturer || "No serial"} · {candidate.status}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {!mergeLoading && mergeCandidates.length === 0 && <p className="mt-2 text-xs text-muted-foreground">No compatible candidate is available. Nexus does not merge assets across clients or break an Agent-linked device identity.</p>}
+            </div>
+            {mergeLoading && <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground"><RefreshCw className="h-4 w-4 animate-spin" />Preparing retained-evidence preview…</div>}
+            {mergePreview && <div className="space-y-3 rounded-xl border border-border/80 bg-muted/[0.13] p-4" data-testid="merge-device-preview">
+              <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-sm font-semibold">Merge impact preview</p><p className="mt-0.5 text-xs text-muted-foreground">{mergePreview.history_policy}</p></div><Badge variant="outline" className="border-violet-500/25 text-violet-700 dark:text-violet-200">Evidence retained</Badge></div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {Object.entries(mergePreview.evidence_counts || {}).filter(([, count]) => count > 0).length ? Object.entries(mergePreview.evidence_counts || {}).filter(([, count]) => count > 0).map(([label, count]) => <div key={label} className="rounded-lg border border-border/70 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">{count}</p><p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label.replaceAll("_", " ")}</p></div>) : <p className="text-sm text-muted-foreground sm:col-span-3">No linked operational evidence was found on the duplicate.</p>}
+              </div>
+              <div className="rounded-lg border border-border/60 bg-background/40 p-3 text-xs text-muted-foreground">Inventory links stay with their original record. Source inventory records: {mergePreview.source_inventory_assets?.length || 0} · surviving inventory records: {mergePreview.survivor_inventory_assets?.length || 0}. This preserves commercial provenance for later review.</div>
+            </div>}
+            <div>
+              <Label htmlFor="device-merge-reason">Why are these duplicate records?</Label>
+              <Textarea id="device-merge-reason" className="mt-2 min-h-20" value={lifecycleReason} onChange={(event) => setLifecycleReason(event.target.value)} placeholder="e.g. Manual inventory record was duplicated after Agent enrolment" data-testid="merge-device-reason" />
+            </div>
+            <div>
+              <Label htmlFor="device-merge-confirmation">Type <span className="font-mono">{dev.name}</span> to archive this duplicate</Label>
+              <Input id="device-merge-confirmation" className="mt-2" value={mergeConfirmation} onChange={(event) => setMergeConfirmation(event.target.value)} placeholder={dev.name} data-testid="merge-device-confirmation" />
+            </div>
+          </div>
+        </NexusWorkflowDialog>
+      </Dialog>
+
+      <Dialog open={lifecycleDialog === "purge"} onOpenChange={(open) => !open && closeLifecycleDialog()}>
+        <NexusWorkflowDialog
+          eyebrow="Managed asset lifecycle"
+          title="Permanently delete asset?"
+          description="This is only for an empty, manually created record. Nexus blocks deletion if an Agent identity, ticket, alert, session, telemetry or inventory link exists."
+          icon={Trash2}
+          tone="rose"
+          data-testid="purge-device-workflow"
+          footer={<><Button variant="outline" onClick={closeLifecycleDialog} disabled={lifecycleBusy}>Keep record</Button><Button variant="destructive" onClick={purgeManagedAsset} disabled={lifecycleBusy || mergeConfirmation.trim() !== dev.name}>{lifecycleBusy ? <RefreshCw className="mr-1.5 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1.5 h-4 w-4" />}Delete permanently</Button></>}
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.05] p-4 text-sm text-muted-foreground">For a retired endpoint, use <span className="font-medium text-foreground">Archive</span>. It keeps the evidence a technician, client, auditor or future incident investigation may need.</div>
+            <div>
+              <Label htmlFor="device-purge-confirmation">Type <span className="font-mono">{dev.name}</span> to confirm permanent deletion</Label>
+              <Input id="device-purge-confirmation" className="mt-2" value={mergeConfirmation} onChange={(event) => setMergeConfirmation(event.target.value)} placeholder={dev.name} data-testid="purge-device-confirmation" />
+              <Label htmlFor="device-purge-reason" className="mt-4 block">Why is this record being deleted?</Label>
+              <Textarea id="device-purge-reason" className="mt-2" maxLength={1000} value={lifecycleReason} onChange={event => setLifecycleReason(event.target.value)} placeholder="Explain why this empty manual record is incorrect. This reason is retained in the client activity trail." />
+            </div>
+          </div>
+        </NexusWorkflowDialog>
       </Dialog>
 
       <MaintenanceWindowDialog

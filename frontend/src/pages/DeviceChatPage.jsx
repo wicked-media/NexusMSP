@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import WorkspaceBackControl from "@/components/WorkspaceBackControl";
 import { toast } from "sonner";
 import { 
   MessageSquare,
@@ -19,10 +20,8 @@ import {
   Monitor,
   User,
   Bot,
-  ArrowLeft,
   RefreshCw,
   Loader2,
-  Command
 } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
@@ -80,8 +79,6 @@ export default function DeviceChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [activeTab, setActiveTab] = useState("chat");
-  const [commandInput, setCommandInput] = useState("");
-  const [commandConfirmationOpen, setCommandConfirmationOpen] = useState(false);
   const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
   const messagesEndRef = useRef(null);
 
@@ -134,24 +131,6 @@ export default function DeviceChatPage() {
     }
   };
 
-  const sendCommand = async (e) => {
-    e?.preventDefault();
-    if (!commandInput.trim()) return;
-
-    setSending(true);
-    try {
-      await axios.post(`${API}/devices/${deviceId}/chat/command?command=${encodeURIComponent(commandInput)}`, {}, { headers });
-      setCommandInput("");
-      setCommandConfirmationOpen(false);
-      fetchChat();
-      toast.success("Command sent");
-    } catch (error) {
-      toast.error("Failed to send command");
-    } finally {
-      setSending(false);
-    }
-  };
-
   const clearChat = async () => {
     try {
       await axios.delete(`${API}/devices/${deviceId}/chat`, { headers });
@@ -176,9 +155,7 @@ export default function DeviceChatPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
+          <WorkspaceBackControl className="h-9 rounded-lg border border-border/70 bg-background/70 px-2" />
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
               device?.status === 'online' ? 'bg-green-500/10' : 'bg-red-500/10'
@@ -259,55 +236,19 @@ export default function DeviceChatPage() {
                 </Button>
               </form>
             ) : (
-              <form onSubmit={sendCommand} className="space-y-3">
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <Command className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      value={commandInput}
-                      onChange={(e) => setCommandInput(e.target.value)}
-                      placeholder="Enter command (e.g., systeminfo, ipconfig)"
-                      className="pl-9 font-mono"
-                      disabled={sending}
-                      data-testid="command-input"
-                    />
-                  </div>
-                  <Button type="button" onClick={() => setCommandConfirmationOpen(true)} disabled={sending || !commandInput.trim()}>
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Review command"}
-                  </Button>
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/30 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium">Use the audited Nexus Agent console</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Terminal &amp; Files queues commands through the enrolled agent and records returned output.</p>
                 </div>
-                <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCommandInput("systeminfo")}>
-                    systeminfo
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCommandInput("ipconfig /all")}>
-                    ipconfig
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCommandInput("tasklist")}>
-                    tasklist
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCommandInput("netstat -an")}>
-                    netstat
-                  </Button>
-                </div>
-              </form>
+                <Button type="button" onClick={() => navigate(`/device-terminal?deviceId=${encodeURIComponent(deviceId)}`)}>
+                  <Terminal className="mr-2 h-4 w-4" />Open Terminal &amp; Files
+                </Button>
+              </div>
             )}
           </div>
         </CardContent>
       </Card>
-
-      <Dialog open={commandConfirmationOpen} onOpenChange={setCommandConfirmationOpen}>
-        <NexusWorkflowDialog
-          eyebrow="Device operations"
-          title="Review device command"
-          description="Confirm the exact command before Nexus sends it to the device agent. The request and resulting output remain in this device timeline."
-          icon={Terminal}
-          tone="amber"
-          footer={<><Button variant="outline" onClick={() => setCommandConfirmationOpen(false)}>Cancel</Button><Button onClick={sendCommand} disabled={!commandInput.trim() || sending} data-testid="confirm-device-command"><Terminal className="mr-2 h-4 w-4" />{sending ? "Sending…" : "Send to device"}</Button></>}
-        >
-          <div className="space-y-3"><div className="rounded-xl border border-amber-400/20 bg-black/25 p-4"><p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300">Command</p><code className="block whitespace-pre-wrap break-words font-mono text-sm text-foreground">{commandInput}</code></div><p className="text-xs leading-5 text-muted-foreground">Only use commands that are safe for this client and ticket context. For a high-impact change, create an approved change first.</p></div>
-        </NexusWorkflowDialog>
-      </Dialog>
 
       <Dialog open={clearConfirmationOpen} onOpenChange={setClearConfirmationOpen}>
         <NexusWorkflowDialog

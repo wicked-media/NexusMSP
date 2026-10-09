@@ -75,3 +75,22 @@ def test_recovery_simulator_uses_customer_scoped_observations():
     assert result["rto_status"] == "met"
     assert result["immutability"] == "proven"
     assert result["blockers"] == []
+
+
+def test_recovery_simulator_never_uses_a_matching_customer_name_as_evidence():
+    result = simulate_recovery(
+        client_id="client-1",
+        client_name="Shared Display Name",
+        workload="File server",
+        target_rto_hours=2,
+        target_rpo_hours=24,
+        data_size_gb=50,
+        dependencies=[],
+        jobs=[{"client_id": "client-2", "client_name": "Shared Display Name", "status": "success", "completed_at": NOW.isoformat()}],
+        records=[{"client_id": "client-2", "client_name": "Shared Display Name", "immutable": True}],
+        tests=[{"client_id": "client-2", "client_name": "Shared Display Name", "result": "pass", "restore_time_minutes": 45}],
+        now=NOW,
+    )
+
+    assert result["readiness"] == "insufficient_evidence"
+    assert result["evidence"] == {"jobs": 0, "backup_records": 0, "completed_tests": 0, "successful_restore_tests": 0}

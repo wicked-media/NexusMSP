@@ -1,16 +1,15 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Optional
 from datetime import datetime, timezone, timedelta
-import uuid
 import re
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token, password_policy_error
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user, hash_password, password_policy_error
 from app.services.action_permissions import (
     default_permissions_for_role,
     normalise_action_permissions,
 )
 from app.services.scope_permissions import normalise_scope_payload
+from app.services.ticket_time import list_technician_time_history
 from app.models import *
 
 router = APIRouter()
@@ -225,11 +224,15 @@ async def get_technicians_overview(current_user: dict = Depends(get_current_user
                     sla_dt = datetime.fromisoformat(str(sla).replace("Z", "+00:00")) if isinstance(sla, str) else sla
                     if sla_dt and sla_dt < datetime.now(timezone.utc):
                         overdue += 1
-                except:
+                except Exception:
                     pass
         week_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = week_start - timedelta(days=week_start.weekday())
-        time_entries = await db.ticket_time_entries.find({"user_id": uid, "created_at": {"$gte": week_start.isoformat()}}, {"_id": 0}).to_list(5000)
+        time_entries = await list_technician_time_history(
+            uid,
+            database=db,
+            since=week_start.isoformat(),
+        )
         week_hours = round(sum(e.get("minutes", 0) for e in time_entries) / 60, 1)
 
         result.append({
@@ -438,12 +441,21 @@ async def archive_technician(tech_id: str, data: Optional[dict] = None, current_
             raise HTTPException(status_code=400, detail="Keep at least one active administrator account")
     archive_reason = str((data or {}).get("reason", "")).strip()[:500]
     archived_at = datetime.now(timezone.utc).isoformat()
-    await db.users.update_one({"id": tech_id}, {"$set": {
-        "is_active": False, "archived": True,
-        "archived_at": archived_at,
-        "archived_by": current_user.get("id"),
-        "archive_reason": archive_reason,
-    }})
+    await db.users.update_one(
+        {"id": tech_id},
+        {
+            "$set": {
+                "is_active": False, "archived": True,
+                "archived_at": archived_at,
+                "archived_by": current_user.get("id"),
+                "archive_reason": archive_reason,
+                "sessions_revoked_at": archived_at,
+            },
+            # Restoring an archived account must never make a token issued
+            # before offboarding valid again.
+            "$inc": {"session_version": 1},
+        },
+    )
     from app.routers.tech_intel import _log_audit
     await _log_audit(caller, "technician_archived", tech_id, target.get("name", "Technician"), {"reason": archive_reason, "archived_at": archived_at})
     return {"message": "Technician archived"}
@@ -501,7 +513,7 @@ async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(ge
             if isinstance(sla, str):
                 try:
                     sla_dt = datetime.fromisoformat(sla.replace("Z", "+00:00"))
-                except:
+                except Exception:
                     sla_dt = None
             else:
                 sla_dt = sla
@@ -512,7 +524,7 @@ async def get_technician_dashboard(tech_id: str, current_user: dict = Depends(ge
         if note_count == 0:
             no_notes_tickets.append(t)
 
-    time_entries = await db.ticket_time_entries.find({"user_id": tech_id}, {"_id": 0}).to_list(5000)
+    time_entries = await list_technician_time_history(tech_id, database=db)
     total_min = sum(e.get("minutes", 0) for e in time_entries)
     billable_min = sum(e.get("minutes", 0) for e in time_entries if e.get("billable"))
 
@@ -675,7 +687,7 @@ async def get_technician_leaderboard(current_user: dict = Depends(get_current_us
         assigned = [t for t in all_tickets if t.get("assigned_to") == uid]
         closed_this_month = [t for t in assigned if t.get("status") in ("resolved", "closed") and t.get("resolved_at", t.get("updated_at", "")) >= month_start.isoformat()]
         closed_total = [t for t in assigned if t.get("status") in ("resolved", "closed")]
-        time_entries = await db.ticket_time_entries.find({"user_id": uid}, {"_id": 0}).to_list(5000)
+        time_entries = await list_technician_time_history(uid, database=db)
         month_entries = [e for e in time_entries if e.get("created_at", "") >= month_start.isoformat()]
         total_hours = round(sum(e.get("minutes", 0) for e in time_entries) / 60, 1)
         month_hours = round(sum(e.get("minutes", 0) for e in month_entries) / 60, 1)
@@ -688,7 +700,7 @@ async def get_technician_leaderboard(current_user: dict = Depends(get_current_us
                     c = datetime.fromisoformat(str(t["created_at"]).replace("Z", "+00:00"))
                     r = datetime.fromisoformat(str(t["resolved_at"]).replace("Z", "+00:00"))
                     deltas.append((r - c).total_seconds() / 3600)
-                except:
+                except Exception:
                     pass
             if deltas:
                 avg_resolution = round(sum(deltas) / len(deltas), 1)

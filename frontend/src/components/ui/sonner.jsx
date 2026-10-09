@@ -1,11 +1,25 @@
 import { useEffect, useState } from "react"
 import { Toaster as Sonner, toast } from "sonner"
+import { CheckCircle2, CircleAlert, Info, LoaderCircle, TriangleAlert } from "lucide-react"
 
 const DEFAULT_TOAST_PREFS = {
   toast_position: "top-right",
   toast_style: "nexus",
   toast_duration: 4500,
   toast_density: "comfortable",
+};
+
+// The surface itself is owned by src/index.css, alongside the rest of the Nexus
+// tokens. These maps only name the variant, and every stored preference falls
+// back to a complete toast so an unknown value can never render an unstyled one.
+const TOAST_STYLE_CLASS = {
+  nexus: "nx-toast--nexus",
+  minimal: "nx-toast--minimal",
+  compact: "nx-toast--ops",
+};
+const TOAST_DENSITY_CLASS = {
+  comfortable: "nx-toast--comfortable",
+  compact: "nx-toast--dense",
 };
 
 const readToastPrefs = () => {
@@ -28,30 +42,45 @@ const Toaster = ({ ...props }) => {
     };
   }, []);
 
-  const styleClass = preferences.toast_style === "minimal"
-    ? "!rounded-lg !border-border !bg-card !shadow-xl"
-    : preferences.toast_style === "compact"
-      ? "!rounded-lg !border-primary/20 !bg-card/95 !shadow-lg"
-      : "!rounded-xl !border-primary/25 !bg-card/95 !shadow-[0_18px_45px_-24px_hsl(var(--primary)/0.45)] !backdrop-blur-xl";
-  const densityClass = preferences.toast_density === "compact" ? "!p-2 !text-xs" : "!p-4";
+  const styleClass = TOAST_STYLE_CLASS[preferences.toast_style] || TOAST_STYLE_CLASS.nexus;
+  const densityClass = TOAST_DENSITY_CLASS[preferences.toast_density] || TOAST_DENSITY_CLASS.comfortable;
 
   return (
     <Sonner
       theme={theme}
       position={preferences.toast_position}
       duration={Number(preferences.toast_duration) || DEFAULT_TOAST_PREFS.toast_duration}
-      visibleToasts={preferences.toast_density === "compact" ? 3 : 5}
-      closeButton={preferences.toast_style !== "minimal"}
-      expand={preferences.toast_style === "nexus"}
-      richColors
+      visibleToasts={preferences.toast_density === "compact" ? 2 : 3}
+      closeButton
+      expand={false}
+      richColors={false}
+      // Sonner keeps what it is good at: timers, stacking, swipe and aria-live.
+      // Project CSS owns every visual property. Sonner only turns its own styling
+      // off when `unstyled` arrives with the toast options; otherwise its
+      // runtime-injected theme rules outrank our stylesheet, so each tone has to
+      // be declared twice and the icon chip silently loses its tint.
+      unstyled
+      gap={10}
+      offset={16}
+      icons={{
+        success: <CheckCircle2 />,
+        info: <Info />,
+        warning: <TriangleAlert />,
+        error: <CircleAlert />,
+        loading: <LoaderCircle className="nx-toast__spinner" />,
+      }}
       className="toaster group"
       toastOptions={{
+        unstyled: true,
         classNames: {
-          toast:
-            `nx-toast group toast !text-foreground ${styleClass} ${densityClass}`,
-          description: "!mt-1 !text-muted-foreground",
-          actionButton: "!rounded-md !bg-primary !text-primary-foreground hover:!brightness-110",
-          cancelButton: "!rounded-md !bg-muted !text-muted-foreground hover:!bg-accent hover:!text-foreground",
+          toast: `nx-toast ${styleClass} ${densityClass}`,
+          content: "nx-toast__content",
+          title: "nx-toast__title",
+          description: "nx-toast__description",
+          icon: "nx-toast__icon",
+          closeButton: "nx-toast__close",
+          actionButton: "nx-toast__action",
+          cancelButton: "nx-toast__cancel",
         },
       }}
       {...props} />

@@ -31,38 +31,17 @@ CLOSED_INVOICE_STATES = {"cancelled", "voided"}
 OPEN_PO_STATES = {"draft", "submitted", "approved", "ordered", "partially_received", "open"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
-def _number(value: Any, default: float = 0.0) -> float:
-    if isinstance(value, bool):
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+from app.services.number_utils import float_or_default_no_bool as _number
 
 
 def _round_money(value: Any) -> float:
     return round(_number(value), 2)
 
 
-def _parse_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        text = str(value or "").strip()
-        if not text:
-            return None
-        try:
-            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
-            try:
-                parsed = datetime.strptime(text[:10], "%Y-%m-%d")
-            except ValueError:
-                return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+from app.services.time_utils import parse_datetime_tolerant as _parse_datetime
 
 
 def _within_window(row: dict, threshold: datetime, fields: tuple[str, ...]) -> bool:
@@ -128,7 +107,9 @@ def _and(*clauses: dict) -> dict:
 
 
 def _actor(user: dict) -> str:
-    return user.get("name") or user.get("email") or user.get("id") or "Unknown owner"
+    from app.services.identity_utils import actor_label
+
+    return actor_label(user, "Unknown owner")
 
 
 def build_profit_killers(
@@ -369,11 +350,6 @@ async def _load_executive_state(user: dict) -> dict:
         row for row in time_entries
         if _within_window(row, threshold, ("date", "created_at", "started_at"))
     ]
-    recent_invoices = [
-        row for row in invoices
-        if _within_window(row, threshold, ("invoice_date", "issue_date", "created_at", "date"))
-    ]
-
     client_mrr = {client_id: 0.0 for client_id in client_ids}
     for contract in contracts:
         client_id = str(contract.get("client_id") or "")
@@ -431,7 +407,7 @@ async def _load_executive_state(user: dict) -> dict:
     available_hours = len(technicians) * 160
     capacity_pct = round(recorded_hours / available_hours * 100, 1) if available_hours else None
 
-    health_scores = await asyncio.gather(*[_compute_health(client) for client in clients]) if clients else []
+    health_scores = await asyncio.gather(*[_compute_health(client, user) for client in clients]) if clients else []
     assessed_health = [row for row in health_scores if isinstance(row.get("health_score"), (int, float))]
     at_risk = [row for row in assessed_health if row["health_score"] < 50]
     average_health = (

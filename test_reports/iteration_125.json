@@ -26,7 +26,7 @@
     "/app/backend/tests/test_iteration125_inline_remote_regression.py"
   ],
   "success_rate": {"backend": "100% (13/13 tests passed)", "frontend": "N/A (backend-only testing per request)"},
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "No seed data created - tests use existing devices and RustDesk config from seed data",
   "retest_needed": false,
   "should_main_agent_self_test": false,

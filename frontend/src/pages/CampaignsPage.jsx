@@ -131,9 +131,9 @@ export default function CampaignsPage({ embedded = false }) {
       </Card>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Create Campaign</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+        <DialogContent className="flex h-[min(760px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:rounded-2xl" data-testid="campaign-create-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-muted/20 px-5 py-5 pr-12"><DialogTitle>Create Campaign</DialogTitle></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <div><Label>Campaign Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} data-testid="campaign-name" /></div>
             <div><Label>Subject Line</Label><Input value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
@@ -160,7 +160,7 @@ export default function CampaignsPage({ embedded = false }) {
             </div>
             <div><Label>Body</Label><Textarea value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} rows={6} placeholder="Use {client_name}, {company_name} as variables..." /></div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t border-border/70 bg-muted/10 px-5 py-4">
             <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={createCampaign} data-testid="save-campaign-btn">Create</Button>
           </DialogFooter>

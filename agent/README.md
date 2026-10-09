@@ -8,15 +8,20 @@ Cross-platform RMM agent (Windows-first) for the NexusOps platform.
 +------------------+       HTTPS         +-----------------------+
 |  NexusOps Agent  |  <-- poll cmds -->  |   NexusOps Backend    |
 |  (Go binary)     |  --> heartbeat -->  |   /api/nexus-agent/*  |
-|  + Splashtop     |                     |                       |
-|  Streamer        |                     |   MongoDB             |
+|  + local broker  |                     |   MongoDB             |
+|  + companions    |                     |                       |
 +------------------+                     +-----------------------+
 ```
 
 - Heartbeat every 60s (configurable) with telemetry: CPU, RAM, disks, network, OS, uptime, processes, services.
 - Long-poll every 10s for new commands; processes them; reports results.
-- Phase 1: HTTPS long-poll. Phase 2 will upgrade transport to WebSocket.
-- Auto-update: agent compares `version` against `/api/nexus-agent/version` on each heartbeat.
+- HTTPS control plane with signed command envelopes and replay protection.
+- Signed update manifests are evaluated on heartbeat; the agent fails closed if
+  the version, pinned signing key, signature or artifact fingerprint is wrong.
+- Nexus Remote is first-party. The Windows service brokers only a
+  policy-hash-verified, attended Remote Companion (view-only by default;
+  interactive control requires fresh endpoint approval per session); it never
+  starts or repairs an external remote-access provider.
 
 ## Nexus Shield deployment profile
 
@@ -36,15 +41,25 @@ an endpoint automatically. Those actions remain explicit, reviewed workflows.
 
 ```bash
 cd /app/agent
-make windows         # Cross-compile windows/amd64 -> dist/nexus-agent.exe
+make all             # Build service, Client Chat and Tray for windows/amd64
+make windows-remote  # Build the Native Remote user-session companion
 ```
+
+The production API image builds these components from the checked-in
+Agent source in its Docker build stage. It does not copy a developer's
+ignored `agent/dist` directory or any per-device `config.json` into the image.
+Pass the same `NEXUS_AGENT_VERSION` build argument and API environment value
+when promoting a release so the advertised and embedded versions agree.
 
 ## Install (test machine)
 
 The backend's installer builder produces a ZIP per client containing:
 
 - `nexus-agent.exe`
-- `config.json` (per-client enrollment token + server URL)
+- `nexus-client-chat.exe` and `nexus-agent-tray.exe`
+- `nexus-remote-companion.exe` when the Native Remote build is available
+- `config.json` (per-client enrollment token + server URL, ACL-restricted to
+  `SYSTEM` and local Administrators after installation)
 - `install.bat` (silent installer — creates service "NexusOps Agent" + auto-start)
 
 Run `install.bat` as Administrator.
@@ -58,7 +73,63 @@ Run `install.bat` as Administrator.
 - `internal/commands/`         — command poller + executor
 - `internal/telemetry/`        — system inventory collectors
 - `internal/transport/`        — HTTP client (with auth, retry)
-- `internal/splashtop/`        — Splashtop Streamer bootstrapper
+- `internal/selfheal/`         — connectivity self-awareness, repair ladder, Windows performance guard
+- `internal/localbroker/`      — narrow, service-owned localhost bridge for companions
+- `internal/updater/`          — signed update verification and staged swap/rollback
+
+## Self-healing
+
+The agent knows whether it is still phoning home, repairs what it can by itself,
+and keeps its own endpoint performing. Full design, safety gates and the operating
+runbook live in [docs/AGENT_SELF_HEALING.md](../docs/AGENT_SELF_HEALING.md).
+
+- **Connectivity awareness.** Every heartbeat result — success and failure — is fed
+  into a watchdog that reports `connected` / `degraded` / `disconnected` / `rejected`
+  with the classified cause, outage length and the actions it took. NexusMSP learns
+  an endpoint was offline from the endpoint itself, with the reason attached.
+- **A repair ladder that learns.** Read-only probe first, then local identity/policy
+  repair, certificate renewal, transport fallback, once-a-day re-enrollment and an
+  optional service restart. A rung is credited only when contact actually returns, so
+  the agent converges on the action that works *on this endpoint* for the cause it
+  saw.
+- **Endpoint performance guard.** CPU, memory and free-space signals are compared
+  against a baseline learned on the endpoint itself (never a fixed number), plus
+  cached `DISM /CheckHealth` component-store health. Sustained degradation triggers
+  the built-in Windows repair: `DISM /RestoreHealth` (payload from Windows Update),
+  then `sfc /scannow`, then `DISM /CheckHealth` to verify.
+- **Learning is endpoint-local.** `self-heal-state.json` in the agent base directory
+  records outcomes, the outage history, the performance baseline and repair results.
+  A corrupt or missing file is replaced with a fresh profile rather than stopping the
+  agent. This is bookkeeping about the agent itself; NexusMSP owns the audit trail.
+
+Windows component repair is **off by default** and only runs when the signed
+platform policy (or an explicit installer configuration on a pilot machine) enables
+it, the agent is elevated, the optional maintenance window allows it, and the learned
+cooldown and daily cap permit it. Every blocked attempt records why. The package
+never builds a shell command string: each step is an absolute `System32` executable
+with fixed arguments.
+
+## Application updates (winget)
+
+The agent uses winget, the package manager Windows ships, for the two things the
+platform could not previously see:
+
+- **What is pending.** `internal/appupdate/` lists upgradable packages with
+  `winget upgrade --include-unknown` and reports a bounded list as heartbeat
+  evidence, so an operator can see an endpoint's pending application updates
+  before anyone calls the service desk. A scan walks the winget sources, so it is
+  cached and refreshed in the background — a heartbeat never waits for winget.
+- **Apply them.** A technician applies a selected package, or everything pending,
+  from the device menu, which queues an audited `winget_upgrade` command. The
+  agent resolves it into a fixed argument vector, one winget run per package, and
+  reports what actually happened: a failed run is never reported as installed.
+
+Automatic installation is **off by default**. It runs only when the signed
+policy's `winget.auto_update_enabled` is set with a non-empty `allowed_ids`
+allow-list, and then at most once a day inside the configured window. An empty
+allow-list means none, never all. A package identifier is always refused unless it
+has an identifier's shape, so an id can never become an argument to another
+program.
 
 ## Nexus Elevate (native endpoint privilege approvals)
 
@@ -83,15 +154,26 @@ user-session companion and service-hardening rollout.
 
 ### User-session companion
 
-The `nexus-client-chat.exe` companion is included in current installer packs.
-It opens a local-only window at `http://127.0.0.1:5967` for client chat and
-**Request administrator access**. The companion fingerprints the selected
-executable locally, relays the request with the protected agent token, and
-polls the technician decision. The browser window never receives the token.
+The installer includes `nexus-client-chat.exe` and `nexus-agent-tray.exe`.
+Client Chat opens a local-only window at `http://127.0.0.1:5967` for client
+chat and **Request administrator access**. The companion fingerprints the
+selected executable locally, then asks the protected Agent service to forward
+only that narrow request through its local broker at `127.0.0.1:5968`.
+The long-lived Agent token stays in the protected service configuration; it is
+not read by Client Chat, the Tray app or the browser.
 
-The installer and the managed rollout both add **Nexus Client Chat** to the
-Windows Start Menu under **NexusMSP**. It is deliberately user launched: the
-background service does not inject a GUI into an endpoint user's session.
+The loopback broker is deliberately route-limited, but it is not yet an
+OS-authenticated caller boundary. Requests arriving through Client Chat are
+therefore forcibly held for technician approval even when an auto-allow policy
+matches. Do not use an Agent-side caller as a substitute for Windows
+caller-bound IPC; a Windows pilot install/update/rollback drill remains a
+release gate.
+
+The installer and managed rollout add **Nexus Client Chat** to the Windows
+Start Menu under **NexusMSP**. The tray companion is registered for sign-in so
+the user can see Agent status, included services, updates, chat and Elevate
+progress. Both companions are deliberately user-session processes: the
+background service never injects a GUI into an endpoint user's session.
 
 ## Nexus Edge
 
@@ -120,5 +202,11 @@ inflate the billable count.
 - [x] Phase 1 — Enrollment + heartbeat
 - [x] Phase 2 — Full telemetry (CPU/RAM/disks/services/processes/software)
 - [x] Phase 3 — Remote command execution (scripts/reboot/etc.)
-- [ ] Phase 4 — Splashtop bundling + per-client deployment packs
-- [ ] Phase 5 — Auto-update, code signing, MSI builder
+- [x] Phase 4 — Per-client deployment packs, Client Chat and Tray companions
+- [~] Phase 5a — Application-level update verification and swap/rollback code paths
+- [ ] Phase 5b — Release code signing, MSI builder and staged production rings
+
+Phase 5 is not production-complete until Windows code signing, caller-bound
+companion IPC, staged rings, and a retained endpoint update/rollback drill are
+in place. An Ed25519 application manifest is integrity logic; it is not a
+replacement for Windows Authenticode signing or release provenance.

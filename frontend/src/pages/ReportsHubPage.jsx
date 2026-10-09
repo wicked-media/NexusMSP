@@ -11,11 +11,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Activity, BarChart3, BellRing, BookOpenCheck, CalendarClock, CheckCircle2,
   ClipboardCheck, Download, FileBarChart, FileCheck2, Landmark, Loader2,
   MonitorCog, ReceiptText, RefreshCw, Scale, ShieldCheck, TriangleAlert, Users, WalletCards, FileText,
+  SlidersHorizontal,
 } from "lucide-react";
 import { ResponsiveContainer, Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -69,6 +71,8 @@ export default function ReportsHubPage() {
   const [refreshedAt, setRefreshedAt] = useState(null);
   const [activeReport, setActiveReport] = useState(null);
   const [reportPreviewLoading, setReportPreviewLoading] = useState(false);
+  const [reportDraft, setReportDraft] = useState(null);
+  const [selectedClientId, setSelectedClientId] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -89,11 +93,26 @@ export default function ReportsHubPage() {
     const blob = new Blob([JSON.stringify({ exported_at: new Date().toISOString(), scope: tab, data }, null, 2)], { type: "application/json" });
     const href = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = href; a.download = `nexusmsp-${tab}-report-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(href);
   };
-  const runReport = async (name, reportType) => {
+  const openReportComposer = (name, reportType) => {
+    setSelectedClientId("all");
+    setReportDraft({ name, reportType });
+  };
+  const runReport = async (requestedName, requestedType) => {
+    if (requestedName && requestedType) {
+      openReportComposer(requestedName, requestedType);
+      return;
+    }
+    if (!reportDraft) return;
+    const { name, reportType } = reportDraft;
     setGenerating(reportType);
     try {
-      await axios.post(`${API}/reports/generate`, { name, report_type: reportType }, { headers });
+      await axios.post(`${API}/reports/generate`, {
+        name,
+        report_type: reportType,
+        client_ids: selectedClientId === "all" ? [] : [selectedClientId],
+      }, { headers });
       toast.success(`${name} generated and retained in Reporting.`);
+      setReportDraft(null);
       await load();
     } catch (error) {
       toast.error(error?.response?.data?.detail || `Could not generate ${name}.`);
@@ -141,13 +160,12 @@ export default function ReportsHubPage() {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;
 
   return <div className="nx-page-stage space-y-5" data-testid="reports-hub">
-    <section className="nx-ambient-surface relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-slate-950 via-slate-950 to-indigo-950/60 p-5 sm:p-6" data-nx-signal={reportingSignal}>
-      <div className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-violet-500/15 blur-3xl" />
-      <div className="relative flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Assurance intelligence</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Reporting & evidence centre</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">One reporting library for service performance, devices, security posture, audit evidence, finance and client outcomes.</p></div>
-        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={load}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button><Button variant="outline" size="sm" onClick={exportCurrent}><Download className="mr-1.5 h-3.5 w-3.5" />Export view</Button><Button variant="outline" size="sm" onClick={() => navigate("/incident-heatmap")}><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Incident heatmap</Button><Button size="sm" onClick={() => selectTab("delivery")}><CalendarClock className="mr-1.5 h-3.5 w-3.5" />Schedule delivery</Button></div>
+    <section className="nx-ambient-surface relative overflow-hidden rounded-2xl border border-white/[0.09] bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_34%),radial-gradient(circle_at_top_right,rgba(139,92,246,0.12),transparent_30%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] p-5 shadow-[0_22px_65px_rgba(0,0,0,0.24)] backdrop-blur-xl sm:p-6" data-nx-signal={reportingSignal}>
+      <div className="relative flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+        <div className="max-w-3xl"><div className="flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-cyan-400/25 bg-cyan-400/[0.06] text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Reporting workspace</Badge><span className="text-xs text-muted-foreground">Retained evidence · scope enforced</span></div><h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-[2rem]">Report intelligence</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Build client-ready evidence packs from service operations, estate health, security, commercial performance and governance records.</p></div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={load}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button><Button variant="outline" size="sm" onClick={exportCurrent}><Download className="mr-1.5 h-3.5 w-3.5" />Export view</Button><Button variant="outline" size="sm" onClick={() => navigate("/incident-heatmap")}><TriangleAlert className="mr-1.5 h-3.5 w-3.5" />Heatmap</Button><Button size="sm" onClick={() => openReportComposer("Custom evidence snapshot", "executive_summary")}><SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />New report</Button></div>
       </div>
-      <p className="relative mt-4 text-[11px] text-muted-foreground">Live data refreshed {refreshedAt ? refreshedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "now"}. Exports preserve the data currently visible in this workspace.</p>
+      <div className="relative mt-5 flex flex-col gap-3 border-t border-white/[0.08] pt-4 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between"><span>Live evidence refreshed {refreshedAt ? refreshedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "now"}.</span><div className="flex flex-wrap gap-x-4 gap-y-1"><span><span className="font-medium text-foreground/85">{data.schedules?.active || 0}</span> active schedules</span><span><span className="font-medium text-foreground/85">{data.generated?.length || 0}</span> retained outputs</span><button className="font-medium text-primary hover:text-primary/80" onClick={() => selectTab("delivery")}>Manage delivery →</button></div></div>
     </section>
 
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -172,12 +190,15 @@ export default function ReportsHubPage() {
       <TabsContent value="overview" className="mt-5 space-y-5">
         <div className="flex items-end justify-between gap-3"><div><h2 className="text-lg font-semibold">Report library</h2><p className="text-sm text-muted-foreground">Authoritative reports are grouped by the operational question they answer.</p></div><Badge variant="outline">{data.schedules?.active || 0} scheduled deliveries active</Badge></div>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <ReportCard icon={Activity} title="Service operations" description="Ticket volume, resolution performance, SLA and technician capacity." tag="Live" onOpen={() => runReport("Service operations", "service_operations")} />
-          <ReportCard icon={MonitorCog} title="RMM & device estate" description="Endpoint inventory, health, check-in status, patching and device risk." tag="Live" tone="emerald" onOpen={() => runReport("RMM & device estate", "rmm_device_estate")} />
-          <ReportCard icon={ShieldCheck} title="Security & compliance" description="Framework scans, security evidence, patch compliance and endpoint protections." tag="Evidence" tone="rose" onOpen={() => runReport("Security & compliance", "security_compliance")} />
-          <ReportCard icon={ClipboardCheck} title="Audit & governance" description="Searchable persisted actions, critical events and compliance-ready audit evidence." tag="30-day live" tone="violet" onOpen={() => runReport("Audit & governance", "audit_governance")} />
-          <ReportCard icon={ReceiptText} title="Billing & revenue" description="Revenue, MRR, collections, invoice aging and client profitability." tag="Finance" tone="amber" onOpen={() => runReport("Billing & revenue", "billing_revenue")} />
-          <ReportCard icon={Users} title="Client outcomes" description="Executive packs, client history, health insights and QBR-ready reporting." tag="Client-ready" tone="sky" onOpen={() => runReport("Client outcomes", "client_health")} />
+          <ReportCard icon={Activity} title="Service operations" description="Ticket volume, resolution performance, SLA and technician capacity." tag="Live" onOpen={() => openReportComposer("Service operations", "service_operations")} />
+          <ReportCard icon={MonitorCog} title="RMM & device estate" description="Endpoint inventory, health, check-in status, patching and device risk." tag="Live" tone="emerald" onOpen={() => openReportComposer("RMM & device estate", "rmm_device_estate")} />
+          <ReportCard icon={RefreshCw} title="Backup & recovery assurance" description="Backup success, failed jobs and recovery evidence for client assurance." tag="Evidence" tone="emerald" onOpen={() => openReportComposer("Backup & recovery assurance", "backup_assurance")} />
+          <ReportCard icon={MonitorCog} title="Asset lifecycle" description="Managed inventory, lifecycle state and warranty-refresh evidence." tag="Asset" tone="sky" onOpen={() => openReportComposer("Asset lifecycle", "asset_lifecycle")} />
+          <ReportCard icon={Activity} title="Remote access audit" description="Remote session activity and active-session evidence for service governance." tag="Audit" tone="violet" onOpen={() => openReportComposer("Remote access audit", "remote_session_audit")} />
+          <ReportCard icon={ShieldCheck} title="Security & compliance" description="Framework scans, security evidence, patch compliance and endpoint protections." tag="Evidence" tone="rose" onOpen={() => openReportComposer("Security & compliance", "security_compliance")} />
+          <ReportCard icon={ClipboardCheck} title="Audit & governance" description="Searchable persisted actions, critical events and compliance-ready audit evidence." tag="30-day live" tone="violet" onOpen={() => openReportComposer("Audit & governance", "audit_governance")} />
+          <ReportCard icon={ReceiptText} title="Billing & revenue" description="Revenue, MRR, collections, invoice aging and client profitability." tag="Finance" tone="amber" onOpen={() => openReportComposer("Billing & revenue", "billing_revenue")} />
+          <ReportCard icon={Users} title="Client outcomes" description="Executive packs, client history, health insights and QBR-ready reporting." tag="Client-ready" tone="sky" onOpen={() => openReportComposer("Client outcomes", "client_health")} />
           <ReportCard icon={TriangleAlert} title="Incident post-mortems" description="Generate a review from a resolved ticket, retain the incident record, and track prevention actions." tag="Incident review" tone="rose" onOpen={() => selectTab("postmortems")} />
         </div>
         <Card>
@@ -190,11 +211,11 @@ export default function ReportsHubPage() {
 
       <TabsContent value="operations" className="mt-5 space-y-4">
         <div><h2 className="text-lg font-semibold">Service operations</h2><p className="text-sm text-muted-foreground">Evidence for ticket performance, technician workload and service commitments.</p></div>
-        <div className="grid gap-3 md:grid-cols-3"><ReportCard icon={BarChart3} title="Ticket analytics" description="Volume, categories, resolution time and SLA performance." tag="Current" onOpen={() => runReport("Ticket analytics", "ticket_analytics")} /><ReportCard icon={Users} title="Technician utilisation" description="Capacity, workload and service delivery performance by technician." onOpen={() => runReport("Technician utilisation", "technician_utilisation")} tone="violet" /><ReportCard icon={BellRing} title="SLA reporting" description="Response commitments, breached timers and trend analysis." onOpen={() => runReport("SLA reporting", "sla_reporting")} tone="amber" /></div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><ReportCard icon={BarChart3} title="Ticket analytics" description="Volume, categories, resolution time and SLA performance." tag="Current" onOpen={() => openReportComposer("Ticket analytics", "ticket_analytics")} /><ReportCard icon={Users} title="Technician utilisation" description="Capacity, workload and service delivery performance by technician." onOpen={() => openReportComposer("Technician utilisation", "technician_utilisation")} tone="violet" /><ReportCard icon={BellRing} title="SLA reporting" description="Response commitments, breached timers and trend analysis." onOpen={() => openReportComposer("SLA reporting", "sla_reporting")} tone="amber" /><ReportCard icon={Activity} title="Remote access audit" description="Remote support activity and active-session evidence." onOpen={() => openReportComposer("Remote access audit", "remote_session_audit")} tone="sky" /></div>
         {categoryData.length ? <Card><CardHeader className="pb-2"><CardTitle className="text-base">Ticket categories</CardTitle></CardHeader><CardContent><div className="h-64"><ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}><BarChart data={categoryData}><CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.12} /><XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} /><YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} /><Tooltip contentStyle={{ background: "#0f172a", border: "1px solid #334155", borderRadius: 10 }} /><Bar dataKey="count" fill="#38bdf8" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div></CardContent></Card> : <EmptyState>No ticket categories have been collected yet.</EmptyState>}
       </TabsContent>
 
-      <TabsContent value="security" className="mt-5 space-y-4"><div><h2 className="text-lg font-semibold">Security & compliance evidence</h2><p className="text-sm text-muted-foreground">Use framework scans as source evidence; controls without evidence remain explicitly unassessed.</p></div><div className="grid gap-3 md:grid-cols-3"><ReportCard icon={ShieldCheck} title="Framework assessments" description="CIS, HIPAA and other framework scans with control-level evidence." tag={`${data.compliance.length} scans`} tone="rose" onOpen={() => runReport("Framework assessments", "framework_assessments")} /><ReportCard icon={MonitorCog} title="Patch compliance" description="Patch posture, exceptions and remediation evidence across managed devices." tone="amber" onOpen={() => runReport("Patch compliance", "patch_compliance")} /><ReportCard icon={FileCheck2} title="Endpoint security" description="Defender, firewall, encryption and antivirus status from endpoint inventory." tone="emerald" onOpen={() => runReport("Endpoint security", "endpoint_security")} /></div>{data.compliance.length ? <Card><CardHeader><CardTitle className="text-base">Recent framework evidence</CardTitle></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Framework</TableHead><TableHead>Evidence score</TableHead><TableHead>Coverage</TableHead><TableHead>Scanned</TableHead></TableRow></TableHeader><TableBody>{data.compliance.slice(0, 8).map((report) => <TableRow key={report.id}><TableCell className="font-medium">{report.client_name || "Organisation"}</TableCell><TableCell>{report.framework_name || report.framework}</TableCell><TableCell>{report.score ?? 0}%</TableCell><TableCell>{report.coverage_pct ?? "—"}{report.coverage_pct != null ? "%" : ""}</TableCell><TableCell>{date(report.scanned_at || report.generated_at)}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card> : <EmptyState>No framework scan has been generated. Run a compliance scan to create an evidence-backed baseline.</EmptyState>}</TabsContent>
+      <TabsContent value="security" className="mt-5 space-y-4"><div><h2 className="text-lg font-semibold">Security & compliance evidence</h2><p className="text-sm text-muted-foreground">Use framework scans as source evidence; controls without evidence remain explicitly unassessed.</p></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"><ReportCard icon={ShieldCheck} title="Framework assessments" description="CIS, HIPAA and other framework scans with control-level evidence." tag={`${data.compliance.length} scans`} tone="rose" onOpen={() => runReport("Framework assessments", "framework_assessments")} /><ReportCard icon={MonitorCog} title="Patch compliance" description="Patch posture, exceptions and remediation evidence across managed devices." tone="amber" onOpen={() => runReport("Patch compliance", "patch_compliance")} /><ReportCard icon={FileCheck2} title="Endpoint security" description="Defender, firewall, encryption and antivirus status from endpoint inventory." tone="emerald" onOpen={() => runReport("Endpoint security", "endpoint_security")} /><ReportCard icon={RefreshCw} title="Backup & recovery" description="Backup status and recovery assurance evidence for security reviews." tone="sky" onOpen={() => runReport("Backup & recovery", "backup_assurance")} /></div>{data.compliance.length ? <Card><CardHeader><CardTitle className="text-base">Recent framework evidence</CardTitle></CardHeader><CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Framework</TableHead><TableHead>Evidence score</TableHead><TableHead>Coverage</TableHead><TableHead>Scanned</TableHead></TableRow></TableHeader><TableBody>{data.compliance.slice(0, 8).map((report) => <TableRow key={report.id}><TableCell className="font-medium">{report.client_name || "Organisation"}</TableCell><TableCell>{report.framework_name || report.framework}</TableCell><TableCell>{report.score ?? 0}%</TableCell><TableCell>{report.coverage_pct ?? "—"}{report.coverage_pct != null ? "%" : ""}</TableCell><TableCell>{date(report.scanned_at || report.generated_at)}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card> : <EmptyState>No framework scan has been generated. Run a compliance scan to create an evidence-backed baseline.</EmptyState>}</TabsContent>
 
       <TabsContent value="governance" className="mt-5 space-y-4"><div><h2 className="text-lg font-semibold">Audit & governance</h2><p className="text-sm text-muted-foreground">Read-only evidence assembled from persisted activity and endpoint events.</p></div><div className="grid gap-3 md:grid-cols-3"><ReportCard icon={ClipboardCheck} title="Audit trail" description="Filter actions by category, severity, technician and evidence window." tag={`${audit.total_events || 0} events`} tone="violet" onOpen={() => runReport("Audit trail", "audit_trail")} /><ReportCard icon={FileCheck2} title="Change management" description="Approved changes, risk records and implementation history." tone="amber" onOpen={() => runReport("Change management", "change_management")} /><ReportCard icon={BookOpenCheck} title="Knowledge & runbooks" description="Operational documentation supporting repeatable and auditable service delivery." tone="sky" onOpen={() => runReport("Knowledge & runbooks", "knowledge_runbooks")} /></div><Card><CardHeader><CardTitle className="text-base">30-day audit evidence</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-3"><div><p className="text-3xl font-bold">{audit.total_events || 0}</p><p className="mt-1 text-xs text-muted-foreground">Persisted events</p></div><div><p className="text-3xl font-bold text-rose-300">{audit.by_severity?.critical || 0}</p><p className="mt-1 text-xs text-muted-foreground">Critical events requiring review</p></div><div><p className="text-3xl font-bold text-amber-300">{audit.by_severity?.warning || 0}</p><p className="mt-1 text-xs text-muted-foreground">Warnings in the evidence window</p></div></CardContent></Card></TabsContent>
 
@@ -215,6 +236,21 @@ export default function ReportsHubPage() {
     <Dialog open={!!activeReport || reportPreviewLoading} onOpenChange={(open) => { if (!open) { setActiveReport(null); setReportPreviewLoading(false); } }}>
       <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto p-0" aria-describedby="report-preview-description">
         {reportPreviewLoading && !activeReport ? <div className="flex min-h-80 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div> : activeReport && <ReportPreview report={activeReport} onDownload={() => downloadReportPdf(activeReport.history)} />}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={!!reportDraft} onOpenChange={(open) => { if (!open) setReportDraft(null); }}>
+      <DialogContent className="max-w-lg overflow-hidden p-0 sm:rounded-2xl" aria-describedby="report-composer-description" data-testid="report-composer-dialog">
+        <DialogHeader className="border-b border-border/70 bg-[linear-gradient(135deg,rgba(34,211,238,0.08),rgba(139,92,246,0.06),transparent)] px-6 py-5 pr-12 text-left">
+          <div className="flex items-center gap-2"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-400/[0.08]"><SlidersHorizontal className="h-4 w-4 text-cyan-200" /></span><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Report builder</p><DialogTitle className="mt-0.5 text-xl">{reportDraft?.name || "New report"}</DialogTitle></div></div>
+          <DialogDescription id="report-composer-description" className="mt-3 text-sm leading-6">Choose the client boundary before generating a retained, point-in-time evidence snapshot. PDF is available immediately after generation.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 px-6 py-5">
+          <div className="rounded-xl border border-border/70 bg-muted/25 p-4"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Evidence source</p><p className="mt-1 font-medium capitalize">{String(reportDraft?.reportType || "standard").replace(/_/g, " ")}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Uses the latest permitted Nexus records. Historical trends require source records with timestamps and are surfaced only where that evidence exists.</p></div>
+          <div><label className="text-sm font-medium">Client scope</label><p className="mt-1 text-xs text-muted-foreground">The API validates this selection against your permitted client scope.</p><Select value={selectedClientId} onValueChange={setSelectedClientId}><SelectTrigger className="mt-2"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All permitted clients</SelectItem>{(data.clients || []).map((client) => <SelectItem key={client.id} value={client.id}>{client.name || "Client"}</SelectItem>)}</SelectContent></Select></div>
+          <div className="flex items-start gap-2 rounded-lg border border-amber-400/15 bg-amber-400/[0.045] px-3 py-2.5 text-xs leading-5 text-muted-foreground"><FileCheck2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-200" />Generation records who produced the report, its tenant/client boundary, and the evidence captured at that time.</div>
+        </div>
+        <DialogFooter className="border-t border-border/70 bg-muted/10 px-6 py-4"><Button variant="outline" onClick={() => setReportDraft(null)}>Cancel</Button><Button onClick={() => runReport()} disabled={!!generating} data-testid="confirm-generate-report">{generating ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <FileBarChart className="mr-1.5 h-4 w-4" />}Generate evidence snapshot</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </div>;

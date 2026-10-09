@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { GitBranch, History, Download, RefreshCw, Code } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function GitScriptsPage() {
   const { token } = useAuth();
@@ -62,7 +63,7 @@ export default function GitScriptsPage() {
 
   return (
     <div className="space-y-6" data-testid="git-scripts-page">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-2xl font-bold">Git Script Library</h1><p className="text-muted-foreground text-sm">Version-controlled scripts with history, review context, and one-click import into the main library.</p></div><div className="flex gap-2"><Button variant="outline" onClick={fetchScripts} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button><Button onClick={() => navigate("/scripting")} data-testid="open-main-script-library"><Code className="mr-2 h-4 w-4" />My Scripts</Button></div></div>
+      <OperationalPageHeader eyebrow="Automation engineering · versioned library" title="Git Script Library" description="Review version history and provenance before importing scripts into the governed execution library." icon={GitBranch} tone="violet" signal={scripts.length ? "ready" : undefined} actions={<><Button variant="outline" onClick={fetchScripts} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button><Button onClick={() => navigate("/scripting")} data-testid="open-main-script-library"><Code className="mr-2 h-4 w-4" />My scripts</Button></>} />
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-3">
           {scripts.map(s => (
@@ -81,7 +82,7 @@ export default function GitScriptsPage() {
             <Card><CardHeader className="pb-2"><CardTitle className="text-base">{selected.name}</CardTitle></CardHeader>
               <CardContent>
                 <pre className="bg-[#0d1117] text-[#c9d1d9] p-4 rounded-lg text-xs font-mono overflow-x-auto max-h-64 border border-[#30363d]">{selected.content}</pre>
-                <div className="mt-3 flex flex-wrap gap-2"><Button onClick={() => importToScriptLibrary(selected)} disabled={importingId === selected.id} data-testid="import-git-script"><Download className="mr-2 h-4 w-4" />{importingId === selected.id ? "Importing…" : "Import to My Scripts"}</Button><Button variant="outline" onClick={() => navigate("/scripting")}><Code className="mr-2 h-4 w-4" />Open My Scripts</Button></div>
+                <div className="mt-3 flex flex-wrap gap-2"><Button onClick={() => importToScriptLibrary(selected)} disabled={importingId === selected.id} data-testid="import-git-script"><Download className="mr-2 h-4 w-4" />{importingId === selected.id ? "Importing…" : "Import to my scripts"}</Button><Button variant="outline" onClick={() => navigate("/scripting")}><Code className="mr-2 h-4 w-4" />Open my scripts</Button></div>
                 <div className="mt-4">
                   <h4 className="text-sm font-medium flex items-center gap-1 mb-2"><History className="w-4 h-4" />Commit History</h4>
                   <div className="space-y-1">

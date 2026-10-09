@@ -1,6 +1,5 @@
-// Nexus Client Chat is a per-user companion. The Windows service keeps its
-// credentials private; this local window talks only to localhost, while the
-// companion relays requests to NexusMSP using the agent token.
+// Nexus Client Chat is a per-user companion. The protected Agent service owns
+// the device token and exposes only a deliberately narrow localhost broker.
 package main
 
 import (
@@ -18,39 +17,33 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"nexusagent/internal/config"
 )
 
 const listen = "127.0.0.1:5967"
+const broker = "http://127.0.0.1:5968"
 
 func main() {
-	cfg, err := config.LoadOrInit("")
-	if err != nil || cfg.AgentToken == "" {
-		log.Fatal("Nexus Client Chat needs an enrolled NexusOps Agent")
-	}
 	proxy := func(w http.ResponseWriter, r *http.Request) {
-		path := "/api/live-chat/agent/session"
+		path := "/live-chat/session"
 		if r.URL.Path == "/api/send" {
-			path += "/messages"
+			path = "/live-chat/messages"
 		}
 		if r.URL.Path == "/api/typing" {
-			path += "/typing"
+			path = "/live-chat/typing"
 		}
 		var body io.Reader
 		if r.Method == http.MethodPost {
 			body = r.Body
 		}
-		req, err := http.NewRequest(r.Method, strings.TrimRight(cfg.ServerURL, "/")+path, body)
+		req, err := http.NewRequest(r.Method, strings.TrimRight(broker, "/")+path, body)
 		if err != nil {
-			http.Error(w, "Unable to reach NexusMSP", 502)
+			http.Error(w, "Unable to reach the protected Nexus Agent service", 502)
 			return
 		}
-		req.Header.Set("X-Agent-Token", cfg.AgentToken)
 		req.Header.Set("Content-Type", "application/json")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
-			http.Error(w, "NexusMSP is unavailable", 502)
+			http.Error(w, "Nexus Agent service is unavailable", 502)
 			return
 		}
 		defer res.Body.Close()
@@ -61,9 +54,9 @@ func main() {
 	http.HandleFunc("/api/session", proxy)
 	http.HandleFunc("/api/send", proxy)
 	http.HandleFunc("/api/typing", proxy)
-	http.HandleFunc("/api/elevate/request", elevationRequestProxy(cfg))
-	http.HandleFunc("/api/elevate/status", elevationStatusProxy(cfg))
-	http.HandleFunc("/api/elevate/recent", elevationRecentProxy(cfg))
+	http.HandleFunc("/api/elevate/request", elevationRequestProxy())
+	http.HandleFunc("/api/elevate/status", elevationStatusProxy())
+	http.HandleFunc("/api/elevate/recent", elevationRecentProxy())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Path == "/elevate" {
@@ -89,7 +82,7 @@ type elevationForm struct {
 	TicketID      string `json:"ticket_id"`
 }
 
-func elevationRequestProxy(cfg *config.Config) http.HandlerFunc {
+func elevationRequestProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -145,7 +138,7 @@ func elevationRequestProxy(cfg *config.Config) http.HandlerFunc {
 			"ticket_id":     strings.TrimSpace(form.TicketID),
 			"agent_version": "nexus-client-companion",
 		}
-		forwardJSON(w, r, cfg, "/api/nexus-elevate/agent/requests", http.MethodPost, payload)
+		forwardJSON(w, "/elevate/requests", http.MethodPost, payload)
 	}
 }
 
@@ -155,28 +148,28 @@ func writeJSONError(w http.ResponseWriter, detail string, status int) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"detail": detail})
 }
 
-func elevationStatusProxy(cfg *config.Config) http.HandlerFunc {
+func elevationStatusProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestID := strings.TrimSpace(r.URL.Query().Get("id"))
 		if requestID == "" || len(requestID) > 100 {
 			http.Error(w, "A request id is required", http.StatusBadRequest)
 			return
 		}
-		forwardJSON(w, r, cfg, "/api/nexus-elevate/agent/requests/"+requestID, http.MethodGet, nil)
+		forwardJSON(w, "/elevate/requests/"+requestID, http.MethodGet, nil)
 	}
 }
 
-func elevationRecentProxy(cfg *config.Config) http.HandlerFunc {
+func elevationRecentProxy() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		forwardJSON(w, r, cfg, "/api/nexus-elevate/agent/requests", http.MethodGet, nil)
+		forwardJSON(w, "/elevate/requests", http.MethodGet, nil)
 	}
 }
 
-func forwardJSON(w http.ResponseWriter, _ *http.Request, cfg *config.Config, path, method string, payload any) {
+func forwardJSON(w http.ResponseWriter, path, method string, payload any) {
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
@@ -186,16 +179,15 @@ func forwardJSON(w http.ResponseWriter, _ *http.Request, cfg *config.Config, pat
 		}
 		body = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequest(method, strings.TrimRight(cfg.ServerURL, "/")+path, body)
+	req, err := http.NewRequest(method, strings.TrimRight(broker, "/")+path, body)
 	if err != nil {
-		http.Error(w, "Unable to reach NexusMSP", http.StatusBadGateway)
+		http.Error(w, "Unable to reach the protected Nexus Agent service", http.StatusBadGateway)
 		return
 	}
-	req.Header.Set("X-Agent-Token", cfg.AgentToken)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		http.Error(w, "NexusMSP is unavailable", http.StatusBadGateway)
+		http.Error(w, "Nexus Agent service is unavailable", http.StatusBadGateway)
 		return
 	}
 	defer res.Body.Close()

@@ -27,7 +27,7 @@
     "backend": "100% (31/31 tests passed)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required - Help articles auto-seed on first access",
   "retest_needed": false,
   "should_main_agent_self_test": false,

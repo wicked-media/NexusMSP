@@ -1,0 +1,61 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "type": "timeseries", "title": "API request rate by status", "id": 1,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum by (status_class) (rate(nexus_http_requests_total[5m]))", "legendFormat": "{{status_class}}", "refId": "A"}]
+    },
+    {
+      "type": "timeseries", "title": "API p95 latency", "id": 2,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(nexus_http_request_duration_seconds_bucket[10m])))", "legendFormat": "p95", "refId": "A"}]
+    },
+    {
+      "type": "stat", "title": "Required dependencies", "id": 3,
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DOWN"}, "1": {"text": "READY"}}, "type": "value"}]}, "overrides": []},
+      "targets": [{"expr": "nexus_dependency_ready", "legendFormat": "{{dependency}}", "refId": "A"}]
+    },
+    {
+      "type": "timeseries", "title": "Queue and dead letters", "id": 4,
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "nexus_event_queue_depth", "legendFormat": "queue depth", "refId": "A"},
+        {"expr": "nexus_event_dead_letters", "legendFormat": "dead letters", "refId": "B"}
+      ]
+    },
+    {
+      "type": "stat", "title": "Durable worker loops", "id": 5,
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "nexus_worker_loop_up", "legendFormat": "{{worker}}", "refId": "A"}]
+    },
+    {
+      "type": "timeseries", "title": "Alert delivery outcomes", "id": 6,
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 14},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum by (status) (increase(nexus_alert_deliveries_total[1h]))", "legendFormat": "{{status}}", "refId": "A"}]
+    },
+    {
+      "type": "logs", "title": "API and worker logs", "id": 7,
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 14},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "targets": [{"expr": "{service_name=~\"nexus-api|nexus-worker\"}", "refId": "A"}]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": ["nexus", "operations", "production"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "title": "Nexus Production Operations",
+  "uid": "nexus-production-operations",
+  "version": 1
+}

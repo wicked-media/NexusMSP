@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 import uuid
 from app.database import db, UPLOADS_DIR
@@ -12,6 +12,10 @@ from app.services.finance_integrity import (
     fail_idempotent_operation,
 )
 from app.services.procurement_integrity import get_po_approval_settings, next_po_number, version_filter
+from app.services.commercial_documents import (
+    freeze_commercial_document_snapshot,
+    normalise_document_customisation,
+)
 from app.services.scope_permissions import assert_client_scope, assert_global_scope, scoped_query
 
 router = APIRouter()
@@ -30,6 +34,15 @@ async def _po_or_404(po_id: str, current_user: dict) -> dict:
         mask_not_found=True,
     )
     return po
+
+
+async def _commercial_document_branding() -> dict:
+    """Load the existing organisation branding without creating a second owner."""
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
+    if not branding:
+        legacy = await db.settings.find_one({"key": "whitelabel_options"}, {"_id": 0}) or {}
+        branding = legacy.get("value") if isinstance(legacy.get("value"), dict) else legacy
+    return branding or {}
 
 
 async def _calculate_po_totals(line_items: list[dict], shipping_value=0) -> tuple[float, float, float, float]:
@@ -133,6 +146,7 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=422, detail="At least one purchase-order line is required")
     if data.get("ticket_id"):
         await _ticket_or_422(str(data["ticket_id"]), current_user)
+    document_customisation = await normalise_document_customisation(data, "purchase_order", database=db)
     for li in line_items:
         li["received_qty"] = 0
         li["returned_qty"] = 0
@@ -158,6 +172,9 @@ async def create_purchase_order(data: dict, current_user: dict = Depends(get_cur
         "total": total,
         "approval_required": bool(policy.get("enabled", True)) and total >= float(policy.get("threshold", 0) or 0),
         "notes": data.get("notes", ""),
+        "document_label": document_customisation.get("document_label"),
+        "document_terms": document_customisation.get("document_terms"),
+        "document_template_id": document_customisation.get("document_template_id"),
         "ship_to": data.get("ship_to", ""),
         "expected_delivery": data.get("expected_delivery", ""),
         "client_id": client_id,
@@ -196,8 +213,17 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
     old_po = await _po_or_404(po_id, current_user)
     allowed = {"vendor", "vendor_id", "vendor_contact", "vendor_email", "status", "line_items",
                "subtotal", "tax", "shipping", "total", "notes", "ship_to", "expected_delivery",
-               "client_id", "client_name", "ticket_id", "ticket_number", "ticket_title", "assigned_to", "assigned_to_name"}
+               "client_id", "client_name", "ticket_id", "ticket_number", "ticket_title", "assigned_to", "assigned_to_name",
+               "document_label", "document_terms", "document_template_id"}
     update = {k: v for k, v in data.items() if k in allowed}
+    document_fields = {"document_label", "document_terms", "document_template_id"}
+    if document_fields.intersection(update):
+        if old_po.get("status") != "draft":
+            raise HTTPException(
+                status_code=409,
+                detail="Document appearance can only be changed while a purchase order is a draft",
+            )
+        update.update(await normalise_document_customisation(update, "purchase_order", database=db))
     if "client_id" in update:
         updated_client_id = str(update["client_id"] or "").strip()
         if updated_client_id:
@@ -211,6 +237,7 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
     financial_fields = {"line_items", "subtotal", "tax", "shipping", "total", "vendor", "vendor_id", "client_id", "ticket_id"}
     if old_po.get("status") not in {"draft", "rejected"} and financial_fields.intersection(update):
         raise HTTPException(status_code=409, detail="Ordered purchase orders are financially locked; duplicate or cancel the order to correct it")
+    freeze_document_snapshot = False
     if "status" in update:
         requested_status = str(update["status"] or "").strip().lower()
         allowed_transitions = {
@@ -228,6 +255,7 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
         if requested_status == "cancelled" and any(int(item.get("received_qty", 0) or 0) > 0 for item in old_po.get("line_items", [])):
             raise HTTPException(status_code=409, detail="A purchase order with received stock cannot be cancelled; record a return instead")
         update["status"] = requested_status
+        freeze_document_snapshot = requested_status == "submitted" and old_po.get("status") != "submitted"
     if "line_items" in update:
         update["line_items"] = await _normalise_line_item_destinations(update["line_items"], current_user)
         for new_line in update["line_items"]:
@@ -244,6 +272,14 @@ async def update_purchase_order(po_id: str, data: dict, current_user: dict = Dep
         update.update({"line_items": source_lines, "subtotal": subtotal, "tax": tax, "shipping": shipping, "total": total})
     if update.get("ticket_id"):
         await _ticket_or_422(str(update["ticket_id"]), current_user)
+    if freeze_document_snapshot:
+        rendered_record = {**old_po, **update}
+        update["document_snapshot"] = await freeze_commercial_document_snapshot(
+            "purchase_order",
+            rendered_record,
+            await _commercial_document_branding(),
+            database=db,
+        )
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     result = await db.purchase_orders.update_one(
         {"id": po_id, **version_filter(old_po)},
@@ -269,11 +305,20 @@ async def record_vendor_invoice_match(po_id: str, data: dict, current_user: dict
     invoice_number = str(data.get("invoice_number", "")).strip()
     if not invoice_number:
         raise HTTPException(status_code=422, detail="Supplier invoice number is required")
-    duplicate = await db.purchase_orders.find_one({
+    # Supplier invoice numbers are only unique within the PO's client record.
+    # Keep the record's client boundary even for administrators, whose broader
+    # workspace scope must not turn a duplicate check into a cross-client
+    # information disclosure.
+    duplicate_query = {
         "id": {"$ne": po_id},
         "vendor_id": po.get("vendor_id", ""),
         "vendor_invoice_match.invoice_number": invoice_number,
-    }, {"_id": 0, "po_number": 1})
+        "client_id": po.get("client_id", ""),
+    }
+    duplicate = await db.purchase_orders.find_one(
+        scoped_query(current_user, duplicate_query, site_field=None),
+        {"_id": 0, "po_number": 1},
+    )
     if duplicate and po.get("vendor_id"):
         raise HTTPException(status_code=409, detail=f"Supplier invoice {invoice_number} is already recorded on {duplicate.get('po_number', 'another purchase order')}")
     try:
@@ -412,6 +457,11 @@ async def receive_po_items(po_id: str, data: dict, current_user: dict = Depends(
             if not li:
                 raise HTTPException(status_code=422, detail="Received item is not on this purchase order")
             line_index = line_items.index(li)
+        # Older receiving clients may identify a line by product name only.
+        # Once the authoritative PO line is resolved, use its stable product
+        # ID for stock, serial and receipt evidence so a successful receipt
+        # cannot silently omit the inventory movement.
+        pid = str(li.get("product_id") or pid or "").strip()
         prev_received = int(li.get("received_qty", 0))
         ordered_qty = int(li.get("quantity", 0))
         remaining_qty = max(0, ordered_qty - prev_received)
@@ -791,7 +841,7 @@ async def upload_po_attachment(
     note: str = Form(""),
     current_user: dict = Depends(get_current_user),
 ):
-    po = await _po_or_404(po_id, current_user)
+    await _po_or_404(po_id, current_user)
     extension = Path(file.filename or "").suffix.lower()
     if extension not in {".pdf", ".png", ".jpg", ".jpeg", ".csv", ".docx", ".xlsx"}:
         raise HTTPException(status_code=422, detail="Upload a PDF, image, CSV, Word, or Excel evidence file")

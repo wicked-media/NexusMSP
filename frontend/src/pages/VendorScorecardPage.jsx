@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import HeroTile from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import { WorkspaceLoadingState } from "@/components/WorkspaceState";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -17,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Building2, DollarSign, Star, Package, Truck, Search, RefreshCw,
-  Loader2, AlertTriangle, BarChart3,
+  AlertTriangle, BarChart3,
   ShieldCheck, ChevronRight
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, PieChart, Pie, Cell, CartesianGrid } from "recharts";
@@ -34,6 +35,7 @@ export default function VendorScorecardPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [ratingFilter, setRatingFilter] = useState("all");
   const [sortBy, setSortBy] = useState("score");
@@ -42,18 +44,22 @@ export default function VendorScorecardPage() {
   const tab = ["overview", "analytics", "risk"].includes(searchParams.get("tab")) ? searchParams.get("tab") : "overview";
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async ({ quiet = false } = {}) => {
+    if (quiet) setRefreshing(true);
+    else setLoading(true);
     try {
       const res = await axios.get(`${API}/vendor-scorecard/overview`, { headers });
       setData(res.data);
-    } catch { toast.error("Failed to load vendor data"); }
-    finally { setLoading(false); }
+    } catch { toast.error(quiet ? "Could not refresh vendor performance. Current insights remain visible." : "Failed to load vendor data"); }
+    finally {
+      if (quiet) setRefreshing(false);
+      else setLoading(false);
+    }
   }, [headers]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  if (loading || !data) return <div className="flex items-center justify-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  if (loading || !data) return <WorkspaceLoadingState label="Loading vendor scorecards" />;
 
   const { summary, vendors } = data;
   const filtered = vendors.filter(v => {
@@ -77,7 +83,7 @@ export default function VendorScorecardPage() {
         description="Rank supplier delivery confidence, spend concentration, and procurement risk from the same audited purchase-order ledger."
         icon={Building2}
         tone="cyan"
-        actions={<Button variant="outline" size="sm" onClick={fetchData} data-testid="refresh-vendors"><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>}
+        actions={<Button variant="outline" size="sm" onClick={() => fetchData({ quiet: true })} disabled={refreshing} data-testid="refresh-vendors"><RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button>}
       />
 
       {/* Summary Stats */}

@@ -18,6 +18,7 @@ func svcUninstall() error               { return unsupportedServiceAction("unins
 func svcStart() error                   { return unsupportedServiceAction("start") }
 func svcStop() error                    { return unsupportedServiceAction("stop") }
 func svcStatus() (string, error)        { return "", unsupportedServiceAction("query status") }
+func svcRestart() error                 { return unsupportedServiceAction("restart") }
 
 func unsupportedServiceAction(action string) error {
 	return fmt.Errorf("cannot %s the NexusOps Agent service on this operating system; Windows is required", action)

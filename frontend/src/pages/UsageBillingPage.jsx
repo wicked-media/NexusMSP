@@ -3,12 +3,13 @@ import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { DollarSign, HardDrive, Users, Loader2, TrendingUp, Database, BarChart3, Zap } from "lucide-react";
+import { DollarSign, HardDrive, Users, Loader2, Database, BarChart3, Zap } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import HeroTile from "@/components/HeroTile";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 export default function UsageBillingPage() {
   const { token } = useAuth();
@@ -28,18 +29,11 @@ export default function UsageBillingPage() {
 
   return (
     <div className="space-y-6" data-testid="usage-billing-page">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center"><Database className="w-4 h-4 text-sky-300" /></span>
-          <div><h1 className="text-2xl font-bold tracking-tight">Usage Billing</h1><p className="text-sm text-muted-foreground">Metered services, device counts, and per-unit revenue by client.</p></div>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate("/recurring-invoices")} data-testid="usage-go-recurring"><TrendingUp className="w-4 h-4 mr-1" />Recurring</Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/invoices")} data-testid="usage-go-invoices"><DollarSign className="w-4 h-4 mr-1" />Invoices</Button>
-        </div>
-      </div>
+      <OperationalPageHeader eyebrow="Billing operations · metered evidence" title="Usage Billing" description="Review metered services, device counts and per-unit revenue with a clear route to recurring billing." icon={Database} tone="sky" signal={(s.overages_this_month || 0) > 0 ? "attention" : "ready"} />
 
-      <div className="grid grid-cols-4 gap-3">
+      <BillingWorkspaceNav />
+
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <HeroTile label="Usage MRR" value={`$${(s.total_mrr || 0).toLocaleString()}`} icon={DollarSign} glow="emerald" animated={false} onClick={() => navigate("/recurring-invoices")} testId="usage-metric-mrr" />
         <HeroTile label="Clients on plans" value={s.total_clients || 0} icon={Users} glow="cyan" testId="usage-metric-clients" />
         <HeroTile label="Average per device" value={`$${(s.avg_per_device || 0).toFixed(2)}`} icon={HardDrive} glow="violet" animated={false} testId="usage-metric-device" />

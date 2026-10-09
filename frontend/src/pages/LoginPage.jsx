@@ -203,6 +203,14 @@ export default function LoginPage() {
   }, []);
 
   useEffect(() => {
+    if (!isNexusBrand || isAtelierExperience) return undefined;
+    const interval = window.setInterval(() => {
+      setNexusStatementIndex((index) => (index + 1) % NEXUS_LOGIN_STATEMENTS.length);
+    }, 4600);
+    return () => window.clearInterval(interval);
+  }, [isAtelierExperience, isNexusBrand]);
+
+  useEffect(() => {
     // Apply the product identity immediately so a slow or unavailable branding
     // endpoint never exposes a stale browser title or favicon.
     document.title = "NexusMSP";
@@ -242,14 +250,6 @@ export default function LoginPage() {
     });
   }, [searchParams]);
 
-  useEffect(() => {
-    if (!isNexusBrand) return undefined;
-    const interval = window.setInterval(() => {
-      setNexusStatementIndex((index) => (index + 1) % NEXUS_LOGIN_STATEMENTS.length);
-    }, 4600);
-    return () => window.clearInterval(interval);
-  }, [isNexusBrand]);
-
   if (user && !previewMode) return <Navigate to="/" replace />;
 
   const handleMicrosoftLogin = () => {
@@ -279,50 +279,105 @@ export default function LoginPage() {
   const hour = now.getHours();
   const timeGreeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
   const GreetingIcon = hour < 6 ? Moon : hour < 12 ? Sun : hour < 17 ? CloudSun : hour < 21 ? Sunset : Moon;
-  const nexusStatement = NEXUS_LOGIN_STATEMENTS[nexusStatementIndex];
+  const nexusStatement = NEXUS_LOGIN_STATEMENTS[isAtelierExperience ? 0 : nexusStatementIndex];
 
   if (isAtelierExperience) {
     return (
       <div ref={loginRootRef} className="nexus-atelier-login relative min-h-[100svh] overflow-hidden bg-[#020611] text-white" data-testid="login-page" data-login-experience={experience}>
         <div className="nexus-atelier-atmosphere" aria-hidden="true" />
-        <img src="/login-experiences/nexus-atelier-horizon.png" alt="" className="nexus-atelier-horizon" aria-hidden="true" />
-        <img src="/login-experiences/nexus-atelier-horizon.png" alt="" className="nexus-atelier-horizon-glare" aria-hidden="true" />
-        <main className="nexus-atelier-main relative z-10 mx-auto flex min-h-[100svh] w-full max-w-xl flex-col items-center px-6 pb-8 pt-[clamp(4rem,9vh,7rem)] text-center">
-          <img src="/login-experiences/nexus-atelier-identity.png" alt="Nexus MSP" className="nexus-atelier-identity" />
-          <h1 className="nexus-atelier-heading">Welcome to the <span>autonomous MSP.</span></h1>
-          <form onSubmit={handleLogin} className="nexus-atelier-form mt-9 w-full max-w-[28rem] text-left" aria-busy={isLoading}>
-            {authError && <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-rose-400/25 bg-rose-500/[0.08] px-3 py-2.5 text-xs leading-relaxed text-rose-200" role="alert"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" /><div><p className="font-semibold">Sign-in unsuccessful</p><p className="mt-0.5 text-rose-200/75">{authError}</p></div></div>}
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-zinc-300">Email</Label>
-              <div className="group relative h-12"><Mail className="pointer-events-none absolute inset-y-0 left-4 z-10 my-auto h-4 w-4 text-zinc-500 transition group-focus-within:text-cyan-300" /><Input type="email" placeholder="you@example.com" value={loginData.email} onChange={(e) => { setLoginData({ ...loginData, email: e.target.value }); if (authError) setAuthError(""); }} required data-testid="login-email-input" className="h-12 rounded-lg border-cyan-200/20 bg-[#07101f]/66 pl-11 text-white placeholder:text-zinc-500 focus:border-cyan-300/60 focus:ring-cyan-300/15" /></div>
+        <div className="nexus-atelier-stars" aria-hidden="true" />
+        {previewMode && (
+          <div className="nexus-atelier-preview fixed left-1/2 top-4 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-full border border-white/10 bg-[#020817]/80 p-1 shadow-2xl backdrop-blur-xl" data-testid="login-preview-switcher">
+            {EXPERIENCE_IDS.map(id => (
+              <button key={id} type="button" onClick={() => navigate(`/login?preview=1&experience=${id}`)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${experience === id ? "bg-cyan-300 text-slate-950" : "text-zinc-400 hover:bg-white/5 hover:text-white"}`} aria-pressed={experience === id}>{id === "theatre" ? "Operations Theatre" : id}</button>
+            ))}
+          </div>
+        )}
+        <main className="nexus-atelier-layout relative z-10 mx-auto grid min-h-[100svh] w-full max-w-[1680px] lg:grid-cols-[minmax(0,1.12fr)_minmax(27rem,.88fr)]">
+          <section className="nexus-atelier-stage relative flex min-h-[38rem] overflow-hidden px-6 pb-12 pt-20 sm:px-10 lg:min-h-[100svh] lg:px-[clamp(3rem,7vw,8rem)] lg:py-[clamp(3.5rem,7vh,6.5rem)]" aria-label="Nexus MSP identity">
+            <div className="nexus-atelier-stage-rail relative z-10 flex w-full max-w-[38rem] flex-col justify-center">
+              <div className="nexus-atelier-kicker"><span className="nexus-atelier-kicker-dot" aria-hidden="true" />Nexus MSP · Operations workspace</div>
+              <img src="/login-experiences/nexus-atelier-identity.png" alt="Nexus MSP" className="nexus-atelier-identity" />
+              <div className="nexus-atelier-copy">
+                <p className="nexus-atelier-statement"><span>{nexusStatement.lead}</span> <strong>{nexusStatement.accent}</strong></p>
+                <p className="nexus-atelier-supporting">A secure, deliberate start to every customer, signal and accountable action.</p>
+              </div>
+              <div className="nexus-atelier-trust-row" aria-label="Nexus platform qualities">
+                <span><Network className="h-3.5 w-3.5" />Connected</span>
+                <span><ClipboardCheck className="h-3.5 w-3.5" />Accountable</span>
+                <span><ShieldCheck className="h-3.5 w-3.5" />Protected</span>
+              </div>
             </div>
-            <div className="mt-6 space-y-2">
-              <Label className="text-xs font-medium text-zinc-300">Password</Label>
-              <div className="group relative h-12"><Lock className="pointer-events-none absolute inset-y-0 left-4 z-10 my-auto h-4 w-4 text-zinc-500 transition group-focus-within:text-cyan-300" /><Input type={showPassword ? "text" : "password"} placeholder="Enter password" value={loginData.password} onChange={(e) => { setLoginData({ ...loginData, password: e.target.value }); if (authError) setAuthError(""); }} onKeyDown={(e) => setCapsLockOn(e.getModifierState("CapsLock"))} onKeyUp={(e) => setCapsLockOn(e.getModifierState("CapsLock"))} onBlur={() => setCapsLockOn(false)} required data-testid="login-password-input" className="h-12 rounded-lg border-cyan-200/20 bg-[#07101f]/66 pl-11 pr-11 text-white placeholder:text-zinc-500 focus:border-cyan-300/60 focus:ring-cyan-300/15" /><button type="button" className="absolute inset-y-0 right-0 z-10 flex w-12 items-center justify-center text-zinc-500 transition hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/60" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} data-testid="toggle-login-password">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
-              {capsLockOn && <p className="flex items-center gap-1.5 text-[10px] font-medium text-amber-300" role="status"><TriangleAlert className="h-3 w-3" />Caps Lock is on</p>}
+            <img src="/login-experiences/nexus-atelier-horizon.png" alt="" className="nexus-atelier-horizon" aria-hidden="true" />
+            <img src="/login-experiences/nexus-atelier-horizon.png" alt="" className="nexus-atelier-horizon-glare" aria-hidden="true" />
+          </section>
+          <section className="nexus-atelier-auth-stage relative flex min-h-[42rem] items-center justify-center border-t border-cyan-200/[0.08] px-6 py-14 sm:px-10 lg:min-h-[100svh] lg:border-l lg:border-t-0 lg:px-[clamp(3rem,6vw,7rem)]" aria-label="Sign in to Nexus MSP">
+            <div className="nexus-atelier-auth-halo" aria-hidden="true" />
+            <div className={`nexus-atelier-auth-panel relative w-full max-w-[28rem] overflow-hidden rounded-[1.35rem] border border-cyan-200/[0.18] bg-[#06101f]/[0.86] shadow-[0_28px_90px_rgba(0,0,0,.45),0_0_55px_rgba(10,139,255,.08)] backdrop-blur-2xl ${isLoading ? "is-authenticating" : ""}`}>
+              <div className="nexus-atelier-auth-header border-b border-cyan-200/[0.12] px-7 pb-6 pt-7 sm:px-8 sm:pt-8">
+                <p className="nexus-atelier-auth-kicker">Secure workspace access</p>
+                <h1 className="mt-2 text-[clamp(1.7rem,2.6vw,2.2rem)] font-semibold tracking-[-0.045em] text-white">Welcome back</h1>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-300/75">Use your technician account to enter your organisation’s protected workspace.</p>
+              </div>
+              <form onSubmit={handleLogin} className="px-7 py-7 sm:px-8 sm:py-8" aria-busy={isLoading}>
+                {authError && <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-rose-400/25 bg-rose-500/[0.08] px-3.5 py-3 text-xs leading-relaxed text-rose-100" role="alert"><TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" /><div><p className="font-semibold">Sign-in unsuccessful</p><p className="mt-0.5 text-rose-200/75">{authError}</p></div></div>}
+                <div className="space-y-2.5">
+                  <Label htmlFor="nexus-login-email" className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-300/75">Email</Label>
+                  <div className="nexus-atelier-field group relative h-12"><Mail className="pointer-events-none absolute inset-y-0 left-4 z-10 my-auto h-4 w-4 text-slate-500 transition group-focus-within:text-cyan-200" /><Input id="nexus-login-email" type="email" autoComplete="email" placeholder="you@company.com" value={loginData.email} onChange={(e) => { setLoginData({ ...loginData, email: e.target.value }); if (authError) setAuthError(""); }} required data-testid="login-email-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 pl-11 text-white placeholder:text-slate-500 focus:border-cyan-300/60 focus:ring-cyan-300/15" /></div>
+                </div>
+                <div className="mt-5 space-y-2.5">
+                  <Label htmlFor="nexus-login-password" className="text-[11px] font-semibold uppercase tracking-[0.13em] text-slate-300/75">Password</Label>
+                  <div className="nexus-atelier-field group relative h-12"><Lock className="pointer-events-none absolute inset-y-0 left-4 z-10 my-auto h-4 w-4 text-slate-500 transition group-focus-within:text-cyan-200" /><Input id="nexus-login-password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="Enter password" value={loginData.password} onChange={(e) => { setLoginData({ ...loginData, password: e.target.value }); if (authError) setAuthError(""); }} onKeyDown={(e) => setCapsLockOn(e.getModifierState("CapsLock"))} onKeyUp={(e) => setCapsLockOn(e.getModifierState("CapsLock"))} onBlur={() => setCapsLockOn(false)} required data-testid="login-password-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 pl-11 pr-11 text-white placeholder:text-slate-500 focus:border-cyan-300/60 focus:ring-cyan-300/15" /><button type="button" className="absolute inset-y-0 right-0 z-10 flex w-12 items-center justify-center text-slate-500 transition hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyan-400/60" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} data-testid="toggle-login-password">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div>
+                  {capsLockOn && <p className="flex items-center gap-1.5 text-[10px] font-medium text-amber-200" role="status"><TriangleAlert className="h-3 w-3" />Caps Lock is on</p>}
+                </div>
+                {twoFactorRequired && <div className="mt-5 space-y-2.5 rounded-xl border border-cyan-300/20 bg-cyan-400/[0.05] p-3.5"><Label htmlFor="nexus-login-2fa" className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.13em] text-cyan-100"><ShieldCheck className="h-3.5 w-3.5" />Authenticator code</Label><Input id="nexus-login-2fa" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" value={twoFactorCode} onChange={(e) => { setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6)); if (authError) setAuthError(""); }} required maxLength={6} data-testid="login-2fa-input" className="h-12 rounded-xl border-cyan-200/[0.14] bg-[#0a1628]/90 font-mono tracking-[.35em] text-center text-white" /></div>}
+                <Button type="submit" className="nexus-atelier-submit mt-7 h-[3.25rem] w-full rounded-xl border border-cyan-200/25 bg-cyan-500 text-[15px] font-semibold text-slate-950 shadow-[0_16px_34px_-20px_rgba(34,211,238,.75)] transition-colors hover:bg-cyan-400 hover:text-slate-950" disabled={isLoading} data-testid="login-submit-button">{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying workspace</> : <>{twoFactorRequired ? "Verify & Sign In" : "Sign in"}<ArrowRight className="ml-2 h-4 w-4" /></>}</Button>
+                {ssoEnabled && <Button type="button" variant="outline" className="mt-3 h-11 w-full rounded-xl border-cyan-200/[0.14] bg-white/[0.025] text-slate-200 hover:bg-cyan-400/[0.06] hover:text-white" onClick={handleMicrosoftLogin} disabled={ssoLoading} data-testid="microsoft-sso-button">{ssoLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Sign in with Microsoft</Button>}
+                {isLocalPreview && <Button type="button" variant="ghost" className="mt-2 h-8 w-full text-xs text-slate-400 hover:bg-transparent hover:text-cyan-100" onClick={fillDemoCredentials} data-testid="demo-credentials-button">Use local account email</Button>}
+                <p className="mt-6 flex items-start justify-center gap-2 text-center text-[11px] leading-5 text-slate-400"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-300" />Sign-in attempts and security challenges are audited.</p>
+              </form>
             </div>
-            {twoFactorRequired && <div className="mt-5 space-y-2 rounded-lg border border-cyan-300/25 bg-cyan-400/[0.05] p-3"><Label className="flex items-center gap-2 text-xs font-medium text-cyan-200"><ShieldCheck className="h-3.5 w-3.5" />Authenticator code</Label><Input inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code" value={twoFactorCode} onChange={(e) => { setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6)); if (authError) setAuthError(""); }} required maxLength={6} data-testid="login-2fa-input" className="h-12 border-cyan-200/20 bg-[#07101f]/66 font-mono tracking-[.35em] text-center text-white" /></div>}
-            <Button type="submit" className="nexus-atelier-submit mt-9 h-14 w-full rounded-lg border border-blue-400/65 bg-transparent text-base font-medium text-white transition hover:border-cyan-200 hover:bg-cyan-400/[0.08]" disabled={isLoading} data-testid="login-submit-button">{isLoading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Verifying workspace</> : <>{twoFactorRequired ? "Verify & Sign In" : "Sign in"}</>}</Button>
-            {ssoEnabled && <Button type="button" variant="outline" className="mt-4 h-11 w-full border-cyan-200/20 bg-transparent text-zinc-200 hover:bg-cyan-400/[0.06] hover:text-white" onClick={handleMicrosoftLogin} disabled={ssoLoading} data-testid="microsoft-sso-button">{ssoLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Sign in with Microsoft</Button>}
-            {isLocalPreview && <Button type="button" variant="ghost" className="mt-2 h-8 w-full text-xs text-zinc-500 hover:bg-transparent hover:text-cyan-200" onClick={fillDemoCredentials} data-testid="demo-credentials-button">Use local account email</Button>}
-            <p className="mt-6 flex items-center justify-center gap-2 text-center text-[11px] text-zinc-500"><ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />Sign-in attempts and security challenges are audited.</p>
-          </form>
+          </section>
         </main>
         <style>{`
-          @keyframes atelierIdentityFloat { 0%,100% { transform:translate3d(0,0,0) scale(1); filter:brightness(.94) saturate(.95); } 50% { transform:translate3d(0,-7px,0) scale(1.012); filter:brightness(1.08) saturate(1.12) drop-shadow(0 0 18px rgba(25,166,255,.16)); } }
-          @keyframes atelierHorizonDrift { 0%,100% { transform:scale(1.035) rotate(-.18deg) translate3d(-.65%,.3%,0); filter:brightness(.86) saturate(.9); opacity:.76; } 50% { transform:scale(1.075) rotate(.18deg) translate3d(.72%,-1.1%,0); filter:brightness(1.08) saturate(1.13); opacity:1; } }
-          @keyframes atelierHorizonGlare { 0%,100% { transform:scale(1.08) translate3d(-1.8%,.6%,0); opacity:.08; filter:brightness(.8) blur(1px); } 52% { transform:scale(1.16) translate3d(2.4%,-2%,0); opacity:.34; filter:brightness(1.55) blur(2px); } }
-          @keyframes atelierButtonBreathe { 0%,100% { box-shadow:0 0 0 rgba(24,155,255,0), inset 0 0 0 rgba(20,123,255,0); } 50% { box-shadow:0 0 24px rgba(24,155,255,.2), inset 0 0 18px rgba(20,123,255,.11); } }
-          .nexus-atelier-login { background:radial-gradient(ellipse at 50% 90%,rgba(12,68,152,.17),transparent 37%),linear-gradient(180deg,#01050d 0%,#030817 68%,#020714 100%); }
-          .nexus-atelier-atmosphere { position:absolute; inset:0; pointer-events:none; background:radial-gradient(circle at 50% 29%,rgba(10,71,156,.10),transparent 22%),radial-gradient(circle at 50% 74%,rgba(14,117,255,.08),transparent 33%); }
-          .nexus-atelier-horizon { position:absolute; inset:auto 0 0; width:100%; height:22vh; min-height:9rem; object-fit:cover; object-position:center bottom; opacity:.9; animation:atelierHorizonDrift 22s ease-in-out infinite; mask-image:linear-gradient(180deg,transparent 0%,#000 34%); }
-          .nexus-atelier-horizon-glare { position:absolute; inset:auto 0 0; width:100%; height:22vh; min-height:9rem; object-fit:cover; object-position:center bottom; mix-blend-mode:screen; pointer-events:none; animation:atelierHorizonGlare 16s ease-in-out infinite; mask-image:linear-gradient(180deg,transparent 5%,#000 58%); }
-          .nexus-atelier-identity { width:min(100%,31rem); height:auto; margin-top:-1.6rem; mix-blend-mode:screen; animation:atelierIdentityFloat 8s ease-in-out infinite; }
-          .nexus-atelier-heading { margin-top:-.35rem; color:#f8fbff; font-size:clamp(1.7rem,2.5vw,2.35rem); font-weight:400; letter-spacing:-.038em; line-height:1.1; text-shadow:0 2px 22px rgba(0,0,0,.46); }
-          .nexus-atelier-heading span { color:#1597ff; text-shadow:0 0 20px rgba(28,158,255,.25); }
-          .nexus-atelier-submit { animation:atelierButtonBreathe 4.2s ease-in-out infinite; }
-          @media (max-height:760px) and (min-width:1024px) { .nexus-atelier-main { padding-top:2.8rem; } .nexus-atelier-identity { width:min(100%,25rem); margin-top:-1.9rem; } .nexus-atelier-form { margin-top:1.5rem; } .nexus-atelier-form > div + div { margin-top:1rem; } .nexus-atelier-submit { margin-top:1.5rem; } }
-          @media (prefers-reduced-motion:reduce) { .nexus-atelier-identity,.nexus-atelier-horizon,.nexus-atelier-horizon-glare,.nexus-atelier-submit { animation:none; } }
+          @keyframes atelierIdentityFloat { 0%,100% { transform:translate3d(0,0,0); filter:brightness(.95) saturate(.93) drop-shadow(0 0 0 rgba(13,177,255,0)); } 50% { transform:translate3d(0,-7px,0); filter:brightness(1.07) saturate(1.08) drop-shadow(0 0 18px rgba(13,177,255,.16)); } }
+          @keyframes atelierHorizonDrift { 0%,100% { transform:scale(1.025) translate3d(-.5%,.45%,0); filter:brightness(.82) saturate(.92); opacity:.72; } 50% { transform:scale(1.065) translate3d(.65%,-1%,0); filter:brightness(1.04) saturate(1.1); opacity:.98; } }
+          @keyframes atelierHorizonGlare { 0%,100% { transform:scale(1.06) translate3d(-2%,.25%,0); opacity:.05; filter:brightness(.75) blur(1px); } 52% { transform:scale(1.14) translate3d(2.6%,-1.6%,0); opacity:.31; filter:brightness(1.55) blur(1.5px); } }
+          @keyframes atelierStatementIn { from { opacity:0; transform:translateY(10px); filter:blur(4px); } to { opacity:1; transform:translateY(0); filter:blur(0); } }
+          @keyframes atelierKickerPulse { 0%,100% { box-shadow:0 0 0 rgba(87,224,255,0); opacity:.68; } 50% { box-shadow:0 0 15px rgba(87,224,255,.72); opacity:1; } }
+          @keyframes atelierButtonBreathe { 0%,100% { background-position:0% 50%; box-shadow:0 16px 35px -18px rgba(0,181,255,.7); } 50% { background-position:100% 50%; box-shadow:0 20px 42px -16px rgba(53,120,255,.82); } }
+          @keyframes atelierPanelIn { from { opacity:0; transform:translate3d(14px,0,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+          @keyframes atelierFieldFocus { 0%,100% { box-shadow:0 0 0 rgba(54,190,255,0); } 50% { box-shadow:0 12px 28px -18px rgba(44,174,255,.68); } }
+          @keyframes atelierAuthenticating { 0%,100% { border-color:rgba(165,243,252,.18); } 50% { border-color:rgba(90,213,255,.52); box-shadow:0 28px 90px rgba(0,0,0,.48),0 0 45px rgba(46,184,255,.18); } }
+          .nexus-atelier-login { background:radial-gradient(ellipse at 17% 76%,rgba(7,66,153,.19),transparent 37%),radial-gradient(ellipse at 82% 18%,rgba(12,92,176,.09),transparent 34%),linear-gradient(145deg,#01040b 0%,#030918 51%,#020713 100%); }
+          .nexus-atelier-atmosphere { position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg,rgba(2,7,18,.12),transparent 53%,rgba(1,5,15,.35)),radial-gradient(circle at 39% 31%,rgba(21,132,255,.1),transparent 24%); }
+          .nexus-atelier-stars { position:absolute; inset:0; pointer-events:none; opacity:.45; background-image:radial-gradient(circle at 16% 23%,rgba(179,236,255,.8) 0 1px,transparent 1.5px),radial-gradient(circle at 36% 16%,rgba(92,201,255,.58) 0 1px,transparent 1.5px),radial-gradient(circle at 56% 31%,rgba(171,219,255,.36) 0 1px,transparent 1.5px),radial-gradient(circle at 83% 19%,rgba(103,193,255,.42) 0 1px,transparent 1.5px),radial-gradient(circle at 75% 74%,rgba(93,188,255,.42) 0 1px,transparent 1.5px); }
+          .nexus-atelier-stage::after { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(90deg,transparent 66%,rgba(1,5,15,.55)); }
+          .nexus-atelier-stage-rail { padding-bottom:clamp(5rem,11vh,8rem); }
+          .nexus-atelier-kicker { display:flex; align-items:center; gap:.58rem; color:rgba(174,229,255,.72); font-size:.64rem; font-weight:700; letter-spacing:.19em; text-transform:uppercase; }
+          .nexus-atelier-kicker-dot { width:.42rem; height:.42rem; border-radius:999px; background:#64d9ff; animation:atelierKickerPulse 3.8s ease-in-out infinite; }
+          .nexus-atelier-identity { width:min(100%,25rem); height:auto; margin:clamp(1.6rem,4.5vh,3.5rem) 0 clamp(1.45rem,3.5vh,2.4rem); object-fit:contain; object-position:left center; }
+          .nexus-atelier-copy { max-width:29rem; }
+          .nexus-atelier-statement { margin:0; color:#f7fbff; font-size:clamp(2rem,3.6vw,4.15rem); font-weight:500; letter-spacing:-.06em; line-height:.97; text-shadow:0 4px 28px rgba(0,0,0,.42); animation:atelierStatementIn .68s cubic-bezier(.2,.78,.2,1) both; }
+          .nexus-atelier-statement strong { color:#7ddcff; font-weight:inherit; }
+          .nexus-atelier-supporting { max-width:25rem; margin:1.2rem 0 0; color:rgba(189,213,231,.7); font-size:.92rem; line-height:1.65; }
+          .nexus-atelier-trust-row { display:flex; flex-wrap:wrap; gap:.65rem 1.05rem; margin-top:2rem; color:rgba(193,228,247,.7); font-size:.68rem; font-weight:600; letter-spacing:.04em; }
+          .nexus-atelier-trust-row span { display:inline-flex; align-items:center; gap:.42rem; }
+          .nexus-atelier-trust-row svg { color:#60dfff; }
+          .nexus-atelier-horizon { position:absolute; inset:auto 0 0; width:100%; height:min(29vh,17rem); min-height:10rem; object-fit:cover; object-position:center bottom; opacity:.72; pointer-events:none; mask-image:linear-gradient(180deg,transparent 0%,#000 35%); }
+          .nexus-atelier-horizon-glare { position:absolute; inset:auto 0 0; width:100%; height:min(29vh,17rem); min-height:10rem; object-fit:cover; object-position:center bottom; mix-blend-mode:screen; opacity:.2; pointer-events:none; mask-image:linear-gradient(180deg,transparent 5%,#000 60%); }
+          .nexus-atelier-auth-stage { background:linear-gradient(165deg,rgba(5,14,30,.38),rgba(1,5,14,.69)); }
+          .nexus-atelier-auth-halo { position:absolute; width:27rem; height:27rem; border-radius:999px; background:rgba(12,115,216,.09); filter:blur(70px); pointer-events:none; }
+          .nexus-atelier-auth-panel { animation:atelierPanelIn .72s cubic-bezier(.2,.78,.2,1) .12s both; }
+          .nexus-atelier-auth-header { background:linear-gradient(135deg,rgba(15,126,213,.13),rgba(4,28,65,.05) 56%,rgba(0,197,255,.08)); }
+          .nexus-atelier-auth-kicker { color:rgba(109,221,255,.92); font-size:.64rem; font-weight:700; letter-spacing:.2em; text-transform:uppercase; }
+          .nexus-atelier-field { border-radius:.75rem; transition:transform .2s ease; }
+          .nexus-atelier-field:focus-within { transform:translateY(-1px); animation:atelierFieldFocus 2.4s ease-in-out infinite; }
+          .nexus-atelier-submit { background-size:100% 100%; }
+          .nexus-atelier-auth-panel.is-authenticating { animation:atelierAuthenticating 1.8s ease-in-out infinite !important; }
+          @media (max-width:1023px) { .nexus-atelier-stage::after { background:linear-gradient(180deg,transparent 62%,rgba(1,5,15,.9)); } .nexus-atelier-stage-rail { padding-bottom:7rem; } .nexus-atelier-identity { width:min(100%,21rem); } .nexus-atelier-horizon,.nexus-atelier-horizon-glare { height:13rem; } }
+          @media (max-width:640px) { .nexus-atelier-preview { justify-content:flex-start; } .nexus-atelier-stage { min-height:31rem; } .nexus-atelier-stage-rail { padding-bottom:5.5rem; } .nexus-atelier-statement { font-size:clamp(2rem,10.5vw,3.1rem); } .nexus-atelier-auth-panel { border-radius:1.15rem; } }
+          @media (prefers-reduced-motion:reduce) { .nexus-atelier-identity,.nexus-atelier-horizon,.nexus-atelier-horizon-glare,.nexus-atelier-kicker-dot,.nexus-atelier-statement,.nexus-atelier-statement strong,.nexus-atelier-auth-panel,.nexus-atelier-submit,.nexus-atelier-auth-panel.is-authenticating { animation:none !important; } }
         `}</style>
       </div>
     );

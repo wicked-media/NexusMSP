@@ -16,13 +16,7 @@ USEFUL_LIFE_YEARS = {
 }
 
 
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
+from app.services.time_utils import parse_iso_datetime as _parse_date
 
 
 @router.get("/asset-depreciation")

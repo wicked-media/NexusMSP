@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState, createContext, useContext, Suspense } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import LoginPage from "@/pages/LoginPage";
-import { Sidebar } from "@/components/Sidebar";
+import { NotificationBell, Sidebar } from "@/components/Sidebar";
+import TechnicianAccountMenu from "@/components/TechnicianAccountMenu";
 import { AICopilotPanel } from "@/components/AICopilotPanel";
 import { routeConfig } from "@/config/routes";
 import { secureStorage } from "@/lib/secureStorage";
@@ -13,6 +14,8 @@ import { ChatPanel } from "@/components/presence/ChatPanel";
 import { usePresenceHeartbeat } from "@/components/presence/PresenceDot";
 import KonamiCRT from "@/components/easter-eggs/KonamiCRT";
 import ShortcutPalette from "@/components/easter-eggs/ShortcutPalette";
+import SeasonalEffects from "@/components/seasonal/SeasonalEffects";
+import NotFoundPage from "@/pages/NotFoundPage";
 import CommandPalette from "@/components/CommandPalette";
 import NexusQuickDock from "@/components/NexusQuickDock";
 import NexusWorkspaceCompass from "@/components/NexusWorkspaceCompass";
@@ -21,16 +24,25 @@ import NexusPrivacyCurtain from "@/components/NexusPrivacyCurtain";
 import UniversalInspector from "@/components/UniversalInspector";
 import { NavCountsProvider } from "@/hooks/useNavCounts";
 import { ClientContextProvider } from "@/contexts/ClientContext";
-import ClientContextBar from "@/components/ClientContextBar";
-import { Menu } from "lucide-react";
+import WeatherStrip from "@/components/ambient/WeatherStrip";
+import { Bot, ChevronRight, Menu, Search } from "lucide-react";
+import { resolveTopbarWorkspace } from "@/lib/topbarWorkspaceContext";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
+// Only the local dev server reaches a directly exposed API on :8000. A
+// production build (including the containerised web tier behind nginx) must use
+// same-origin /api/, which proxies to the API service without publishing it.
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || (
-  LOCAL_HOSTS.has(window.location.hostname)
+  process.env.NODE_ENV === "development" && LOCAL_HOSTS.has(window.location.hostname)
     ? `${window.location.protocol}//${window.location.hostname}:8000`
     : window.location.origin
 );
 export const API = `${BACKEND_URL}/api`;
+// A protected route must not remain on its global loading spinner forever when
+// the local API is restarting or an intermediary leaves the socket open. The
+// recovery state below preserves the session and gives the technician an
+// explicit retry instead.
+const AUTH_BOOTSTRAP_TIMEOUT_MS = 10_000;
 
 // Theme Context
 const ThemeContext = createContext(null);
@@ -179,7 +191,8 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: AUTH_BOOTSTRAP_TIMEOUT_MS,
       });
       setUser(response.data);
       setAuthServiceUnavailable(false);
@@ -315,16 +328,34 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Newly invited technicians complete the versioned readiness flow before
+  // entering operational workspaces. The server derives this flag from the
+  // account-owned checklist, so a browser cannot bypass the requirement by
+  // hiding or changing the UI.
+  const isOnboardingLearningRoute = ["/technician-onboarding", "/nexus-academy"].includes(location.pathname)
+    || (location.pathname === "/documentation-hub" && new URLSearchParams(location.search).get("tab") === "help");
+  if (user.onboarding_required && !isOnboardingLearningRoute) {
+    return <Navigate to="/nexus-academy" state={{ from: location }} replace />;
+  }
+
   return children;
 };
 
 // Main Layout with Sidebar
 const MainLayout = ({ children }) => {
+  const { user, logout, token } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const collaborationWorkspace = location.pathname === "/team-chat";
+  const deviceRecordWorkspace = /^\/devices\/[^/]+$/.test(location.pathname);
+  const restoreSidebarCollapsed = useCallback((value) => {
+    setSidebarCollapsed(Boolean(value));
+  }, []);
 
   useEffect(() => {
     const openCopilot = () => setCopilotOpen(true);
@@ -347,7 +378,7 @@ const MainLayout = ({ children }) => {
   useEffect(() => {
     setFocusMode(false);
     setMobileNavigationOpen(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
 
   useEffect(() => {
     document.documentElement.dataset.focusMode = focusMode ? "true" : "false";
@@ -360,41 +391,91 @@ const MainLayout = ({ children }) => {
     };
   }, [focusMode]);
 
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
+  // Global header context: the active workspace label, resolved from the same
+  // navigation config the sidebar renders so the two never drift.
+  const workspaceContext = resolveTopbarWorkspace(location.pathname);
+
   return (
-    <div className="min-h-screen bg-background flex" style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
+    <div className={`${collaborationWorkspace ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex`} style={{ backgroundColor: "var(--theme-bg, hsl(var(--background)))" }}>
       {!focusMode && mobileNavigationOpen && (
         <button
           type="button"
           aria-label="Close navigation"
-          className="fixed inset-0 z-30 bg-black/65 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-[35] bg-black/65 backdrop-blur-sm md:hidden"
           onClick={() => setMobileNavigationOpen(false)}
         />
       )}
-      {!focusMode && <Sidebar collapsed={sidebarCollapsed} mobileOpen={mobileNavigationOpen} onMobileClose={() => setMobileNavigationOpen(false)} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} onCopilotToggle={() => setCopilotOpen(o => !o)} />}
+      {!focusMode && <Sidebar
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileNavigationOpen}
+        onMobileClose={() => setMobileNavigationOpen(false)}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
+        onCollapsedPreferenceRestore={restoreSidebarCollapsed}
+      />}
       {!focusMode && (
-        <div className="fixed inset-x-0 top-0 z-20 flex h-14 items-center gap-3 border-b border-border/80 bg-background/90 px-3 backdrop-blur-xl md:hidden">
+        <header className={`nx-topbar fixed right-0 top-0 z-30 flex h-14 items-center gap-2 border-b border-border/70 bg-background/90 px-3 shadow-[0_10px_30px_-26px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[left] duration-300 ${sidebarCollapsed ? "left-0 md:left-[64px]" : "left-0 md:left-[240px]"}`} data-testid="global-technician-bar">
           <button
             type="button"
             aria-label="Open navigation"
             onClick={() => { setSidebarCollapsed(false); setMobileNavigationOpen(true); }}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="nx-topbar-icon inline-flex h-9 w-9 items-center justify-center border border-border/80 bg-card text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 md:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="text-sm font-semibold tracking-tight">NexusMSP</span>
+          <span className="text-sm font-semibold tracking-tight md:hidden">NexusMSP</span>
+          {workspaceContext && (
+            <div className="nx-topbar-context hidden min-w-0 items-center gap-1.5 md:flex" data-testid="topbar-workspace-context">
+              {workspaceContext.group && (
+                <>
+                  <span className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/70">{workspaceContext.group}</span>
+                  <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/35" aria-hidden="true" />
+                </>
+              )}
+              <span className="truncate text-sm font-semibold tracking-tight text-foreground" data-testid="topbar-workspace-label">{workspaceContext.label}</span>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent("nexus:open-command-palette"))}
-            className="ml-auto rounded-lg border border-border/70 bg-card/70 px-3 py-2 text-xs text-muted-foreground"
+            className="nx-topbar-search hidden h-9 min-w-[220px] items-center gap-2 rounded-lg border border-border/70 bg-card/55 px-3 text-left text-xs text-muted-foreground transition hover:border-primary/25 hover:bg-card hover:text-foreground md:flex"
+            data-testid="topbar-search"
           >
-            Search
+            <Search className="h-3.5 w-3.5" />
+            <span>Search Nexus</span>
+            <span className="nx-topbar-kbd ml-auto font-mono">Ctrl K</span>
           </button>
-        </div>
+          <div className="ml-auto flex items-center gap-1">
+            {location.pathname === "/" && <WeatherStrip compact />}
+            <button
+              type="button"
+              onClick={() => setCopilotOpen((open) => !open)}
+              className={`hidden h-9 items-center gap-2 rounded-lg px-2.5 text-xs transition sm:flex ${copilotOpen ? "bg-primary/[0.12] text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              aria-pressed={copilotOpen}
+              data-testid="topbar-copilot-toggle"
+            >
+              <Bot className="h-4 w-4" />
+              <span className="hidden xl:inline">Copilot</span>
+            </button>
+            <NotificationBell token={token} placement="topbar" />
+            <TechnicianAccountMenu
+              user={user}
+              theme={theme}
+              onSettings={() => navigate("/my-settings")}
+              onThemeToggle={toggleTheme}
+              onCopilot={() => setCopilotOpen(true)}
+              onLogout={handleLogout}
+            />
+          </div>
+        </header>
       )}
-      <main className={`min-w-0 flex-1 transition-all duration-300 ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[72px]' : 'md:ml-[260px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
-        <div className={`${focusMode ? 'p-4 md:p-8' : 'px-4 pb-24 pt-20 md:p-8'}`}>
-          {!focusMode && <ClientContextBar />}
-          <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""}`}>
+      <main className={`min-w-0 flex-1 transition-all duration-300 ${collaborationWorkspace ? "flex min-h-0 flex-col overflow-hidden" : ""} ${focusMode ? 'ml-0' : sidebarCollapsed ? 'md:ml-[64px]' : 'md:ml-[240px]'} ${copilotOpen ? 'xl:mr-[456px]' : ''}`}>
+        <div className={collaborationWorkspace ? 'flex min-h-0 flex-1 flex-col px-3 pb-3 pt-[68px] md:px-4 md:pb-4 md:pt-[72px]' : focusMode ? 'p-4 md:p-8' : deviceRecordWorkspace ? 'px-4 pb-24 pt-20 md:px-7 md:pb-7 md:pt-[72px]' : 'px-4 pb-24 pt-20 md:px-8 md:pb-8 md:pt-[80px]'}>
+          <div key={location.pathname} className={`nx-page-stage ${focusMode ? "nx-focus-stage" : ""} ${collaborationWorkspace ? "flex min-h-0 flex-1 flex-col" : ""}`}>
             {children}
           </div>
         </div>
@@ -434,17 +515,6 @@ const buildRouteElement = (route) => {
 
 // App Component
 function App() {
-  useEffect(() => {
-    const seedData = async () => {
-      try {
-        await axios.post(`${API}/seed`);
-      } catch (error) {
-        // Ignore if already seeded
-      }
-    };
-    seedData();
-  }, []);
-
   return (
     <ThemeProvider>
     <AuthProvider>
@@ -461,7 +531,7 @@ function App() {
               element={buildRouteElement(route)}
             />
           ))}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
       </NavCountsProvider>
@@ -490,6 +560,7 @@ function AuthedAddons({ token }) {
       <ChatPanel />
       <KonamiCRT />
       <ShortcutPalette />
+      <SeasonalEffects />
       <CommandPalette />
       <NexusQuickDock />
       <NexusWorkspaceCompass />

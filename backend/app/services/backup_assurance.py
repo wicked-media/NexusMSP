@@ -132,11 +132,11 @@ def simulate_recovery(
 ) -> dict[str, Any]:
     """Preview recovery readiness. This function never performs a restore."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    aliases = {client_id.strip().lower(), client_name.strip().lower()} - {""}
-
     def belongs(row: dict[str, Any]) -> bool:
-        values = {str(row.get("client_id") or "").strip().lower(), str(row.get("client_name") or "").strip().lower()}
-        return bool(aliases & values)
+        # A client display name is intentionally not used as a relationship
+        # key: customers can share or rename it. Missing legacy IDs remain
+        # unassessed instead of being attributed to the wrong customer.
+        return str(row.get("client_id") or "").strip() == client_id.strip()
 
     client_jobs = [row for row in jobs if belongs(row)]
     client_records = [row for row in records if belongs(row)]

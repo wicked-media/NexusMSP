@@ -13,7 +13,6 @@ import re
 import uuid
 from typing import Any
 
-from app.database import db
 from app.services.event_backbone import persist_platform_event
 
 

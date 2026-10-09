@@ -6,6 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DollarSign, Ticket, Clock } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import SupportDebtPanel from "@/components/billing/SupportDebtPanel";
 
 export default function CostPerTicketPage() {
   const { token } = useAuth();
@@ -21,8 +23,7 @@ export default function CostPerTicketPage() {
 
   return (
     <div className="space-y-6" data-testid="cost-per-ticket-page">
-      <div><h1 className="text-2xl font-bold tracking-tight">Cost-Per-Ticket Analytics</h1>
-        <p className="text-muted-foreground text-sm mt-1">True cost analysis combining labour and linked supplier purchase orders.</p></div>
+      <OperationalPageHeader eyebrow="Service economics · cost provenance" title="Cost-Per-Ticket Analytics" description="Understand true delivery cost from recorded labour and linked supplier purchasing evidence." icon={Ticket} tone="emerald" signal={data.summary.total_tickets > 0 ? "ready" : undefined} />
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
         <Card><CardContent className="pt-4 pb-3 text-center"><Ticket className="w-4 h-4 mx-auto mb-1" /><p className="text-xl font-bold">{data.summary.total_tickets}</p><p className="text-xs text-muted-foreground">Total Tickets</p></CardContent></Card>
@@ -84,6 +85,8 @@ export default function CostPerTicketPage() {
           </Tabs>
         </CardContent>
       </Card>
+
+      <SupportDebtPanel headers={{ Authorization: `Bearer ${token}` }} />
     </div>
   );
 }

@@ -12,6 +12,8 @@ from urllib.parse import urlencode
 from typing import Optional
 from app.database import db
 from app.auth import get_current_user
+from app.services.microsoft_graph_connection import load_connect_app_config, organisation_tenant_id
+from app.services.secret_store import decrypt_secret, encrypt_secret
 
 router = APIRouter()
 
@@ -34,19 +36,46 @@ def _calendar_pkce():
     return verifier, challenge
 
 
-def _frontend_url():
-    return os.environ.get("FRONTEND_URL", "http://127.0.0.1:3001").rstrip("/")
+def _frontend_url(request: Request | None = None) -> str:
+    for candidate in (os.environ.get("FRONTEND_URL", ""), os.environ.get("REACT_APP_BACKEND_URL", "")):
+        if str(candidate or "").strip():
+            return str(candidate).rstrip("/")
+    if request is not None:
+        return str(request.base_url).rstrip("/")
+    return "http://127.0.0.1:3001"
 
 
 async def _microsoft_calendar_config():
     """Use the existing Microsoft app registration for delegated calendar consent."""
     config = await db.settings.find_one({"type": "microsoft_sso"}, {"_id": 0}) or {}
-    if not config.get("tenant_id") or not config.get("client_id"):
-        raise HTTPException(
-            status_code=400,
-            detail="Set the Microsoft Entra tenant ID and client ID in Settings > Sign-in & Access before connecting a calendar.",
-        )
-    return config
+    if config.get("tenant_id") and config.get("client_id"):
+        return config
+    app_config = await load_connect_app_config()
+    tenant = await organisation_tenant_id()
+    if app_config.get("client_id") and tenant:
+        return {**config, "client_id": app_config["client_id"], "client_secret": app_config.get("client_secret", ""), "tenant_id": tenant}
+    raise HTTPException(
+        status_code=400,
+        detail="Set the Microsoft Entra tenant ID and client ID in Settings > Sign-in & Access before connecting a calendar.",
+    )
+
+
+def _encrypted_calendar_credentials(*, access_token: str, refresh_token: str, expires_at: str, scope: str) -> dict:
+    """Calendar tokens are stored only in their encrypted vault form."""
+    return {
+        "access_token_encrypted": encrypt_secret(access_token),
+        "refresh_token_encrypted": encrypt_secret(refresh_token),
+        "expires_at": expires_at,
+        "scope": scope,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _calendar_tokens(credentials: dict) -> tuple[str, str]:
+    """Read the calendar tokens, tolerating the legacy plaintext fields."""
+    access = decrypt_secret(str(credentials.get("access_token_encrypted") or "")) or str(credentials.get("access_token") or "")
+    refresh = decrypt_secret(str(credentials.get("refresh_token_encrypted") or "")) or str(credentials.get("refresh_token") or "")
+    return access, refresh
 
 
 def _calendar_redirect_uri(request: Request, config: dict):
@@ -93,7 +122,7 @@ async def start_microsoft_calendar_connect(request: Request, current_user: dict 
 @router.get("/scheduling/microsoft365/callback")
 async def complete_microsoft_calendar_connect(request: Request, code: str = "", state: str = "", error: str = ""):
     """Exchange the Microsoft authorization response and save the calendar connection."""
-    frontend = _frontend_url()
+    frontend = _frontend_url(request)
     if error or not code or not state:
         reason = error or "missing_authorization_response"
         return RedirectResponse(f"{frontend}/settings?tab=calendar&calendar_error={reason}", status_code=302)
@@ -142,13 +171,12 @@ async def complete_microsoft_calendar_connect(request: Request, code: str = "", 
             "last_synced_at": now.isoformat(),
             "updated_at": now.isoformat(),
         }
-        credentials = {
-            "access_token": tokens.get("access_token", ""),
-            "refresh_token": tokens.get("refresh_token", ""),
-            "expires_at": (now + timedelta(seconds=int(tokens.get("expires_in", 3600)))).isoformat(),
-            "scope": tokens.get("scope", ""),
-            "updated_at": now.isoformat(),
-        }
+        credentials = _encrypted_calendar_credentials(
+            access_token=tokens.get("access_token", ""),
+            refresh_token=tokens.get("refresh_token", ""),
+            expires_at=(now + timedelta(seconds=int(tokens.get("expires_in", 3600)))).isoformat(),
+            scope=tokens.get("scope", ""),
+        )
         await db.settings.update_one({"key": "dispatch_calendar_connection"}, {"$set": {"key": "dispatch_calendar_connection", "value": connection}}, upsert=True)
         await db.settings.update_one({"key": "dispatch_calendar_credentials"}, {"$set": {"key": "dispatch_calendar_credentials", "value": credentials}}, upsert=True)
         await db.activity_logs.insert_one({
@@ -211,7 +239,22 @@ async def _microsoft_calendar_access_token() -> tuple[str | None, dict]:
 
     credentials_doc = await db.settings.find_one({"key": "dispatch_calendar_credentials"}, {"_id": 0}) or {}
     credentials = credentials_doc.get("value", {})
-    access_token = credentials.get("access_token")
+    if "access_token" in credentials or "refresh_token" in credentials:
+        # Migrate the legacy plaintext copy into the encrypted vault fields so
+        # the stored credential document never keeps readable token material.
+        legacy_access, legacy_refresh = _calendar_tokens(credentials)
+        credentials = _encrypted_calendar_credentials(
+            access_token=legacy_access,
+            refresh_token=legacy_refresh,
+            expires_at=str(credentials.get("expires_at") or ""),
+            scope=str(credentials.get("scope") or ""),
+        )
+        await db.settings.update_one(
+            {"key": "dispatch_calendar_credentials"},
+            {"$set": {"key": "dispatch_calendar_credentials", "value": credentials}},
+            upsert=True,
+        )
+    access_token, refresh_token = _calendar_tokens(credentials)
     expires_at = credentials.get("expires_at")
     now = datetime.now(timezone.utc)
     try:
@@ -223,7 +266,6 @@ async def _microsoft_calendar_access_token() -> tuple[str | None, dict]:
     if access_token and expires > now + timedelta(minutes=2):
         return access_token, connection
 
-    refresh_token = credentials.get("refresh_token")
     if not refresh_token:
         return None, connection
     config = await _microsoft_calendar_config()
@@ -235,16 +277,14 @@ async def _microsoft_calendar_access_token() -> tuple[str | None, dict]:
     if response.status_code != 200:
         return None, connection
     tokens = response.json()
-    refreshed = {
-        **credentials,
-        "access_token": tokens.get("access_token", ""),
-        "refresh_token": tokens.get("refresh_token") or refresh_token,
-        "expires_at": (now + timedelta(seconds=int(tokens.get("expires_in", 3600)))).isoformat(),
-        "scope": tokens.get("scope", credentials.get("scope", "")),
-        "updated_at": now.isoformat(),
-    }
+    refreshed = _encrypted_calendar_credentials(
+        access_token=tokens.get("access_token", ""),
+        refresh_token=tokens.get("refresh_token") or refresh_token,
+        expires_at=(now + timedelta(seconds=int(tokens.get("expires_in", 3600)))).isoformat(),
+        scope=tokens.get("scope", credentials.get("scope", "")),
+    )
     await db.settings.update_one({"key": "dispatch_calendar_credentials"}, {"$set": {"key": "dispatch_calendar_credentials", "value": refreshed}}, upsert=True)
-    return refreshed["access_token"] or None, connection
+    return tokens.get("access_token") or None, connection
 
 
 async def sync_schedule_to_microsoft(schedule: dict) -> dict:

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Body, HTTPException, Header
 from app.database import db
 from app.auth import get_current_user
+from app.services.scope_permissions import assert_client_scope, scoped_query, tenant_scoped_query
 from datetime import datetime, timezone
 import uuid
 
@@ -27,14 +28,19 @@ def _active_typers(session_id: str, exclude_user_id: str | None = None) -> list[
     return active
 
 
-async def _require_active_session(session_id: str) -> dict:
-    """Load an open support conversation before changing its live state."""
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
+async def _require_session(session_id: str, user: dict, *, active: bool = False) -> dict:
+    """Load a tenant/client-authorised support conversation for a technician."""
+    session = await db.chat_sessions.find_one(tenant_scoped_query(user, {"id": session_id}), {"_id": 0})
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.get("status") != "active":
+    await assert_client_scope(user, session.get("client_id"), operation="live_chat.session", mask_not_found=True)
+    if active and session.get("status") != "active":
         raise HTTPException(status_code=409, detail="This chat session is closed")
     return session
+
+
+async def _require_active_session(session_id: str, user: dict) -> dict:
+    return await _require_session(session_id, user, active=True)
 
 
 async def _mirror_ticket_chat_activity(
@@ -97,12 +103,14 @@ async def _agent_live_chat_session(x_agent_token: str | None) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     session = {
         "id": str(uuid.uuid4())[:8], "agent_device_id": agent["id"],
+        "tenant_id": agent.get("tenant_id") or "nexus-local",
         "client_id": agent.get("client_id", ""), "client_name": agent.get("client_name", ""),
         "visitor_name": agent.get("hostname") or "Device user", "subject": "Nexus Agent live support",
         "priority": "normal", "status": "active", "assigned_to": "", "assigned_name": "",
         "created_at": now, "updated_at": now,
     }
     await db.chat_sessions.insert_one(session)
+    session.pop("_id", None)
     return session
 
 
@@ -133,6 +141,7 @@ async def send_agent_visitor_message(payload: dict = Body(...), x_agent_token: s
         occurred_at=now,
     )
     _typing_by_session.get(session["id"], {}).pop("visitor", None)
+    msg.pop("_id", None)
     return msg
 
 
@@ -147,6 +156,9 @@ async def set_agent_visitor_typing(payload: dict = Body(...), x_agent_token: str
     return {"typing_users": _active_typers(session["id"], "visitor")}
 
 # ====== Default canned responses (seed if empty) ======
+LEGACY_REMOTE_CANNED_CONTENT = "I'd like to remote into your device to investigate. Please accept the RustDesk prompt when it appears."
+NEXUS_REMOTE_CANNED_CONTENT = "I'd like to start a Nexus Remote support session to investigate. Please accept the Nexus Remote request when it appears."
+
 DEFAULT_CANNED_RESPONSES = [
     {"shortcut": "/hello", "title": "Greeting", "content": "Hi {visitor}, thanks for reaching out. How can I help today?"},
     {"shortcut": "/check", "title": "Investigating", "content": "Let me check that for you — one moment, please."},
@@ -154,7 +166,7 @@ DEFAULT_CANNED_RESPONSES = [
     {"shortcut": "/ticket", "title": "Ticket created", "content": "I've created a ticket for this issue. You'll receive updates via email."},
     {"shortcut": "/pw-reset", "title": "Password reset", "content": "To reset your password, please visit the account page and click 'Forgot password'."},
     {"shortcut": "/thanks", "title": "Thanks/closing", "content": "Glad I could help! Is there anything else I can assist with today?"},
-    {"shortcut": "/remote", "title": "Remote session", "content": "I'd like to remote into your device to investigate. Please accept the RustDesk prompt when it appears."},
+    {"shortcut": "/remote", "title": "Remote session", "content": NEXUS_REMOTE_CANNED_CONTENT},
 ]
 
 
@@ -171,7 +183,7 @@ async def get_chat_sessions(
     if search:
         rx = {"$regex": search, "$options": "i"}
         query["$or"] = [{"visitor_name": rx}, {"client_name": rx}, {"subject": rx}, {"visitor_email": rx}]
-    sessions = await db.chat_sessions.find(query, {"_id": 0}).sort("updated_at", -1).to_list(500)
+    sessions = await db.chat_sessions.find(tenant_scoped_query(user, scoped_query(user, query)), {"_id": 0}).sort("updated_at", -1).to_list(500)
     # Enrich with unread count + last message preview
     for s in sessions:
         last = await db.chat_messages.find_one(
@@ -188,13 +200,13 @@ async def get_chat_sessions(
 @router.post("/devices/{device_id}/open")
 async def open_device_chat(device_id: str, user=Depends(get_current_user)):
     """Open the single, auditable live-support session bound to an asset."""
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+    device = await db.devices.find_one(tenant_scoped_query(user, scoped_query(user, {"id": device_id})), {"_id": 0})
     if not device:
         raise HTTPException(status_code=404, detail="Asset not found")
     agent_id = device.get("nexus_agent_id")
     if not agent_id:
         raise HTTPException(status_code=409, detail="This asset does not have a NexusOps Agent enrolled")
-    agent = await db.nexus_agents.find_one({"id": agent_id, "is_active": True}, {"_id": 0})
+    agent = await db.nexus_agents.find_one(tenant_scoped_query(user, scoped_query(user, {"id": agent_id, "is_active": True})), {"_id": 0})
     if not agent:
         raise HTTPException(status_code=409, detail="The enrolled NexusOps Agent is unavailable")
     session = await db.chat_sessions.find_one({"agent_device_id": agent_id, "status": "active"}, {"_id": 0})
@@ -202,6 +214,7 @@ async def open_device_chat(device_id: str, user=Depends(get_current_user)):
     if not session:
         session = {
             "id": str(uuid.uuid4())[:8], "agent_device_id": agent_id, "asset_id": device_id,
+            "tenant_id": user.get("tenant_id") or "nexus-local",
             "client_id": device.get("client_id", ""), "client_name": device.get("client_name", ""),
             "visitor_name": agent.get("hostname") or device.get("name") or "Device user",
             "subject": f"Device support — {device.get('name') or agent.get('hostname') or 'asset'}",
@@ -209,6 +222,7 @@ async def open_device_chat(device_id: str, user=Depends(get_current_user)):
             "assigned_name": user.get("name", ""), "created_at": now, "updated_at": now,
         }
         await db.chat_sessions.insert_one(session)
+        session.pop("_id", None)
         await db.chat_messages.insert_one({"id": str(uuid.uuid4())[:8], "session_id": session["id"], "sender_type": "system", "sender_name": "NexusMSP", "content": f"{user.get('name') or 'A technician'} opened live support for this asset.", "read": True, "sent_at": now})
     elif not session.get("assigned_to"):
         await db.chat_sessions.update_one({"id": session["id"]}, {"$set": {"assigned_to": user.get("id", ""), "assigned_name": user.get("name", ""), "updated_at": now}})
@@ -218,21 +232,22 @@ async def open_device_chat(device_id: str, user=Depends(get_current_user)):
 
 @router.get("/stats")
 async def chat_stats(user=Depends(get_current_user)):
-    active = await db.chat_sessions.count_documents({"status": "active"})
-    closed = await db.chat_sessions.count_documents({"status": "closed"})
-    mine = await db.chat_sessions.count_documents({"status": "active", "assigned_to": user.get("id", "")})
-    unassigned = await db.chat_sessions.count_documents({"status": "active", "$or": [{"assigned_to": ""}, {"assigned_to": None}]})
+    scoped_sessions = tenant_scoped_query(user, scoped_query(user))
+    active = await db.chat_sessions.count_documents(tenant_scoped_query(user, scoped_query(user, {"status": "active"})))
+    closed = await db.chat_sessions.count_documents(tenant_scoped_query(user, scoped_query(user, {"status": "closed"})))
+    mine = await db.chat_sessions.count_documents(tenant_scoped_query(user, scoped_query(user, {"status": "active", "assigned_to": user.get("id", "")})))
+    unassigned = await db.chat_sessions.count_documents(tenant_scoped_query(user, scoped_query(user, {"status": "active", "$or": [{"assigned_to": ""}, {"assigned_to": None}]})))
+    session_rows = await db.chat_sessions.find(scoped_sessions, {"_id": 0, "id": 1}).to_list(5000)
+    session_ids = [row.get("id") for row in session_rows if row.get("id")]
     total_msgs_today = await db.chat_messages.count_documents(
-        {"sent_at": {"$gte": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()}}
+        {"session_id": {"$in": session_ids}, "sent_at": {"$gte": datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()}}
     )
     return {"active": active, "closed": closed, "mine": mine, "unassigned": unassigned, "messages_today": total_msgs_today}
 
 
 @router.get("/sessions/{session_id}")
 async def get_session_messages(session_id: str, user=Depends(get_current_user)):
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _require_session(session_id, user)
     messages = await db.chat_messages.find({"session_id": session_id}, {"_id": 0}).sort("sent_at", 1).to_list(1000)
 
     # Mark visitor messages as read when agent opens the session
@@ -273,8 +288,10 @@ async def get_session_messages(session_id: str, user=Depends(get_current_user)):
 
 @router.post("/sessions")
 async def create_chat_session(payload: dict = Body(...), user=Depends(get_current_user)):
+    await assert_client_scope(user, payload.get("client_id"), operation="live_chat.session.create")
     doc = {
         "id": str(uuid.uuid4())[:8],
+        "tenant_id": user.get("tenant_id") or "nexus-local",
         "client_id": payload.get("client_id", ""),
         "client_name": payload.get("client_name", ""),
         "visitor_name": payload.get("visitor_name", "Anonymous"),
@@ -294,7 +311,7 @@ async def create_chat_session(payload: dict = Body(...), user=Depends(get_curren
 
 @router.post("/sessions/{session_id}/messages")
 async def send_message(session_id: str, payload: dict = Body(...), user=Depends(get_current_user)):
-    session = await _require_active_session(session_id)
+    session = await _require_active_session(session_id, user)
     content = str(payload.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="Message content is required")
@@ -328,7 +345,7 @@ async def send_message(session_id: str, payload: dict = Body(...), user=Depends(
 @router.post("/sessions/{session_id}/typing")
 async def set_session_typing(session_id: str, payload: dict = Body(...), user=Depends(get_current_user)):
     """Refresh or clear the authenticated technician's composing state."""
-    await _require_active_session(session_id)
+    await _require_active_session(session_id, user)
     user_id = str(user.get("id") or "")
     participants = _typing_by_session.setdefault(session_id, {})
     if payload.get("typing"):
@@ -345,17 +362,13 @@ async def set_session_typing(session_id: str, payload: dict = Body(...), user=De
 
 @router.get("/sessions/{session_id}/typing")
 async def get_session_typing(session_id: str, user=Depends(get_current_user)):
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 1})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    await _require_session(session_id, user)
     return {"typing_users": _active_typers(session_id, str(user.get("id") or ""))}
 
 
 @router.post("/sessions/{session_id}/close")
 async def close_session(session_id: str, user=Depends(get_current_user)):
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _require_session(session_id, user)
     if session.get("status") == "closed":
         return {"message": "Session already closed", "already_closed": True}
     now = datetime.now(timezone.utc).isoformat()
@@ -389,11 +402,14 @@ async def close_session(session_id: str, user=Depends(get_current_user)):
 @router.post("/sessions/{session_id}/transfer")
 async def transfer_session(session_id: str, payload: dict = Body(...), user=Depends(get_current_user)):
     """Transfer an active chat session to another agent/team."""
-    session = await _require_active_session(session_id)
+    session = await _require_active_session(session_id, user)
     target_user_id = payload.get("agent_id")
     if not target_user_id:
         raise HTTPException(status_code=400, detail="agent_id required")
-    target = await db.users.find_one({"id": target_user_id}, {"_id": 0, "id": 1, "name": 1})
+    target = await db.users.find_one(
+        tenant_scoped_query(user, {"id": target_user_id, "is_active": {"$ne": False}, "archived": {"$ne": True}}),
+        {"_id": 0, "id": 1, "name": 1},
+    )
     if not target:
         raise HTTPException(status_code=404, detail="Target agent not found")
 
@@ -427,9 +443,7 @@ async def transfer_session(session_id: str, payload: dict = Body(...), user=Depe
 
 @router.post("/sessions/{session_id}/create-ticket")
 async def create_ticket_from_chat(session_id: str, user=Depends(get_current_user)):
-    session = await db.chat_sessions.find_one({"id": session_id}, {"_id": 0})
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await _require_session(session_id, user)
     if session.get("ticket_id"):
         return {"ticket_id": session["ticket_id"], "message": "Existing ticket linked to this chat", "existing": True}
 
@@ -439,6 +453,7 @@ async def create_ticket_from_chat(session_id: str, user=Depends(get_current_user
     now = datetime.now(timezone.utc).isoformat()
     ticket = {
         "id": f"TKT-CHAT-{str(uuid.uuid4())[:6].upper()}",
+        "tenant_id": user.get("tenant_id") or "nexus-local",
         "title": session.get("subject") or f"Chat inquiry from {session.get('visitor_name', 'visitor')}",
         "description": f"Created from live chat session.\n\nTranscript:\n{transcript}",
         "client_id": session.get("client_id", ""),
@@ -467,24 +482,41 @@ async def create_ticket_from_chat(session_id: str, user=Depends(get_current_user
 
 
 # ====== Canned Responses ======
+async def _upgrade_legacy_remote_canned_response(user: dict) -> None:
+    """Replace only Nexus's retired default; leave tenant customisations intact."""
+    await db.chat_canned_responses.update_many(
+        tenant_scoped_query(user, {"shortcut": "/remote", "content": LEGACY_REMOTE_CANNED_CONTENT}),
+        {"$set": {"content": NEXUS_REMOTE_CANNED_CONTENT, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+
+
 @router.get("/canned-responses")
 async def list_canned_responses(user=Depends(get_current_user)):
-    docs = await db.chat_canned_responses.find({}, {"_id": 0}).sort("shortcut", 1).to_list(200)
+    await _upgrade_legacy_remote_canned_response(user)
+    scope = tenant_scoped_query(user)
+    docs = await db.chat_canned_responses.find(scope, {"_id": 0}).sort("shortcut", 1).to_list(200)
     if not docs:
         # seed defaults
         for r in DEFAULT_CANNED_RESPONSES:
-            await db.chat_canned_responses.insert_one({"id": str(uuid.uuid4())[:8], **r, "created_at": datetime.now(timezone.utc).isoformat()})
-        docs = await db.chat_canned_responses.find({}, {"_id": 0}).sort("shortcut", 1).to_list(200)
+            await db.chat_canned_responses.insert_one({"id": str(uuid.uuid4())[:8], "tenant_id": user.get("tenant_id") or "nexus-local", **r, "created_at": datetime.now(timezone.utc).isoformat()})
+        docs = await db.chat_canned_responses.find(scope, {"_id": 0}).sort("shortcut", 1).to_list(200)
     return docs
 
 
 @router.post("/canned-responses")
 async def create_canned_response(payload: dict = Body(...), user=Depends(get_current_user)):
+    shortcut = str(payload.get("shortcut") or "").strip().lower()
+    content = str(payload.get("content") or "").strip()
+    if not shortcut.startswith("/") or len(shortcut) > 50 or not content or len(content) > 5000:
+        raise HTTPException(status_code=400, detail="Provide a slash shortcut and a response up to 5,000 characters")
+    if await db.chat_canned_responses.find_one(tenant_scoped_query(user, {"shortcut": shortcut}), {"_id": 1}):
+        raise HTTPException(status_code=409, detail="That canned-response shortcut already exists")
     doc = {
         "id": str(uuid.uuid4())[:8],
-        "shortcut": payload.get("shortcut", ""),
-        "title": payload.get("title", ""),
-        "content": payload.get("content", ""),
+        "tenant_id": user.get("tenant_id") or "nexus-local",
+        "shortcut": shortcut,
+        "title": str(payload.get("title") or "").strip()[:160],
+        "content": content,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": user.get("name", ""),
     }
@@ -494,7 +526,7 @@ async def create_canned_response(payload: dict = Body(...), user=Depends(get_cur
 
 @router.delete("/canned-responses/{cid}")
 async def delete_canned_response(cid: str, user=Depends(get_current_user)):
-    res = await db.chat_canned_responses.delete_one({"id": cid})
+    res = await db.chat_canned_responses.delete_one(tenant_scoped_query(user, {"id": cid}))
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Deleted"}
@@ -504,7 +536,7 @@ async def delete_canned_response(cid: str, user=Depends(get_current_user)):
 async def list_available_agents(user=Depends(get_current_user)):
     """List users available to receive transfers."""
     users = await db.users.find(
-        {"$or": [{"role": "admin"}, {"role": "tech"}, {"is_admin": True}]},
+        tenant_scoped_query(user, {"$or": [{"role": "admin"}, {"role": "tech"}, {"is_admin": True}], "is_active": {"$ne": False}, "archived": {"$ne": True}}),
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
     ).to_list(200)
     return users

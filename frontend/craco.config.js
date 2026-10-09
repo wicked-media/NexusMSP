@@ -63,6 +63,19 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
+  // In the sandboxed full-stack preview the browser reaches the app through a
+  // single origin, so same-origin /api calls are forwarded to the FastAPI
+  // backend started by scripts/dev-stack.sh. NEXUS_PROXY_TARGET overrides the
+  // target when the API runs elsewhere.
+  devServerConfig.proxy = {
+    "/api": {
+      target: process.env.NEXUS_PROXY_TARGET || "http://127.0.0.1:8000",
+      changeOrigin: true,
+      secure: false,
+    },
+    ...(devServerConfig.proxy || {}),
+  };
+
   // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;

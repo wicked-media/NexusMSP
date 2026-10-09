@@ -10,8 +10,7 @@ from app.services.activity import log_activity
 router = APIRouter()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _actor(user: dict) -> str:

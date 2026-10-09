@@ -17,6 +17,7 @@ import {
   CheckCircle2, AlertTriangle, XCircle, TrendingUp,
 } from "lucide-react";
 import { PageShell, MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const SERVICE_ICONS = {
   dmarc_monitoring: "📊",
@@ -106,24 +107,14 @@ export default function SupedCommandCenterPage() {
       </MetricStrip>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Mail className="w-6 h-6 text-fuchsia-400" />Suped Command Center
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              DMARC, SPF, and email authentication coverage across your MSP book.
-            </p>
-          </div>
-          <div className="flex gap-2">
+        <OperationalPageHeader eyebrow="Email assurance · domain posture" title="Suped Command Center" description="Review DMARC, SPF and email-authentication coverage across the permitted client portfolio." icon={Mail} tone="violet" signal={(dashboard?.unprotected ?? 0) > 0 ? "attention" : "ready"} actions={<>
             <Button variant="outline" size="sm" asChild data-testid="suped-configure-btn">
               <Link to="/settings?tab=integrations&anchor=suped-settings-card"><SettingsIcon className="w-3 h-3 mr-1" />Settings</Link>
             </Button>
             <Button size="sm" variant="outline" onClick={load} disabled={loading} data-testid="suped-refresh-btn">
               {loading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}Refresh
             </Button>
-          </div>
-        </div>
+          </>} />
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList data-testid="suped-tabs">

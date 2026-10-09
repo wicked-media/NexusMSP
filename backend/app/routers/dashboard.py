@@ -1,13 +1,119 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
-from typing import List, Optional, Dict, Any
+import asyncio
+import logging
+
+from fastapi import APIRouter, Depends
+from typing import List, Any
 from datetime import datetime, timezone, timedelta
-import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.scope_permissions import scoped_query, tenant_scoped_query
 from app.models import *
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+# The dashboard must remain responsive even when a customer PBX is offline or
+# its remote API is slow. Detailed live PBX troubleshooting belongs in Voice;
+# this small budget only covers optional call activity in the shared feed.
+DASHBOARD_PBX_ACTIVITY_TIMEOUT_SECONDS = 2.0
+
+
+def _report_scope(current_user: dict, query: dict | None = None, *, field: str = "client_id") -> dict:
+    """Apply both tenant and client scope to evidence used by dashboard reports."""
+    return scoped_query(current_user, tenant_scoped_query(current_user, query), field=field, site_field=None)
+
+
+def _report_number(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _report_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ticket_resolution_hours(ticket: dict) -> float | None:
+    started = _report_timestamp(ticket.get("created_at"))
+    finished = next((_report_timestamp(ticket.get(field)) for field in ("resolved_at", "closed_at", "completed_at") if _report_timestamp(ticket.get(field))), None)
+    if not started or not finished or finished < started:
+        return None
+    return (finished - started).total_seconds() / 3600
+
+
+def _ticket_sla_met(ticket: dict) -> bool | None:
+    finished = next((_report_timestamp(ticket.get(field)) for field in ("resolved_at", "closed_at", "completed_at") if _report_timestamp(ticket.get(field))), None)
+    deadline = next((_report_timestamp(ticket.get(field)) for field in ("sla_due_at", "resolution_due_at", "due_at") if _report_timestamp(ticket.get(field))), None)
+    if not finished or not deadline:
+        return None
+    return finished <= deadline
+
+
+async def _recent_yeastar_call_activity(limit: int, current_user: dict) -> list[dict]:
+    """Return best-effort Yeastar call entries without becoming dashboard truth.
+
+    This intentionally uses the same configured PBX credentials as the Voice
+    workspace, but the caller applies a short overall timeout. A slow remote
+    endpoint therefore omits only optional call activity rather than delaying
+    the technician's landing page.
+    """
+    from app.routers.yeastar import _yeastar_api_get, _yeastar_get_token
+
+    activities: list[dict] = []
+    yeastar_pbxs = await db.yeastar_pbxs.find(
+        scoped_query(
+            current_user,
+            {"enabled": {"$ne": False}},
+            site_field=None,
+        ),
+        {
+            "_id": 0,
+            "id": 1,
+            "name": 1,
+            "client_name": 1,
+            "pbx_url": 1,
+            "client_api_id": 1,
+            "client_secret": 1,
+            "tls_validation": 1,
+        },
+    ).to_list(20)
+
+    for yeastar_pbx in yeastar_pbxs:
+        yeastar_token = await _yeastar_get_token(yeastar_pbx)
+        if not yeastar_token:
+            continue
+        cdr_data = await _yeastar_api_get(
+            "cdr/list",
+            {"page": 1, "page_size": 5},
+            settings=yeastar_pbx,
+            token=yeastar_token,
+        )
+        if not isinstance(cdr_data, dict) or cdr_data.get("errcode") != 0:
+            continue
+        for cdr in (cdr_data.get("data", []) or [])[:5]:
+            call_from = cdr.get("call_from", "")
+            call_to = cdr.get("call_to", "")
+            disposition = cdr.get("disposition", "").upper()
+            icon = "phone-missed" if disposition in ("NO ANSWER", "FAILED") else "phone"
+            title_prefix = "Missed call" if disposition in ("NO ANSWER", "FAILED") else f"{cdr.get('call_type', 'Call')} call"
+            activities.append({
+                "id": f"cdr-{yeastar_pbx.get('id', '')}-{cdr.get('id', '')}",
+                "type": "call",
+                "icon": icon,
+                "title": f"{title_prefix}: {call_from} -> {call_to}",
+                "description": f"{yeastar_pbx.get('client_name') or yeastar_pbx.get('name') or 'Client PBX'} | Duration: {cdr.get('duration', 0)}s | {disposition}",
+                "user": call_from.split("<")[0].strip() if "<" in call_from else call_from,
+                "timestamp": cdr.get("time", datetime.now(timezone.utc).isoformat()),
+                "meta": {"direction": cdr.get("call_type", "internal").lower(), "duration": cdr.get("duration", 0)},
+            })
+    return activities[:limit]
 
 # ============== DASHBOARD ENDPOINTS ==============
 
@@ -150,35 +256,18 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
             "ref_type": "device", "ref_id": a.get("device_id"),
         })
 
-    # Yeastar call log entries (live from client-linked PBXs)
+    # Yeastar call activity is optional enrichment. Do not let an unreachable
+    # PBX hold the shared dashboard request open; the frontend's own request
+    # timeout is a final safety net, not the normal dashboard control flow.
     try:
-        from datetime import timezone as tz
-        from app.routers.yeastar import _yeastar_api_get, _yeastar_get_token
-        yeastar_pbxs = await db.yeastar_pbxs.find(
-            {"enabled": {"$ne": False}},
-            {"_id": 0, "id": 1, "name": 1, "client_name": 1, "pbx_url": 1, "client_api_id": 1, "client_secret": 1, "tls_validation": 1},
-        ).to_list(20)
-        for yeastar_pbx in yeastar_pbxs:
-            yeastar_token = await _yeastar_get_token(yeastar_pbx)
-            if yeastar_token:
-                cdr_data = await _yeastar_api_get("cdr/list", {"page": 1, "page_size": 5}, settings=yeastar_pbx)
-                if cdr_data and cdr_data.get("errcode") == 0:
-                    for cdr in (cdr_data.get("data", []) or [])[:5]:
-                        call_from = cdr.get("call_from", "")
-                        call_to = cdr.get("call_to", "")
-                        disp = cdr.get("disposition", "").upper()
-                        icon = "phone-missed" if disp in ("NO ANSWER", "FAILED") else "phone"
-                        title_prefix = "Missed call" if disp in ("NO ANSWER", "FAILED") else f"{cdr.get('call_type', 'Call')} call"
-                        activities.append({
-                            "id": f"cdr-{yeastar_pbx.get('id', '')}-{cdr.get('id','')}", "type": "call", "icon": icon,
-                            "title": f"{title_prefix}: {call_from} -> {call_to}",
-                            "description": f"{yeastar_pbx.get('client_name') or yeastar_pbx.get('name') or 'Client PBX'} | Duration: {cdr.get('duration', 0)}s | {disp}",
-                            "user": call_from.split("<")[0].strip() if "<" in call_from else call_from,
-                            "timestamp": cdr.get("time", datetime.now(tz.utc).isoformat()),
-                            "meta": {"direction": cdr.get("call_type", "internal").lower(), "duration": cdr.get("duration", 0)}
-                        })
-    except Exception as e:
-        logger.debug(f"Activity feed Yeastar CDR fetch skipped: {e}")
+        activities.extend(await asyncio.wait_for(
+            _recent_yeastar_call_activity(limit, current_user),
+            timeout=DASHBOARD_PBX_ACTIVITY_TIMEOUT_SECONDS,
+        ))
+    except TimeoutError:
+        logger.debug("Dashboard activity feed skipped slow Yeastar enrichment")
+    except Exception as exc:
+        logger.debug("Dashboard activity feed skipped Yeastar enrichment: %s", exc)
 
     # Sort by timestamp descending
     def sort_key(a):
@@ -193,17 +282,17 @@ async def get_activity_feed(limit: int = 30, current_user: dict = Depends(get_cu
 @router.get("/reports/technician-utilization")
 async def get_tech_utilization(current_user: dict = Depends(get_current_user)):
     """Technician utilization report"""
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
-    entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
+    users = await db.users.find(tenant_scoped_query(current_user), {"_id": 0, "password_hash": 0}).to_list(100)
+    entries = await db.time_entries.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    tickets = await db.tickets.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
     tech_data = []
     for u in users:
         user_entries = [e for e in entries if e.get("user_id") == u["id"]]
         user_tickets = [t for t in tickets if t.get("assigned_to") == u["id"]]
-        total_min = sum(e.get("minutes", 0) for e in user_entries)
-        billable_min = sum(e.get("minutes", 0) for e in user_entries if e.get("billable"))
-        revenue = sum(e.get("total_amount", 0) for e in user_entries if e.get("billable"))
+        total_min = sum(_report_number(e.get("minutes")) for e in user_entries)
+        billable_min = sum(_report_number(e.get("minutes")) for e in user_entries if e.get("billable"))
+        revenue = sum(_report_number(e.get("total_amount")) for e in user_entries if e.get("billable"))
         resolved = len([t for t in user_tickets if t.get("status") in ("resolved", "closed")])
         tech_data.append({
             "id": u["id"], "name": u["name"], "role": u.get("role", "technician"),
@@ -220,7 +309,7 @@ async def get_tech_utilization(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/ticket-analytics")
 async def get_ticket_analytics(current_user: dict = Depends(get_current_user)):
     """Comprehensive ticket analytics"""
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
+    tickets = await db.tickets.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
     by_status = {}
     by_priority = {}
     by_client = {}
@@ -235,23 +324,25 @@ async def get_ticket_analytics(current_user: dict = Depends(get_current_user)):
         cat = t.get("category", "support")
         by_category[cat] = by_category.get(cat, 0) + 1
 
+    resolution_hours = [duration for ticket in tickets if (duration := _ticket_resolution_hours(ticket)) is not None]
+    sla_results = [result for ticket in tickets if (result := _ticket_sla_met(ticket)) is not None]
     return {
         "total": len(tickets),
         "by_status": [{"name": k, "value": v} for k, v in by_status.items()],
         "by_priority": [{"name": k, "value": v} for k, v in by_priority.items()],
         "by_client": sorted([{"name": k, "value": v} for k, v in by_client.items()], key=lambda x: -x["value"]),
         "by_category": [{"name": k, "value": v} for k, v in by_category.items()],
-        "avg_resolution_hours": 4.2,
-        "sla_compliance": 87.5,
+        "avg_resolution_hours": round(sum(resolution_hours) / len(resolution_hours), 1) if resolution_hours else None,
+        "sla_compliance": round((sum(1 for result in sla_results if result) / len(sla_results)) * 100, 1) if sla_results else None,
     }
 
 @router.get("/reports/client-analytics")
 async def get_client_analytics(current_user: dict = Depends(get_current_user)):
     """Client-level analytics"""
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
-    entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
+    clients = await db.clients.find(_report_scope(current_user, field="id"), {"_id": 0}).to_list(1000)
+    tickets = await db.tickets.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    entries = await db.time_entries.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
     result = []
     for c in clients:
@@ -259,7 +350,7 @@ async def get_client_analytics(current_user: dict = Depends(get_current_user)):
         ct = [t for t in tickets if t.get("client_id") == cid]
         cd = [d for d in devices if d.get("client_id") == cid]
         ce = [e for e in entries if e.get("client_id") == cid]
-        billable_amt = sum(e.get("total_amount", 0) for e in ce if e.get("billable"))
+        billable_amt = sum(_report_number(e.get("total_amount")) for e in ce if e.get("billable"))
         result.append({
             "id": cid, "name": c["name"], "industry": c.get("industry", "Other"),
             "mrr": c.get("mrr", 0),
@@ -275,15 +366,15 @@ async def get_client_analytics(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/revenue")
 async def get_revenue_report(current_user: dict = Depends(get_current_user)):
     """Revenue and billing analytics"""
-    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
-    entries = await db.time_entries.find({}, {"_id": 0}).to_list(5000)
+    clients = await db.clients.find(_report_scope(current_user, field="id"), {"_id": 0}).to_list(1000)
+    invoices = await db.invoices.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    entries = await db.time_entries.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
-    total_mrr = sum(c.get("mrr", 0) for c in clients)
-    total_invoiced = sum(i.get("total", 0) for i in invoices)
-    paid = sum(i.get("total", 0) for i in invoices if i.get("status") == "paid")
-    outstanding = sum(i.get("total", 0) for i in invoices if i.get("status") in ("sent", "draft"))
-    billable_rev = sum(e.get("total_amount", 0) for e in entries if e.get("billable"))
+    total_mrr = sum(_report_number(c.get("mrr")) for c in clients)
+    total_invoiced = sum(_report_number(i.get("total")) for i in invoices)
+    paid = sum(_report_number(i.get("total")) for i in invoices if i.get("status") == "paid")
+    outstanding = sum(_report_number(i.get("total")) for i in invoices if i.get("status") in ("sent", "draft", "overdue"))
+    billable_rev = sum(_report_number(e.get("total_amount")) for e in entries if e.get("billable"))
 
     mrr_by_client = sorted(
         [{"name": c["name"], "mrr": c.get("mrr", 0)} for c in clients if c.get("mrr", 0) > 0],
@@ -309,8 +400,8 @@ async def get_revenue_report(current_user: dict = Depends(get_current_user)):
 @router.get("/reports/device-analytics")
 async def get_device_analytics(current_user: dict = Depends(get_current_user)):
     """Device/infrastructure analytics"""
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
-    alerts = await db.alerts.find({}, {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
+    alerts = await db.alerts.find(_report_scope(current_user), {"_id": 0}).to_list(5000)
 
     by_type = {}
     by_os = {}

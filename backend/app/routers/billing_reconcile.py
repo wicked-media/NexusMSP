@@ -16,8 +16,26 @@ import httpx
 from app.database import db
 from app.auth import get_current_user
 from app.services.integrations import acronis_service
+from app.services.activity import log_activity
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
 
 router = APIRouter()
+
+
+def _reconciliation_line_values(line_item: dict) -> tuple[int, float]:
+    """Read legacy and current recurring-line pricing without fabricating drift.
+
+    Recurring billing templates historically stored their price as ``rate``;
+    newer surfaces may send ``unit_price``.  A reconciliation must understand
+    both shapes or it can correctly count devices yet report a zero-dollar
+    billing impact.
+    """
+    try:
+        quantity = int(line_item.get("quantity") or 0)
+        unit_price = float(line_item.get("unit_price", line_item.get("rate", 0)) or 0)
+    except (TypeError, ValueError):
+        return 0, 0.0
+    return max(0, quantity), max(0.0, unit_price)
 
 
 async def _count_devices_under_policy(policy_id: str, client_id: str | None) -> dict:
@@ -73,9 +91,13 @@ async def _count_devices_under_policy(policy_id: str, client_id: str | None) -> 
 @router.get("/billing/reconcile-recurring/{ri_id}")
 async def reconcile_recurring_invoice(ri_id: str, current_user: dict = Depends(get_current_user)):
     """Compare billed quantities to actual device counts (per Acronis policy)."""
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Recurring invoice not found")
+    ri = await assert_record_scope(
+        current_user,
+        db.recurring_invoices,
+        ri_id,
+        operation="billing.recurring.reconcile.read",
+        resource_name="Recurring invoice",
+    )
 
     client_id = ri.get("client_id")
     line_items = ri.get("line_items", []) or []
@@ -86,8 +108,7 @@ async def reconcile_recurring_invoice(ri_id: str, current_user: dict = Depends(g
     for li in line_items:
         if not isinstance(li, dict):
             continue
-        billed = int(li.get("quantity") or 0)
-        unit_price = float(li.get("unit_price") or 0)
+        billed, unit_price = _reconciliation_line_values(li)
         policy_id = li.get("acronis_policy_id")
         result = {
             "description": li.get("description", ""),
@@ -145,17 +166,34 @@ async def reconcile_recurring_invoice(ri_id: str, current_user: dict = Depends(g
 @router.put("/billing/recurring/{ri_id}/line-items/{idx}/link-policy")
 async def link_line_item_to_policy(ri_id: str, idx: int, body: dict, current_user: dict = Depends(get_current_user)):
     """Set or clear the acronis_policy_id on a recurring invoice line item by index."""
-    ri = await db.recurring_invoices.find_one({"id": ri_id}, {"_id": 0})
-    if not ri:
-        raise HTTPException(status_code=404, detail="Recurring invoice not found")
+    ri = await assert_record_scope(
+        current_user,
+        db.recurring_invoices,
+        ri_id,
+        operation="billing.recurring.reconcile.mapping.update",
+        resource_name="Recurring invoice",
+    )
     line_items = list(ri.get("line_items") or [])
     if idx < 0 or idx >= len(line_items):
         raise HTTPException(status_code=400, detail="Invalid line item index")
-    policy_id = (body or {}).get("acronis_policy_id") or None
+    policy_id = str((body or {}).get("acronis_policy_id") or "").strip() or None
+    if policy_id and len(policy_id) > 200:
+        raise HTTPException(status_code=422, detail="Acronis policy ID is too long")
     line_items[idx]["acronis_policy_id"] = policy_id
-    await db.recurring_invoices.update_one(
-        {"id": ri_id},
+    result = await db.recurring_invoices.update_one(
+        {"id": ri_id, "client_id": ri.get("client_id")},
         {"$set": {"line_items": line_items, "updated_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Recurring invoice changed before its policy mapping could be saved")
+    await log_activity(
+        current_user,
+        "recurring_policy_mapping_updated",
+        "recurring_invoice",
+        ri_id,
+        ri.get("description") or ri_id,
+        "Updated Acronis policy mapping for a recurring billing line.",
+        metadata={"line_index": idx, "policy_linked": bool(policy_id)},
     )
     return {"message": "Linked" if policy_id else "Unlinked", "line_item": line_items[idx]}
 
@@ -167,9 +205,13 @@ async def get_device_acronis_info(device_id: str, current_user: dict = Depends(g
     Resolves the device's acronis_resource_id (or falls back to matching device.name
     against Acronis resource names) and queries policy_management/v4/applications.
     """
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="backup.device_acronis.read",
+        resource_name="Device",
+    )
 
     # Resolve Acronis resource id
     resource_id = device.get("acronis_resource_id") or device.get("acronis_id")
@@ -266,12 +308,32 @@ async def get_device_acronis_info(device_id: str, current_user: dict = Depends(g
 @router.put("/devices/{device_id}/acronis-link")
 async def link_device_to_acronis(device_id: str, body: dict, current_user: dict = Depends(get_current_user)):
     """Manually link a device to an Acronis resource id."""
-    resource_id = (body or {}).get("acronis_resource_id")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0, "id": 1})
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+    resource_id = str((body or {}).get("acronis_resource_id") or "").strip() or None
+    if resource_id and len(resource_id) > 200:
+        raise HTTPException(status_code=422, detail="Acronis resource ID is too long")
+    device = await assert_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="backup.device_acronis.mapping.update",
+        resource_name="Device",
+    )
     update = {"acronis_resource_id": resource_id, "updated_at": datetime.now(timezone.utc).isoformat()}
-    await db.devices.update_one({"id": device_id}, {"$set": update})
+    result = await db.devices.update_one(
+        {"id": device_id, "client_id": device.get("client_id")},
+        {"$set": update},
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=409, detail="Device changed before its Acronis mapping could be saved")
+    await log_activity(
+        current_user,
+        "device_acronis_mapping_updated",
+        "device",
+        device_id,
+        device.get("name") or device_id,
+        "Updated the device Acronis resource mapping.",
+        metadata={"linked": bool(resource_id)},
+    )
     return {"message": "Linked" if resource_id else "Unlinked", "acronis_resource_id": resource_id}
 
 
@@ -285,8 +347,15 @@ async def auto_link_devices_to_acronis(body: dict | None = None, current_user: d
     Body (optional): {"client_id": "..." to scope to a single client, "force": true to re-link already-linked}
     """
     body = body or {}
-    client_id = body.get("client_id")
+    client_id = str(body.get("client_id") or "").strip() or None
     force = bool(body.get("force", False))
+    if client_id:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="backup.device_acronis.auto_link",
+            mask_not_found=True,
+        )
 
     # Pull all Acronis resources
     try:
@@ -309,7 +378,10 @@ async def auto_link_devices_to_acronis(body: dict | None = None, current_user: d
     query = {} if not client_id else {"client_id": client_id}
     if not force:
         query["$or"] = [{"acronis_resource_id": {"$in": [None, ""]}}, {"acronis_resource_id": {"$exists": False}}]
-    devices = await db.devices.find(query, {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_name": 1, "acronis_resource_id": 1}).to_list(5000)
+    devices = await db.devices.find(
+        scoped_query(current_user, query),
+        {"_id": 0, "id": 1, "name": 1, "hostname": 1, "client_id": 1, "client_name": 1, "acronis_resource_id": 1},
+    ).to_list(5000)
 
     matched = []
     skipped = []
@@ -328,7 +400,7 @@ async def auto_link_devices_to_acronis(body: dict | None = None, current_user: d
                 break
         if rid:
             await db.devices.update_one(
-                {"id": d["id"]},
+                {"id": d["id"], "client_id": d.get("client_id")},
                 {"$set": {"acronis_resource_id": rid, "updated_at": datetime.now(timezone.utc).isoformat()}},
             )
             matched.append({"device_id": d["id"], "device_name": d.get("name"), "acronis_resource_id": rid})
@@ -356,7 +428,7 @@ async def drift_watchtower(min_drift: int = 1, current_user: dict = Depends(get_
     `min_drift` filters out invoices with drift count below threshold.
     """
     invoices = await db.recurring_invoices.find(
-        {"status": {"$ne": "cancelled"}},
+        scoped_query(current_user, {"status": {"$ne": "cancelled"}}),
         {"_id": 0}
     ).to_list(500)
 
@@ -380,8 +452,7 @@ async def drift_watchtower(min_drift: int = 1, current_user: dict = Depends(get_
             policy_id = li.get("acronis_policy_id")
             if not policy_id:
                 continue
-            billed = int(li.get("quantity") or 0)
-            unit_price = float(li.get("unit_price") or 0)
+            billed, unit_price = _reconciliation_line_values(li)
             counts = await _count_devices_under_policy(policy_id, client_id)
             actual = counts.get("mapped_count", 0)
             drift = actual - billed

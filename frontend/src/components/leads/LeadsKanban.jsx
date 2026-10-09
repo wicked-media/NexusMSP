@@ -29,7 +29,7 @@ function fireConfetti() {
   setTimeout(() => root.remove(), 2800);
 }
 
-export default function LeadsKanban({ leads = [], scores = {}, onOpen, onMoved }) {
+export default function LeadsKanban({ leads = [], scores = {}, onOpen, onMoved, readOnly = false }) {
   const { token } = useAuth();
   const [dragging, setDragging] = useState(null);
   const [overCol, setOverCol] = useState(null);
@@ -46,6 +46,7 @@ export default function LeadsKanban({ leads = [], scores = {}, onOpen, onMoved }
   }, [leads, scores]);
 
   const onDrop = async (stage) => {
+    if (readOnly) return;
     if (!dragging || dragging.status === stage) { setDragging(null); setOverCol(null); return; }
     const id = dragging.id;
     const prevStatus = dragging.status;
@@ -78,7 +79,7 @@ export default function LeadsKanban({ leads = [], scores = {}, onOpen, onMoved }
         return (
           <div
             key={stage}
-            onDragOver={e => { e.preventDefault(); setOverCol(stage); }}
+            onDragOver={e => { if (!readOnly) { e.preventDefault(); setOverCol(stage); } }}
             onDragLeave={() => setOverCol(c => c === stage ? null : c)}
             onDrop={() => onDrop(stage)}
             className={`flex-shrink-0 w-72 rounded-lg border ${isOver ? "border-violet-500 bg-violet-500/5" : "border-zinc-800/60 bg-zinc-900/30"}`}
@@ -99,11 +100,11 @@ export default function LeadsKanban({ leads = [], scores = {}, onOpen, onMoved }
                 return (
                   <Card
                     key={l.id}
-                    draggable
+                    draggable={!readOnly}
                     onDragStart={() => setDragging(l)}
                     onClick={() => onOpen && onOpen(l.id)}
                     data-testid={`kanban-card-${l.id}`}
-                    className="cursor-grab active:cursor-grabbing p-2 bg-zinc-950/40 border-zinc-800/60 hover:border-violet-500/50 transition-all"
+                    className={`${readOnly ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"} p-2 bg-zinc-950/40 border-zinc-800/60 hover:border-violet-500/50 transition-all`}
                   >
                     <div className="flex items-start gap-2">
                       <InitialsAvatar name={l.company_name} size={26} />

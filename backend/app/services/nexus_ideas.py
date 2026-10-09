@@ -11,6 +11,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
+from pymongo.errors import DuplicateKeyError
+
 from app.database import db
 
 
@@ -449,10 +451,31 @@ def _seed_document(number: int, title: str, category: str, summary: str, axes: t
     }
 
 
+async def _remove_duplicate_ideas() -> None:
+    """Repair rows duplicated by pre-upsert seeding so the unique id index can build."""
+    rows = await db.nexus_ideas.find({}, {"_id": 1, "id": 1}).sort([("number", 1), ("created_at", 1)]).to_list(5000)
+    seen: set[str] = set()
+    duplicates = []
+    for row in rows:
+        identity = str(row.get("id") or "")
+        if identity in seen:
+            duplicates.append(row["_id"])
+        else:
+            seen.add(identity)
+    if duplicates:
+        await db.nexus_ideas.delete_many({"_id": {"$in": duplicates}})
+
+
 async def ensure_idea_catalog() -> None:
     for idea in (_seed_document(*row) for row in _IDEAS):
         await db.nexus_ideas.update_one({"id": idea["id"]}, {"$setOnInsert": idea}, upsert=True)
-    await db.nexus_ideas.create_index("id", unique=True)
+    try:
+        await db.nexus_ideas.create_index("id", unique=True)
+    except DuplicateKeyError:
+        # Legacy blind inserts can leave duplicate id rows behind. Repair the
+        # catalog, then rebuild the index so the duplicate cannot return.
+        await _remove_duplicate_ideas()
+        await db.nexus_ideas.create_index("id", unique=True)
     await db.nexus_ideas.create_index([("status", 1), ("number", 1)])
 
 

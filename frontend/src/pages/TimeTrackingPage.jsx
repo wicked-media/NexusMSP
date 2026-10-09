@@ -28,7 +28,6 @@ import {
 import { format, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, parseISO } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
-const COLORS = ["#3B82F6", "#22C55E", "#EAB308", "#EF4444", "#8B5CF6", "#EC4899"];
 const chartTooltipStyle = { backgroundColor: "hsl(217, 33%, 17%)", border: "1px solid hsl(217, 33%, 25%)", borderRadius: "8px", color: "hsl(210, 40%, 98%)" };
 const billableValue = (entry) => {
   const recorded = Number(entry?.total_amount);
@@ -125,7 +124,6 @@ export default function TimeTrackingPage() {
   const [timeEntries, setTimeEntries] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [users, setUsers] = useState([]);
-  const [weeklySummary, setWeeklySummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -154,16 +152,14 @@ export default function TimeTrackingPage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [entriesRes, ticketsRes, usersRes, weeklyRes] = await Promise.all([
+    const [entriesRes, ticketsRes, usersRes] = await Promise.all([
         axios.get(`${API}/time-entries`, { headers }),
         axios.get(`${API}/tickets`, { headers }),
         axios.get(`${API}/users`, { headers }),
-        axios.get(`${API}/time-entries/weekly-summary`, { headers }),
       ]);
       setTimeEntries(entriesRes.data);
       setTickets(ticketsRes.data);
       setUsers(usersRes.data);
-      setWeeklySummary(weeklyRes.data);
     } catch { toast.error("Failed to fetch time entries"); }
     finally { setLoading(false); }
   };
@@ -355,12 +351,12 @@ export default function TimeTrackingPage() {
                   </div>
                   <Switch checked={timerBillable} onCheckedChange={setTimerBillable} data-testid="timer-billable-switch" />
                 </div>
-                <Button className="w-full" onClick={startTimer} data-testid="start-timer-btn"><Play className="w-4 h-4 mr-2" />Start Timer</Button>
+                <Button className="w-full" onClick={startTimer} data-testid="start-timer-btn"><Play className="w-4 h-4 mr-2" />Start timer</Button>
               </div>
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-muted-foreground text-center">{timerDescription || "Working..."}</p>
-                <Button className="w-full" variant="destructive" onClick={stopTimer} data-testid="stop-timer-btn"><Square className="w-4 h-4 mr-2" />Stop & Log</Button>
+                <Button className="w-full" variant="destructive" onClick={stopTimer} data-testid="stop-timer-btn"><Square className="w-4 h-4 mr-2" />Stop & log</Button>
               </div>
             )}
           </CardContent>
@@ -492,8 +488,8 @@ export default function TimeTrackingPage() {
 
       {/* Billing reconciliation review */}
       <Dialog open={Boolean(reviewEntry)} onOpenChange={(open) => { if (!open) setReviewEntry(null); }}>
-        <DialogContent className="overflow-hidden border-emerald-400/20 p-0 sm:max-w-2xl" data-testid="time-entry-review-dialog">
-          <div className="border-b border-emerald-400/15 bg-gradient-to-br from-emerald-500/[0.12] via-background to-background px-6 py-5">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-emerald-400/20 p-0 sm:rounded-2xl" data-testid="time-entry-review-dialog">
+          <div className="shrink-0 border-b border-emerald-400/15 bg-gradient-to-br from-emerald-500/[0.12] via-background to-background px-6 py-5">
             <DialogHeader>
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Billing evidence review</p>
               <DialogTitle className="mt-1 flex items-center gap-2 text-xl">
@@ -506,7 +502,7 @@ export default function TimeTrackingPage() {
             </DialogHeader>
           </div>
           {reviewEntry && (
-            <div className="space-y-5 px-6 py-5">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Technician</p>
@@ -545,7 +541,7 @@ export default function TimeTrackingPage() {
               </div>
             </div>
           )}
-          <DialogFooter className="border-t border-white/10 bg-black/10 px-6 py-4">
+          <DialogFooter className="shrink-0 border-t border-white/10 bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setReviewEntry(null)}>Close</Button>
             {reviewEntry?.ticket_id && (
               <Button onClick={() => navigate(`/tickets?ticket=${encodeURIComponent(reviewEntry.ticket_id)}`)} data-testid="open-reviewed-time-ticket">
@@ -558,16 +554,16 @@ export default function TimeTrackingPage() {
 
       {/* Add Time Entry Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="overflow-hidden border-emerald-400/20 p-0 sm:max-w-2xl" aria-describedby="log-time-description">
-          <div className="border-b border-emerald-400/15 bg-gradient-to-br from-emerald-500/[0.12] via-background to-background px-6 py-5">
+        <DialogContent className="flex h-[min(820px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-emerald-400/20 p-0 sm:rounded-2xl" aria-describedby="log-time-description" data-testid="time-entry-create-dialog">
+          <div className="shrink-0 border-b border-emerald-400/15 bg-gradient-to-br from-emerald-500/[0.12] via-background to-background px-6 py-5">
             <DialogHeader>
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Auditable service record</p>
               <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><Clock className="h-5 w-5 text-emerald-300" />Log time entry</DialogTitle>
               <DialogDescription id="log-time-description">Record who performed the work, what changed and which client ticket should receive the billing evidence.</DialogDescription>
             </DialogHeader>
           </div>
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-5 px-6 py-5">
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
               <div className="space-y-2"><Label>Related ticket {formData.billable && <span className="text-emerald-300">*</span>}</Label>
                 <SearchableSelect options={ticketOptions} value={formData.ticket_id} onValueChange={v => setFormData({ ...formData, ticket_id: v })} placeholder="Search ticket, client or contact…" searchPlaceholder="Type a ticket number, title, client or contact…" testId="log-time-ticket-search" />
                 <p className="text-[11px] text-muted-foreground">Billable entries require a ticket so the invoice, client history and audit trail remain connected.</p>
@@ -585,7 +581,7 @@ export default function TimeTrackingPage() {
                 <Switch checked={formData.billable} onCheckedChange={v => setFormData({ ...formData, billable: v })} data-testid="log-time-billable" />
               </div>
             </div>
-            <DialogFooter className="border-t border-white/10 bg-black/10 px-6 py-4">
+            <DialogFooter className="shrink-0 border-t border-white/10 bg-black/10 px-6 py-4">
               <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
               <Button type="submit" data-testid="submit-time-entry"><Clock className="mr-2 h-4 w-4" />Log time</Button>
             </DialogFooter>
@@ -611,15 +607,15 @@ export default function TimeTrackingPage() {
 
       {/* Generate Invoice Dialog */}
       <Dialog open={invoiceDialog} onOpenChange={setInvoiceDialog}>
-        <DialogContent className="overflow-hidden border-emerald-400/20 p-0 sm:max-w-xl" aria-describedby="invoice-gen-desc">
-          <div className="border-b border-emerald-400/15 bg-gradient-to-br from-emerald-500/[0.12] via-background to-background px-6 py-5">
+        <DialogContent className="flex h-[min(700px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-xl flex-col gap-0 overflow-hidden border-emerald-400/20 p-0 sm:rounded-2xl" aria-describedby="invoice-gen-desc" data-testid="time-entry-invoice-dialog">
+          <div className="shrink-0 border-b border-emerald-400/15 bg-gradient-to-br from-emerald-500/[0.12] via-background to-background px-6 py-5">
             <DialogHeader>
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-emerald-300">Billing hand-off</p>
               <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><Receipt className="h-5 w-5 text-emerald-300" />Generate invoice from time</DialogTitle>
               <DialogDescription id="invoice-gen-desc">Create a draft invoice from the client&apos;s unbilled, billable service evidence.</DialogDescription>
             </DialogHeader>
           </div>
-          <div className="space-y-4 px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <div className="space-y-2"><Label>Client with unbilled time</Label>
               <SearchableSelect options={clientOptions} value={invoiceClient} onValueChange={setInvoiceClient} placeholder="Search for a client…" searchPlaceholder="Type a client name…" testId="invoice-time-client-search" />
             </div>
@@ -630,7 +626,7 @@ export default function TimeTrackingPage() {
               </div>
             )}
           </div>
-          <DialogFooter className="border-t border-white/10 bg-black/10 px-6 py-4">
+          <DialogFooter className="shrink-0 border-t border-white/10 bg-black/10 px-6 py-4">
             <Button variant="outline" onClick={() => setInvoiceDialog(false)}>Cancel</Button>
             <Button onClick={handleGenerateInvoice} disabled={generatingInvoice || !invoiceClient} data-testid="confirm-gen-invoice">
               {generatingInvoice ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1" />}

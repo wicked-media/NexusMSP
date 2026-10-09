@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { API, useAuth } from "@/App";
 import { PageShell } from "@/components/design-system";
+import WorkspaceBackControl from "@/components/WorkspaceBackControl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +12,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertTriangle, ArrowRight, BookOpen, CheckCircle2, ChevronRight, CircleHelp,
-  FileCheck2, FileText, FolderOpen, Gauge, Image as ImageIcon, ListChecks, Loader2, Pencil,
+  FileCheck2, FileText, FolderOpen, Gauge, History, Image as ImageIcon, ListChecks, Loader2, Pencil,
   Plus, RefreshCw, RotateCcw, Search, Send, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import {
+  guideActionFor, headingsFromMarkdown, readingMinutes, searchDocuments, withHeadingAnchors,
+} from "@/components/knowledge/knowledgeSearch";
+import {
+  KNOWLEDGE_KINDS, knowledgeCount, knowledgeHint, rankKnowledge, recentlyRead, rememberKnowledge,
+} from "@/components/knowledge/knowledgeLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import {
+  ArticleProvenance, CopilotAnswer, EmptySearchState, KnowledgeMemoryBar, MatchEvidence,
+  PrintGuideButton, CopyLinkButton, ReadingProgress, RelatedList, TableOfContents, useReadingState,
+} from "@/components/knowledge/KnowledgeReadingKit";
 
 const md = new MarkdownIt({ html: true, breaks: true, linkify: true });
 
@@ -318,6 +331,7 @@ export default function HelpCenterPage() {
   const api = useApi(token);
   const { slug } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [library, setLibrary] = useState({ articles: [], by_category: {}, count: 0 });
   const [active, setActive] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -329,8 +343,46 @@ export default function HelpCenterPage() {
   const [editing, setEditing] = useState(null);
   const [copilotQuestion, setCopilotQuestion] = useState("");
   const [copilotAnswer, setCopilotAnswer] = useState("");
+  const [copilotSources, setCopilotSources] = useState([]);
+  const [copilotFallback, setCopilotFallback] = useState(false);
   const [askingCopilot, setAskingCopilot] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
+  const [guideOutcome, setGuideOutcome] = useState(null);
+  const contentRef = useRef(null);
   const isAdmin = (user?.role || "").toLowerCase() === "admin";
+
+  /**
+   * The reading position is measured in this component even though the article
+   * renders in a child, because the table of contents lives in the right rail —
+   * two views of the same position, one source of truth.
+   */
+  const outline = useMemo(() => guideOutline(active), [active]);
+  const { progress, activeId } = useReadingState({ contentRef, headings: outline });
+
+  // The catalogue learns through the shared workspace store, like every other
+  // workspace: the server owns the counters and the tenant-wide aggregate.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.DOCUMENTATION);
+  const { record } = learning;
+
+  /**
+   * Remember that this technician opened this guide. The signal goes to the
+   * shared workspace store and only ever changes the order guides are presented
+   * in. It depends on the stable writer rather than on the whole learning
+   * snapshot, so the server answering a memory read cannot be mistaken for a
+   * second open of the same guide.
+   */
+  useEffect(() => {
+    if (!active?.slug) return;
+    setGuideOutcome(null);
+    rememberKnowledge(record, KNOWLEDGE_KINDS.GUIDE, active.slug);
+  }, [active?.slug, record]);
+
+  // The hub searches both libraries and hands the question over as `?q=`, so a
+  // technician never retypes what they already typed on the front door.
+  useEffect(() => {
+    const requested = searchParams.get("q");
+    if (requested !== null && requested !== query) setQuery(requested);
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadLibrary = async () => {
     setLoading(true);
@@ -361,14 +413,17 @@ export default function HelpCenterPage() {
         toast.error(error.response?.data?.detail || "Guide not found");
       })
       .finally(() => setLoadingArticle(false));
-  }, [slug, library.articles, active?.slug, api]);
+  }, [slug, library.articles, active?.slug, api, navigate]);
 
   const categories = useMemo(() => Object.entries(library.by_category || {}).sort(([left], [right]) => left.localeCompare(right)), [library.by_category]);
   const matchingArticles = useMemo(() => {
+    if (query.trim()) return library.articles.filter((article) => guideMatches(article, query));
     const candidates = selectedCategory === "All guides" ? library.articles : (library.by_category?.[selectedCategory] || []);
-    if (!query.trim()) return candidates;
-    return library.articles.filter((article) => guideMatches(article, query));
-  }, [library, query, selectedCategory]);
+    // With no search, the catalogue follows this technician's own reading, then
+    // what the team reads, before it follows the authored order. Learning
+    // reorders, it never hides.
+    return rankKnowledge(learning, candidates, { kind: KNOWLEDGE_KINDS.GUIDE, idOf: (article) => article.slug });
+  }, [library, query, selectedCategory, learning]);
   const suggestions = useMemo(() => query.trim()
     ? library.articles.filter((article) => guideMatches(article, query)).slice(0, 6)
     : [], [library.articles, query]);
@@ -377,6 +432,43 @@ export default function HelpCenterPage() {
     article: library.articles.find((article) => article.slug === item.slug),
   })), [library.articles]);
   const missingGuideCoverage = useMemo(() => guideCoverage.filter((item) => !item.article), [guideCoverage]);
+
+  /** Guides this technician has already opened, newest first. */
+  const continueReading = useMemo(
+    () => recentlyRead(learning, library.articles || [], { kind: KNOWLEDGE_KINDS.GUIDE, idOf: (article) => article.slug, limit: 4 }),
+    [library.articles, learning],
+  );
+
+  const memoryHint = useMemo(() => knowledgeHint(learning), [learning]);
+
+  /** Why each search result is on screen, keyed by slug. */
+  const matchEvidence = useMemo(() => {
+    const map = new Map();
+    if (!query.trim()) return map;
+    searchDocuments(library.articles || [], query, { limit: 60, idOf: (article) => article.slug })
+      .forEach((result) => map.set(String(result.document.slug), result));
+    return map;
+  }, [library.articles, query]);
+
+  const relatedGuides = useMemo(() => {
+    if (!active) return [];
+    const siblings = (library.by_category?.[active.category] || []).filter((guide) => guide.slug !== active.slug);
+    return rankKnowledge(learning, siblings, { kind: KNOWLEDGE_KINDS.GUIDE, idOf: (guide) => guide.slug }).slice(0, 5);
+  }, [library.by_category, active, learning]);
+
+  const forgetLearning = async () => {
+    setForgetting(true);
+    try {
+      const removed = await learning.forget();
+      toast.success(`Forgot ${removed} learned signal${removed === 1 ? "" : "s"}`, {
+        description: "Guides are back in the order Nexus shipped them and will learn again from your next read.",
+      });
+    } catch {
+      toast.error("Nexus could not clear the learned ordering. Nothing has been changed.");
+    } finally {
+      setForgetting(false);
+    }
+  };
 
   const openGuide = (guideSlug) => {
     setSearchFocused(false);
@@ -434,18 +526,39 @@ export default function HelpCenterPage() {
     }
   };
 
-  const askCopilot = async (event) => {
-    event.preventDefault();
-    if (!copilotQuestion.trim()) return;
+  /**
+   * Ask the co-pilot and keep its citations.
+   *
+   * The endpoint answers from the article corpus and returns the articles it
+   * used, so grounding is a fact the response states rather than something this
+   * page infers: no citations means the answer is not grounded in a NexusMSP
+   * article, and the UI says exactly that instead of sounding confident.
+   */
+  const runCopilot = async (question) => {
+    const trimmed = String(question || "").trim();
+    if (!trimmed) return;
     setAskingCopilot(true);
     try {
-      const result = await api.post("/help/copilot", { question: copilotQuestion, article_slug: active?.slug });
+      const result = await api.post("/help/copilot", { question: trimmed, article_slug: active?.slug });
+      const citations = Array.isArray(result.citations) ? result.citations : [];
       setCopilotAnswer(result.answer || result.response || "No recommendation was returned.");
+      setCopilotSources(citations);
+      setCopilotFallback(Boolean(result.fallback));
     } catch (error) {
       toast.error(error.response?.data?.detail || "Unable to ask the Help Co-pilot");
     } finally {
       setAskingCopilot(false);
     }
+  };
+
+  const askCopilot = (event) => {
+    event.preventDefault();
+    return runCopilot(copilotQuestion);
+  };
+
+  const askAbout = (question) => {
+    setCopilotQuestion(question);
+    return runCopilot(question);
   };
 
   return (
@@ -456,6 +569,7 @@ export default function HelpCenterPage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
         <header className="flex flex-wrap items-center justify-between gap-4 overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.11] via-card to-cyan-500/[0.05] p-5">
           <div>
+            {slug && <WorkspaceBackControl className="mb-2" />}
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">NexusMSP knowledge</p>
             <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><CircleHelp className="h-6 w-6 text-emerald-300" />Help Centre</h1>
             <p className="mt-1 text-sm text-muted-foreground">Task-first guides for safe, consistent service delivery — with verification and audit built in.</p>
@@ -523,18 +637,96 @@ export default function HelpCenterPage() {
           </aside>
 
           <main className="min-w-0 space-y-4">
+            {!query.trim() && !loading ? (
+              <div className="space-y-3">
+                <KnowledgeMemoryBar summary={memoryHint} onForget={forgetLearning} forgetting={forgetting} />
+                {continueReading.length ? (
+                  <section className="rounded-2xl border border-amber-400/20 bg-amber-500/[0.045] p-3" aria-label="Continue reading">
+                    <header className="flex items-center gap-2 px-2 pb-1">
+                      <History className="h-4 w-4 text-amber-300" />
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200">Continue reading</p>
+                    </header>
+                    <div className="grid gap-1 sm:grid-cols-2">
+                      {continueReading.map((guide) => (
+                        <button
+                          key={`continue-${guide.slug}`}
+                          type="button"
+                          onClick={() => openGuide(guide.slug)}
+                          className="flex w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left transition hover:bg-amber-500/[0.08]"
+                        >
+                          <span className="text-base leading-none">{guide.icon || "📘"}</span>
+                          <span className="min-w-0 flex-1 truncate text-xs">{guide.title}</span>
+                          <Badge variant="outline" className="shrink-0 rounded-full border-amber-400/25 bg-amber-500/[0.08] text-[10px] font-normal text-amber-100">
+                            opened {knowledgeCount(learning, KNOWLEDGE_KINDS.GUIDE, guide.slug)}×
+                          </Badge>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+              </div>
+            ) : null}
             {loading ? <Card><CardContent className="flex min-h-[440px] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-emerald-300" /></CardContent></Card> : query || selectedCategory !== "All guides" ? <>
               <div className="flex items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">Guide catalogue</p><h2 className="mt-1 text-xl font-semibold">{query ? `Results for “${query}”` : selectedCategory}</h2></div><span className="text-sm text-muted-foreground">{matchingArticles.length} guide{matchingArticles.length === 1 ? "" : "s"}</span></div>
               <div className="grid gap-3 md:grid-cols-2">
-                {matchingArticles.map((article) => <button key={article.slug} type="button" onClick={() => openGuide(article.slug)} className={`group rounded-xl border p-4 text-left transition ${active?.slug === article.slug ? "border-emerald-400/40 bg-emerald-500/[0.07]" : "border-white/[0.08] bg-card/75 hover:border-emerald-400/25 hover:bg-emerald-500/[0.04]"}`} data-testid={`help-nav-${article.slug}`}><div className="flex items-start gap-3"><span className="text-xl">{article.icon || "📘"}</span><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-3"><span className="truncate font-semibold">{article.title}</span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-emerald-300" /></span><span className="mt-1 block text-xs text-emerald-300">{article.category}</span><span className="mt-2 line-clamp-2 block text-sm leading-5 text-muted-foreground">{article.summary}</span></span></div></button>)}
-                {!matchingArticles.length && <Card className="md:col-span-2"><CardContent className="p-8 text-center"><FileText className="mx-auto h-6 w-6 text-muted-foreground" /><p className="mt-3 font-medium">No guide matches that yet</p><p className="mt-1 text-sm text-muted-foreground">Try a different task or create a custom team guide.</p></CardContent></Card>}
+                {matchingArticles.map((article) => <button key={article.slug} type="button" onClick={() => openGuide(article.slug)} className={`group rounded-xl border p-4 text-left transition ${active?.slug === article.slug ? "border-emerald-400/40 bg-emerald-500/[0.07]" : "border-white/[0.08] bg-card/75 hover:border-emerald-400/25 hover:bg-emerald-500/[0.04]"}`} data-testid={`help-nav-${article.slug}`}><div className="flex items-start gap-3"><span className="text-xl">{article.icon || "📘"}</span><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-3"><span className="truncate font-semibold">{article.title}</span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-emerald-300" /></span><span className="mt-1 block text-xs text-emerald-300">{article.category}</span><span className="mt-2 line-clamp-2 block text-sm leading-5 text-muted-foreground">{article.summary}</span>{matchEvidence.get(String(article.slug)) ? <MatchEvidence className="mt-2" matched={matchEvidence.get(String(article.slug)).matched} snippet={matchEvidence.get(String(article.slug)).snippet} /> : null}</span></div></button>)}
+                {!matchingArticles.length ? (
+                  <div className="md:col-span-2">
+                    <EmptySearchState
+                      query={query.trim() || selectedCategory}
+                      suggestions={library.articles
+                        .filter((article) => (selectedCategory === "All guides" ? true : article.category === selectedCategory))
+                        .slice(0, 4)
+                        .map((article) => ({ ...article, id: article.slug, category_label: article.category }))}
+                      onOpenSuggestion={(article) => openGuide(article.slug)}
+                      onAsk={() => askAbout(query.trim() ? `${query.trim()} — which NexusMSP guide covers this?` : `Which NexusMSP guide covers ${selectedCategory}?`)}
+                      asking={askingCopilot}
+                      onClear={() => { setQuery(""); setSelectedCategory("All guides"); }}
+                      categoryHint={`No guide in ${selectedCategory === "All guides" ? "the library" : selectedCategory} matched every word.`}
+                    />
+                  </div>
+                ) : null}
               </div>
-            </> : loadingArticle ? <Card><CardContent className="flex min-h-[440px] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-emerald-300" /></CardContent></Card> : active ? <ArticleReader active={active} isAdmin={isAdmin} onEdit={() => { setEditing(active); setEditorOpen(true); }} onDelete={deleteGuide} /> : <Card><CardContent className="p-10 text-center text-muted-foreground">Choose a guide to begin.</CardContent></Card>}
+            </> : loadingArticle ? <Card><CardContent className="flex min-h-[440px] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin text-emerald-300" /></CardContent></Card> : active ? (
+                <ArticleReader
+                  active={active}
+                  isAdmin={isAdmin}
+                  onEdit={() => { setEditing(active); setEditorOpen(true); }}
+                  onDelete={deleteGuide}
+                  contentRef={contentRef}
+                  progress={progress}
+                  onAskCopilot={askAbout}
+                  outcome={guideOutcome}
+                  onOutcome={setGuideOutcome}
+                  openedCount={knowledgeCount(learning, KNOWLEDGE_KINDS.GUIDE, active.slug)}
+                />
+              ) : <Card><CardContent className="p-10 text-center text-muted-foreground">Choose a guide to begin.</CardContent></Card>}
           </main>
 
           <aside className="space-y-4 lg:col-span-2 2xl:col-span-1">
-            <Card className="border-cyan-500/20 bg-gradient-to-b from-cyan-500/[0.08] to-card"><CardContent className="p-4"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Help Co-pilot</p></div><p className="mt-2 text-xs leading-5 text-muted-foreground">Ask for the next safe step. Answers stay grounded in your NexusMSP guide library.</p><form onSubmit={askCopilot} className="mt-3 space-y-2"><Textarea value={copilotQuestion} onChange={(event) => setCopilotQuestion(event.target.value)} placeholder="What should I verify before…" className="min-h-[86px] resize-none text-sm" /><Button type="submit" size="sm" className="w-full bg-cyan-400 text-cyan-950 hover:bg-cyan-300" disabled={askingCopilot}>{askingCopilot ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}Ask Co-pilot</Button></form>{copilotAnswer && <div className="mt-4 rounded-lg border border-cyan-400/15 bg-black/15 p-3 text-xs leading-5 text-muted-foreground whitespace-pre-wrap">{copilotAnswer}</div>}</CardContent></Card>
+            {active ? <TableOfContents headings={outline} activeId={activeId} /> : null}
+            <Card className="border-cyan-500/20 bg-gradient-to-b from-cyan-500/[0.08] to-card"><CardContent className="p-4"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-cyan-300" /><p className="text-sm font-semibold">Help Co-pilot</p></div><p className="mt-2 text-xs leading-5 text-muted-foreground">Ask for the next safe step. Answers stay grounded in your NexusMSP guide library.</p><form onSubmit={askCopilot} className="mt-3 space-y-2"><Textarea value={copilotQuestion} onChange={(event) => setCopilotQuestion(event.target.value)} placeholder="What should I verify before…" className="min-h-[86px] resize-none text-sm" /><Button type="submit" size="sm" className="w-full bg-cyan-400 text-cyan-950 hover:bg-cyan-300" disabled={askingCopilot}>{askingCopilot ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}Ask Co-pilot</Button></form>{copilotAnswer ? (
+              <div className="mt-4 space-y-2" data-testid="help-copilot-output">
+                <CopilotAnswer answer={copilotAnswer} grounded={copilotSources.length > 0} sources={copilotSources.map((source) => source.title || source.slug)} />
+                {copilotFallback && copilotSources.length ? (
+                  <p className="text-[11px] leading-5 text-muted-foreground">Nexus returned the closest articles rather than a synthesised answer, so read them in full before you act.</p>
+                ) : null}
+              </div>
+            ) : null}</CardContent></Card>
             {active && <Card className="border-white/[0.08] bg-card/80"><CardContent className="p-4"><p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Guide checklist</p><div className="mt-3 space-y-3 text-sm"><ChecklistItem label="Confirm scope, access, and approval" /><ChecklistItem label="Capture the safe starting state" /><ChecklistItem label="Complete the controlled steps" /><ChecklistItem label="Verify the live result and recovery" /><ChecklistItem label="Attach evidence and hand over" /></div></CardContent></Card>}
+            {active ? (
+              <RelatedList
+                title="Related guides"
+                hint={`Other guides in ${active.category}`}
+                emptyLabel="No other guide shares this work area yet."
+                items={relatedGuides}
+                idOf={(guide) => guide.slug}
+                testIdOf={(guide) => `help-related-${guide.slug}`}
+                metaOf={(guide) => guide.category}
+                icon={(guide) => <span className="mt-0.5 shrink-0 text-sm leading-none">{guide.icon || "📘"}</span>}
+                onOpen={(guide) => openGuide(guide.slug)}
+              />
+            ) : null}
             {isAdmin && <Card className="border-violet-500/20 bg-gradient-to-b from-violet-500/[0.07] to-card" data-testid="help-guide-coverage"><CardContent className="p-4"><div className="flex items-start justify-between gap-3"><div><p className="flex items-center gap-2 text-sm font-semibold"><FileCheck2 className="h-4 w-4 text-violet-300" />Guide coverage</p><p className="mt-1 text-xs leading-5 text-muted-foreground">Priority Nexus workspaces with a task-first guide.</p></div><Badge variant="outline" className={missingGuideCoverage.length ? "border-amber-400/30 bg-amber-500/[0.08] text-amber-200" : "border-emerald-400/30 bg-emerald-500/[0.08] text-emerald-200"}>{guideCoverage.length - missingGuideCoverage.length}/{guideCoverage.length}</Badge></div><div className="mt-3 space-y-1">{guideCoverage.map((item) => item.article ? <button key={item.slug} type="button" onClick={() => openGuide(item.slug)} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-white/[0.05]"><CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-300" /><span className="min-w-0 flex-1 truncate text-muted-foreground">{item.label}</span><ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /></button> : <button key={item.slug} type="button" onClick={() => draftMissingGuide(item)} className="flex w-full items-center gap-2 rounded-lg bg-amber-500/[0.055] px-2 py-1.5 text-left text-xs transition hover:bg-amber-500/[0.11]"><AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300" /><span className="min-w-0 flex-1 truncate text-amber-100">Draft {item.label} guide</span><Plus className="h-3.5 w-3.5 text-amber-300" /></button>)}</div>{!missingGuideCoverage.length && <p className="mt-3 rounded-lg border border-emerald-400/15 bg-emerald-500/[0.045] px-3 py-2 text-[11px] leading-5 text-emerald-100">All priority workspaces have an associated guide. Use product-guide refresh after shipped changes, then review the relevant runbook.</p>}</CardContent></Card>}
           </aside>
         </div>
@@ -559,6 +751,43 @@ function splitGuideSections(markdown) {
     sections[parts[index].trim().toLowerCase()] = (parts[index + 1] || "").trim();
   }
   return sections;
+}
+
+/**
+ * The sections a structured runbook declares, in reading order, paired with the
+ * ids OperationalGuideBody actually renders. One list, so the table of contents
+ * can never point at a section that does not exist.
+ */
+const STRUCTURED_GUIDE_SECTIONS = [
+  { key: "outcome", id: "guide-outcome", label: "Outcome" },
+  { key: "at a glance", id: "guide-at-a-glance", label: "At a glance" },
+  { key: "visual", id: "guide-visual-reference", label: "What you should see", needsScreenshots: true },
+  { key: "before you start", id: "guide-before", label: "Before you start" },
+  { key: "procedure", id: "guide-procedure", label: "Procedure" },
+  { key: "verify the result", id: "guide-verify", label: "Verify the result" },
+  { key: "audit and handover", id: "guide-audit", label: "Audit and handover" },
+  { key: "troubleshooting", id: "guide-troubleshooting", label: "Troubleshooting" },
+  { key: "rollback and escalation", id: "guide-rollback", label: "Rollback and escalation" },
+];
+
+/** A guide the reader can render as a runbook rather than as loose prose. */
+function isStructuredGuide(sections) {
+  return Boolean(sections.outcome && sections["before you start"] && sections.procedure
+    && sections["verify the result"] && sections["audit and handover"]);
+}
+
+/**
+ * The contents list for a guide: the runbook's own sections when it has them,
+ * otherwise the headings inside its prose.
+ */
+function guideOutline(active) {
+  const body = active?.body_md || "";
+  const sections = splitGuideSections(body);
+  if (!isStructuredGuide(sections)) return headingsFromMarkdown(body);
+  const hasScreenshots = (active?.screenshots || []).length > 0;
+  return STRUCTURED_GUIDE_SECTIONS
+    .filter((section) => (section.needsScreenshots ? hasScreenshots : Boolean(sections[section.key])))
+    .map((section) => ({ id: section.id, label: section.label, level: 2 }));
 }
 
 function copyBlocks(markdown) {
@@ -620,8 +849,12 @@ function GuideSection({ id, eyebrow, title, icon: Icon, tone = "emerald", childr
 }
 
 function GenericGuideBody({ body }) {
+  // Heading anchors are added to the rendered HTML, so the table of contents and
+  // the prose agree on one id per heading (including repeated headings, which are
+  // suffixed rather than colliding).
+  const html = useMemo(() => DOMPurify.sanitize(withHeadingAnchors(md.render(body || ""))), [body]);
   return <div className="rounded-2xl border border-white/[0.08] bg-black/[0.12] p-6 sm:p-7" data-testid="help-article-body">
-    <div className="space-y-5 text-sm leading-7 text-muted-foreground [&_a]:text-emerald-300 [&_a]:underline-offset-4 [&_h2]:mt-8 [&_h2]:border-b [&_h2]:border-white/[0.08] [&_h2]:pb-3 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:mt-6 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-foreground [&_li]:ml-5 [&_li]:list-disc [&_ol]:space-y-2 [&_ol]:pl-5 [&_ol]:marker:text-emerald-300 [&_ul]:space-y-2" dangerouslySetInnerHTML={{ __html: safeHtml(body) }} />
+    <div className="nx-guide-doc space-y-5 text-sm leading-7 text-muted-foreground" dangerouslySetInnerHTML={{ __html: html }} />
   </div>;
 }
 
@@ -644,7 +877,7 @@ function OperationalGuideBody({ body, screenshots = [] }) {
   const rollback = sections["rollback and escalation"];
   const audit = sections["audit and handover"];
   const related = sections["related guides"];
-  if (!(outcome && before && procedure && verify && audit)) return <GenericGuideBody body={body} />;
+  if (!isStructuredGuide(sections)) return <GenericGuideBody body={body} />;
   const steps = procedureSteps(procedure);
 
   return <div className="space-y-5" data-testid="help-article-body">
@@ -697,14 +930,64 @@ function OperationalGuideBody({ body, screenshots = [] }) {
   </div>;
 }
 
-function ArticleReader({ active, isAdmin, onEdit, onDelete }) {
+function ArticleReader({ active, isAdmin, onEdit, onDelete, contentRef, progress, onAskCopilot, outcome, onOutcome, openedCount }) {
   const screenshots = active.screenshots || [];
-  return <article className="overflow-hidden rounded-[22px] border border-white/[0.09] bg-card/90 shadow-[0_24px_80px_-50px_rgba(34,211,238,0.55)]" data-testid="help-article">
+  const navigate = useNavigate();
+  // Only guides with a known, served workspace get a take-action button; an
+  // unmapped guide simply shows the runbook rather than a link to a 404.
+  const action = guideActionFor(active.slug);
+  return <article className="nx-guide-print overflow-hidden rounded-[22px] border border-white/[0.09] bg-card/90 shadow-[0_24px_80px_-50px_rgba(34,211,238,0.55)]" data-testid="help-article">
+    <ReadingProgress progress={progress} />
     <header className="relative overflow-hidden border-b border-white/[0.08] bg-[radial-gradient(circle_at_0%_0%,rgba(16,185,129,0.18),transparent_38%),linear-gradient(110deg,rgba(16,185,129,0.10),rgba(15,23,42,0.25),rgba(6,182,212,0.07))] px-6 py-7 sm:px-8">
       <div className="absolute right-0 top-0 h-32 w-32 translate-x-10 -translate-y-10 rounded-full bg-cyan-400/[0.08] blur-3xl" />
-      <div className="relative flex flex-wrap items-start justify-between gap-5"><div className="flex min-w-0 items-start gap-4"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-500/[0.12] text-3xl shadow-inner shadow-emerald-300/10">{active.icon || "📘"}</span><div><div className="mb-3 flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/[0.06] text-emerald-200">{active.category}</Badge><span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />Operational runbook</span></div><h2 className="text-2xl font-bold tracking-tight sm:text-3xl" data-testid="help-article-title">{active.title}</h2><p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">{active.summary}</p></div></div>{isAdmin && <div className="flex gap-2"><Button size="sm" variant="outline" className="bg-black/15" onClick={onEdit} data-testid="help-edit-btn"><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit guide</Button><Button size="sm" variant="ghost" className="text-red-300 hover:bg-red-500/[0.08] hover:text-red-200" onClick={onDelete}>Delete</Button></div>}</div>
+      <div className="relative flex flex-wrap items-start justify-between gap-5"><div className="flex min-w-0 items-start gap-4"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-emerald-300/25 bg-emerald-500/[0.12] text-3xl shadow-inner shadow-emerald-300/10">{active.icon || "📘"}</span><div><div className="mb-3 flex flex-wrap items-center gap-2"><Badge variant="outline" className="border-emerald-400/30 bg-emerald-500/[0.06] text-emerald-200">{active.category}</Badge><span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />Operational runbook</span>{openedCount > 1 ? <Badge variant="outline" className="rounded-full border-amber-400/25 bg-amber-500/[0.08] text-[10px] font-normal text-amber-100">opened {openedCount}×</Badge> : null}</div><h2 className="text-2xl font-bold tracking-tight sm:text-3xl" data-testid="help-article-title">{active.title}</h2><p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground sm:text-[15px]">{active.summary}</p></div></div>{isAdmin && <div className="flex gap-2"><Button size="sm" variant="outline" className="bg-black/15" onClick={onEdit} data-testid="help-edit-btn"><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit guide</Button><Button size="sm" variant="ghost" className="text-red-300 hover:bg-red-500/[0.08] hover:text-red-200" onClick={onDelete}>Delete</Button></div>}</div>
+      <div className="relative mt-5 flex flex-wrap items-center gap-2 border-t border-white/[0.08] pt-4">
+        {action ? <Button size="sm" className="rounded-xl bg-emerald-500 text-emerald-950 hover:bg-emerald-400" onClick={() => navigate(action.path)} data-testid="help-take-action"><ArrowRight className="mr-1.5 h-3.5 w-3.5" />{action.label}</Button> : null}
+        <CopyLinkButton />
+        <PrintGuideButton />
+        <span className="ml-auto text-[11px] text-muted-foreground">Prepare → execute → verify → record</span>
+      </div>
     </header>
-    <div className="p-5 sm:p-7 lg:p-8"><OperationalGuideBody body={active.body_md} screenshots={screenshots} />
+    <div className="px-5 pt-5 sm:px-7 lg:px-8">
+      <ArticleProvenance
+        author="Nexus product team"
+        updatedAt={active.updated_at}
+        createdAt={active.created_at}
+        readingMinutes={readingMinutes(active.body_md)}
+        extra={{ label: "Work area", value: active.category }}
+      />
+    </div>
+    <div className="p-5 sm:p-7 lg:p-8" ref={contentRef}>
+      <OperationalGuideBody body={active.body_md} screenshots={screenshots} />
+    </div>
+    <div className="border-t border-white/[0.08] bg-black/[0.14] px-5 py-5 sm:px-7 lg:px-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Did this guide answer it?</p>
+          <p className="max-w-2xl text-xs leading-5 text-muted-foreground">
+            NexusMSP has no published-feedback endpoint for guides yet, so this answer is remembered on this device only —
+            nothing is sent to the server. It changes which guides Nexus puts first for you.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button size="sm" variant={outcome === "yes" ? "default" : "outline"} className="rounded-xl" disabled={outcome === "yes"} onClick={() => onOutcome?.("yes")} data-testid="help-guide-helpful">
+            <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Yes, that worked
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-xl"
+            onClick={() => {
+              onOutcome?.("gap");
+              onAskCopilot?.(`This guide did not answer my question: ${active.title}. What are the next safe steps?`);
+            }}
+            data-testid="help-guide-gap"
+          >
+            <Sparkles className="mr-1.5 h-3.5 w-3.5" />Not quite — ask the co-pilot
+          </Button>
+        </div>
+      </div>
+      {outcome === "yes" ? <p className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-500/[0.06] px-3 py-2 text-[11px] leading-5 text-emerald-100">Recorded on this device. Nexus will put this guide first for you next time.</p> : null}
     </div>
   </article>;
 }

@@ -1,11 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request, Response
-from typing import Optional
 from datetime import datetime, timezone
 import uuid
 import os
-import io
-import asyncio
 import logging
+import mimetypes
 import re
 from app.database import db, UPLOADS_DIR
 from app.auth import get_current_user
@@ -110,11 +108,14 @@ async def upload_workshop_photo(job_id: str, photo_type: str = "general", file: 
     filepath = PHOTO_DIR / filename
     with open(filepath, "wb") as f:
         f.write(content)
+    photo_id = str(uuid.uuid4())
     photo = {
-        "id": str(uuid.uuid4()),
+        "id": photo_id,
         "job_id": job_id,
         "filename": filename,
-        "url": f"/api/uploads/workshop_photos/{filename}",
+        # Job photos are customer evidence; reference only the scope-checked
+        # download route, never the public upload mount.
+        "url": f"/api/workshop/jobs/{job_id}/photos/{photo_id}/file",
         "photo_type": photo_type,
         "original_name": safe_original_filename(file.filename),
         "size_bytes": len(content),
@@ -138,6 +139,33 @@ async def delete_workshop_photo(job_id: str, photo_id: str, current_user: dict =
     await db.workshop_photos.delete_one({"id": photo_id})
     await _ws_audit(job_id, "photo_deleted", "Photo deleted", current_user)
     return {"message": "Photo deleted"}
+
+
+@router.get("/workshop/jobs/{job_id}/photos/{photo_id}/file")
+async def download_workshop_photo(job_id: str, photo_id: str, current_user: dict = Depends(get_current_user)):
+    """Serve a job photo only after workshop job scope has been enforced.
+
+    The legacy public static path for workshop photos is rejected in server.py
+    so known filenames cannot bypass job, client or tenant authorisation.
+    """
+    photo = await db.workshop_photos.find_one(
+        scoped_query(current_user, {"id": photo_id, "job_id": job_id}), {"_id": 0}
+    )
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    filename = safe_original_filename(photo.get("filename"), default="missing")
+    filepath = PHOTO_DIR / filename
+    if not filepath.is_file():
+        raise HTTPException(status_code=404, detail="Photo is unavailable")
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=filepath.read_bytes(),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 # ============== DIAGNOSTIC CHECKLISTS ==============

@@ -13,6 +13,7 @@ import {
   Users, Shield, Target, ArrowUpRight
 } from "lucide-react";
 import { MetricStrip, MetricTile } from "@/components/design-system";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function HealthRadarPage({ embedded = false }) {
   const { token } = useAuth();
@@ -49,16 +50,7 @@ export default function HealthRadarPage({ embedded = false }) {
 
   return (
     <div className="space-y-5 p-6" data-testid="health-radar-page">
-      <div className={`flex items-center gap-4 flex-wrap ${embedded ? "justify-end" : "justify-between"}`}>
-        {!embedded && <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg border border-rose-500/25 bg-rose-500/10 flex items-center justify-center"><Heart className="w-4 h-4 text-rose-400" /></div>
-            <h1 className="text-2xl font-bold tracking-tight">Client Health Radar</h1>
-          </div>
-          <p className="text-xs text-muted-foreground mt-1">Prioritise retention risks and revenue opportunities across your client base.</p>
-        </div>}
-        <Button size="sm" variant="outline" onClick={fetchData}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh radar</Button>
-      </div>
+      {!embedded ? <OperationalPageHeader eyebrow="Client intelligence · relationship health" title="Client Health Radar" description="Prioritise retention risk and evidence-backed revenue opportunity across the client portfolio." icon={Heart} tone="rose" signal={data?.summary?.at_risk_count > 0 ? "attention" : "ready"} actions={<Button size="sm" variant="outline" onClick={fetchData}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh radar</Button>} /> : <div className="flex justify-end"><Button size="sm" variant="outline" onClick={fetchData}><RefreshCw className="w-3.5 h-3.5 mr-1.5" />Refresh radar</Button></div>}
 
       {data && (
         <>

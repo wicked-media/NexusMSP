@@ -5,7 +5,7 @@ alerts, or remediation results.  It can store connection details and local polic
 configuration, but operational data is returned only when it has been written by
 a verified Microsoft Graph/Partner Center synchronisation provider.
 """
-from datetime import datetime, timezone
+import asyncio
 from typing import Any
 import json
 import logging
@@ -20,6 +20,21 @@ from app.auth import get_current_user
 from app.database import db
 from app.services.activity import log_activity
 from app.services.action_permissions import require_action
+from app.services.m365_provider_visibility import (
+    m365_provider_evidence_query,
+    m365_provider_tenant_query,
+    m365_tenant_connection_query,
+    visible_m365_provider_tenant_ids,
+)
+from app.services.secret_store import decrypt_secret, encrypt_secret
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    effective_scope,
+    platform_tenant_id,
+    scope_query,
+    tenant_scoped_query,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +45,58 @@ router = APIRouter()
 # remains empty until one is installed and verified.
 VERIFIED_SOURCES = ("m365_graph", "m365_partner_center")
 LEGACY_MOCK_SOURCE = "m365cc"
+CONNECTION_SECRET_FIELDS = (
+    ("app_secret", "app_secret_encrypted"),
+    ("refresh_token", "refresh_token_encrypted"),
+)
+ONBOARDING_CONNECTION_STATUS_FIELDS = (
+    "secret_configured",
+    "refresh_token_configured",
+    "mode",
+    "telemetry_available",
+)
+
+# The collector-readiness view is deliberately a deployment contract rather
+# than a claim that a saved credential equals live Microsoft evidence.  Keep
+# the streams explicit so a missing or new collection cannot quietly turn into
+# an invented health signal in the Control Plane.
+M365_COLLECTOR_STREAMS = (
+    {
+        "id": "identity",
+        "label": "Identity",
+        "collection": "m365_users",
+        "permissions": ["User.Read.All", "Directory.Read.All"],
+        "feeds": ["Users", "MFA evidence", "Licence assignments"],
+    },
+    {
+        "id": "exchange",
+        "label": "Exchange",
+        "collection": "m365_mailboxes",
+        "permissions": ["Mail.ReadBasic.All", "MailboxSettings.Read"],
+        "feeds": ["Mailboxes", "Forwarding posture", "Audit evidence"],
+    },
+    {
+        "id": "intune",
+        "label": "Intune",
+        "collection": "m365_intune_devices",
+        "permissions": ["DeviceManagementManagedDevices.Read.All"],
+        "feeds": ["Managed devices", "Compliance", "Encryption posture"],
+    },
+    {
+        "id": "collaboration",
+        "label": "Collaboration",
+        "collection": "m365_teams",
+        "permissions": ["Group.Read.All", "Sites.Read.All"],
+        "feeds": ["Teams", "Sharing posture", "Guest access"],
+    },
+    {
+        "id": "security",
+        "label": "Security",
+        "collection": "m365_security_alerts",
+        "permissions": ["SecurityAlert.Read.All", "IdentityRiskEvent.Read.All"],
+        "feeds": ["Defender alerts", "Identity risk", "Security posture"],
+    },
+)
 
 STANDARD_LIBRARY = [
     {
@@ -100,13 +167,107 @@ GDAP_ROLE_TEMPLATES = [
 ]
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
-async def _get_settings() -> dict:
-    settings = await db.settings.find_one({"key": "m365_connection"}, {"_id": 0}) or {}
-    return settings.get("value") or {}
+def _m365_connection_settings_query(
+    current_user: dict | None = None,
+    extra: dict | None = None,
+) -> dict:
+    """Select the platform-owned Partner Center connection record.
+
+    Microsoft customer tenant IDs cannot serve as the Nexus platform boundary,
+    so connector settings use an explicit ``platform_tenant_id``.  The
+    documented local installation keeps compatibility with its untagged
+    setting through ``tenant_scoped_query``; an explicitly platform-bound
+    actor never falls back to that record.
+    """
+    selector = {"key": "m365_connection", **(extra or {})}
+    if current_user is None:
+        return selector
+    return tenant_scoped_query(
+        current_user,
+        selector,
+        tenant_field="platform_tenant_id",
+    )
+
+
+async def _get_settings(
+    *,
+    current_user: dict | None = None,
+    migrate_legacy: bool = False,
+) -> dict:
+    """Load server-only Partner Center credentials without persisting plaintext.
+
+    Encrypted credentials are authoritative. A legacy plaintext value is
+    migrated only from a globally scoped connection workflow, so a restricted
+    evidence read cannot mutate the MSP-wide connection record.
+    """
+    document = await db.settings.find_one(
+        _m365_connection_settings_query(current_user),
+        {"_id": 0},
+    ) or {}
+    settings = dict(document.get("value") or {})
+    for plaintext_field, encrypted_field in CONNECTION_SECRET_FIELDS:
+        encrypted = str(settings.get(encrypted_field) or "").strip()
+        legacy = str(settings.get(plaintext_field) or "").strip()
+        if encrypted:
+            # Do not revive a stale plaintext sibling if the encrypted value
+            # cannot be decrypted after a credential rotation or key change.
+            settings[plaintext_field] = decrypt_secret(encrypted)
+            if migrate_legacy and legacy:
+                await db.settings.update_one(
+                    _m365_connection_settings_query(
+                        current_user,
+                        {f"value.{encrypted_field}": encrypted},
+                    ),
+                    {"$unset": {f"value.{plaintext_field}": ""}},
+                )
+            continue
+        if not legacy:
+            settings.pop(plaintext_field, None)
+            continue
+        if migrate_legacy:
+            encrypted = encrypt_secret(legacy)
+            await db.settings.update_one(
+                _m365_connection_settings_query(
+                    current_user,
+                    {
+                        f"value.{plaintext_field}": legacy,
+                        "$or": [
+                            {f"value.{encrypted_field}": {"$exists": False}},
+                            {f"value.{encrypted_field}": ""},
+                            {f"value.{encrypted_field}": None},
+                        ],
+                    },
+                ),
+                {
+                    "$set": {f"value.{encrypted_field}": encrypted},
+                    "$unset": {f"value.{plaintext_field}": ""},
+                },
+            )
+            settings[encrypted_field] = encrypted
+        settings[plaintext_field] = legacy
+    return settings
+
+
+def _connection_settings_for_storage(settings: dict) -> dict:
+    """Strip in-memory plaintext credentials before replacing the settings value."""
+    stored = dict(settings)
+    for plaintext_field, _encrypted_field in CONNECTION_SECRET_FIELDS:
+        stored.pop(plaintext_field, None)
+    return stored
+
+
+def _onboarding_connection_payload_for_scope(current_user: dict, payload: dict) -> dict:
+    """Keep scoped onboarding useful without exposing MSP connection identity."""
+    if effective_scope(current_user)["mode"] == "all":
+        return payload
+    return {
+        field: payload.get(field)
+        for field in ONBOARDING_CONNECTION_STATUS_FIELDS
+        if field in payload
+    }
 
 
 def _connection_status(settings: dict) -> str:
@@ -130,6 +291,106 @@ def _verified_query(extra: dict | None = None) -> dict:
     return query
 
 
+def _normalise_tenant_identifier(value: Any) -> str:
+    """Return a stable provider tenant identifier or an empty value.
+
+    Provider evidence must be joined to Nexus client scope with a stable tenant
+    identifier.  Names and domains are intentionally never used as a fallback:
+    both are mutable and can collide between customers.
+    """
+    return str(value or "").strip()
+
+
+def _tenant_identifiers_from_record(record: dict) -> set[str]:
+    """Return provider tenant identity plus the supported legacy record alias."""
+    return {
+        identifier
+        for identifier in (
+            _normalise_tenant_identifier(record.get("tenant_id")),
+            _normalise_tenant_identifier(record.get("id")),
+        )
+        if identifier
+    }
+
+
+async def _visible_tenant_ids(current_user: dict) -> set[str] | None:
+    """Resolve provider tenants from Nexus-owned client mappings.
+
+    Microsoft tenant IDs belong to customer directories, not to the Nexus
+    platform.  The shared resolver starts with the actor's platform-scoped
+    Nexus clients, excludes ambiguous mappings, and fails closed for an empty
+    result.  It is deliberately shared with CIPP and Mail Shield so one
+    module cannot accidentally see a broader provider inventory than another.
+    """
+    return await visible_m365_provider_tenant_ids(current_user, database=db)
+
+
+def _evidence_query_for_tenants(
+    visible_tenant_ids: set[str] | None,
+    extra: dict | None = None,
+) -> dict:
+    """Constrain tenant-keyed provider evidence to an authorised tenant set."""
+    # ``None`` is only the documented local-administrator compatibility path.
+    # Preserve the historical flat query shape there for existing integrations.
+    if visible_tenant_ids is None:
+        return _verified_query(extra)
+    return m365_provider_evidence_query(visible_tenant_ids, extra)
+
+
+def _tenant_record_query_for_tenants(
+    visible_tenant_ids: set[str] | None,
+    extra: dict | None = None,
+) -> dict:
+    """Constrain the tenant inventory, which supports legacy ``id`` records."""
+    if visible_tenant_ids is None:
+        return _verified_query(extra)
+    return m365_provider_tenant_query(visible_tenant_ids, extra)
+
+
+def _onboarding_record_query(current_user: dict, extra: dict | None = None) -> dict:
+    """Constrain new onboarding registry records to their Nexus platform."""
+    return tenant_scoped_query(
+        current_user,
+        extra,
+        tenant_field="platform_tenant_id",
+    )
+
+
+def _onboarding_list_query(
+    current_user: dict,
+    visible_tenant_ids: set[str] | None,
+) -> dict:
+    """Show mapped provider tenants plus this platform's unmapped discoveries."""
+    provider_query = m365_tenant_connection_query(visible_tenant_ids)
+    if visible_tenant_ids is None:
+        return provider_query
+    return {"$or": [provider_query, _onboarding_record_query(current_user)]}
+
+
+async def _scope_tenant_or_404(
+    current_user: dict,
+    tenant_id: str | None,
+    *,
+    operation: str,
+) -> set[str] | None:
+    """Return the caller's visible tenant set and mask a foreign tenant ID.
+
+    This delegates denial logging and fail-closed behaviour to the shared
+    client-scope service.  A missing/unmapped provider tenant is deliberately
+    indistinguishable from a foreign tenant to a restricted technician.
+    """
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    requested = _normalise_tenant_identifier(tenant_id)
+    if requested and visible_tenant_ids is not None and requested not in visible_tenant_ids:
+        await assert_client_scope(
+            current_user,
+            None,
+            operation=operation,
+            mask_not_found=True,
+        )
+    return visible_tenant_ids
+
+
 async def _retire_legacy_mock_data() -> None:
     """Remove the former demo records without touching verified provider data."""
     tenants = await db.m365_tenants.find({"source": LEGACY_MOCK_SOURCE}, {"_id": 0, "id": 1}).to_list(500)
@@ -146,9 +407,25 @@ async def _retire_legacy_mock_data() -> None:
     await db.m365_scripted_alerts.delete_many({"id": {"$regex": "^sa-"}})
 
 
-async def _connection_payload() -> dict:
-    settings = await _get_settings()
-    telemetry_available = await db.m365_tenants.count_documents(_verified_query()) > 0
+async def _retire_legacy_mock_data_for_global_scope(current_user: dict) -> None:
+    """Keep read-only evidence routes non-mutating for restricted technicians."""
+    if effective_scope(current_user)["mode"] == "all":
+        await _retire_legacy_mock_data()
+
+
+async def _connection_payload(
+    visible_tenant_ids: set[str] | None = None,
+    *,
+    current_user: dict | None = None,
+    migrate_legacy: bool = False,
+) -> dict:
+    settings = await _get_settings(
+        current_user=current_user,
+        migrate_legacy=migrate_legacy,
+    )
+    telemetry_available = await db.m365_tenants.count_documents(
+        _tenant_record_query_for_tenants(visible_tenant_ids)
+    ) > 0
     partner_tenant_id = settings.get("partner_tenant_id") or settings.get("tenant_id")
     return {
         "app_id": settings.get("app_id"),
@@ -261,21 +538,37 @@ def _normalise_partner_customer(raw: dict) -> dict | None:
     }
 
 
-def _tenant_access_state(row: dict, verified_ids: set[str]) -> tuple[bool, str]:
-    verified = bool(row.get("graph_verified")) or str(row.get("tenant_id")) in verified_ids
-    if verified:
+def _tenant_access_state(row: dict, graph_verified_ids: set[str]) -> tuple[bool, str]:
+    """Return Graph capability without conflating Partner Center discovery.
+
+    A Partner Center relationship proves the MSP can discover a customer. It
+    does not prove a managed application can perform Microsoft Graph work in
+    that customer tenant.  Only an explicit Graph verification is allowed to
+    unlock the connected state.
+    """
+    graph_verified = bool(row.get("graph_verified")) or str(row.get("tenant_id")) in graph_verified_ids
+    if graph_verified:
         return True, "connected"
     if row.get("consent_method") == "customer_admin":
         return False, "consent_required"
     return False, "gdap_required"
 
 
-async def _mapping_target_client(tenant_id: str, client_id: str | None) -> dict | None:
+async def _mapping_target_client(
+    tenant_id: str,
+    client_id: str | None,
+    current_user: dict | None = None,
+) -> dict | None:
     """Return a safe client mapping target without silently replacing another tenant."""
     if not client_id:
         return None
+    client_query = (
+        tenant_scoped_query(current_user, {"id": client_id})
+        if current_user is not None
+        else {"id": client_id}
+    )
     client = await db.clients.find_one(
-        {"id": client_id},
+        client_query,
         {"_id": 0, "id": 1, "name": 1, "cipp_tenant_id": 1, "cipp_tenant_display": 1},
     )
     if not client:
@@ -289,8 +582,11 @@ async def _mapping_target_client(tenant_id: str, client_id: str | None) -> dict 
             detail=f"{client.get('name') or 'This Nexus client'} is already linked to {linked_name}. Unlink that tenant before assigning another.",
         )
 
+    duplicate_query = {"client_id": client_id, "tenant_id": {"$ne": tenant_id}}
+    if current_user is not None:
+        duplicate_query = _onboarding_record_query(current_user, duplicate_query)
     duplicate = await db.m365_tenant_connections.find_one(
-        {"client_id": client_id, "tenant_id": {"$ne": tenant_id}},
+        duplicate_query,
         {"_id": 0, "tenant_id": 1, "tenant_name": 1},
     )
     if duplicate:
@@ -300,6 +596,31 @@ async def _mapping_target_client(tenant_id: str, client_id: str | None) -> dict 
             detail=f"{client.get('name') or 'This Nexus client'} is already mapped to {linked_name} in the Microsoft onboarding registry.",
         )
     return client
+
+
+async def _assert_verified_provider_owner(
+    tenant_id: str,
+    client_id: str | None,
+) -> None:
+    """Prevent a manual onboarding record from overriding verified ownership."""
+    provider_tenant = await db.m365_tenants.find_one(
+        _verified_query(
+            {
+                "$or": [
+                    {"tenant_id": tenant_id},
+                    {"tenantId": tenant_id},
+                    {"id": tenant_id},
+                ]
+            }
+        ),
+        {"_id": 0, "client_id": 1},
+    )
+    verified_owner = str((provider_tenant or {}).get("client_id") or "").strip()
+    if verified_owner and verified_owner != str(client_id or "").strip():
+        raise HTTPException(
+            status_code=409,
+            detail="This Microsoft tenant already has verified Nexus client ownership.",
+        )
 
 
 def _execution_unavailable(detail: str = "A verified Microsoft Graph synchronisation provider is required before this action can run.") -> HTTPException:
@@ -316,9 +637,15 @@ async def microsoft_sync_readiness(current_user: dict = Depends(get_current_user
     secrets and does not attempt a live Graph call; it gives a technician a
     precise least-privilege checklist before a collector is installed.
     """
-    connection = await _connection_payload()
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    connection = await _connection_payload(
+        visible_tenant_ids,
+        current_user=current_user,
+    )
     counts = await asyncio.gather(*[
-        getattr(db, stream["collection"]).count_documents(_verified_query())
+        getattr(db, stream["collection"]).count_documents(
+            _evidence_query_for_tenants(visible_tenant_ids)
+        )
         for stream in M365_COLLECTOR_STREAMS
     ])
     connection_ready = connection.get("mode") == "configured_unverified" or bool(connection.get("verified_at"))
@@ -339,8 +666,13 @@ async def microsoft_sync_readiness(current_user: dict = Depends(get_current_user
 
 @router.get("/m365/connection")
 async def get_connection(current_user: dict = Depends(get_current_user)):
-    await _retire_legacy_mock_data()
-    return await _connection_payload()
+    await assert_global_scope(current_user, operation="m365.connection.read")
+    await _retire_legacy_mock_data_for_global_scope(current_user)
+    return await _connection_payload(
+        await _visible_tenant_ids(current_user),
+        current_user=current_user,
+        migrate_legacy=True,
+    )
 
 
 @router.put("/m365/connection")
@@ -349,8 +681,10 @@ async def update_connection(
     current_user: dict = Depends(get_current_user),
     _: dict = Depends(require_action("m365.tenant.manage")),
 ):
-    settings = await _get_settings()
+    await assert_global_scope(current_user, operation="m365.connection.write")
+    settings = await _get_settings(current_user=current_user, migrate_legacy=True)
     credential_keys = {"app_id", "tenant_id", "partner_tenant_id", "app_secret", "refresh_token"}
+    encrypted_secret_fields = dict(CONNECTION_SECRET_FIELDS)
     credentials_changed = False
     for key in (
         "app_id",
@@ -366,7 +700,15 @@ async def update_connection(
             value = str(data[key]).strip() or None
             if key in credential_keys and settings.get(key) != value:
                 credentials_changed = True
-            settings[key] = value
+            if key in encrypted_secret_fields:
+                settings[key] = value
+                encrypted_field = encrypted_secret_fields[key]
+                if value:
+                    settings[encrypted_field] = encrypt_secret(value)
+                else:
+                    settings.pop(encrypted_field, None)
+            else:
+                settings[key] = value
     if settings.get("partner_tenant_id"):
         # Preserve the old key for compatibility with existing provider checks.
         settings["tenant_id"] = settings["partner_tenant_id"]
@@ -379,8 +721,14 @@ async def update_connection(
     settings["updated_by"] = current_user.get("name")
     settings["updated_at"] = _now_iso()
     await db.settings.update_one(
-        {"key": "m365_connection"},
-        {"$set": {"value": settings, "key": "m365_connection"}},
+        _m365_connection_settings_query(current_user),
+        {
+            "$set": {
+                "value": _connection_settings_for_storage(settings),
+                "key": "m365_connection",
+                "platform_tenant_id": platform_tenant_id(current_user),
+            }
+        },
         upsert=True,
     )
     mode = _connection_status(settings)
@@ -397,7 +745,8 @@ async def test_connection(
     current_user: dict = Depends(get_current_user),
     _: dict = Depends(require_action("m365.tenant.manage")),
 ):
-    settings = await _get_settings()
+    await assert_global_scope(current_user, operation="m365.connection.test")
+    settings = await _get_settings(current_user=current_user, migrate_legacy=True)
     mode = _connection_status(settings)
     if mode != "configured_unverified":
         return {
@@ -422,7 +771,7 @@ async def test_connection(
                 ],
             }
         await db.settings.update_one(
-            {"key": "m365_connection"},
+            _m365_connection_settings_query(current_user),
             {"$set": {"value.last_test_status": "failed", "value.last_tested_at": now}},
         )
         return {
@@ -436,7 +785,7 @@ async def test_connection(
             ],
         }
     await db.settings.update_one(
-        {"key": "m365_connection"},
+        _m365_connection_settings_query(current_user),
         {"$set": {"value.last_test_status": "success", "value.last_tested_at": now}},
     )
     await log_activity(
@@ -464,9 +813,13 @@ async def test_connection(
 
 @router.get("/m365/onboarding")
 async def get_onboarding(current_user: dict = Depends(get_current_user)):
-    settings_payload = await _connection_payload()
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    settings_payload = _onboarding_connection_payload_for_scope(
+        current_user,
+        await _connection_payload(visible_tenant_ids, current_user=current_user),
+    )
     clients = await db.clients.find(
-        {},
+        tenant_scoped_query(current_user, scope_query(current_user, field="id")),
         {
             "_id": 0,
             "id": 1,
@@ -482,15 +835,32 @@ async def get_onboarding(current_user: dict = Depends(get_current_user)):
     client_by_id = {str(client.get("id")): client for client in clients if client.get("id")}
 
     verified = await db.m365_tenants.find(
-        _verified_query(),
-        {"_id": 0, "id": 1, "tenant_id": 1, "name": 1, "domain": 1, "client_id": 1},
+        _tenant_record_query_for_tenants(visible_tenant_ids),
+        {
+            "_id": 0,
+            "id": 1,
+            "tenant_id": 1,
+            "name": 1,
+            "domain": 1,
+            "client_id": 1,
+            "source": 1,
+            "graph_verified": 1,
+            "verified_at": 1,
+        },
     ).to_list(2000)
-    verified_ids = {
+    graph_verified_ids = {
         str(item.get("tenant_id") or item.get("id"))
         for item in verified
-        if item.get("tenant_id") or item.get("id")
+        if (
+            (item.get("tenant_id") or item.get("id"))
+            and item.get("source") == "m365_graph"
+            and item.get("graph_verified") is True
+        )
     }
-    rows = await db.m365_tenant_connections.find({}, {"_id": 0}).sort("tenant_name", 1).to_list(2000)
+    rows = await db.m365_tenant_connections.find(
+        _onboarding_list_query(current_user, visible_tenant_ids),
+        {"_id": 0},
+    ).sort("tenant_name", 1).to_list(2000)
     row_by_tenant = {str(row.get("tenant_id")): row for row in rows if row.get("tenant_id")}
 
     # Preserve verified provider tenants and historic client mappings in the
@@ -505,7 +875,7 @@ async def get_onboarding(current_user: dict = Depends(get_current_user)):
                 "default_domain": item.get("domain") or "",
                 "source": "verified_provider",
                 "client_id": item.get("client_id"),
-                "graph_verified": True,
+                "graph_verified": tenant_id in graph_verified_ids,
                 "discovered_at": item.get("verified_at") or item.get("updated_at"),
             }
     for client in clients:
@@ -518,14 +888,14 @@ async def get_onboarding(current_user: dict = Depends(get_current_user)):
                 "default_domain": client.get("cipp_tenant_domain") or "",
                 "source": "existing_client_link",
                 "client_id": client.get("id"),
-                "graph_verified": tenant_id in verified_ids,
+                "graph_verified": tenant_id in graph_verified_ids,
                 "discovered_at": client.get("cipp_linked_at"),
             }
 
     output = []
     for row in row_by_tenant.values():
         linked_client = client_by_id.get(str(row.get("client_id"))) if row.get("client_id") else None
-        graph_verified, access_status = _tenant_access_state(row, verified_ids)
+        graph_verified, access_status = _tenant_access_state(row, graph_verified_ids)
         output.append({
             **row,
             "graph_verified": graph_verified,
@@ -553,11 +923,12 @@ async def discover_partner_customers(
     current_user: dict = Depends(get_current_user),
     _: dict = Depends(require_action("m365.tenant.manage")),
 ):
-    settings = await _get_settings()
+    await assert_global_scope(current_user, operation="m365.onboarding.discover")
+    settings = await _get_settings(current_user=current_user, migrate_legacy=True)
     raw_customers = await _partner_center_customers(settings)
     customers = [item for item in (_normalise_partner_customer(raw) for raw in raw_customers) if item]
     clients = await db.clients.find(
-        {},
+        tenant_scoped_query(current_user),
         {"_id": 0, "id": 1, "name": 1, "website": 1, "domain": 1, "cipp_tenant_id": 1, "cipp_tenant_domain": 1},
     ).to_list(2000)
 
@@ -566,38 +937,62 @@ async def discover_partner_customers(
         return re.sub(r"^https?://", "", text).split("/")[0].lstrip("www.")
 
     client_by_tenant = {str(client.get("cipp_tenant_id")): client for client in clients if client.get("cipp_tenant_id")}
-    client_by_domain: dict[str, dict] = {}
+    client_by_domain: dict[str, dict[str, dict]] = {}
     for client in clients:
         for candidate in (client.get("cipp_tenant_domain"), client.get("domain"), client.get("website")):
             domain = normalise_domain(candidate)
-            if domain:
-                client_by_domain.setdefault(domain, client)
+            client_id = str(client.get("id") or "")
+            if domain and client_id:
+                client_by_domain.setdefault(domain, {})[client_id] = client
 
     now = _now_iso()
     created = 0
     updated = 0
     auto_mapped = 0
+    mapping_review_required = 0
+    ownership_conflicts = 0
     for customer in customers:
-        existing = await db.m365_tenant_connections.find_one({"tenant_id": customer["tenant_id"]}, {"_id": 0})
-        matched_client = client_by_tenant.get(customer["tenant_id"]) or client_by_domain.get(normalise_domain(customer["default_domain"]))
+        existing = await db.m365_tenant_connections.find_one(
+            _onboarding_record_query(current_user, {"tenant_id": customer["tenant_id"]}),
+            {"_id": 0},
+        )
+        existing_any = await db.m365_tenant_connections.find_one(
+            {"tenant_id": customer["tenant_id"]},
+            {"_id": 0, "platform_tenant_id": 1},
+        )
+        if not existing and existing_any:
+            # Do not copy or claim a customer relationship from another Nexus
+            # platform.  The batch result reports the count without exposing
+            # the foreign owner or its customer data.
+            ownership_conflicts += 1
+            continue
+        stable_match = client_by_tenant.get(customer["tenant_id"])
+        domain_matches = list(
+            client_by_domain.get(normalise_domain(customer["default_domain"]), {}).values()
+        )
+        matched_client = stable_match or (domain_matches[0] if len(domain_matches) == 1 else None)
+        ambiguous_domain_match = not stable_match and len(domain_matches) > 1
         client_id = existing.get("client_id") if existing else None
         if not client_id and matched_client:
             client_id = matched_client.get("id")
             auto_mapped += 1
+        if not client_id and ambiguous_domain_match:
+            mapping_review_required += 1
         record = {
             **customer,
             "id": (existing or {}).get("id") or f"m365-tenant-{uuid.uuid4().hex[:12]}",
+            "platform_tenant_id": platform_tenant_id(current_user),
             "source": "partner_center",
             "client_id": client_id,
             "consent_method": (existing or {}).get("consent_method") or "gdap",
             "graph_verified": bool((existing or {}).get("graph_verified")),
-            "discovery_status": "discovered",
+            "discovery_status": "needs_mapping_review" if not client_id else "discovered",
             "discovered_at": (existing or {}).get("discovered_at") or now,
             "updated_at": now,
             "updated_by": current_user.get("name"),
         }
         await db.m365_tenant_connections.update_one(
-            {"tenant_id": customer["tenant_id"]},
+            _onboarding_record_query(current_user, {"tenant_id": customer["tenant_id"]}),
             {"$set": record},
             upsert=True,
         )
@@ -607,7 +1002,7 @@ async def discover_partner_customers(
             created += 1
         if matched_client and client_id == matched_client.get("id") and not matched_client.get("cipp_tenant_id"):
             await db.clients.update_one(
-                {"id": client_id},
+                tenant_scoped_query(current_user, {"id": client_id}),
                 {"$set": {
                     "cipp_tenant_id": customer["tenant_id"],
                     "cipp_tenant_display": customer["tenant_name"],
@@ -620,8 +1015,14 @@ async def discover_partner_customers(
     settings["last_discovery_count"] = len(customers)
     settings["last_test_status"] = "success"
     await db.settings.update_one(
-        {"key": "m365_connection"},
-        {"$set": {"key": "m365_connection", "value": settings}},
+        _m365_connection_settings_query(current_user),
+        {
+            "$set": {
+                "key": "m365_connection",
+                "value": _connection_settings_for_storage(settings),
+                "platform_tenant_id": platform_tenant_id(current_user),
+            }
+        },
         upsert=True,
     )
     await log_activity(
@@ -630,7 +1031,7 @@ async def discover_partner_customers(
         "integration",
         "partner_center",
         "Microsoft Partner Center",
-        f"{len(customers)} tenants discovered; {auto_mapped} mapped to clients",
+        f"{len(customers)} tenants discovered; {auto_mapped} mapped; {mapping_review_required} need mapping review",
     )
     return {
         "success": True,
@@ -638,6 +1039,8 @@ async def discover_partner_customers(
         "created": created,
         "updated": updated,
         "auto_mapped": auto_mapped,
+        "mapping_review_required": mapping_review_required,
+        "ownership_conflicts": ownership_conflicts,
         "message": f"{len(customers)} Partner Center customer tenants discovered.",
     }
 
@@ -656,10 +1059,41 @@ async def add_individual_tenant(
     if consent_method not in {"gdap", "customer_admin"}:
         raise HTTPException(status_code=400, detail="Consent method must be GDAP or customer_admin.")
     client_id = str((data or {}).get("client_id") or "").strip() or None
-    client = await _mapping_target_client(tenant_id, client_id)
+    if client_id:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="m365.onboarding.tenant.create",
+            mask_not_found=True,
+        )
+    else:
+        # An unmapped provider tenant has no customer ownership for a restricted
+        # technician to prove.  Discovery/mapping of those tenants is a global
+        # administrator workflow.
+        await assert_global_scope(current_user, operation="m365.onboarding.tenant.create")
+    await _assert_verified_provider_owner(tenant_id, client_id)
+    client = await _mapping_target_client(tenant_id, client_id, current_user)
     now = _now_iso()
-    existing = await db.m365_tenant_connections.find_one({"tenant_id": tenant_id}, {"_id": 0})
+    existing = await db.m365_tenant_connections.find_one(
+        _onboarding_record_query(current_user, {"tenant_id": tenant_id}),
+        {"_id": 0},
+    )
+    existing_any = await db.m365_tenant_connections.find_one(
+        {"tenant_id": tenant_id},
+        {"_id": 0, "platform_tenant_id": 1},
+    )
+    if not existing and existing_any:
+        raise HTTPException(
+            status_code=409,
+            detail="This Microsoft tenant is already owned by another Nexus platform.",
+        )
     if existing and existing.get("client_id") and client_id and existing.get("client_id") != client_id:
+        await assert_client_scope(
+            current_user,
+            existing.get("client_id"),
+            operation="m365.onboarding.tenant.create",
+            mask_not_found=True,
+        )
         raise HTTPException(
             status_code=409,
             detail="This Microsoft tenant is already mapped to another Nexus client. Move it from the onboarding registry instead of adding it again.",
@@ -667,6 +1101,7 @@ async def add_individual_tenant(
     record = {
         "id": (existing or {}).get("id") or f"m365-tenant-{uuid.uuid4().hex[:12]}",
         "tenant_id": tenant_id,
+        "platform_tenant_id": platform_tenant_id(current_user),
         "tenant_name": tenant_name,
         "default_domain": str((data or {}).get("default_domain") or "").strip().lower(),
         "source": "manual",
@@ -678,10 +1113,14 @@ async def add_individual_tenant(
         "updated_at": now,
         "updated_by": current_user.get("name"),
     }
-    await db.m365_tenant_connections.update_one({"tenant_id": tenant_id}, {"$set": record}, upsert=True)
+    await db.m365_tenant_connections.update_one(
+        _onboarding_record_query(current_user, {"tenant_id": tenant_id}),
+        {"$set": record},
+        upsert=True,
+    )
     if client:
         await db.clients.update_one(
-            {"id": client_id},
+            tenant_scoped_query(current_user, {"id": client_id}),
             {"$set": {
                 "cipp_tenant_id": tenant_id,
                 "cipp_tenant_display": tenant_name,
@@ -700,14 +1139,38 @@ async def map_tenant_to_client(
     current_user: dict = Depends(get_current_user),
     _: dict = Depends(require_action("m365.tenant.manage")),
 ):
-    row = await db.m365_tenant_connections.find_one({"id": connection_id}, {"_id": 0})
+    await assert_global_scope(current_user, operation="m365.onboarding.tenant.map")
+    client_id = str((data or {}).get("client_id") or "").strip() or None
+    mapping_reason = str((data or {}).get("reason") or "").strip()
+    if not mapping_reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Add a mapping reason before changing a Microsoft tenant's Nexus client.",
+        )
+    if len(mapping_reason) > 500:
+        raise HTTPException(status_code=400, detail="Mapping reason must be 500 characters or fewer.")
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    row = await db.m365_tenant_connections.find_one(
+        _onboarding_record_query(current_user, {"id": connection_id}),
+        {"_id": 0},
+    )
+    created_from_provider = False
     if not row:
         tenant_id = connection_id.removeprefix("m365-tenant-")
         verified = await db.m365_tenants.find_one(
-            _verified_query({"$or": [{"tenant_id": tenant_id}, {"id": tenant_id}]}),
+            _tenant_record_query_for_tenants(
+                visible_tenant_ids,
+                {"$or": [{"tenant_id": tenant_id}, {"id": tenant_id}]},
+            ),
             {"_id": 0},
         )
-        linked_client = await db.clients.find_one({"cipp_tenant_id": tenant_id}, {"_id": 0})
+        linked_client = await db.clients.find_one(
+            tenant_scoped_query(
+                current_user,
+                {"cipp_tenant_id": tenant_id, **scope_query(current_user, field="id")},
+            ),
+            {"_id": 0},
+        )
         source = verified or linked_client
         if not source:
             raise HTTPException(status_code=404, detail="Tenant onboarding record not found.")
@@ -719,17 +1182,40 @@ async def map_tenant_to_client(
             "source": "verified_provider" if verified else "existing_client_link",
             "client_id": (verified or {}).get("client_id") or (linked_client or {}).get("id"),
             "consent_method": "gdap",
-            "graph_verified": bool(verified),
+            "graph_verified": bool(
+                verified
+                and verified.get("source") == "m365_graph"
+                and verified.get("graph_verified") is True
+            ),
             "discovered_at": (verified or {}).get("verified_at") or (linked_client or {}).get("cipp_linked_at"),
         }
-        await db.m365_tenant_connections.insert_one({**row, "updated_at": _now_iso(), "updated_by": current_user.get("name")})
-    client_id = str((data or {}).get("client_id") or "").strip() or None
+        created_from_provider = True
+    await _assert_verified_provider_owner(str(row.get("tenant_id") or ""), client_id)
+    if client_id:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="m365.onboarding.tenant.map",
+            mask_not_found=True,
+        )
     now = _now_iso()
     previous_client_id = row.get("client_id")
-    client = await _mapping_target_client(str(row.get("tenant_id") or ""), client_id)
+    client = await _mapping_target_client(str(row.get("tenant_id") or ""), client_id, current_user)
+    if created_from_provider:
+        await db.m365_tenant_connections.insert_one(
+            {
+                **row,
+                "platform_tenant_id": platform_tenant_id(current_user),
+                "updated_at": now,
+                "updated_by": current_user.get("name"),
+            }
+        )
     if previous_client_id and previous_client_id != client_id:
         await db.clients.update_one(
-            {"id": previous_client_id, "cipp_tenant_id": row.get("tenant_id")},
+            tenant_scoped_query(
+                current_user,
+                {"id": previous_client_id, "cipp_tenant_id": row.get("tenant_id")},
+            ),
             {"$unset": {
                 "cipp_tenant_id": "",
                 "cipp_tenant_display": "",
@@ -739,7 +1225,7 @@ async def map_tenant_to_client(
         )
     if client_id:
         await db.clients.update_one(
-            {"id": client_id},
+            tenant_scoped_query(current_user, {"id": client_id}),
             {"$set": {
                 "cipp_tenant_id": row.get("tenant_id"),
                 "cipp_tenant_display": row.get("tenant_name"),
@@ -747,9 +1233,20 @@ async def map_tenant_to_client(
                 "cipp_linked_at": now,
             }},
         )
+    mapping_update = {
+        "client_id": client_id,
+        "updated_at": now,
+        "updated_by": current_user.get("name"),
+    }
+    if mapping_reason:
+        mapping_update.update({
+            "mapping_reason": mapping_reason,
+            "mapping_reason_at": now,
+            "mapping_reason_by": current_user.get("name"),
+        })
     await db.m365_tenant_connections.update_one(
-        {"id": connection_id},
-        {"$set": {"client_id": client_id, "updated_at": now, "updated_by": current_user.get("name")}},
+        _onboarding_record_query(current_user, {"id": connection_id}),
+        {"$set": mapping_update},
     )
     await log_activity(
         current_user,
@@ -757,17 +1254,26 @@ async def map_tenant_to_client(
         "m365_tenant",
         connection_id,
         row.get("tenant_name") or row.get("tenant_id"),
-        (client or {}).get("name") or "Unmapped",
+        f"{(client or {}).get('name') or 'Unmapped'} · {mapping_reason or 'No mapping reason recorded'}",
     )
-    return {"success": True, "client_id": client_id, "client_name": (client or {}).get("name")}
+    return {
+        "success": True,
+        "client_id": client_id,
+        "client_name": (client or {}).get("name"),
+        "mapping_reason": mapping_reason or row.get("mapping_reason"),
+    }
 
 
 # Verified tenant evidence ----------------------------------------------------
 
 @router.get("/m365/tenants")
 async def list_tenants(current_user: dict = Depends(get_current_user)):
-    await _retire_legacy_mock_data()
-    return await db.m365_tenants.find(_verified_query(), {"_id": 0}).sort("name", 1).to_list(500)
+    await _retire_legacy_mock_data_for_global_scope(current_user)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    return await db.m365_tenants.find(
+        _tenant_record_query_for_tenants(visible_tenant_ids),
+        {"_id": 0},
+    ).sort("name", 1).to_list(500)
 
 
 @router.get("/m365/groups")
@@ -783,7 +1289,12 @@ async def list_groups(
     choice of an existing group, but never treats a typed group name as proof
     that the group exists or that its membership can be changed.
     """
-    query = _verified_query({"tenant_id": tenant_id})
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.group.read",
+    )
+    query = _evidence_query_for_tenants(visible_tenant_ids, {"tenant_id": tenant_id})
     if q and q.strip():
         term = {"$regex": re.escape(q.strip()), "$options": "i"}
         query["$or"] = [
@@ -801,8 +1312,12 @@ async def list_groups(
 
 @router.get("/m365/tenants/health/summary")
 async def tenants_health_summary(current_user: dict = Depends(get_current_user)):
-    await _retire_legacy_mock_data()
-    tenants = await db.m365_tenants.find(_verified_query(), {"_id": 0}).to_list(500)
+    await _retire_legacy_mock_data_for_global_scope(current_user)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    tenants = await db.m365_tenants.find(
+        _tenant_record_query_for_tenants(visible_tenant_ids),
+        {"_id": 0},
+    ).to_list(500)
     if not tenants:
         return {
             "telemetry_available": False,
@@ -819,8 +1334,12 @@ async def tenants_health_summary(current_user: dict = Depends(get_current_user))
     mfa = numeric("mfa_enrolled_pct")
     score = numeric("secure_score")
     trend = numeric("secure_score_30d_trend")
-    risky = await db.m365_users.count_documents(_verified_query({"risky_signin_30d": True}))
-    expiring = await db.m365_gdap.count_documents(_verified_query({"expires_in_days": {"$lte": 30}}))
+    risky = await db.m365_users.count_documents(
+        _evidence_query_for_tenants(visible_tenant_ids, {"risky_signin_30d": True})
+    )
+    expiring = await db.m365_gdap.count_documents(
+        _evidence_query_for_tenants(visible_tenant_ids, {"expires_in_days": {"$lte": 30}})
+    )
     return {
         "telemetry_available": True,
         "tenants": len(tenants),
@@ -835,14 +1354,31 @@ async def tenants_health_summary(current_user: dict = Depends(get_current_user))
 
 @router.get("/m365/tenants/{tid}")
 async def get_tenant(tid: str, current_user: dict = Depends(get_current_user)):
-    tenant = await db.m365_tenants.find_one(_verified_query({"id": tid}), {"_id": 0})
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tid,
+        operation="m365.tenant.read",
+    )
+    tenant = await db.m365_tenants.find_one(
+        _tenant_record_query_for_tenants(visible_tenant_ids, {"id": tid}),
+        {"_id": 0},
+    )
     if not tenant:
         raise HTTPException(404, "Verified Microsoft 365 tenant not found")
     domain = tenant.get("default_domain") or ""
     tenant["computed"] = {
-        "user_count": await db.m365_users.count_documents(_verified_query({"tenant_id": tid})),
-        "users_no_mfa": await db.m365_users.count_documents(_verified_query({"tenant_id": tid, "mfa_enforced": False, "account_enabled": True})),
-        "admins": await db.m365_users.count_documents(_verified_query({"tenant_id": tid, "is_admin": True})),
+        "user_count": await db.m365_users.count_documents(
+            _evidence_query_for_tenants(visible_tenant_ids, {"tenant_id": tid})
+        ),
+        "users_no_mfa": await db.m365_users.count_documents(
+            _evidence_query_for_tenants(
+                visible_tenant_ids,
+                {"tenant_id": tid, "mfa_enforced": False, "account_enabled": True},
+            )
+        ),
+        "admins": await db.m365_users.count_documents(
+            _evidence_query_for_tenants(visible_tenant_ids, {"tenant_id": tid, "is_admin": True})
+        ),
     }
     tenant["deep_links"] = {
         "entra": f"https://entra.microsoft.com/{domain}/",
@@ -855,7 +1391,12 @@ async def get_tenant(tid: str, current_user: dict = Depends(get_current_user)):
 
 @router.get("/m365/users")
 async def list_users(tenant_id: str | None = None, q: str | None = None, no_mfa: bool = False, current_user: dict = Depends(get_current_user)):
-    query = _verified_query()
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.user.read",
+    )
+    query = _evidence_query_for_tenants(visible_tenant_ids)
     if tenant_id:
         query["tenant_id"] = tenant_id
     if no_mfa:
@@ -879,13 +1420,18 @@ async def exchange_posture(tenant_id: str | None = None, current_user: dict = De
     an empty, connection-gated state until that evidence exists; it does not infer
     forwarding or mail-flow safety from a saved Graph credential.
     """
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.exchange.posture.read",
+    )
     scope = {"tenant_id": tenant_id} if tenant_id else {}
-    query = _verified_query(scope)
+    query = _evidence_query_for_tenants(visible_tenant_ids, scope)
     mailboxes, mailbox_rules, transport_rules, tenants = await asyncio.gather(
         db.m365_mailboxes.find(query, {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
         db.m365_mailbox_rules.find(query, {"_id": 0}).sort("observed_at", -1).limit(5000).to_list(5000),
         db.m365_transport_rules.find(query, {"_id": 0}).sort("observed_at", -1).limit(2000).to_list(2000),
-        db.m365_tenants.find(_verified_query(scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
+        db.m365_tenants.find(_tenant_record_query_for_tenants(visible_tenant_ids, scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
     )
 
     def external_forward(row: dict) -> bool:
@@ -958,10 +1504,15 @@ async def intune_posture(tenant_id: str | None = None, current_user: dict = Depe
     synchroniser can correlate records by tenant/device identity, while this route
     keeps the Microsoft source, evidence time and compliance state explicit.
     """
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.intune.posture.read",
+    )
     scope = {"tenant_id": tenant_id} if tenant_id else {}
     devices, tenants = await asyncio.gather(
-        db.m365_intune_devices.find(_verified_query(scope), {"_id": 0}).sort("device_name", 1).limit(10000).to_list(10000),
-        db.m365_tenants.find(_verified_query(scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
+        db.m365_intune_devices.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("device_name", 1).limit(10000).to_list(10000),
+        db.m365_tenants.find(_tenant_record_query_for_tenants(visible_tenant_ids, scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
     )
     noncompliant_states = {"noncompliant", "error", "conflict", "unknown"}
     compliant = [row for row in devices if str(row.get("compliance_state") or "").lower() == "compliant"]
@@ -1010,12 +1561,17 @@ async def collaboration_posture(tenant_id: str | None = None, current_user: dict
     configured secret, create a Team, change a sharing policy, or revoke access.
     Those actions must remain separately approved when the Graph executor exists.
     """
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.collaboration.posture.read",
+    )
     scope = {"tenant_id": tenant_id} if tenant_id else {}
     sites, teams, guests, tenants = await asyncio.gather(
-        db.m365_sharepoint_sites.find(_verified_query(scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
-        db.m365_teams.find(_verified_query(scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
-        db.m365_guest_users.find(_verified_query(scope), {"_id": 0}).sort("created_at", -1).limit(10000).to_list(10000),
-        db.m365_tenants.find(_verified_query(scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
+        db.m365_sharepoint_sites.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_teams.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_guest_users.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("created_at", -1).limit(10000).to_list(10000),
+        db.m365_tenants.find(_tenant_record_query_for_tenants(visible_tenant_ids, scope), {"_id": 0, "id": 1, "name": 1, "default_domain": 1}).sort("name", 1).to_list(500),
     )
 
     def externally_shared(row: dict) -> bool:
@@ -1080,12 +1636,17 @@ async def security_posture(tenant_id: str | None = None, current_user: dict = De
     remains the tenant-control surface and never resolves alerts, isolates a
     device, changes CA policy, or performs identity containment itself.
     """
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.security.posture.read",
+    )
     scope = {"tenant_id": tenant_id} if tenant_id else {}
     alerts, identity_risks, ca_policies, defender_devices = await asyncio.gather(
-        db.m365_security_alerts.find(_verified_query(scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
-        db.m365_identity_risks.find(_verified_query(scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
-        db.m365_conditional_access_policies.find(_verified_query(scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
-        db.m365_defender_devices.find(_verified_query(scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
+        db.m365_security_alerts.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
+        db.m365_identity_risks.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
+        db.m365_conditional_access_policies.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("display_name", 1).limit(5000).to_list(5000),
+        db.m365_defender_devices.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("observed_at", -1).limit(10000).to_list(10000),
     )
     closed = {"resolved", "closed", "dismissed", "remediated"}
     high = {"high", "critical"}
@@ -1138,10 +1699,15 @@ async def licensing_posture(tenant_id: str | None = None, current_user: dict = D
     purchased SKU evidence. It does not infer cost, mutate an invoice, or claim a
     service is reconciled until a contract/service mapping is explicitly present.
     """
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.licensing.posture.read",
+    )
     scope = {"tenant_id": tenant_id} if tenant_id else {}
     licenses, users = await asyncio.gather(
-        db.m365_licenses.find(_verified_query(scope), {"_id": 0}).sort("sku_name", 1).limit(10000).to_list(10000),
-        db.m365_users.find(_verified_query(scope), {"_id": 0}).limit(20000).to_list(20000),
+        db.m365_licenses.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).sort("sku_name", 1).limit(10000).to_list(10000),
+        db.m365_users.find(_evidence_query_for_tenants(visible_tenant_ids, scope), {"_id": 0}).limit(20000).to_list(20000),
     )
 
     def assignments(row: dict) -> list:
@@ -1187,16 +1753,17 @@ async def licensing_posture(tenant_id: str | None = None, current_user: dict = D
 @router.get("/m365/search")
 async def universal_search(q: str = Query(..., min_length=2), current_user: dict = Depends(get_current_user)):
     search = re.escape(q)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
     users = await db.m365_users.find(
-        _verified_query({"$or": [{"display_name": {"$regex": search, "$options": "i"}}, {"upn": {"$regex": search, "$options": "i"}}]}),
+        _evidence_query_for_tenants(visible_tenant_ids, {"$or": [{"display_name": {"$regex": search, "$options": "i"}}, {"upn": {"$regex": search, "$options": "i"}}]}),
         {"_id": 0, "id": 1, "display_name": 1, "upn": 1, "tenant_name": 1, "tenant_id": 1},
     ).limit(40).to_list(40)
     tenants = await db.m365_tenants.find(
-        _verified_query({"$or": [{"name": {"$regex": search, "$options": "i"}}, {"default_domain": {"$regex": search, "$options": "i"}}]}),
+        _tenant_record_query_for_tenants(visible_tenant_ids, {"$or": [{"name": {"$regex": search, "$options": "i"}}, {"default_domain": {"$regex": search, "$options": "i"}}]}),
         {"_id": 0, "id": 1, "name": 1, "default_domain": 1},
     ).limit(20).to_list(20)
     gdap = await db.m365_gdap.find(
-        _verified_query({"roles": {"$regex": search, "$options": "i"}}),
+        _evidence_query_for_tenants(visible_tenant_ids, {"roles": {"$regex": search, "$options": "i"}}),
         {"_id": 0, "id": 1, "tenant_name": 1, "tenant_id": 1, "roles": 1, "expires_in_days": 1},
     ).limit(20).to_list(20)
     return {"users": users, "tenants": tenants, "gdap": gdap, "count": len(users) + len(tenants) + len(gdap)}
@@ -1248,14 +1815,26 @@ async def run_standard(sid: str, current_user: dict = Depends(get_current_user))
 
 @router.get("/m365/standards/{sid}/runs")
 async def list_standard_runs(sid: str, current_user: dict = Depends(get_current_user)):
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
     return await db.m365_standard_run_summaries.find(
-        _verified_query({"standard_id": sid}), {"_id": 0}
+        _evidence_query_for_tenants(visible_tenant_ids, {"standard_id": sid}), {"_id": 0}
     ).sort("started_at", -1).limit(50).to_list(50)
 
 
 @router.get("/m365/bpa-report")
 async def bpa_report(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
-    tenants = await db.m365_tenants.find(_verified_query({"id": tenant_id} if tenant_id else None), {"_id": 0}).to_list(200)
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.bpa.read",
+    )
+    tenants = await db.m365_tenants.find(
+        _tenant_record_query_for_tenants(
+            visible_tenant_ids,
+            {"id": tenant_id} if tenant_id else None,
+        ),
+        {"_id": 0},
+    ).to_list(200)
     standards = await list_standards(current_user=current_user)
     return {
         "telemetry_available": bool(tenants),
@@ -1269,7 +1848,11 @@ async def bpa_report(tenant_id: str | None = None, current_user: dict = Depends(
 
 @router.get("/m365/gdap")
 async def list_gdap(expiring_only: bool = False, current_user: dict = Depends(get_current_user)):
-    query = _verified_query({"expires_in_days": {"$lte": 30}} if expiring_only else None)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    query = _evidence_query_for_tenants(
+        visible_tenant_ids,
+        {"expires_in_days": {"$lte": 30}} if expiring_only else None,
+    )
     return await db.m365_gdap.find(query, {"_id": 0}).sort("expires_in_days", 1).to_list(500)
 
 
@@ -1290,18 +1873,36 @@ async def start_offboarding(data: dict, current_user: dict = Depends(get_current
 
 @router.get("/m365/offboardings")
 async def list_offboardings(current_user: dict = Depends(get_current_user)):
-    return await db.m365_offboardings.find(_verified_query(), {"_id": 0}).sort("executed_at", -1).limit(100).to_list(100)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    return await db.m365_offboardings.find(
+        _evidence_query_for_tenants(visible_tenant_ids),
+        {"_id": 0},
+    ).sort("executed_at", -1).limit(100).to_list(100)
 
 
 # Security evidence, policy references and manual drafts ---------------------
 
 @router.get("/m365/mfa-analytics")
 async def mfa_analytics(tenant_id: str | None = None, current_user: dict = Depends(get_current_user)):
-    query = _verified_query({"account_enabled": True, **({"tenant_id": tenant_id} if tenant_id else {})})
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tenant_id,
+        operation="m365.mfa.analytics.read",
+    )
+    query = _evidence_query_for_tenants(
+        visible_tenant_ids,
+        {"account_enabled": True, **({"tenant_id": tenant_id} if tenant_id else {})},
+    )
     rows = await db.m365_users.aggregate([{"$match": query}, {"$group": {"_id": "$mfa_method", "n": {"$sum": 1}}}]).to_list(20)
     methods = {row["_id"] or "none": row["n"] for row in rows}
     total = sum(methods.values())
-    no_mfa = await db.m365_users.find(_verified_query({"account_enabled": True, "mfa_enforced": False, **({"tenant_id": tenant_id} if tenant_id else {})}), {"_id": 0, "display_name": 1, "upn": 1, "tenant_name": 1, "is_admin": 1}).limit(50).to_list(50)
+    no_mfa = await db.m365_users.find(
+        _evidence_query_for_tenants(
+            visible_tenant_ids,
+            {"account_enabled": True, "mfa_enforced": False, **({"tenant_id": tenant_id} if tenant_id else {})},
+        ),
+        {"_id": 0, "display_name": 1, "upn": 1, "tenant_name": 1, "is_admin": 1},
+    ).limit(50).to_list(50)
     return {
         "telemetry_available": bool(total),
         "by_method": methods,
@@ -1314,10 +1915,17 @@ async def mfa_analytics(tenant_id: str | None = None, current_user: dict = Depen
 
 @router.get("/m365/secure-score/trend")
 async def secure_score_trend(current_user: dict = Depends(get_current_user)):
-    tenants = await db.m365_tenants.find(_verified_query(), {"_id": 0, "id": 1, "name": 1, "secure_score": 1, "secure_score_30d_trend": 1}).to_list(500)
+    visible_tenant_ids = await _visible_tenant_ids(current_user)
+    tenants = await db.m365_tenants.find(
+        _tenant_record_query_for_tenants(visible_tenant_ids),
+        {"_id": 0, "id": 1, "name": 1, "secure_score": 1, "secure_score_30d_trend": 1},
+    ).to_list(500)
     # A synchroniser may write real dated snapshots later. Never interpolate a
     # chart from current values because that would falsely imply historical data.
-    series = await db.m365_secure_score_snapshots.find(_verified_query(), {"_id": 0, "date": 1, "avg": 1}).sort("date", 1).limit(366).to_list(366)
+    series = await db.m365_secure_score_snapshots.find(
+        _evidence_query_for_tenants(visible_tenant_ids),
+        {"_id": 0, "date": 1, "avg": 1},
+    ).sort("date", 1).limit(366).to_list(366)
     return {"telemetry_available": bool(tenants), "tenants": tenants, "series": series}
 
 
@@ -1408,7 +2016,15 @@ body::before {{
 
 @router.get("/m365/tenants/{tid}/ai-brief")
 async def tenant_ai_brief(tid: str, current_user: dict = Depends(get_current_user)):
-    tenant = await db.m365_tenants.find_one(_verified_query({"id": tid}), {"_id": 0})
+    visible_tenant_ids = await _scope_tenant_or_404(
+        current_user,
+        tid,
+        operation="m365.tenant.ai_brief.read",
+    )
+    tenant = await db.m365_tenants.find_one(
+        _tenant_record_query_for_tenants(visible_tenant_ids, {"id": tid}),
+        {"_id": 0},
+    )
     if not tenant:
         raise HTTPException(404, "Verified Microsoft 365 tenant not found")
     try:

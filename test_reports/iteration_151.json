@@ -34,14 +34,14 @@
     "backend": "N/A (frontend-only testing)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None",
   "retest_needed": false,
   "should_main_agent_self_test": false,
   "context_for_next_testing_agent": "UX redesign testing complete. All dropdown menus (C.R.A.I.G, Actions, Billing) work correctly. Progress tracker compact mode works. Related Tickets banner shows merge candidates. Hudu KB Suggestions toggle works. Fixed nested button HTML validation issue in HuduSuggestionsPanel.jsx.",
   "features_tested": {
     "ticket_detail_view_loads": "PASS - No runtime errors after layout refactor",
-    "craig_dropdown": "PASS - Opens and shows: AI Diagnose, Doppelgänger, Suggest Resolution, Smart Assign, Apology Draft",
+    "craig_dropdown": "PASS - Opens and shows: AI Diagnose, DoppelgÃ¤nger, Suggest Resolution, Smart Assign, Apology Draft",
     "ticket_actions_dropdown": "PASS - Opens and shows: Start/Stop Timer, Log Time, Create Child Ticket, Merge Tickets",
     "billing_dropdown": "PASS - Opens and shows: Add Billable Items, Apply Kit, Auto-Generate Quote (Push to Invoice conditional)",
     "compact_progress_tracker": "PASS - Renders all 5 stages, clicking advances status",

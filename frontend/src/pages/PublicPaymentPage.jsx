@@ -129,18 +129,18 @@ export default function PublicPaymentPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+      <div className="min-h-screen bg-zinc-950 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.10),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.08),transparent_50%)] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full border-red-500/30 bg-zinc-900">
+      <div className="min-h-screen bg-zinc-950 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.10),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.08),transparent_50%)] flex items-center justify-center p-4">
+        <Card className="max-w-md w-full overflow-hidden rounded-2xl border border-rose-400/25 bg-[linear-gradient(145deg,rgba(28,18,22,0.98),rgba(15,12,16,0.98))] shadow-[0_28px_80px_-32px_rgba(244,63,94,0.55)]">
           <CardContent className="pt-8 pb-8 text-center">
-            <XCircle className="w-16 h-16 mx-auto mb-4 text-red-400" />
+            <span className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-rose-400/30 bg-rose-500/10"><XCircle className="w-8 h-8 text-rose-400" /></span>
             <h2 className="text-xl font-bold text-white mb-2">Payment Unavailable</h2>
             <p className="text-muted-foreground">{error}</p>
           </CardContent>
@@ -151,13 +151,13 @@ export default function PublicPaymentPage() {
 
   if (paymentSuccess || data?.balance <= 0) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full border-emerald-500/30 bg-zinc-900">
+      <div className="min-h-screen bg-zinc-950 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.10),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.08),transparent_50%)] flex items-center justify-center p-4">
+        <Card className="max-w-md w-full overflow-hidden rounded-2xl border border-emerald-400/25 bg-[linear-gradient(145deg,rgba(16,26,24,0.98),rgba(11,18,17,0.98))] shadow-[0_28px_80px_-32px_rgba(16,185,129,0.55)]">
           <CardContent className="pt-8 pb-8 text-center">
-            <CheckCircle className="w-16 h-16 mx-auto mb-4 text-emerald-400" />
+            <span className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-400/30 bg-emerald-500/10 shadow-[0_12px_36px_-14px_rgba(16,185,129,0.8)]"><CheckCircle className="w-8 h-8 text-emerald-400" /></span>
             <h2 className="text-xl font-bold text-white mb-2">Payment Complete</h2>
             <p className="text-muted-foreground mb-4">Invoice {data?.invoice_number} has been paid in full.</p>
-            <p className="text-2xl font-bold text-emerald-400">${data?.total?.toFixed(2)}</p>
+            <p className="text-2xl font-bold font-mono text-emerald-400">${data?.total?.toFixed(2)}</p>
           </CardContent>
         </Card>
       </div>
@@ -167,19 +167,19 @@ export default function PublicPaymentPage() {
   const methods = data?.allowed_methods || [];
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-zinc-950 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.10),transparent_45%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.08),transparent_50%)] flex items-center justify-center p-4">
       <div className="max-w-lg w-full space-y-4">
         {/* Header */}
         <div className="text-center mb-6">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <Lock className="w-4 h-4 text-emerald-400" />
-            <span className="text-xs text-emerald-400 font-medium tracking-wider uppercase">Secure Payment</span>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-500/10"><Lock className="w-3.5 h-3.5 text-emerald-400" /></span>
+            <span className="text-xs text-emerald-400 font-semibold tracking-[0.22em] uppercase">Secure Payment</span>
           </div>
           {data?.company_name && <p className="text-sm text-muted-foreground">{data.company_name}</p>}
         </div>
 
         {/* Invoice Summary */}
-        <Card className="border-border/40 bg-zinc-900" data-testid="payment-invoice-summary">
+        <Card className="overflow-hidden rounded-2xl border border-white/[0.09] bg-[linear-gradient(145deg,rgba(24,25,32,0.98),rgba(15,17,23,0.98))] shadow-[0_24px_70px_-32px_rgba(0,0,0,0.9)]" data-testid="payment-invoice-summary">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg flex items-center gap-2">
@@ -253,7 +253,7 @@ export default function PublicPaymentPage() {
         </Card>
 
         {/* Payment Section */}
-        <Card className="border-border/40 bg-zinc-900" data-testid="payment-methods-card">
+        <Card className="overflow-hidden rounded-2xl border border-white/[0.09] bg-[linear-gradient(145deg,rgba(24,25,32,0.98),rgba(15,17,23,0.98))] shadow-[0_24px_70px_-32px_rgba(0,0,0,0.9)]" data-testid="payment-methods-card">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Choose Payment Method</CardTitle>
           </CardHeader>
@@ -293,40 +293,43 @@ export default function PublicPaymentPage() {
               {methods.includes("card") && (
                 <button
                   onClick={() => setMethod("card")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${method === "card" ? "border-blue-500 bg-blue-500/10" : "border-border/40 hover:border-border"}`}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all duration-150 ${method === "card" ? "border-blue-400/50 bg-blue-500/[0.14] shadow-[0_14px_40px_-20px_rgba(59,130,246,0.9)]" : "border-white/[0.08] bg-black/[0.16] hover:-translate-y-px hover:border-white/[0.18] hover:bg-white/[0.05]"}`}
                   data-testid="method-card"
                 >
-                  <CreditCard className={`w-5 h-5 ${method === "card" ? "text-blue-400" : "text-muted-foreground"}`} />
-                  <div>
-                    <p className={`text-sm font-medium ${method === "card" ? "text-blue-400" : "text-white"}`}>Credit / Debit Card</p>
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${method === "card" ? "bg-blue-500/15 text-blue-300" : "bg-white/[0.05] text-zinc-400"}`}><CreditCard className="w-4 h-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-semibold ${method === "card" ? "text-blue-200" : "text-white"}`}>Credit / Debit Card</p>
                     <p className="text-[10px] text-muted-foreground">Visa, Mastercard, AMEX, Google Pay, Apple Pay</p>
                   </div>
+                  {method === "card" && <CheckCircle className="h-4 w-4 shrink-0 text-blue-300" />}
                 </button>
               )}
               {methods.includes("becs") && (
                 <button
                   onClick={() => setMethod("becs")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${method === "becs" ? "border-purple-500 bg-purple-500/10" : "border-border/40 hover:border-border"}`}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all duration-150 ${method === "becs" ? "border-violet-400/50 bg-violet-500/[0.14] shadow-[0_14px_40px_-20px_rgba(139,92,246,0.9)]" : "border-white/[0.08] bg-black/[0.16] hover:-translate-y-px hover:border-white/[0.18] hover:bg-white/[0.05]"}`}
                   data-testid="method-becs"
                 >
-                  <ArrowRightLeft className={`w-5 h-5 ${method === "becs" ? "text-purple-400" : "text-muted-foreground"}`} />
-                  <div>
-                    <p className={`text-sm font-medium ${method === "becs" ? "text-purple-400" : "text-white"}`}>Direct Debit (BECS)</p>
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${method === "becs" ? "bg-violet-500/15 text-violet-300" : "bg-white/[0.05] text-zinc-400"}`}><ArrowRightLeft className="w-4 h-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-semibold ${method === "becs" ? "text-violet-200" : "text-white"}`}>Direct Debit (BECS)</p>
                     <p className="text-[10px] text-muted-foreground">NAB, CBA, Westpac, ANZ — Australian bank accounts</p>
                   </div>
+                  {method === "becs" && <CheckCircle className="h-4 w-4 shrink-0 text-violet-300" />}
                 </button>
               )}
               {methods.includes("bank_transfer") && (
                 <button
                   onClick={() => setMethod("bank_transfer")}
-                  className={`flex items-center gap-3 p-3 rounded-lg border transition-all text-left ${method === "bank_transfer" ? "border-emerald-500 bg-emerald-500/10" : "border-border/40 hover:border-border"}`}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all duration-150 ${method === "bank_transfer" ? "border-emerald-400/50 bg-emerald-500/[0.14] shadow-[0_14px_40px_-20px_rgba(16,185,129,0.9)]" : "border-white/[0.08] bg-black/[0.16] hover:-translate-y-px hover:border-white/[0.18] hover:bg-white/[0.05]"}`}
                   data-testid="method-bank-transfer"
                 >
-                  <Building2 className={`w-5 h-5 ${method === "bank_transfer" ? "text-emerald-400" : "text-muted-foreground"}`} />
-                  <div>
-                    <p className={`text-sm font-medium ${method === "bank_transfer" ? "text-emerald-400" : "text-white"}`}>Manual Bank Transfer</p>
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${method === "bank_transfer" ? "bg-emerald-500/15 text-emerald-300" : "bg-white/[0.05] text-zinc-400"}`}><Building2 className="w-4 h-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm font-semibold ${method === "bank_transfer" ? "text-emerald-200" : "text-white"}`}>Manual Bank Transfer</p>
                     <p className="text-[10px] text-muted-foreground">Transfer via your bank and enter the reference</p>
                   </div>
+                  {method === "bank_transfer" && <CheckCircle className="h-4 w-4 shrink-0 text-emerald-300" />}
                 </button>
               )}
             </div>
@@ -335,8 +338,8 @@ export default function PublicPaymentPage() {
             {method === "bank_transfer" && (
               <div className="space-y-3 pt-2">
                 {data?.bank_details && (
-                  <div className="p-3 rounded-lg bg-zinc-800/70 border border-border/30">
-                    <p className="text-xs font-medium text-emerald-400 mb-1.5">Bank Account Details</p>
+                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.05] p-3">
+                    <p className="text-xs font-semibold text-emerald-300 mb-1.5">Bank Account Details</p>
                     <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono">{data.bank_details}</pre>
                   </div>
                 )}
@@ -370,7 +373,8 @@ export default function PublicPaymentPage() {
 
             {/* Pay Button */}
             <Button
-              className="w-full h-12 text-base font-semibold"
+              className="h-12 w-full rounded-xl text-base font-semibold shadow-[0_18px_45px_-18px_rgba(16,185,129,0.9)]"
+              variant="success"
               onClick={handlePay}
               disabled={processing || !amount || parseFloat(amount) <= 0}
               data-testid="pay-now-btn"

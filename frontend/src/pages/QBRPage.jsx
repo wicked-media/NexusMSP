@@ -14,6 +14,7 @@ import {
   FileBarChart, Sparkles, Loader2, Save, Download, ListChecks, AlertTriangle,
   TrendingUp, Server, Shield, DollarSign, Target, Award,
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 const SLA_TONE = {
   excellent: "text-emerald-400 border-emerald-500/30 bg-emerald-500/10",
@@ -100,17 +101,7 @@ export default function QBRPage() {
 
   return (
     <div className="p-6 space-y-5" data-testid="qbr-page">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-light tracking-tight flex items-center gap-3">
-            <FileBarChart className="w-7 h-7 text-emerald-500" />
-            Quarterly Business Reviews
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            AI-drafted client reviews with cross-client pattern intelligence and one-click branded PDF export.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <OperationalPageHeader eyebrow="Client success · executive evidence" title="Quarterly Business Reviews" description="Draft client reviews from retained service and commercial evidence, then publish a branded record." icon={FileBarChart} tone="emerald" actions={<>
           <Select value={clientId} onValueChange={setClientId}>
             <SelectTrigger className="h-9 text-xs w-56" data-testid="qbr-client-select"><SelectValue placeholder="Pick a client" /></SelectTrigger>
             <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
@@ -129,8 +120,7 @@ export default function QBRPage() {
             {generating ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Sparkles className="w-4 h-4 mr-1" />}
             {generating ? "Drafting…" : "Generate QBR"}
           </Button>
-        </div>
-      </div>
+        </>} actionsDescription="Choose the client and reporting period before generating." />
 
       {!qbr && !generating && (
         <Card className="border-dashed border-emerald-500/20">

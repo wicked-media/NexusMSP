@@ -49,6 +49,65 @@ def _weather_code(code: Any) -> tuple[str, str]:
         return ("Conditions unavailable", "cloudy")
 
 
+def _daily_forecast_entries(daily: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+    """Normalise provider daily weather fields into a stable Nexus payload."""
+    dates = daily.get("time") or []
+    codes = daily.get("weather_code") or []
+    highs = daily.get("temperature_2m_max") or []
+    lows = daily.get("temperature_2m_min") or []
+    precipitation = daily.get("precipitation_probability_max") or []
+    entries = []
+    for index, day in enumerate(dates[:limit]):
+        label, icon = _weather_code(codes[index] if index < len(codes) else None)
+        entries.append({
+            "date": day,
+            "label": label,
+            "icon": icon,
+            "high": highs[index] if index < len(highs) else None,
+            "low": lows[index] if index < len(lows) else None,
+            "precipitation_probability": precipitation[index] if index < len(precipitation) else None,
+        })
+    return entries
+
+
+def _hourly_forecast_entries(
+    hourly: dict[str, Any],
+    *,
+    observed_at: str | None,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """Return the current hour and next hours without exposing provider payloads.
+
+    Open-Meteo returns both current and hourly values in the selected location's
+    timezone. Their ISO-like timestamps sort chronologically, so filtering on
+    the current observation keeps the compact outlook useful late in the day
+    without introducing a second timezone conversion path in the API.
+    """
+    times = hourly.get("time") or []
+    codes = hourly.get("weather_code") or []
+    temperatures = hourly.get("temperature_2m") or []
+    precipitation = hourly.get("precipitation_probability") or []
+    wind_speeds = hourly.get("wind_speed_10m") or []
+    is_day_values = hourly.get("is_day") or []
+    entries = []
+    for index, timestamp in enumerate(times):
+        if observed_at and isinstance(timestamp, str) and timestamp < observed_at:
+            continue
+        label, icon = _weather_code(codes[index] if index < len(codes) else None)
+        entries.append({
+            "time": timestamp,
+            "label": label,
+            "icon": icon,
+            "temperature": temperatures[index] if index < len(temperatures) else None,
+            "precipitation_probability": precipitation[index] if index < len(precipitation) else None,
+            "wind_speed": wind_speeds[index] if index < len(wind_speeds) else None,
+            "is_day": bool(is_day_values[index]) if index < len(is_day_values) else True,
+        })
+        if len(entries) >= limit:
+            break
+    return entries
+
+
 def _public_settings(doc: dict | None) -> dict:
     location = (doc or {}).get("location") or {}
     configured = bool(location.get("name") and location.get("latitude") is not None and location.get("longitude") is not None)
@@ -145,14 +204,30 @@ async def search_weather_locations(q: str = Query(..., min_length=2, max_length=
 
 @router.get("/ambient/weather")
 async def get_weather(current_user: dict = Depends(get_current_user)):
-    """Return current conditions and a compact three-day forecast for the saved location."""
+    """Return current weather plus compact and expandable outlooks.
+
+    ``forecast`` remains the existing three-day strip contract. ``outlook``
+    and ``hourly`` are additive, bounded views for the expanded weather panel.
+    """
     settings = await db.settings.find_one({"type": SETTINGS_TYPE}, {"_id": 0})
     public_settings = _public_settings(settings)
     if not public_settings["configured"]:
-        return {**public_settings, "current": None, "forecast": []}
+        return {
+            **public_settings,
+            "current": None,
+            "forecast": [],
+            "outlook": [],
+            "hourly": [],
+            "freshness": None,
+        }
 
     location = public_settings["location"]
-    cache_key = f"{location['latitude']}:{location['longitude']}:{public_settings['temperature_unit']}"
+    cache_key = ":".join((
+        str(location["latitude"]),
+        str(location["longitude"]),
+        location["timezone"],
+        public_settings["temperature_unit"],
+    ))
     cached = _weather_cache.get(cache_key)
     if cached and _now() - cached[0] < CACHE_TTL:
         return cached[1]
@@ -162,8 +237,9 @@ async def get_weather(current_user: dict = Depends(get_current_user)):
                 "latitude": location["latitude"], "longitude": location["longitude"],
                 "current": "temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "hourly": "temperature_2m,weather_code,is_day,precipitation_probability,wind_speed_10m",
                 "timezone": location["timezone"], "temperature_unit": public_settings["temperature_unit"],
-                "wind_speed_unit": "kmh", "forecast_days": 4,
+                "wind_speed_unit": "kmh", "forecast_days": 7,
             })
             response.raise_for_status()
             data = response.json()
@@ -173,19 +249,30 @@ async def get_weather(current_user: dict = Depends(get_current_user)):
     current_raw = data.get("current") or {}
     current_label, current_icon = _weather_code(current_raw.get("weather_code"))
     daily = data.get("daily") or {}
-    dates = daily.get("time") or []
-    forecast = []
-    for index, day in enumerate(dates[:3]):
-        codes, highs, lows, precipitation = daily.get("weather_code") or [], daily.get("temperature_2m_max") or [], daily.get("temperature_2m_min") or [], daily.get("precipitation_probability_max") or []
-        label, icon = _weather_code(codes[index] if index < len(codes) else None)
-        forecast.append({"date": day, "label": label, "icon": icon, "high": highs[index] if index < len(highs) else None, "low": lows[index] if index < len(lows) else None, "precipitation_probability": precipitation[index] if index < len(precipitation) else None})
+    outlook = _daily_forecast_entries(daily, limit=7)
+    fetched_at = _now()
+    freshness = {
+        # This is the provider's local observation timestamp, not an inferred
+        # "live" indicator. The UI can show it alongside the fetch timestamp.
+        "observed_at": current_raw.get("time"),
+        "retrieved_at": fetched_at.isoformat(),
+        "expires_at": (fetched_at + CACHE_TTL).isoformat(),
+    }
 
     result = {
         **public_settings,
         "current": {"temperature": current_raw.get("temperature_2m"), "apparent_temperature": current_raw.get("apparent_temperature"), "wind_speed": current_raw.get("wind_speed_10m"), "is_day": bool(current_raw.get("is_day", 1)), "label": current_label, "icon": current_icon, "observed_at": current_raw.get("time")},
-        "forecast": forecast,
+        # Preserve this original field for the compact dashboard strip.
+        "forecast": outlook[:3],
+        "outlook": outlook,
+        "hourly": _hourly_forecast_entries(
+            data.get("hourly") or {},
+            observed_at=current_raw.get("time"),
+        ),
         "units": {"temperature": (data.get("current_units") or {}).get("temperature_2m", "°C"), "wind_speed": (data.get("current_units") or {}).get("wind_speed_10m", "km/h")},
-        "refreshed_at": _now().isoformat(),
+        "freshness": freshness,
+        # Backwards-compatible alias retained for existing callers.
+        "refreshed_at": freshness["retrieved_at"],
     }
-    _weather_cache[cache_key] = (_now(), result)
+    _weather_cache[cache_key] = (fetched_at, result)
     return result

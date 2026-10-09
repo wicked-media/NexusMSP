@@ -6,8 +6,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { API, useAuth } from "@/App";
-import { useClientContext } from "@/contexts/ClientContext";
-import { navGroups } from "@/config/navigation";
+import { getAllNavItems } from "@/config/navigation";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -25,8 +24,11 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Star,
   Terminal,
   Ticket,
+  Target,
+  MessagesSquare,
   Users,
 } from "lucide-react";
 
@@ -48,20 +50,28 @@ const commandIdentity = item => [
 
 const storableCommand = item => {
   const {
-    kind, id, path, cmd, ticket_number, slug, label, hint, desc, status, route,
+    kind, id, path, cmd, ticket_number, slug, label, hint, desc, status, route, client_id,
   } = item;
-  return { kind, id, path, cmd, ticket_number, slug, label, hint, desc, status, route };
+  return { kind, id, path, cmd, ticket_number, slug, label, hint, desc, status, route, client_id };
 };
 
 const EMPTY_SEARCH = {
   intents: [],
   tickets: [],
   clients: [],
+  contacts: [],
   devices: [],
   users: [],
   invoices: [],
+  purchase_orders: [],
+  projects: [],
+  contracts: [],
+  vendors: [],
+  leads: [],
+  conversations: [],
   pbxs: [],
   backups: [],
+  csat_surveys: [],
   knowledge: [],
   products: [],
 };
@@ -78,15 +88,9 @@ const SLASH_COMMANDS = [
 ];
 
 const flatNavPages = (() => {
-  const pages = [];
-  for (const group of navGroups || []) {
-    for (const item of group.items || []) {
-      if (item.path && item.label) pages.push({ path: item.path, label: item.label, group: group.title });
-      for (const child of item.children || []) {
-        if (child.path && child.label) pages.push({ path: child.path, label: child.label, group: group.title });
-      }
-    }
-  }
+  const pages = getAllNavItems()
+    .filter((item) => item.path && item.label)
+    .map((item) => ({ path: item.path, label: item.label, group: item.group, icon: item.icon }));
   const seen = new Set();
   return pages.filter(page => (seen.has(page.path) ? false : (seen.add(page.path), true)));
 })();
@@ -97,11 +101,19 @@ function paletteIcon(item) {
     intent: Sparkles,
     ticket: Ticket,
     client: Users,
+    contact: Users,
     device: Monitor,
     user: Users,
     invoice: Receipt,
+    purchase_order: Receipt,
+    project: FileText,
+    contract: FileText,
+    vendor: Box,
+    lead: Target,
+    conversation: MessagesSquare,
     pbx: Phone,
     backup: HardDrive,
+    csat_survey: Star,
     knowledge: BookOpen,
     product: Box,
     page: ArrowRight,
@@ -112,7 +124,6 @@ function paletteIcon(item) {
 
 export default function CommandPalette() {
   const { token } = useAuth();
-  const { activeClient, activeClientId } = useClientContext() || {};
   const navigate = useNavigate();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [open, setOpen] = useState(false);
@@ -179,7 +190,9 @@ export default function CommandPalette() {
       try {
         const response = await axios.get(`${API}/command-palette/search`, {
           headers,
-          params: { q: q.trim(), ...(activeClientId ? { client_id: activeClientId } : {}) },
+          // The palette is global by design. Client-specific workspaces expose
+          // their own visible filters rather than applying a hidden scope here.
+          params: { q: q.trim() },
         });
         setSearch({ ...EMPTY_SEARCH, ...(response.data || {}) });
       } catch {
@@ -189,7 +202,7 @@ export default function CommandPalette() {
       }
     }, 180);
     return () => clearTimeout(debounceRef.current);
-  }, [q, token, open, headers, activeClientId]);
+  }, [q, token, open, headers]);
 
   const sections = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -234,9 +247,9 @@ export default function CommandPalette() {
       .slice(0, query ? 5 : 7);
     if (pages.length) {
       list.push({
-        heading: query ? "Workspaces" : "Open a workspace",
+        heading: query ? "Workspaces" : "Jump to a workspace",
         icon: ArrowRight,
-        items: pages.map(page => ({ kind: "page", label: page.label, hint: page.group, path: page.path })),
+        items: pages.map(page => ({ kind: "page", label: page.label, hint: page.group, path: page.path, icon: page.icon })),
       });
     }
 
@@ -259,8 +272,19 @@ export default function CommandPalette() {
         items: search.clients.map(client => ({
           kind: "client",
           label: client.name,
-          hint: client.email || client.contract_status,
+          hint: client.phone || client.email || client.contract_status,
           id: client.id,
+        })),
+      });
+      if (search.contacts?.length) list.push({
+        heading: "Client contacts",
+        icon: Users,
+        items: search.contacts.map(contact => ({
+          kind: "contact",
+          label: contact.name,
+          hint: [contact.client_name || "Client", contact.phone || contact.email || contact.role || "Contact"].filter(Boolean).join(" · "),
+          id: contact.id,
+          client_id: contact.client_id,
         })),
       });
       if (search.devices?.length) list.push({
@@ -295,6 +319,72 @@ export default function CommandPalette() {
           status: invoice.status,
         })),
       });
+      if (search.purchase_orders?.length) list.push({
+        heading: "Purchase orders",
+        icon: Receipt,
+        items: search.purchase_orders.map(order => ({
+          kind: "purchase_order",
+          label: order.po_number || "Purchase order",
+          hint: `${order.vendor || "No vendor"} · ${order.client_name || order.status || "Draft"}`,
+          id: order.id,
+          status: order.status,
+        })),
+      });
+      if (search.projects?.length) list.push({
+        heading: "Projects",
+        icon: FileText,
+        items: search.projects.map(project => ({
+          kind: "project",
+          label: project.name || project.project_number || "Project",
+          hint: `${project.client_name || "No client"} · ${project.priority || project.status || "Planning"}`,
+          id: project.id,
+          status: project.status,
+        })),
+      });
+      if (search.contracts?.length) list.push({
+        heading: "Contracts",
+        icon: FileText,
+        items: search.contracts.map(contract => ({
+          kind: "contract",
+          label: contract.name || contract.contract_number || "Contract",
+          hint: `${contract.client_name || "No client"} · ${contract.status || "Draft"}`,
+          id: contract.id,
+          status: contract.status,
+        })),
+      });
+      if (search.vendors?.length) list.push({
+        heading: "Suppliers",
+        icon: Box,
+        items: search.vendors.map(vendor => ({
+          kind: "vendor",
+          label: vendor.name || "Supplier",
+          hint: vendor.phone || vendor.email || vendor.contact_name || vendor.status || "Supplier",
+          id: vendor.id,
+          status: vendor.status,
+        })),
+      });
+      if (search.leads?.length) list.push({
+        heading: "Leads",
+        icon: Target,
+        items: search.leads.map(lead => ({
+          kind: "lead",
+          label: lead.company_name || lead.contact_name || "Lead",
+          hint: [lead.contact_name, lead.phone || lead.email || lead.status || "Lead"].filter(Boolean).join(" · "),
+          id: lead.id,
+          status: lead.status,
+        })),
+      });
+      if (search.conversations?.length) list.push({
+        heading: "Chat",
+        icon: MessagesSquare,
+        items: search.conversations.map(channel => ({
+          kind: "conversation",
+          label: channel.display_name || channel.name || "Conversation",
+          hint: channel.description || (channel.is_private ? "Private conversation" : "Team channel"),
+          id: channel.id,
+          status: channel.kind,
+        })),
+      });
       if (search.pbxs?.length) list.push({
         heading: "Voice services",
         icon: Phone,
@@ -315,6 +405,17 @@ export default function CommandPalette() {
           hint: `${job.client_name || "No client"} · ${job.provider || job.status || "Backup"}`,
           id: job.id,
           status: job.status,
+        })),
+      });
+      if (search.csat_surveys?.length) list.push({
+        heading: "Customer feedback",
+        icon: Star,
+        items: search.csat_surveys.map(survey => ({
+          kind: "csat_survey",
+          label: `${survey.ticket_number || "Ticket feedback"} · ${survey.client_name || "Customer"}`,
+          hint: [survey.score ? `${survey.score}/5` : survey.status || "Sent", survey.tech_name].filter(Boolean).join(" · "),
+          id: survey.id,
+          status: survey.status,
         })),
       });
       if (search.knowledge?.length) list.push({
@@ -379,11 +480,19 @@ export default function CommandPalette() {
     }
     if (item.kind === "ticket") navigate(`/tickets?ticket=${encodeURIComponent(item.ticket_number || item.id)}`);
     if (item.kind === "client") navigate(`/clients?client=${encodeURIComponent(item.id)}`);
+    if (item.kind === "contact") navigate(`/clients?client=${encodeURIComponent(item.client_id || item.id)}`);
     if (item.kind === "device") navigate(`/devices/${item.id}`);
     if (item.kind === "user") navigate("/team-hub?view=directory");
     if (item.kind === "invoice") navigate(`/invoices?invoice=${encodeURIComponent(item.id)}`);
+    if (item.kind === "purchase_order") navigate(`/purchase-orders?po=${encodeURIComponent(item.id)}`);
+    if (item.kind === "project") navigate(`/projects?project=${encodeURIComponent(item.id)}`);
+    if (item.kind === "contract") navigate(`/contracts?contract=${encodeURIComponent(item.id)}`);
+    if (item.kind === "vendor") navigate(`/purchase-orders?vendor=${encodeURIComponent(item.id)}`);
+    if (item.kind === "lead") navigate(`/leads?lead=${encodeURIComponent(item.id)}`);
+    if (item.kind === "conversation") navigate(`/team-chat?channel=${encodeURIComponent(item.id)}`);
     if (item.kind === "pbx") navigate(`/voice?tab=pbxs&pbxId=${encodeURIComponent(item.id)}`);
     if (item.kind === "backup") navigate(`/backup-center?job=${encodeURIComponent(item.id)}`);
+    if (item.kind === "csat_survey") navigate(`/csat-surveys?survey=${encodeURIComponent(item.id)}`);
     if (item.kind === "knowledge") navigate(item.slug ? `/knowledge-base/${item.slug}` : "/documentation-hub?tab=library");
     if (item.kind === "product") navigate(`/products?product=${encodeURIComponent(item.id)}`);
     if (!["slash", "page", "intent"].includes(item.kind)) {
@@ -441,7 +550,7 @@ export default function CommandPalette() {
               </span>
               <div>
                 <p className="text-xs font-semibold text-foreground">Nexus Command</p>
-                <p className="text-[10px] text-muted-foreground">{activeClient ? `Prioritising ${activeClient.name}` : "Search every connected Nexus record or describe an operational outcome"}</p>
+                <p className="text-[10px] text-muted-foreground">Search every connected Nexus record or describe an operational outcome</p>
               </div>
             </div>
             <Badge variant="outline" className="border-emerald-500/25 bg-emerald-500/[0.07] text-[9px] text-emerald-700 dark:text-emerald-200">
@@ -458,7 +567,7 @@ export default function CommandPalette() {
                 setIdx(0);
               }}
               onKeyDown={onKeyDown}
-              placeholder="Search a person, client, asset, ticket, invoice, PBX, backup, product or document"
+              placeholder="Search Nexus — ticket number, client, phone, product, device or an outcome"
               className="h-10 border-0 bg-transparent px-0 text-sm shadow-none focus-visible:ring-0"
               data-testid="palette-input"
             />

@@ -40,7 +40,7 @@
     "frontend": "100%"
   },
   "test_credentials": {
-    "admin": "aaron@stech.com.au / Lucky@2871$!"
+    "admin": "aaron@stech.com.au / [redacted-test-password]"
   },
   "seed_data_creation": "Usage billing and client budget data seeded automatically on first API call if no data exists",
   "retest_needed": false,

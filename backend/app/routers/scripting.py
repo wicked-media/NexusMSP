@@ -1,14 +1,174 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta, time
 from zoneinfo import ZoneInfo
 import uuid
-from app.database import db, AVATARS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.database import db
+from app.auth import get_current_user
+from app.services.action_permissions import require_action
+from app.routers.nexus_agent import require_agent_operator
+from app.services.scope_permissions import assert_client_scope, assert_record_scope, effective_scope, scoped_query
 from app.models import *
 
 router = APIRouter()
+
+
+def _normalise_target_ids(value: Any) -> list[str]:
+    """Accept only stable, de-duplicated device-ID collections."""
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return []
+    return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def _task_client_ids(task: dict) -> list[str]:
+    values = task.get("client_ids")
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return []
+    return sorted({str(item).strip() for item in values if str(item).strip()})
+
+
+def _target_scope_map(task: dict) -> dict[str, dict]:
+    """Read the immutable per-device authorisation snapshot for a saved task."""
+    scopes = task.get("target_scopes")
+    if not isinstance(scopes, list):
+        return {}
+    return {
+        str(scope.get("device_id") or "").strip(): scope
+        for scope in scopes
+        if isinstance(scope, dict) and str(scope.get("device_id") or "").strip()
+    }
+
+
+def _target_scopes(devices: list[dict]) -> list[dict]:
+    """Persist stable device/client/site provenance only from scoped records."""
+    return [
+        {
+            "device_id": device["id"],
+            "client_id": str(device.get("client_id") or "").strip(),
+            "site_id": str(device.get("site_id") or "").strip() or None,
+        }
+        for device in devices
+    ]
+
+
+def _scheduled_task_scope_query(current_user: dict, query: dict | None = None) -> dict:
+    """Fail closed for legacy tasks that have no durable client provenance."""
+    operational = dict(query or {})
+    scope = effective_scope(current_user)
+    if scope["mode"] == "all":
+        return operational
+    provenance_clause = {
+        "client_ids.0": {"$exists": True},
+        "client_ids": {"$not": {"$elemMatch": {"$nin": scope["client_ids"]}}},
+    }
+    clauses = ([operational] if operational else []) + [provenance_clause]
+    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+
+async def _resolve_scoped_target_devices(
+    current_user: dict,
+    target_ids: Any,
+    *,
+    operation: str,
+    allow_empty: bool = False,
+) -> list[dict]:
+    """Resolve all user-selected targets before any execution record or command exists."""
+    ids = _normalise_target_ids(target_ids)
+    if not ids:
+        if allow_empty:
+            return []
+        raise HTTPException(400, "At least one target device is required")
+    return [
+        await assert_record_scope(
+            current_user,
+            db.devices,
+            device_id,
+            operation=operation,
+            resource_name="Managed asset",
+        )
+        for device_id in ids
+    ]
+
+
+async def _load_scoped_scheduled_task(
+    task_id: str,
+    current_user: dict,
+    *,
+    operation: str,
+    require_target_provenance: bool = False,
+    validate_target_provenance: bool = True,
+) -> tuple[dict, list[dict]]:
+    """Load a task and re-authorise every current target before mutation/run-now."""
+    task = await db.scheduled_tasks.find_one({"id": task_id}, {"_id": 0})
+    if not task:
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+
+    target_ids = _normalise_target_ids(task.get("target_ids"))
+    if not target_ids:
+        declared_client_ids = _task_client_ids(task)
+        if declared_client_ids:
+            for client_id in declared_client_ids:
+                await assert_client_scope(
+                    current_user,
+                    client_id,
+                    operation=operation,
+                    mask_not_found=True,
+                )
+        else:
+            await assert_client_scope(
+                current_user,
+                None,
+                operation=operation,
+                mask_not_found=True,
+            )
+        return task, []
+
+    devices = await _resolve_scoped_target_devices(current_user, target_ids, operation=operation)
+    declared_client_ids = set(_task_client_ids(task))
+    current_client_ids = {str(device.get("client_id") or "").strip() for device in devices}
+    if validate_target_provenance and declared_client_ids and (not current_client_ids or current_client_ids != declared_client_ids):
+        raise HTTPException(409, "Scheduled task target ownership changed and requires revalidation")
+    target_scopes = _target_scope_map(task)
+    if require_target_provenance and (not declared_client_ids or len(target_scopes) != len(target_ids)):
+        raise HTTPException(409, "Scheduled task requires target-scope revalidation before dispatch")
+    if validate_target_provenance:
+        for device in devices:
+            expected = target_scopes.get(device["id"])
+            if not expected:
+                continue
+            if (
+                str(expected.get("client_id") or "").strip() != str(device.get("client_id") or "").strip()
+                or (str(expected.get("site_id") or "").strip() or None) != (str(device.get("site_id") or "").strip() or None)
+            ):
+                raise HTTPException(409, "Scheduled task target ownership changed and requires revalidation")
+    return task, devices
+
+
+async def _resolve_worker_task_targets(task: dict) -> tuple[list[dict], str | None]:
+    """Protect server-owned scheduled dispatch from stale or forged target state."""
+    target_ids = _normalise_target_ids(task.get("target_ids"))
+    if not target_ids:
+        return [], None
+    client_ids = set(_task_client_ids(task))
+    if not client_ids:
+        return [], "Task requires client-scope revalidation before scheduled dispatch"
+    target_scopes = _target_scope_map(task)
+    if len(target_scopes) != len(target_ids):
+        return [], "Task requires target-scope revalidation before scheduled dispatch"
+    devices: list[dict] = []
+    for device_id in target_ids:
+        device = await db.devices.find_one({"id": device_id}, {"_id": 0})
+        if not device:
+            return [], "A target device no longer exists"
+        expected = target_scopes.get(device_id) or {}
+        if (
+            str(device.get("client_id") or "").strip() not in client_ids
+            or str(expected.get("client_id") or "").strip() != str(device.get("client_id") or "").strip()
+            or (str(expected.get("site_id") or "").strip() or None) != (str(device.get("site_id") or "").strip() or None)
+        ):
+            return [], "A target device client binding changed"
+        devices.append(device)
+    return devices, None
 
 
 def _schedule_timezone(value: str | None):
@@ -89,10 +249,20 @@ async def _dispatch_execution_to_agent(execution: dict, script: dict, device: di
         }})
         return False
     try:
+        # Execution records carry the target client identity selected at the
+        # authorisation boundary. Re-read just before queueing so a reassigned
+        # device cannot be dispatched with stale target metadata.
+        current_device = await db.devices.find_one({"id": device.get("id")}, {"_id": 0})
+        if (
+            not current_device
+            or not execution.get("client_id")
+            or current_device.get("client_id") != execution.get("client_id")
+        ):
+            raise HTTPException(409, "Managed asset ownership changed; command was not queued")
         # Kept local so the scheduled-task worker does not create an import cycle
         # while the application registers router modules at startup.
         from app.routers.nexus_agent import queue_command_for_device
-        command_id = await queue_command_for_device(device, "run_script", {
+        command_id = await queue_command_for_device(current_device, "run_script", {
             "script": script.get("content") or "",
             "shell": shell,
             "timeout_sec": int(script.get("timeout_seconds") or 300),
@@ -126,6 +296,14 @@ async def process_due_scheduled_tasks(now: datetime | None = None) -> dict:
         if not script:
             await db.scheduled_tasks.update_one({"id": task["id"]}, {"$set": {"enabled": False, "last_error": "Script no longer exists", "updated_at": now.isoformat()}})
             continue
+        target_devices, target_error = await _resolve_worker_task_targets(task)
+        if target_error:
+            await db.scheduled_tasks.update_one({"id": task["id"]}, {"$set": {
+                "enabled": False,
+                "last_error": target_error,
+                "updated_at": now.isoformat(),
+            }})
+            continue
         is_once = task.get("schedule_type") == "once"
         next_run = None if is_once else next_scheduled_run(task, now)
         claim = await db.scheduled_tasks.update_one(
@@ -136,10 +314,8 @@ async def process_due_scheduled_tasks(now: datetime | None = None) -> dict:
             continue
         processed += 1
         executions = []
-        for device_id in task.get("target_ids", []):
-            device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-            if not device:
-                continue
+        for device in target_devices:
+            device_id = device["id"]
             execution = ScriptExecution(
                 script_id=script["id"], script_name=script.get("name"), device_id=device_id,
                 device_name=device.get("name") or device.get("hostname"), client_id=device.get("client_id"),
@@ -151,7 +327,7 @@ async def process_due_scheduled_tasks(now: datetime | None = None) -> dict:
             await db.script_executions.insert_many(executions)
             for execution in executions:
                 device = await db.devices.find_one({"id": execution["device_id"]}, {"_id": 0})
-                if device:
+                if device and device.get("client_id") == execution.get("client_id"):
                     await _dispatch_execution_to_agent(execution, script, device, "scheduler")
             await db.scripts.update_one({"id": script["id"]}, {"$inc": {"run_count": len(executions)}, "$set": {"last_run": now.isoformat()}})
             queued += len(executions)
@@ -195,10 +371,26 @@ async def create_script(script_data: ScriptCreate, current_user: dict = Depends(
     await db.scripts.insert_one(doc)
     return script
 
+# Only technician-editable fields may be updated. Identity, authorship and
+# run-counter fields are server-owned and cannot be overwritten by a payload;
+# library provenance is editable because pack install/uninstall flows maintain
+# it through this endpoint.
+SCRIPT_EDITABLE_FIELDS = {
+    "name", "description", "script_type", "content", "category", "os_target",
+    "run_as_admin", "timeout_seconds", "parameters",
+    "library_pack_ids", "library_template_name",
+}
+
+
 @router.put("/scripts/{script_id}")
-async def update_script(script_id: str, script_data: dict, current_user: dict = Depends(get_current_user)):
-    script_data['updated_at'] = datetime.now(timezone.utc).isoformat()
-    result = await db.scripts.update_one({"id": script_id}, {"$set": script_data})
+async def update_script(script_id: str, script_data: ScriptUpdate, current_user: dict = Depends(get_current_user)):
+    update = {key: value for key, value in script_data.model_dump(exclude_unset=True).items() if key in SCRIPT_EDITABLE_FIELDS}
+    if "name" in update and not str(update["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="Script name cannot be empty")
+    if not update:
+        raise HTTPException(status_code=422, detail="No editable fields supplied")
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.scripts.update_one({"id": script_id}, {"$set": update})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Script not found")
     return {"message": "Script updated"}
@@ -215,18 +407,20 @@ async def delete_script(script_id: str, current_user: dict = Depends(get_current
     return {"message": "Script deleted"}
 
 @router.post("/scripts/{script_id}/execute")
-async def execute_script(script_id: str, device_ids: List[str], parameters: Dict[str, Any] = {}, current_user: dict = Depends(get_current_user)):
+async def execute_script(script_id: str, device_ids: List[str], parameters: Dict[str, Any] = {}, current_user: dict = Depends(require_agent_operator)):
     """Execute a script on one or more devices"""
     script = await db.scripts.find_one({"id": script_id}, {"_id": 0})
     if not script:
         raise HTTPException(status_code=404, detail="Script not found")
-    
+
+    # Resolve every target before creating an execution record or queuing a
+    # command. Mixed in-scope/foreign requests therefore fail atomically.
+    devices = await _resolve_scoped_target_devices(
+        current_user, device_ids, operation="script.execute"
+    )
     executions = []
-    for device_id in device_ids:
-        device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-        if not device:
-            continue
-        
+    for device in devices:
+        device_id = device["id"]
         execution = ScriptExecution(
             script_id=script_id,
             script_name=script['name'],
@@ -241,6 +435,7 @@ async def execute_script(script_id: str, device_ids: List[str], parameters: Dict
         doc = execution.model_dump()
         doc['created_at'] = doc['created_at'].isoformat()
         await db.script_executions.insert_one(doc)
+        doc.pop("_id", None)
         await _dispatch_execution_to_agent(doc, script, device, current_user.get("email") or current_user["id"])
         executions.append(doc)
     
@@ -261,7 +456,17 @@ async def live_run_script(script_id: str, data: dict, current_user: dict = Depen
     if not script:
         raise HTTPException(status_code=404, detail="Script not found")
     device_id = data.get("device_id", "")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0}) if device_id else None
+    device = (
+        await assert_record_scope(
+            current_user,
+            db.devices,
+            device_id,
+            operation="script.live_run",
+            resource_name="Managed asset",
+        )
+        if device_id
+        else None
+    )
     target = device.get("name", device.get("hostname", "Target")) if device else data.get("target", "localhost")
     now = datetime.now(timezone.utc)
     script_content = script.get("content", "")
@@ -286,7 +491,7 @@ async def live_run_script(script_id: str, data: dict, current_user: dict = Depen
             if any(kw in stripped.lower() for kw in ["get-", "echo", "write-", "print", "select", "dir", "ls"]):
                 output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "output", "text": f"[OK] {stripped[:60]}... completed"})
             elif any(kw in stripped.lower() for kw in ["set-", "start-", "restart-", "stop-", "install", "remove", "new-"]):
-                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "success", "text": f"Operation completed successfully"})
+                output_lines.append({"time": (now + timedelta(milliseconds=base_ms)).isoformat(), "type": "success", "text": "Operation completed successfully"})
             elif any(kw in stripped.lower() for kw in ["try", "catch", "if", "else", "for", "while", "foreach"]):
                 pass  # Control flow - no output
             elif any(kw in stripped.lower() for kw in ["error", "throw", "fail"]):
@@ -306,6 +511,7 @@ async def live_run_script(script_id: str, data: dict, current_user: dict = Depen
         "script_name": script.get("name", ""),
         "device_id": device_id,
         "device_name": target,
+        "client_id": device.get("client_id") if device else None,
         "user_id": current_user["id"],
         "user_name": current_user["name"],
         "status": final_status,
@@ -320,10 +526,13 @@ async def live_run_script(script_id: str, data: dict, current_user: dict = Depen
 
 @router.get("/script-executions/{execution_id}")
 async def get_execution_detail(execution_id: str, current_user: dict = Depends(get_current_user)):
-    execution = await db.script_executions.find_one({"id": execution_id}, {"_id": 0})
-    if not execution:
-        raise HTTPException(status_code=404, detail="Execution not found")
-    return execution
+    return await assert_record_scope(
+        current_user,
+        db.script_executions,
+        execution_id,
+        operation="script_execution.read",
+        resource_name="Script execution",
+    )
 
 @router.get("/script-executions")
 async def get_script_executions(
@@ -341,28 +550,43 @@ async def get_script_executions(
     if status:
         query["status"] = status
     
-    executions = await db.script_executions.find(query, {"_id": 0}).sort("created_at", -1).to_list(limit)
+    executions = await db.script_executions.find(
+        scoped_query(current_user, query), {"_id": 0}
+    ).sort("created_at", -1).to_list(limit)
     return executions
 
 # ============== SCHEDULED TASKS ENDPOINTS ==============
 
 @router.get("/scheduled-tasks")
 async def get_scheduled_tasks(current_user: dict = Depends(get_current_user)):
-    tasks = await db.scheduled_tasks.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+    tasks = await db.scheduled_tasks.find(
+        _scheduled_task_scope_query(current_user), {"_id": 0}
+    ).sort("name", 1).to_list(1000)
     return tasks
 
 @router.post("/scheduled-tasks")
-async def create_scheduled_task(task_data: dict, current_user: dict = Depends(get_current_user)):
+async def create_scheduled_task(task_data: dict, current_user: dict = Depends(require_agent_operator)):
     script = await db.scripts.find_one({"id": task_data.get('script_id')}, {"_id": 0})
     if not script:
         raise HTTPException(status_code=404, detail="Script not found")
     
+    target_devices = await _resolve_scoped_target_devices(
+        current_user,
+        task_data.get('target_ids', []),
+        operation="scheduled_task.create",
+        allow_empty=True,
+    )
+    target_ids = [device["id"] for device in target_devices]
+    client_ids = sorted({str(device.get("client_id") or "").strip() for device in target_devices})
+    if "" in client_ids:
+        raise HTTPException(409, "Each scheduled target requires a client binding")
+
     task = ScheduledTask(
         name=task_data.get('name'),
         script_id=task_data.get('script_id'),
         script_name=script['name'],
         target_type=task_data.get('target_type', 'device'),
-        target_ids=task_data.get('target_ids', []),
+        target_ids=target_ids,
         schedule_type=task_data.get('schedule_type', 'once'),
         schedule_time=task_data.get('schedule_time', '09:00'),
         schedule_days=task_data.get('schedule_days', []),
@@ -373,33 +597,65 @@ async def create_scheduled_task(task_data: dict, current_user: dict = Depends(ge
     doc = task.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     doc['next_run'] = next_scheduled_run(doc)
+    doc['client_ids'] = client_ids
+    doc['target_scopes'] = _target_scopes(target_devices)
     await db.scheduled_tasks.insert_one(doc)
     doc.pop('_id', None)
     return doc
 
 @router.put("/scheduled-tasks/{task_id}")
-async def update_scheduled_task(task_id: str, task_data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.scheduled_tasks.update_one({"id": task_id}, {"$set": task_data})
+async def update_scheduled_task(task_id: str, task_data: dict, current_user: dict = Depends(require_agent_operator)):
+    _task, existing_target_devices = await _load_scoped_scheduled_task(
+        task_id,
+        current_user,
+        operation="scheduled_task.update",
+        validate_target_provenance=False,
+    )
+    updates = dict(task_data or {})
+    # Client provenance is server-derived from scoped target identities; never
+    # accept it as an editable browser field.
+    updates.pop("client_ids", None)
+    if "target_ids" in updates:
+        target_devices = await _resolve_scoped_target_devices(
+            current_user,
+            updates.get("target_ids"),
+            operation="scheduled_task.update",
+            allow_empty=True,
+        )
+        updates["target_ids"] = [device["id"] for device in target_devices]
+        client_ids = sorted({str(device.get("client_id") or "").strip() for device in target_devices})
+        if "" in client_ids:
+            raise HTTPException(409, "Each scheduled target requires a client binding")
+        updates["client_ids"] = client_ids
+        updates["target_scopes"] = _target_scopes(target_devices)
+    elif existing_target_devices:
+        # Updating any legacy task explicitly revalidates and upgrades its
+        # current target provenance without a separate migration.
+        updates["client_ids"] = sorted({str(device.get("client_id") or "").strip() for device in existing_target_devices})
+        updates["target_scopes"] = _target_scopes(existing_target_devices)
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    result = await db.scheduled_tasks.update_one({"id": task_id}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"message": "Task updated"}
 
 
 @router.post("/scheduled-tasks/{task_id}/run-now")
-async def run_scheduled_task_now(task_id: str, current_user: dict = Depends(get_current_user)):
+async def run_scheduled_task_now(task_id: str, current_user: dict = Depends(require_agent_operator)):
     """Queue a scheduled task immediately so technicians can validate it on demand."""
-    task = await db.scheduled_tasks.find_one({"id": task_id}, {"_id": 0})
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    task, target_devices = await _load_scoped_scheduled_task(
+        task_id,
+        current_user,
+        operation="scheduled_task.run_now",
+        require_target_provenance=True,
+    )
     script = await db.scripts.find_one({"id": task.get("script_id")}, {"_id": 0})
     if not script:
         raise HTTPException(status_code=404, detail="Script no longer exists")
     now = datetime.now(timezone.utc)
     executions = []
-    for device_id in task.get("target_ids", []):
-        device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-        if not device:
-            continue
+    for device in target_devices:
+        device_id = device["id"]
         execution = ScriptExecution(
             script_id=script["id"], script_name=script.get("name"), device_id=device_id,
             device_name=device.get("name") or device.get("hostname"), client_id=device.get("client_id"),
@@ -413,7 +669,11 @@ async def run_scheduled_task_now(task_id: str, current_user: dict = Depends(get_
     delivered = 0
     for execution in executions:
         device = await db.devices.find_one({"id": execution["device_id"]}, {"_id": 0})
-        if device and await _dispatch_execution_to_agent(execution, script, device, current_user.get("email") or current_user["id"]):
+        if (
+            device
+            and device.get("client_id") == execution.get("client_id")
+            and await _dispatch_execution_to_agent(execution, script, device, current_user.get("email") or current_user["id"])
+        ):
             delivered += 1
     await db.scripts.update_one({"id": script["id"]}, {"$inc": {"run_count": len(executions)}, "$set": {"last_run": now.isoformat()}})
     await db.scheduled_tasks.update_one({"id": task_id}, {"$set": {"last_run": now.isoformat(), "updated_at": now.isoformat()}, "$inc": {"run_count": 1}})
@@ -421,7 +681,13 @@ async def run_scheduled_task_now(task_id: str, current_user: dict = Depends(get_
     return {"message": f"Queued {delivered} of {len(executions)} executions for Nexus Agent", "queued": delivered, "total": len(executions)}
 
 @router.delete("/scheduled-tasks/{task_id}")
-async def delete_scheduled_task(task_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_scheduled_task(task_id: str, current_user: dict = Depends(require_agent_operator)):
+    await _load_scoped_scheduled_task(
+        task_id,
+        current_user,
+        operation="scheduled_task.delete",
+        validate_target_provenance=False,
+    )
     result = await db.scheduled_tasks.delete_one({"id": task_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -431,30 +697,40 @@ async def delete_scheduled_task(task_id: str, current_user: dict = Depends(get_c
 
 @router.get("/patch-policies")
 async def get_patch_policies(current_user: dict = Depends(get_current_user)):
-    policies = await db.patch_policies.find({}, {"_id": 0}).to_list(100)
-    return policies
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy patch policies are retired. Use the auditable Patch Compliance policy register.",
+    )
 
-@router.post("/patch-policies")
+@router.post(
+    "/patch-policies",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
 async def create_patch_policy(policy_data: dict, current_user: dict = Depends(get_current_user)):
-    policy = PatchPolicy(**policy_data)
-    doc = policy.model_dump()
-    doc['created_at'] = doc['created_at'].isoformat()
-    await db.patch_policies.insert_one(doc)
-    return policy
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy patch policies are retired. Use the auditable Patch Compliance policy register.",
+    )
 
-@router.put("/patch-policies/{policy_id}")
+@router.put(
+    "/patch-policies/{policy_id}",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
 async def update_patch_policy(policy_id: str, policy_data: dict, current_user: dict = Depends(get_current_user)):
-    result = await db.patch_policies.update_one({"id": policy_id}, {"$set": policy_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    return {"message": "Policy updated"}
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy patch policies are retired. Use the auditable Patch Compliance policy register.",
+    )
 
-@router.delete("/patch-policies/{policy_id}")
+@router.delete(
+    "/patch-policies/{policy_id}",
+    dependencies=[Depends(require_action("platform.configuration.manage"))],
+)
 async def delete_patch_policy(policy_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.patch_policies.delete_one({"id": policy_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    return {"message": "Policy deleted"}
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy patch policies are retired. Use the auditable Patch Compliance policy register.",
+    )
 
 @router.get("/patches")
 async def get_patches(
@@ -463,52 +739,31 @@ async def get_patches(
     severity: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    query = {}
-    if device_id:
-        query["device_id"] = device_id
-    if status:
-        query["status"] = status
-    if severity:
-        query["severity"] = severity
-    
-    patches = await db.device_patches.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
-    return patches
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy patch rows are retired. Use Patch Compliance for scoped, fresh agent evidence.",
+    )
 
 @router.get("/patches/dashboard")
 async def get_patches_dashboard(current_user: dict = Depends(get_current_user)):
-    """Get patch management dashboard stats"""
-    total = await db.device_patches.count_documents({})
-    available = await db.device_patches.count_documents({"status": "available"})
-    approved = await db.device_patches.count_documents({"status": "approved"})
-    installed = await db.device_patches.count_documents({"status": "installed"})
-    failed = await db.device_patches.count_documents({"status": "failed"})
-    
-    critical = await db.device_patches.count_documents({"severity": "Critical", "status": {"$ne": "installed"}})
-    important = await db.device_patches.count_documents({"severity": "Important", "status": {"$ne": "installed"}})
-    
-    return {
-        "total": total,
-        "available": available,
-        "approved": approved,
-        "installed": installed,
-        "failed": failed,
-        "pending_critical": critical,
-        "pending_important": important
-    }
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy patch dashboard is retired. Use Patch Compliance for scoped, fresh agent evidence.",
+    )
 
 @router.post("/patches/{patch_id}/approve")
 async def approve_patch(patch_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.device_patches.update_one({"id": patch_id}, {"$set": {"status": "approved"}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Patch not found")
-    return {"message": "Patch approved"}
+    raise HTTPException(
+        status_code=410,
+        detail="Per-update patch approval is retired until a verified provider contract can queue the exact update. Use the governed maintenance-window workflow instead.",
+    )
 
 @router.post("/patches/{patch_id}/hide")
 async def hide_patch(patch_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.device_patches.update_one({"id": patch_id}, {"$set": {"status": "hidden"}})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Patch not found")
-    return {"message": "Patch hidden"}
+    raise HTTPException(
+        status_code=410,
+        detail="Per-update patch hiding is retired until a verified provider contract can honour that exception. Record it in the governed maintenance workflow instead.",
+    )
 
 # ============== DEVICE GROUPS ENDPOINTS ==============
 

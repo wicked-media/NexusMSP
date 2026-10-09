@@ -43,6 +43,19 @@ async def create_vendor(data: dict, current_user: dict = Depends(get_current_use
     return {k: v for k, v in vendor.items() if k != "_id"}
 
 
+# Literal /vendors/stats must be registered before /vendors/{vendor_id} or the
+# parameterised route shadows it and the stats widget can never load.
+@router.get("/vendors/stats")
+async def get_vendor_stats(current_user: dict = Depends(get_current_user)):
+    vendors = await db.vendors.find({}, {"_id": 0}).to_list(500)
+    return {
+        "total": len(vendors),
+        "active": len([v for v in vendors if v.get("status") == "active"]),
+        "preferred": len([v for v in vendors if v.get("is_preferred")]),
+        "total_spent": round(sum(v.get("total_spent", 0) for v in vendors), 2),
+    }
+
+
 @router.get("/vendors/{vendor_id}")
 async def get_vendor(vendor_id: str, current_user: dict = Depends(get_current_user)):
     """Return a supplier with its PO history and live purchasing totals."""
@@ -77,17 +90,6 @@ async def delete_vendor(vendor_id: str, current_user: dict = Depends(get_current
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     return {"message": "Deleted"}
-
-
-@router.get("/vendors/stats")
-async def get_vendor_stats(current_user: dict = Depends(get_current_user)):
-    vendors = await db.vendors.find({}, {"_id": 0}).to_list(500)
-    return {
-        "total": len(vendors),
-        "active": len([v for v in vendors if v.get("status") == "active"]),
-        "preferred": len([v for v in vendors if v.get("is_preferred")]),
-        "total_spent": round(sum(v.get("total_spent", 0) for v in vendors), 2),
-    }
 
 
 # ============== WARRANTY TRACKING ==============

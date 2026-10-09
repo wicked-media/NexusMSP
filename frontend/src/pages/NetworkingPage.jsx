@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
@@ -72,7 +72,7 @@ function WlanTab({ siteId, headers }) {
       catch {} finally { setLoading(false); }
     };
     fetch();
-  }, [siteId]);
+  }, [headers, siteId]);
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   return (
     <div className="space-y-3" data-testid="wlan-tab">
@@ -115,7 +115,7 @@ function DpiTab({ siteId, headers }) {
       catch {} finally { setLoading(false); }
     };
     fetch();
-  }, [siteId]);
+  }, [headers, siteId]);
   if (loading) return <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   if (!dpi || !dpi.categories) return <p className="text-center text-muted-foreground py-8">No traffic data</p>;
   
@@ -229,9 +229,9 @@ export default function NetworkingPage() {
   const [editingDevice, setEditingDevice] = useState(null);
   const [testing, setTesting] = useState(false);
 
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setLoadError("");
     try {
@@ -247,9 +247,9 @@ export default function NetworkingPage() {
       setLoadError("Nexus could not load site, controller and customer context. No network changes have been made.");
     }
     finally { setLoading(false); }
-  };
+  }, [headers]);
 
-  const fetchSiteData = async (siteId) => {
+  const fetchSiteData = useCallback(async (siteId) => {
     try {
       const [ovRes, devRes, cliRes] = await Promise.all([
         axios.get(`${API}/networking/sites/${siteId}/overview`, { headers }),
@@ -260,10 +260,10 @@ export default function NetworkingPage() {
       setSiteDevices(devRes.data);
       setSiteClients(cliRes.data);
     } catch { toast.error("Failed to load site data"); }
-  };
+  }, [headers]);
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (selectedSite) fetchSiteData(selectedSite.id); }, [selectedSite]);
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { if (selectedSite) fetchSiteData(selectedSite.id); }, [fetchSiteData, selectedSite]);
 
   const openAddSite = () => { setEditingSite(null); setSiteForm({ ...emptySiteForm }); setSiteDialog(true); };
   const openEditSite = (site) => {
@@ -369,18 +369,15 @@ export default function NetworkingPage() {
 
   // Dashboard data
   const [dashboard, setDashboard] = useState(null);
-  const [dashLoading, setDashLoading] = useState(false);
-
-  const fetchDashboard = async () => {
-    setDashLoading(true);
+  const fetchDashboard = useCallback(async () => {
     try {
       const res = await axios.get(`${API}/networking/dashboard`, { headers });
       setDashboard(res.data);
     } catch { toast.error("Failed to load dashboard"); }
-    finally { setDashLoading(false); }
-  };
+    finally { /* retain the current dashboard while refreshing */ }
+  }, [headers]);
 
-  useEffect(() => { if (!selectedSite) fetchDashboard(); }, [selectedSite]);
+  useEffect(() => { if (!selectedSite) fetchDashboard(); }, [fetchDashboard, selectedSite]);
 
   if (loading) return <WorkspaceLoadingState label="Loading network operations" />;
   if (loadError) return <WorkspaceErrorState title="Networking needs attention" description={loadError} onRetry={fetchData} retryLabel="Retry network data" />;
@@ -518,7 +515,7 @@ export default function NetworkingPage() {
           actions={(
             <>
               <Button variant="outline" size="sm" onClick={() => { setSelectedSite(null); setSiteOverview(null); }} data-testid="back-to-sites"><Globe className="w-4 h-4 mr-1" />All sites</Button>
-              <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit Site</Button>
+              <Button variant="outline" size="sm" onClick={() => openEditSite(selectedSite)} data-testid="edit-site-btn"><Edit className="w-3 h-3 mr-1" />Edit site</Button>
               <Button variant="outline" size="sm" onClick={() => handleTestConnection(selectedSite.id)} disabled={testing || !selectedSite.controller_url} title={selectedSite.controller_url ? "Test controller reachability" : "Configure a controller URL first"}><Plug className="w-3 h-3 mr-1" />{testing ? "Testing..." : "Test"}</Button>
               <Button variant="default" size="sm" disabled={!selectedSite.controller_url} title={selectedSite.controller_url ? "Sync from the configured UniFi controller" : "Configure a controller URL first"} onClick={async () => {
                 toast.info("Syncing from controller...");
@@ -713,7 +710,7 @@ export default function NetworkingPage() {
         actions={(
           <>
           <Button onClick={fetchData} variant="outline" size="sm"><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button onClick={openAddSite} data-testid="add-site-btn"><Plus className="w-4 h-4 mr-1" />Add Site</Button>
+          <Button onClick={openAddSite} data-testid="add-site-btn"><Plus className="w-4 h-4 mr-1" />Add site</Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="gap-1.5" data-testid="network-workspace-more"><MoreHorizontal className="h-3.5 w-3.5" />More<ChevronDown className="h-3 w-3 opacity-60" /></Button>

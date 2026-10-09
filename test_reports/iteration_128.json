@@ -41,7 +41,7 @@
     "/app/backend/tests/test_iteration128_trmm_scheduled_broadcasts.py"
   ],
   "success_rate": {"backend": "100% (44/44 tests passed)", "frontend": "N/A (backend-only testing per request)"},
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "Test scheduled broadcasts and broadcasts created during testing; TRMM settings cleaned up after tests",
   "retest_needed": false,
   "should_main_agent_self_test": false,

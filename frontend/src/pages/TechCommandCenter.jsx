@@ -1,9 +1,9 @@
 /**
- * Team Command Center — native, format-consistent rebuild.
- * Matches the Devices Command Center / Clients module aesthetic.
+ * Team Hub — people, capacity and access workspace.
+ * Uses the same operational workspace patterns as Clients and My Workspace.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import TechRosterPage from "./TechRosterPage";
@@ -11,6 +11,7 @@ import SkillsMatrixPage from "./SkillsMatrixPage";
 import LeaderboardPage from "./LeaderboardPage";
 import { MetricStrip, MetricTile } from "@/components/design-system";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -29,14 +30,12 @@ import { formatDistanceToNow } from "date-fns";
 import {
   Sparkles, Search, Loader2, Users, Shield, AlertTriangle, Zap, Activity,
   Crown, Lock, Unlock, History, Target, RefreshCw,
-  TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Flame, UserPlus,
+  TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, UserPlus,
   Mail, Trash2, Edit, Archive, RotateCcw, Send, Calendar, Trophy,
-  CheckCircle2, XCircle, Clock, Upload, Building2, MapPin,
+  CheckCircle2, XCircle, Clock, Upload, Building2, MapPin, ClipboardCheck,
 } from "lucide-react";
 
 // ---------- Constants ----------
-const SKILL_AXES = ["networking", "cloud", "security", "endpoints", "backup", "m365", "voip", "hardware"];
-
 const STATE_COLORS = {
   idle:       "text-emerald-700 dark:text-emerald-300 border-emerald-500/30 bg-emerald-500/10",
   active:     "text-cyan-700 dark:text-cyan-300 border-cyan-500/30 bg-cyan-500/10",
@@ -95,28 +94,9 @@ const COMMAND_TAB_GROUPS = [
   },
 ];
 
-// ---------- Skill radar (CSS-only) ----------
-function SkillRadar({ skills, size = 84, color = "#a78bfa" }) {
-  const cx = size / 2, cy = size / 2;
-  const radius = size / 2 - 12;
-  const n = SKILL_AXES.length;
-  const points = SKILL_AXES.map((axis, i) => {
-    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    const v = (skills?.[axis] || 0) / 100;
-    return [cx + Math.cos(angle) * radius * v, cy + Math.sin(angle) * radius * v];
-  });
-  const poly = points.map(p => p.join(",")).join(" ");
-  const grid = [0.25, 0.5, 0.75, 1].map(scale => SKILL_AXES.map((_, i) => {
-    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    return [cx + Math.cos(angle) * radius * scale, cy + Math.sin(angle) * radius * scale];
-  }).map(p => p.join(",")).join(" "));
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      {grid.map((g, i) => <polygon key={i} points={g} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={0.5} />)}
-      <polygon points={poly} fill={color} fillOpacity={0.25} stroke={color} strokeWidth={1.4} />
-    </svg>
-  );
-}
+const PRIMARY_COMMAND_TABS = ["directory", "capacity", "roster", "skills", "matrix"];
+const COMMAND_TABS = COMMAND_TAB_GROUPS.flatMap(group => group.tabs.map(item => ({ ...item, group: group.label })));
+const SECONDARY_COMMAND_TABS = COMMAND_TABS.filter(item => !PRIMARY_COMMAND_TABS.includes(item.v));
 
 // ---------- DIRECTORY TAB ----------
 function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
@@ -131,17 +111,41 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
   const titles = useMemo(() => Array.from(new Set(techs.map(t => t.job_title).filter(Boolean))), [techs]);
 
   const filtered = useMemo(() => {
+    const urgency = { overloaded: 0, busy: 1, active: 2, idle: 3 };
     return techs.filter(t => {
+      const workload = t.workload || {};
       if (filterTitle !== "all" && t.job_title !== filterTitle) return false;
       if (filterStatus === "active" && t.archived) return false;
       if (filterStatus === "archived" && !t.archived) return false;
+      if (filterStatus === "attention" && (t.archived || (!workload.overdue && !["busy", "overloaded"].includes(workload.state)))) return false;
+      if (filterStatus === "on_call" && (t.archived || !t.on_call_status)) return false;
       if (search) {
         const q = search.toLowerCase();
-        return (t.name || "").toLowerCase().includes(q) || (t.email || "").toLowerCase().includes(q);
+        return [
+          t.name,
+          t.email,
+          t.job_title,
+          t.role,
+          t.phone,
+          t.mobile,
+          t.teams_email,
+          t.slack_handle,
+          ...(t.specialties || []),
+        ].some(value => String(value || "").toLowerCase().includes(q));
       }
       return true;
+    }).sort((left, right) => {
+      if (Boolean(left.archived) !== Boolean(right.archived)) return Number(Boolean(left.archived)) - Number(Boolean(right.archived));
+      const leftUrgency = urgency[left.workload?.state] ?? 4;
+      const rightUrgency = urgency[right.workload?.state] ?? 4;
+      if (leftUrgency !== rightUrgency) return leftUrgency - rightUrgency;
+      if ((right.workload?.overdue || 0) !== (left.workload?.overdue || 0)) return (right.workload?.overdue || 0) - (left.workload?.overdue || 0);
+      return String(left.name || "").localeCompare(String(right.name || ""));
     });
   }, [techs, filterTitle, filterStatus, search]);
+
+  const filtersApplied = search.trim() || filterTitle !== "all" || filterStatus !== "active";
+  const clearFilters = () => { setSearch(""); setFilterTitle("all"); setFilterStatus("active"); };
 
   const restore = async tech => {
     try {
@@ -153,34 +157,47 @@ function DirectoryTab({ headers, capacity, presets, roleOptions, onChanged }) {
 
   return (
     <div className="space-y-4" data-testid="directory-tab">
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[200px] max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
-          <Input aria-label="Search team members" className="pl-9" placeholder="Search name or email…" value={search} onChange={e => setSearch(e.target.value)} data-testid="directory-search" />
+      <section className="rounded-2xl border border-border/70 bg-card/60 p-4 shadow-sm" aria-label="Find a team member">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Team directory</p>
+            <p className="mt-1 text-xs text-muted-foreground">Search the team, then narrow by role or operational status.</p>
+          </div>
+          <div className="mt-2 flex items-center gap-2 sm:mt-0">
+            <Badge variant="outline" className="border-border/70 bg-background/30 text-[10px] text-muted-foreground" data-testid="directory-result-count">{filtered.length} of {techs.length} shown</Badge>
+            {filtersApplied && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={clearFilters}>Clear filters</Button>}
+          </div>
         </div>
-        <Select value={filterTitle} onValueChange={setFilterTitle}>
-          <SelectTrigger aria-label="Filter team members by role" className="w-[180px]" data-testid="directory-title-filter"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Roles</SelectItem>
-            {titles.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger aria-label="Filter team members by status" className="w-[140px]" data-testid="directory-status-filter"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="archived">Archived</SelectItem>
-            <SelectItem value="all">All</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+        <div className="mt-4 flex min-w-0 flex-col gap-2 lg:flex-row">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input aria-label="Search team members" className="h-10 bg-background/45 pl-9" placeholder="Search name, role, email or mobile…" value={search} onChange={e => setSearch(e.target.value)} data-testid="directory-search" />
+          </div>
+          <Select value={filterTitle} onValueChange={setFilterTitle}>
+            <SelectTrigger aria-label="Filter team members by role" className="h-10 w-full bg-background/45 lg:w-[190px]" data-testid="directory-title-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All roles</SelectItem>
+              {titles.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger aria-label="Filter team members by status" className="h-10 w-full bg-background/45 lg:w-[180px]" data-testid="directory-status-filter"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="attention">Needs attention</SelectItem>
+              <SelectItem value="on_call">On-call now</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </section>
 
       {/* Tech grid — same style as Devices grid */}
       {filtered.length === 0 ? (
-        <Card><CardContent className="flex flex-col items-center py-12 text-center"><Search className="h-6 w-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">No team members match</p><p className="mt-1 text-xs text-muted-foreground">Clear the search and filters to return to the complete directory.</p><Button variant="outline" size="sm" className="mt-4" onClick={() => { setSearch(""); setFilterTitle("all"); setFilterStatus("active"); }}>Clear filters</Button></CardContent></Card>
+        <Card><CardContent className="flex flex-col items-center py-12 text-center"><Search className="h-6 w-6 text-muted-foreground" /><p className="mt-3 text-sm font-medium text-foreground">No team members match</p><p className="mt-1 text-xs text-muted-foreground">Clear the search and filters to return to the complete directory.</p><Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>Clear filters</Button></CardContent></Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {filtered.map(t => (
             <TechCard
               key={t.id}
@@ -205,10 +222,18 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
   const wl = tech.workload || {};
   const stateClass = STATE_COLORS[wl.state] || STATE_COLORS.active;
   const archived = !!tech.archived;
+  const needsAttention = !archived && (wl.overdue > 0 || ["busy", "overloaded"].includes(wl.state));
+  const canManageActive = typeof onEdit === "function" || typeof onArchive === "function";
+  const canManageArchived = typeof onRestore === "function" || typeof onDelete === "function";
+  const strongestSkills = Object.entries(tech.skills || {})
+    .filter(([, score]) => Number(score) > 0)
+    .sort(([, left], [, right]) => Number(right) - Number(left))
+    .slice(0, 3)
+    .map(([skill]) => skill.replaceAll("_", " "));
 
   return (
-    <Card className={`border-border/80 bg-card/80 transition-colors ${archived ? "border-amber-500/25 opacity-85" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
-      <CardContent className="p-4">
+    <Card className={`border-border/80 bg-card/80 transition-colors ${archived ? "border-amber-500/25 opacity-85" : needsAttention ? "border-amber-500/35 shadow-[0_12px_28px_-24px_rgba(245,158,11,0.8)] hover:border-amber-500/50" : "hover:border-violet-500/40"}`} data-testid={`tech-card-${tech.id}`}>
+      <CardContent className="p-5">
         <div className="flex items-start gap-3">
           <div className="relative shrink-0">
             <Avatar className="h-12 w-12 rounded-md border border-violet-400/25 bg-gradient-to-br from-violet-500 via-fuchsia-500 to-pink-500 text-white shadow-sm shadow-violet-500/20">
@@ -217,40 +242,72 @@ function TechCard({ tech, onEdit, onArchive, onRestore, onDelete }) {
             </Avatar>
             {tech.on_call_status && <span className="absolute -right-1 -top-1 h-3 w-3 animate-pulse rounded-full bg-emerald-500 ring-2 ring-background" aria-label="Currently on call" />}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="truncate font-medium text-foreground">{tech.name}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold leading-tight text-foreground">{tech.name}</span>
               {tech.is_admin && <Crown className="h-3 w-3 text-amber-600 dark:text-amber-400" aria-label="Administrator" />}
-              {archived && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[9px] uppercase text-amber-700 dark:text-amber-200">Archived</Badge>}
+              {archived && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-200">Archived</Badge>}
+              {needsAttention && <Badge variant="outline" className="border-amber-500/35 bg-amber-500/10 text-[10px] text-amber-700 dark:text-amber-200">Needs attention</Badge>}
             </div>
-            <div className="truncate font-mono text-[11px] text-muted-foreground">{tech.job_title || "Technician"}</div>
-            <div className="truncate text-[10px] text-muted-foreground">{tech.email}</div>
-            <div className="flex flex-wrap gap-1 mt-1">
-              <Badge variant="outline" className={`text-[9px] uppercase ${stateClass}`}>{wl.state || "idle"} · {wl.utilization_pct ?? 0}%</Badge>
+            <div className="mt-1 text-xs text-muted-foreground">{tech.job_title || "Technician"}</div>
+            <div className="mt-0.5 break-all text-xs text-muted-foreground">{tech.email}</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Badge variant="outline" className={`text-[10px] capitalize ${stateClass}`}>{wl.state || "idle"} · {wl.utilization_pct ?? 0}% utilised</Badge>
+              {tech.on_call_status && <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-700 dark:text-emerald-300">On call</Badge>}
             </div>
           </div>
-          <SkillRadar skills={tech.skills} size={64} />
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2 border-t border-border/70 pt-3 text-center">
-          <div><div className="font-mono text-base font-bold text-cyan-700 dark:text-cyan-300">{wl.open_tickets ?? 0}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">open</div></div>
-          <div><div className={`font-mono text-base font-bold ${wl.overdue ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground"}`}>{wl.overdue ?? 0}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">overdue</div></div>
-          <div><div className="font-mono text-base font-bold text-emerald-700 dark:text-emerald-300">{tech.on_call_status ? "ON" : "—"}</div><div className="text-[9px] uppercase tracking-widest text-muted-foreground">on-call</div></div>
+        <div className="mt-4 grid grid-cols-3 gap-2 border-y border-border/70 py-3 text-center">
+          <div><div className="font-mono text-base font-bold text-cyan-700 dark:text-cyan-300">{wl.open_tickets ?? 0}</div><div className="text-[10px] text-muted-foreground">Open tickets</div></div>
+          <div><div className={`font-mono text-base font-bold ${wl.overdue ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground"}`}>{wl.overdue ?? 0}</div><div className="text-[10px] text-muted-foreground">Overdue</div></div>
+          <div><div className="font-mono text-base font-bold text-foreground">{wl.capacity_remaining ?? Math.max(0, 100 - (wl.utilization_pct ?? 0))}%</div><div className="text-[10px] text-muted-foreground">Capacity left</div></div>
         </div>
 
-        {archived ? (
-          <div className="mt-3 flex items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px] text-emerald-300 hover:bg-emerald-500/10" onClick={onRestore} data-testid={`tech-restore-${tech.id}`}><RotateCcw className="mr-1 h-3 w-3" />Restore</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-300 hover:bg-rose-500/10" onClick={onDelete} data-testid={`tech-delete-${tech.id}`}><Trash2 className="mr-1 h-3 w-3" />Delete</Button>
+        <div className="mt-3 min-h-6">
+          {strongestSkills.length > 0 ? <div className="flex flex-wrap items-center gap-1.5" aria-label={`Top skills: ${strongestSkills.join(", ")}`}><span className="mr-0.5 text-[10px] text-muted-foreground">Top skills</span>{strongestSkills.map(skill => <Badge key={skill} variant="outline" className="border-border/70 bg-background/30 text-[10px] capitalize text-muted-foreground">{skill}</Badge>)}</div> : <p className="text-[10px] text-muted-foreground">Skills profile not yet completed</p>}
+        </div>
+
+        {archived && canManageArchived ? (
+          <div className="mt-4 flex items-center gap-2">
+            {typeof onRestore === "function" && <Button size="sm" variant="outline" className="h-8 flex-1" onClick={onRestore} data-testid={`tech-restore-${tech.id}`}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />Restore account</Button>}
+            {typeof onDelete === "function" && <WorkspaceActionMenu label="Actions" testId={`tech-actions-${tech.id}`}><WorkspaceActionMenuItem icon={Trash2} onSelect={onDelete} testId={`tech-delete-${tech.id}`}>Delete permanently</WorkspaceActionMenuItem></WorkspaceActionMenu>}
           </div>
-        ) : (
-          <div className="mt-3 flex items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-7 flex-1 text-[10px]" aria-label={`Manage ${tech.name}`} onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1 h-3 w-3" />Manage</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-[10px] text-amber-700 hover:bg-amber-500/10 dark:text-amber-300" aria-label={`Archive ${tech.name}`} onClick={onArchive} data-testid={`tech-archive-${tech.id}`}><Archive className="mr-1 h-3 w-3" />Archive</Button>
+        ) : !archived && canManageActive ? (
+          <div className="mt-4 flex items-center gap-2">
+            {typeof onEdit === "function" && <Button size="sm" variant="outline" className="h-8 flex-1" aria-label={`Manage ${tech.name}`} onClick={onEdit} data-testid={`tech-edit-${tech.id}`}><Edit className="mr-1.5 h-3.5 w-3.5" />Manage member</Button>}
+            {typeof onArchive === "function" && <WorkspaceActionMenu label="Actions" testId={`tech-actions-${tech.id}`}><WorkspaceActionMenuItem icon={Archive} onSelect={onArchive} testId={`tech-archive-${tech.id}`}>Archive account</WorkspaceActionMenuItem></WorkspaceActionMenu>}
           </div>
-        )}
+        ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function TechnicianReadinessSignal({ readiness }) {
+  const summary = readiness?.summary;
+  if (!summary) return null;
+
+  const total = summary.total || 0;
+  const compliant = summary.compliant || 0;
+  const required = summary.required || 0;
+  const healthy = total > 0 && required === 0;
+
+  return (
+    <section className={`flex flex-col gap-4 rounded-2xl border p-4 shadow-[0_14px_34px_-30px_rgba(34,197,94,0.9)] sm:flex-row sm:items-center sm:justify-between ${healthy ? "border-emerald-500/25 bg-emerald-500/[0.045]" : "border-amber-500/25 bg-amber-500/[0.045]"}`} data-testid="technician-readiness-signal">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${healthy ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" : "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-300"}`}><ClipboardCheck className="h-5 w-5" /></span>
+        <div>
+          <p className={`text-[10px] font-semibold uppercase tracking-[0.16em] ${healthy ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>Technician readiness</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{healthy ? "Every active technician has completed the required first-use guide." : `${required} technician${required === 1 ? "" : "s"} still need to complete the required first-use guide.`}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Training attestations are retained separately from the ticket, change, billing and remote-work evidence created during real operations.</p>
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="rounded-xl border border-border/70 bg-background/60 px-3 py-2 text-center"><p className={`font-mono text-base font-semibold ${healthy ? "text-emerald-700 dark:text-emerald-300" : "text-amber-700 dark:text-amber-300"}`}>{compliant}/{total}</p><p className="text-[9px] uppercase tracking-wider text-muted-foreground">ready</p></div>
+        <Button size="sm" variant="outline" asChild data-testid="technician-readiness-link"><Link to="/technician-onboarding"><ClipboardCheck className="mr-1.5 h-4 w-4" />Review readiness</Link></Button>
+      </div>
+    </section>
   );
 }
 
@@ -402,7 +459,7 @@ function AddUserDialog({ open, onClose, onCreated, onManageRoles, headers, prese
               </Select>
             </div>
             </div>
-            <div className="mt-3 rounded-lg border border-violet-500/20 bg-zinc-950/45 px-3 py-2.5"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-violet-100">{selectedRole.label}</p>{selectedRole.protected && <Badge variant="outline" className="border-rose-500/35 text-[9px] uppercase text-rose-200">Protected</Badge>}</div><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedRole.description || "Role details are configured in Team Command."}</p></div>
+            <div className="mt-3 rounded-lg border border-violet-500/20 bg-zinc-950/45 px-3 py-2.5"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-violet-100">{selectedRole.label}</p>{selectedRole.protected && <Badge variant="outline" className="border-rose-500/35 text-[9px] uppercase text-rose-200">Protected</Badge>}</div><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedRole.description || "Role details are configured in Team Hub."}</p></div>
           </section>
           <section className="rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4">
             <div className="mb-3"><p className="text-sm font-semibold text-zinc-100">Work profile and secure first sign-in</p><p className="mt-1 text-xs text-zinc-500">Choose the starting permission preset, set the billable rate, then create a unique temporary password.</p></div>
@@ -483,7 +540,7 @@ function InviteDialog({ open, onClose, onSent, onManageRoles, headers, presets, 
               <div><Label className="text-xs">Job title</Label><Select value={form.job_title} onValueChange={v => setForm({ ...form, job_title: v })}><SelectTrigger data-testid="invite-title"><SelectValue /></SelectTrigger><SelectContent>{Object.keys(presets || {}).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
               <div><Label className="text-xs">Billable rate (AUD / hr)</Label><Input type="number" min="0" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: Number(e.target.value) })} data-testid="invite-rate" /></div>
             </div>
-            <div className="mt-3 rounded-lg border border-violet-500/20 bg-zinc-950/45 px-3 py-2.5"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-violet-100">{selectedRole.label}</p>{selectedRole.protected && <Badge variant="outline" className="border-rose-500/35 text-[9px] uppercase text-rose-200">Protected</Badge>}</div><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedRole.description || "Role details are configured in Team Command."}</p></div>
+            <div className="mt-3 rounded-lg border border-violet-500/20 bg-zinc-950/45 px-3 py-2.5"><div className="flex items-center justify-between gap-3"><p className="text-xs font-medium text-violet-100">{selectedRole.label}</p>{selectedRole.protected && <Badge variant="outline" className="border-rose-500/35 text-[9px] uppercase text-rose-200">Protected</Badge>}</div><p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{selectedRole.description || "Role details are configured in Team Hub."}</p></div>
           </section>
           <section className="rounded-xl border border-zinc-800 bg-zinc-900/20 p-4"><Label className="text-sm font-semibold text-zinc-100">Welcome message <span className="text-xs font-normal text-zinc-500">(optional)</span></Label><p className="mt-1 text-xs text-zinc-500">Add a concise note the technician will see alongside their secure sign-in link.</p><Textarea rows={4} className="mt-3" value={form.message} onChange={e => setForm({ ...form, message: e.target.value })} placeholder="Welcome to the team. Please complete your profile and review the service desk handover before your first shift." data-testid="invite-message" /></section>
           <div className="flex items-start gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/[0.05] px-3 py-3 text-xs leading-relaxed text-cyan-50/85"><History className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" />The invitation, delivery outcome, acceptance, and any cancellation are retained in the team audit history.</div>
@@ -635,7 +692,7 @@ function EditTechDialog({ tech, onClose, headers, presets, roleOptions = ROLE_OP
         </DialogHeader>
         <div className="flex flex-col gap-4 rounded-xl border border-violet-500/20 bg-gradient-to-r from-violet-500/[0.08] to-card p-4 sm:flex-row sm:items-center">
           <Avatar className="h-16 w-16 shrink-0 rounded-2xl border-2 border-violet-400/30 bg-violet-500/10 shadow-lg shadow-violet-500/10"><AvatarImage src={avatarUrl} alt={`${tech.name} profile photo`} className="object-cover" /><AvatarFallback className="rounded-2xl bg-violet-500/10 text-lg font-bold text-violet-700 dark:text-violet-100">{tech.name?.split(" ").map(part => part[0]).join("") || "T"}</AvatarFallback></Avatar>
-          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground">Profile photo</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Shown on Team Command, ticket activity, comments, chat presence, and other technician work records.</p><div className="mt-3 flex flex-wrap items-center gap-2"><input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadAvatar} data-testid="team-avatar-file" /><Button type="button" size="sm" variant="outline" className="border-violet-500/40 text-violet-700 hover:bg-violet-500/10 dark:text-violet-100" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} data-testid="team-avatar-upload-btn">{avatarUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{avatarUploading ? "Uploading…" : avatarUrl ? "Replace photo" : "Upload photo"}</Button><span className="text-[11px] text-muted-foreground">PNG, JPG, WebP, or GIF · up to 10 MB</span></div></div>
+          <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-foreground">Profile photo</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">Shown in Team Hub, ticket activity, comments, chat presence, and other technician work records.</p><div className="mt-3 flex flex-wrap items-center gap-2"><input ref={avatarInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={uploadAvatar} data-testid="team-avatar-file" /><Button type="button" size="sm" variant="outline" className="border-violet-500/40 text-violet-700 hover:bg-violet-500/10 dark:text-violet-100" onClick={() => avatarInputRef.current?.click()} disabled={avatarUploading} data-testid="team-avatar-upload-btn">{avatarUploading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}{avatarUploading ? "Uploading…" : avatarUrl ? "Replace photo" : "Upload photo"}</Button><span className="text-[11px] text-muted-foreground">PNG, JPG, WebP, or GIF · up to 10 MB</span></div></div>
         </div>
         <div className="grid grid-cols-1 gap-2 rounded-lg border border-border/80 bg-muted/25 p-3 text-xs sm:grid-cols-3">
           <div><p className="text-muted-foreground">Live workload</p><p className="mt-1 font-medium capitalize text-foreground">{statusLabel}</p></div>
@@ -871,7 +928,7 @@ function TechFinderTab({ headers, capacity }) {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {display.map(t => <TechCard key={t.id} tech={t} onEdit={() => {}} headers={headers} onChanged={() => {}} />)}
+        {display.map(t => <TechCard key={t.id} tech={t} />)}
       </div>
     </div>
   );
@@ -959,7 +1016,8 @@ function AccessRoleSettings({ headers, roleOptions, onSaved }) {
     const stem = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40) || "team_role";
     let value = `custom_${stem}`;
     let suffix = 2;
-    while (roles.some(role => role.value === value)) { value = `custom_${stem.slice(0, 37)}_${suffix}`; suffix += 1; }
+    const existingValues = new Set(roles.map(role => role.value));
+    while (existingValues.has(value)) { value = `custom_${stem.slice(0, 37)}_${suffix}`; suffix += 1; }
     const startingPermissions = roles.find(role => role.value === "technician")?.action_permissions || [];
     setRoles(current => [...current, { value, id: value, label, description, custom: true, protected: false, action_permissions: [...startingPermissions], action_permissions_explicit: true }]);
     setSelectedRoleId(value);
@@ -1494,6 +1552,7 @@ function AuditTab({ headers }) {
 // ---------- MAIN ----------
 export default function TechCommandCenter() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(() => {
@@ -1503,6 +1562,7 @@ export default function TechCommandCenter() {
   const [capacity, setCapacity] = useState(null);
   const [presets, setPresets] = useState({});
   const [roleOptions, setRoleOptions] = useState(ROLE_OPTIONS);
+  const [onboardingReadiness, setOnboardingReadiness] = useState(null);
   const [addOpen, setAddOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
 
@@ -1524,7 +1584,22 @@ export default function TechCommandCenter() {
     } catch { /* retain safe defaults while the role catalogue loads */ }
   }, [headers]);
 
-  useEffect(() => { loadCapacity(); loadPresets(); loadRoles(); }, [loadCapacity, loadPresets, loadRoles]);
+  const loadOnboardingReadiness = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API}/technician-onboarding/technicians`, { headers });
+      setOnboardingReadiness(response.data || null);
+    } catch {
+      // Readiness is an admin-only, additive signal. The Team Hub remains usable
+      // if the current role cannot view it or the endpoint is temporarily unavailable.
+      setOnboardingReadiness(null);
+    }
+  }, [headers]);
+
+  const refreshTeamData = useCallback(async () => {
+    await Promise.all([loadCapacity(), loadOnboardingReadiness()]);
+  }, [loadCapacity, loadOnboardingReadiness]);
+
+  useEffect(() => { loadCapacity(); loadPresets(); loadRoles(); loadOnboardingReadiness(); }, [loadCapacity, loadPresets, loadRoles, loadOnboardingReadiness]);
 
   useEffect(() => {
     const requested = searchParams.get("view");
@@ -1541,62 +1616,76 @@ export default function TechCommandCenter() {
   const isOperationalView = OPERATIONAL_TAB_IDS.has(tab);
 
   const summary = capacity?.summary || { total: 0, idle: 0, active: 0, busy: 0, overloaded: 0, on_call: 0, avg_util: 0 };
+  const attentionCount = (summary.busy || 0) + (summary.overloaded || 0);
+  const teamSignal = summary.overloaded > 0
+    ? "critical"
+    : attentionCount > 0 || (onboardingReadiness?.summary?.required || 0) > 0
+      ? "attention"
+      : summary.total > 0
+        ? "healthy"
+        : "recommendation";
+  const activeSecondaryTab = SECONDARY_COMMAND_TABS.find(item => item.v === tab);
 
   return (
-    <div className="space-y-5 p-6" data-testid="tech-command-center">
+    <div className="min-h-[calc(100vh-64px)] bg-zinc-950 text-zinc-100" data-testid="tech-command-center">
       {isOperationalView && <>
-      {/* Header */}
-      <OperationalPageHeader
-        eyebrow="Team operations"
-        title="Team Command Center"
-        description="Directory, invitations, capacity, permissions, access drift, just-in-time elevation, and audit controls."
-        icon={Sparkles}
-        tone="violet"
-        actions={<><Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="header-invite-btn"><Mail className="mr-1.5 h-4 w-4" />Invite</Button><Button size="sm" onClick={() => setAddOpen(true)} data-testid="header-add-btn"><UserPlus className="mr-1.5 h-4 w-4" />Add user</Button><Button size="sm" variant="outline" onClick={loadCapacity}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button></>}
-      />
-      {/* HeroTile metric strip — same shape as Devices */}
-      <MetricStrip columns={6}>
-        <MetricTile label="Total techs" value={summary.total} accent="violet" icon={<Users className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-total" />
-        <MetricTile label="Idle" value={summary.idle || 0} accent="emerald" icon={<Activity className="w-2.5 h-2.5 text-emerald-400" />} testid="tcc-tile-idle" />
-        <MetricTile label="Active" value={summary.active || 0} accent="cyan" icon={<Activity className="w-2.5 h-2.5 text-cyan-400" />} testid="tcc-tile-active" />
-        <MetricTile label="Busy" value={summary.busy || 0} accent="amber" icon={<Flame className="w-2.5 h-2.5 text-amber-400" />} testid="tcc-tile-busy" />
-        <MetricTile label="Overloaded" value={summary.overloaded || 0} accent={summary.overloaded ? "rose" : "zinc"} icon={<AlertTriangle className={`w-2.5 h-2.5 ${summary.overloaded ? "text-rose-400" : "text-zinc-400"}`} />} testid="tcc-tile-overloaded" />
-        <MetricTile label="Avg utilisation" value={`${summary.avg_util}%`} accent="violet" icon={<TrendingUp className="w-2.5 h-2.5 text-violet-400" />} testid="tcc-tile-util" />
-      </MetricStrip>
+      <div className="px-6 pt-6">
+        <OperationalPageHeader
+          eyebrow="Team operations"
+          title="Team Hub"
+          description="Manage people, coverage, capacity and access from one focused operational workspace."
+          icon={Users}
+          tone="violet"
+          signal={teamSignal}
+          actions={<><WorkspaceActionMenu testId="team-hub-more-actions"><WorkspaceActionMenuItem icon={RefreshCw} onSelect={refreshTeamData} testId="refresh-team-hub">Refresh workspace</WorkspaceActionMenuItem><WorkspaceActionMenuItem icon={ClipboardCheck} onSelect={() => navigate("/technician-onboarding")}>Technician readiness</WorkspaceActionMenuItem></WorkspaceActionMenu><Button size="sm" variant="outline" onClick={() => setInviteOpen(true)} data-testid="header-invite-btn"><Mail className="mr-1.5 h-4 w-4" />Invite</Button><Button size="sm" onClick={() => setAddOpen(true)} data-testid="header-add-btn"><UserPlus className="mr-1.5 h-4 w-4" />Add teammate</Button></>}
+        />
+      </div>
+      <div className="border-b border-zinc-900/60 px-6 py-5">
+        <MetricStrip columns={4}>
+          <MetricTile label="Team members" value={summary.total} trend="managed accounts" accent="violet" icon={<Users className="h-3 w-3 text-violet-400" />} testid="tcc-tile-total" />
+          <MetricTile label="Ready now" value={summary.idle || 0} trend="available capacity" accent="emerald" icon={<Activity className="h-3 w-3 text-emerald-400" />} testid="tcc-tile-idle" />
+          <MetricTile label="On call" value={summary.on_call || 0} trend="current coverage" accent="cyan" icon={<Calendar className="h-3 w-3 text-cyan-400" />} testid="tcc-tile-on-call" />
+          <MetricTile label="Needs attention" value={attentionCount} trend={`${summary.avg_util || 0}% average utilisation`} accent={attentionCount ? "amber" : "emerald"} icon={<AlertTriangle className={`h-3 w-3 ${attentionCount ? "text-amber-400" : "text-emerald-400"}`} />} testid="tcc-tile-attention" />
+        </MetricStrip>
+        <div className="mt-4"><TechnicianReadinessSignal readiness={onboardingReadiness} /></div>
+      </div>
       </>}
 
-      {/* Tabs */}
       <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList className="h-auto w-full flex-wrap justify-start gap-x-4 gap-y-1 rounded-none border-b border-zinc-800 bg-transparent p-0 shadow-none">
-          {COMMAND_TAB_GROUPS.map((group, groupIndex) => (
-            <div key={group.label} className={`flex items-center gap-1 shrink-0 ${groupIndex ? "border-l border-zinc-800 pl-4" : ""}`}>
-              <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-zinc-600 px-1">{group.label}</span>
-              {group.tabs.map(t => (
-                <TabsTrigger key={t.v} value={t.v}
-                  className="rounded-none border-b-2 border-transparent px-3 py-2 text-xs uppercase tracking-wider text-zinc-500 shadow-none transition-colors hover:bg-white/[0.035] hover:text-zinc-200 data-[state=active]:border-violet-500 data-[state=active]:bg-transparent data-[state=active]:text-zinc-100 data-[state=active]:shadow-none"
-                  data-testid={`tcc-tab-${t.v}`}>
-                  <t.Icon className="w-3 h-3 mr-1" />{t.l}
+        <nav className="sticky top-0 z-20 border-b border-zinc-800/80 bg-zinc-950/95 px-6 backdrop-blur" aria-label="Team Hub views">
+          <div className="flex min-w-0 items-center gap-2">
+            <TabsList className="h-12 min-w-0 flex-1 justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0 shadow-none">
+              {COMMAND_TABS.filter(item => PRIMARY_COMMAND_TABS.includes(item.v)).map(item => (
+                <TabsTrigger key={item.v} value={item.v}
+                  className="h-9 shrink-0 rounded-lg border border-transparent px-3 text-xs text-muted-foreground shadow-none transition-colors hover:bg-white/[0.04] hover:text-foreground data-[state=active]:border-violet-500/25 data-[state=active]:bg-violet-500/10 data-[state=active]:text-violet-100 data-[state=active]:shadow-none"
+                  data-testid={`tcc-tab-${item.v}`}>
+                  <item.Icon className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />{item.l}
                 </TabsTrigger>
               ))}
-            </div>
-          ))}
-        </TabsList>
+            </TabsList>
+            <WorkspaceActionMenu label={activeSecondaryTab ? activeSecondaryTab.l : "More views"} testId="team-hub-more-views">
+              {SECONDARY_COMMAND_TABS.map(item => <WorkspaceActionMenuItem key={item.v} icon={item.Icon} onSelect={() => selectTab(item.v)} testId={`tcc-tab-${item.v}`}>{item.l}{item.v === tab ? " (current)" : ""}</WorkspaceActionMenuItem>)}
+            </WorkspaceActionMenu>
+          </div>
+        </nav>
 
-        <TabsContent value="directory" className="mt-4"><DirectoryTab headers={headers} capacity={capacity} presets={presets} roleOptions={roleOptions} onChanged={loadCapacity} /></TabsContent>
-        <TabsContent value="invites" className="mt-4"><InvitesTab headers={headers} /></TabsContent>
-        <TabsContent value="find" className="mt-4"><TechFinderTab headers={headers} capacity={capacity} /></TabsContent>
-        <TabsContent value="capacity" className="mt-4"><CapacityTab capacity={capacity} /></TabsContent>
-        <TabsContent value="matrix" className="mt-4"><PermissionMatrixTab headers={headers} presets={presets} roleOptions={roleOptions} onRolesChanged={setRoleOptions} /></TabsContent>
-        <TabsContent value="drift" className="mt-4"><RoleDriftTab headers={headers} /></TabsContent>
-        <TabsContent value="jit" className="mt-4"><JITTab headers={headers} capacity={capacity} presets={presets} onChanged={loadCapacity} /></TabsContent>
-        <TabsContent value="audit" className="mt-4"><AuditTab headers={headers} /></TabsContent>
-        <TabsContent value="roster" className="mt-4"><TechRosterPage /></TabsContent>
-        <TabsContent value="skills" className="mt-4"><SkillsMatrixPage /></TabsContent>
-        <TabsContent value="leaderboard" className="mt-4"><LeaderboardPage /></TabsContent>
+        <div className={isOperationalView ? "px-6 py-5" : ""}>
+          <TabsContent value="directory" className="m-0"><DirectoryTab headers={headers} capacity={capacity} presets={presets} roleOptions={roleOptions} onChanged={refreshTeamData} /></TabsContent>
+          <TabsContent value="invites" className="m-0"><InvitesTab headers={headers} /></TabsContent>
+          <TabsContent value="find" className="m-0"><TechFinderTab headers={headers} capacity={capacity} /></TabsContent>
+          <TabsContent value="capacity" className="m-0"><CapacityTab capacity={capacity} /></TabsContent>
+          <TabsContent value="matrix" className="m-0"><PermissionMatrixTab headers={headers} presets={presets} roleOptions={roleOptions} onRolesChanged={setRoleOptions} /></TabsContent>
+          <TabsContent value="drift" className="m-0"><RoleDriftTab headers={headers} /></TabsContent>
+          <TabsContent value="jit" className="m-0"><JITTab headers={headers} capacity={capacity} presets={presets} onChanged={refreshTeamData} /></TabsContent>
+          <TabsContent value="audit" className="m-0"><AuditTab headers={headers} /></TabsContent>
+          <TabsContent value="roster" className="m-0"><TechRosterPage /></TabsContent>
+          <TabsContent value="skills" className="m-0"><SkillsMatrixPage /></TabsContent>
+          <TabsContent value="leaderboard" className="m-0"><LeaderboardPage /></TabsContent>
+        </div>
       </Tabs>
 
-      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={loadCapacity} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
-      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={loadCapacity} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <AddUserDialog open={addOpen} onClose={() => setAddOpen(false)} onCreated={refreshTeamData} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
+      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} onSent={refreshTeamData} onManageRoles={() => selectTab("matrix")} headers={headers} presets={presets} roleOptions={roleOptions} />
     </div>
   );
 }

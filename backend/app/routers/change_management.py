@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -13,8 +13,7 @@ VALID_CATEGORIES = {"standard", "normal", "emergency", "expedited"}
 VALID_RISKS = {"low", "medium", "high"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 async def _get_change(change_id: str, user: dict) -> dict:
@@ -180,6 +179,7 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
         "updated_at": now,
     }
     await db.change_requests.insert_one(doc)
+    doc.pop("_id", None)
     await _write_audit(user, "change_request_submitted", doc)
     return doc
 

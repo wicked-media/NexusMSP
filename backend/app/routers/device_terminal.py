@@ -5,7 +5,6 @@ to an enrolled online agent and become visible only when that endpoint returns
 its actual stdout, stderr and exit code.
 """
 
-from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,14 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.database import db
 from app.routers.nexus_agent import queue_command_for_device, require_agent_operator
 from app.services.activity import log_activity
+from app.services.scope_permissions import assert_tenant_record_scope, platform_tenant_id, tenant_scoped_query
 
 
 router = APIRouter()
 VALID_SHELLS = {"powershell", "cmd"}
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now
 
 
 def _is_admin(user: dict) -> bool:
@@ -28,7 +27,7 @@ def _is_admin(user: dict) -> bool:
 
 
 def _session_scope(session_id: str, user: dict) -> dict:
-    query = {"id": session_id}
+    query = tenant_scoped_query(user, {"id": session_id})
     if not _is_admin(user):
         query["user_id"] = user.get("id")
     return query
@@ -36,7 +35,7 @@ def _session_scope(session_id: str, user: dict) -> dict:
 
 @router.get("/device-terminal/sessions")
 async def get_terminal_sessions(current_user: dict = Depends(require_agent_operator)):
-    query = {} if _is_admin(current_user) else {"user_id": current_user.get("id")}
+    query = tenant_scoped_query(current_user, {} if _is_admin(current_user) else {"user_id": current_user.get("id")})
     return await db.terminal_sessions.find(query, {"_id": 0, "commands": 0}).sort("started_at", -1).to_list(50)
 
 
@@ -56,15 +55,21 @@ async def create_terminal_session(data: dict, current_user: dict = Depends(requi
         raise HTTPException(400, "device_id required")
     if shell not in VALID_SHELLS:
         raise HTTPException(400, "Choose PowerShell or CMD for the Nexus Agent command console")
-    device = await db.devices.find_one({"id": device_id}, {"_id": 0})
-    if not device:
-        raise HTTPException(404, "Managed asset not found")
+    device = await assert_tenant_record_scope(
+        current_user,
+        db.devices,
+        device_id,
+        operation="device_terminal.session.create",
+        resource_name="Managed asset",
+    )
     if not device.get("nexus_agent_id"):
         raise HTTPException(409, "Nexus Agent is not enrolled on this asset")
 
     session = {
         "id": f"term-{uuid.uuid4().hex[:12]}",
         "device_id": device_id,
+        "client_id": device.get("client_id"),
+        "tenant_id": platform_tenant_id(current_user),
         "agent_id": device["nexus_agent_id"],
         "device_name": device.get("name") or "Managed asset",
         "client_name": device.get("client_name") or "",
@@ -79,6 +84,7 @@ async def create_terminal_session(data: dict, current_user: dict = Depends(requi
         "os": device.get("os") or "",
     }
     await db.terminal_sessions.insert_one(session)
+    session.pop("_id", None)
     await log_activity(current_user, "agent_command_session_opened", "device", device_id, session["device_name"], f"{shell} command console opened", metadata={"session_id": session["id"], "agent_id": session["agent_id"]})
     return session
 
@@ -94,8 +100,14 @@ async def execute_command(session_id: str, data: dict, current_user: dict = Depe
     if len(command) > 12000:
         raise HTTPException(400, "Command exceeds the 12,000 character limit")
 
-    device = await db.devices.find_one({"id": session["device_id"]}, {"_id": 0})
-    if not device or device.get("nexus_agent_id") != session.get("agent_id"):
+    device = await assert_tenant_record_scope(
+        current_user,
+        db.devices,
+        session["device_id"],
+        operation="device_terminal.session.execute",
+        resource_name="Managed asset",
+    )
+    if device.get("nexus_agent_id") != session.get("agent_id"):
         raise HTTPException(409, "The asset's Nexus Agent association has changed; open a new command session")
 
     command_id = await queue_command_for_device(
@@ -107,7 +119,7 @@ async def execute_command(session_id: str, data: dict, current_user: dict = Depe
     if not command_id:
         raise HTTPException(409, "Nexus Agent is not available")
     entry = {"id": command_id, "command": command, "status": "queued", "queued_at": _now()}
-    await db.terminal_sessions.update_one({"id": session_id}, {"$push": {"commands": entry}, "$set": {"last_command_at": entry["queued_at"]}})
+    await db.terminal_sessions.update_one(_session_scope(session_id, current_user), {"$push": {"commands": entry}, "$set": {"last_command_at": entry["queued_at"]}})
     await db.nexus_agent_commands.update_one({"id": command_id}, {"$set": {"terminal_session_id": session_id, "terminal_command_id": command_id}})
     await log_activity(current_user, "agent_command_queued", "device", device["id"], session["device_name"], command[:240], metadata={"session_id": session_id, "command_id": command_id, "shell": session["session_type"]})
     return {"command_id": command_id, "status": "queued", "message": "Queued for the live Nexus Agent"}
@@ -120,6 +132,6 @@ async def end_terminal_session(session_id: str, current_user: dict = Depends(req
         raise HTTPException(404, "Command session not found")
     if session.get("status") != "active":
         raise HTTPException(409, "Command session is already closed")
-    await db.terminal_sessions.update_one({"id": session_id}, {"$set": {"status": "ended", "ended_at": _now(), "ended_by": current_user.get("id")}})
+    await db.terminal_sessions.update_one(_session_scope(session_id, current_user), {"$set": {"status": "ended", "ended_at": _now(), "ended_by": current_user.get("id")}})
     await log_activity(current_user, "agent_command_session_closed", "device", session["device_id"], session.get("device_name", ""), "Command console closed", metadata={"session_id": session_id})
     return {"message": "Command session ended"}

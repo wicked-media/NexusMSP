@@ -6,11 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ShieldCheck, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function ThirdPartyPatchingPage() {
   const { token } = useAuth();
   const [data, setData] = useState(null);
   const [policies, setPolicies] = useState([]);
+  const [policyState, setPolicyState] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     const fetchData = async () => {
@@ -20,7 +22,8 @@ export default function ThirdPartyPatchingPage() {
           axios.get(`${API}/third-party-patching/policies`, { headers: { Authorization: `Bearer ${token}` } }),
         ]);
         setData(oRes.data);
-        setPolicies(pRes.data);
+        setPolicies(Array.isArray(pRes.data) ? pRes.data : (pRes.data?.policies || []));
+        setPolicyState(Array.isArray(pRes.data) ? null : pRes.data);
       } catch (e) { toast.error("Failed"); }
       setLoading(false);
     };
@@ -33,22 +36,22 @@ export default function ThirdPartyPatchingPage() {
 
   return (
     <div className="space-y-6" data-testid="third-party-patching-page">
-      <div><h1 className="text-2xl font-bold tracking-tight">Third-Party Patching</h1><p className="text-muted-foreground text-sm mt-1">Track and manage 100+ third-party applications</p></div>
+      <OperationalPageHeader eyebrow="Application security · observed patch posture" title="Third-Party Patching" description="Review third-party application posture from approved provider or agent evidence—never inferred coverage." icon={ShieldCheck} tone="emerald" signal={data.summary.critical_updates > 0 ? "critical" : data.summary.outdated > 0 ? "attention" : "ready"} />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card><CardContent className="pt-5"><p className="text-3xl font-bold">{data.summary.compliance_pct}%</p><p className="text-xs text-muted-foreground">Compliance</p><Progress value={data.summary.compliance_pct} className="mt-2" /></CardContent></Card>
+        <Card><CardContent className="pt-5"><p className="text-3xl font-bold">{data.summary.compliance_pct ?? "—"}{data.summary.compliance_pct != null ? "%" : ""}</p><p className="text-xs text-muted-foreground">Compliance</p><Progress value={data.summary.compliance_pct ?? 0} className="mt-2" /></CardContent></Card>
         <Card><CardContent className="pt-5 flex items-center gap-3"><ShieldCheck className="w-6 h-6 text-emerald-500" /><div><p className="text-2xl font-bold">{data.summary.current}</p><p className="text-xs text-muted-foreground">Current</p></div></CardContent></Card>
         <Card><CardContent className="pt-5 flex items-center gap-3"><AlertTriangle className="w-6 h-6 text-amber-500" /><div><p className="text-2xl font-bold">{data.summary.outdated}</p><p className="text-xs text-muted-foreground">Outdated</p></div></CardContent></Card>
         <Card><CardContent className="pt-5 flex items-center gap-3"><AlertTriangle className="w-6 h-6 text-red-500" /><div><p className="text-2xl font-bold">{data.summary.critical_updates}</p><p className="text-xs text-muted-foreground">Critical Updates</p></div></CardContent></Card>
       </div>
 
-      <Card><CardHeader><CardTitle className="text-lg">Update Policies</CardTitle></CardHeader>
+      <Card><CardHeader><CardTitle className="text-lg">Patch planning</CardTitle><p className="text-xs text-muted-foreground">{policyState?.message || "Provider policy state"}</p></CardHeader>
         <CardContent><div className="space-y-2">{policies.map(p => (
           <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border">
             <span className="font-medium text-sm">{p.app_name}</span>
-            <div className="flex items-center gap-2"><Badge variant={p.auto_update ? "default" : "outline"}>{p.auto_update ? "Auto" : "Manual"}</Badge><Badge variant="outline">{p.ring}</Badge></div>
+            <div className="flex items-center gap-2"><Badge variant="outline">{p.template_only ? "Template" : p.auto_update ? "Auto" : "Manual"}</Badge><Badge variant="outline">{p.recommended_ring || p.ring}</Badge></div>
           </div>
-        ))}</div></CardContent>
+        ))}{!policies.length && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">No third-party patch policy templates are available yet.</p>}</div></CardContent>
       </Card>
 
       <Card><CardHeader><CardTitle className="text-lg">Outdated Applications</CardTitle></CardHeader>
@@ -60,7 +63,7 @@ export default function ThirdPartyPatchingPage() {
               <td className="py-2 font-mono text-xs text-red-500">{a.installed_version}</td><td className="py-2 font-mono text-xs text-emerald-500">{a.latest_version}</td>
               <td className="py-2"><Badge variant={sevColor[a.update_severity]}>{a.update_severity}</Badge></td>
             </tr>
-          ))}</tbody>
+          ))}{!data.apps.some(a => a.status === "outdated") && <tr><td className="py-7 text-center text-sm text-muted-foreground" colSpan={6}>{data.message || "No observed third-party patch posture is available yet."}</td></tr>}</tbody>
         </table></div></CardContent>
       </Card>
     </div>

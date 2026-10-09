@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,15 +12,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Server, Play, Square, RotateCcw, Power, RefreshCw, CheckCircle, XCircle, Archive, Calendar, Loader2 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 
 export default function ProxmoxPage() {
   const { token } = useAuth();
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [nodes, setNodes] = useState([]);
   const [vms, setVms] = useState([]);
   const [backups, setBackups] = useState([]);
   const [schedules, setSchedules] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
   const [backupDialog, setBackupDialog] = useState(false);
   const [backupForm, setBackupForm] = useState({ vm_id: "", vm_name: "", type: "full", storage: "local-zfs", retention_days: 30 });
@@ -28,7 +28,6 @@ export default function ProxmoxPage() {
   const [scheduleForm, setScheduleForm] = useState({ name: "", schedule: "0 2 * * *", type: "full", storage: "local-zfs", retention_days: 30, vms: [] });
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
     try {
       const [nRes, vRes, bRes, sRes] = await Promise.all([
         axios.get(`${API}/proxmox/nodes`, { headers }),
@@ -38,8 +37,8 @@ export default function ProxmoxPage() {
       ]);
       setNodes(nRes.data); setVms(vRes.data); setBackups(bRes.data); setSchedules(sRes.data);
     } catch { toast.error("Failed to load Proxmox data"); }
-    finally { setLoading(false); }
-  }, []);
+    finally { /* retain the existing data while a refresh is in flight */ }
+  }, [headers]);
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const handleVmAction = async (vmId, action) => {
@@ -64,14 +63,11 @@ export default function ProxmoxPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-3xl font-bold tracking-tight">Proxmox</h1><p className="text-muted-foreground">Virtual machine management & backups</p></div>
-        <div className="flex gap-2">
+      <OperationalPageHeader eyebrow="Infrastructure operations · virtual estate" title="Proxmox" description="Manage virtual machines, protected backup jobs and scheduled infrastructure work." icon={Server} tone="cyan" signal={nodes.some(node => node.status === "warning") ? "attention" : nodes.length ? "ready" : undefined} actions={<>
           <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
           <Button variant="outline" onClick={() => setScheduleDialog(true)} data-testid="create-schedule-btn"><Calendar className="w-4 h-4 mr-1" />Schedule</Button>
-          <Button onClick={() => setBackupDialog(true)} data-testid="create-backup-btn"><Archive className="w-4 h-4 mr-1" />New Backup</Button>
-        </div>
-      </div>
+          <Button onClick={() => setBackupDialog(true)} data-testid="create-backup-btn"><Archive className="w-4 h-4 mr-1" />New backup</Button>
+        </>} />
 
       <div className="grid grid-cols-3 gap-4">
         {nodes.map(n => (

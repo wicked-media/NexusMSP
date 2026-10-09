@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 import uuid
 import json
@@ -20,7 +20,13 @@ from app.services.event_backbone import (
     rotate_subscription_secret,
     update_subscription,
 )
-from app.services.scope_permissions import scoped_query
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_record_scope,
+    effective_scope,
+    scoped_query,
+)
 from app.services.platform_foundation import (
     EVENT_SUBJECTS,
     emit_platform_event,
@@ -30,22 +36,101 @@ from app.services.platform_foundation import (
 router = APIRouter()
 
 # In-memory event store for SSE
-_event_subscribers: Dict[str, asyncio.Queue] = {}
+_event_subscribers: Dict[str, dict] = {}
 _ticket_viewers: Dict[str, Dict[str, dict]] = {}
 
 # ============== REAL-TIME EVENT BUS ==============
 
+
+async def _resolve_publish_scope(data: dict, current_user: dict, request: Request) -> tuple[dict, str | None, str]:
+    """Resolve an API-published event to the caller's proven Nexus scope.
+
+    ``/events/publish`` is an integration convenience endpoint, not a way to
+    manufacture events for another client or tenant.  Direct service publishers
+    remain free to supply their own trusted envelope; browser/API callers are
+    always constrained here before persistence.
+    """
+    payload = data.get("payload") or {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Event payload must be an object")
+
+    explicit_client_id = str(data.get("client_id") or "").strip() or None
+    payload_client_id = str(payload.get("client_id") or "").strip() or None
+    if explicit_client_id and payload_client_id and explicit_client_id != payload_client_id:
+        raise HTTPException(status_code=422, detail="Event client_id must match payload.client_id when both are supplied")
+    client_id = explicit_client_id or payload_client_id
+    if client_id:
+        await assert_client_scope(
+            current_user,
+            client_id,
+            operation="platform.events.publish",
+            request=request,
+        )
+    else:
+        await assert_global_scope(
+            current_user,
+            operation="platform.events.publish",
+            request=request,
+        )
+
+    actor_tenant_id = str(current_user.get("tenant_id") or "").strip() or None
+    requested_tenant_id = str(data.get("tenant_id") or "").strip() or None
+    if actor_tenant_id and requested_tenant_id and requested_tenant_id != actor_tenant_id:
+        raise HTTPException(status_code=403, detail="Events can only be published for the current tenant")
+    # Current local records predate explicit tenant binding.  They remain in the
+    # documented local partition until the tenant migration plan is approved.
+    tenant_id = actor_tenant_id or "nexus-local"
+    return payload, client_id, tenant_id
+
+
+def _subscriber_can_receive_event(subscriber: dict, event: dict) -> bool:
+    """Keep compatibility SSE events inside the recipient's client boundary."""
+    scope = effective_scope(subscriber.get("user") or {})
+    if scope["mode"] == "all":
+        return True
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    client_id = event.get("client_id") or payload.get("client_id")
+    # An event without a client boundary is platform-wide and must never be
+    # disclosed to a restricted technician by the compatibility stream.
+    return bool(client_id and str(client_id) in scope["client_ids"])
+
+
+def _broadcast_scoped_event(event: dict) -> None:
+    for subscriber in list(_event_subscribers.values()):
+        if not _subscriber_can_receive_event(subscriber, event):
+            continue
+        try:
+            subscriber["queue"].put_nowait(event)
+        except asyncio.QueueFull:
+            continue
+
+
+async def _scoped_ticket(ticket_id: str, current_user: dict, request: Request | None = None) -> dict:
+    return await assert_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.viewer.presence",
+        request=request,
+        resource_name="Ticket",
+    )
+
 @router.post("/events/publish")
-async def publish_event(data: dict, request: Request, current_user: dict = Depends(get_current_user)):
+async def publish_event(
+    data: dict,
+    request: Request,
+    current_user: dict = Depends(require_action("platform.events.publish")),
+):
     """Persist and publish an event using the shared Nexus event envelope."""
     try:
+        payload, client_id, tenant_id = await _resolve_publish_scope(data, current_user, request)
         event = await emit_platform_event(
             subject=data.get("subject") or data.get("type") or "platform.general",
             source=data.get("source", "nexus.api"),
-            payload=data.get("payload", {}),
+            payload=payload,
             actor=current_user,
-            tenant_id=data.get("tenant_id"),
-            client_id=data.get("client_id"),
+            tenant_id=tenant_id,
+            client_id=client_id,
             correlation_id=request_correlation_id(request),
             causation_id=data.get("causation_id"),
             schema_version=data.get("schema_version", 1),
@@ -67,11 +152,7 @@ async def publish_event(data: dict, request: Request, current_user: dict = Depen
     if not event.get("deduplicated"):
         await db.events.insert_one({**compatibility_event})
     
-        for user_id, queue in list(_event_subscribers.items()):
-            try:
-                queue.put_nowait(compatibility_event)
-            except asyncio.QueueFull:
-                pass
+        _broadcast_scoped_event(compatibility_event)
     
     return {
         "message": "Event persisted and published",
@@ -261,12 +342,20 @@ async def nexus_black_box(
 # ============== DURABLE EVENT BACKBONE ==============
 
 @router.get("/events/backbone/health")
-async def get_event_backbone_health(current_user: dict = Depends(get_current_user)):
+async def get_event_backbone_health(
+    request: Request,
+    current_user: dict = Depends(require_action("platform.events.view")),
+):
+    await assert_global_scope(current_user, operation="platform.events.read", request=request)
     return await event_backbone_health()
 
 
 @router.get("/events/backbone/subscriptions")
-async def list_event_subscriptions(current_user: dict = Depends(get_current_user)):
+async def list_event_subscriptions(
+    request: Request,
+    current_user: dict = Depends(require_action("platform.events.view")),
+):
+    await assert_global_scope(current_user, operation="platform.events.read", request=request)
     return await db.platform_event_subscriptions.find(
         {},
         {"_id": 0, "signing_secret_encrypted": 0},
@@ -276,8 +365,10 @@ async def list_event_subscriptions(current_user: dict = Depends(get_current_user
 @router.post("/events/backbone/subscriptions")
 async def add_event_subscription(
     data: dict,
+    request: Request,
     current_user: dict = Depends(require_action("platform.events.manage")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.manage", request=request)
     try:
         subscription = await create_subscription(data, current_user)
     except ValueError as exc:
@@ -298,8 +389,10 @@ async def add_event_subscription(
 async def edit_event_subscription(
     subscription_id: str,
     data: dict,
+    request: Request,
     current_user: dict = Depends(require_action("platform.events.manage")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.manage", request=request)
     try:
         subscription = await update_subscription(subscription_id, data)
     except ValueError as exc:
@@ -321,8 +414,10 @@ async def edit_event_subscription(
 @router.post("/events/backbone/subscriptions/{subscription_id}/rotate-secret")
 async def rotate_event_subscription_secret(
     subscription_id: str,
+    request: Request,
     current_user: dict = Depends(require_action("platform.events.manage")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.manage", request=request)
     result = await rotate_subscription_secret(subscription_id)
     if not result:
         raise HTTPException(status_code=404, detail="Webhook subscription not found")
@@ -341,8 +436,10 @@ async def rotate_event_subscription_secret(
 async def list_event_deliveries(
     status: Optional[str] = None,
     limit: int = 100,
-    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+    current_user: dict = Depends(require_action("platform.events.view")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.read", request=request)
     query = {"status": status} if status else {}
     safe_limit = max(1, min(int(limit or 100), 500))
     return await db.platform_event_deliveries.find(
@@ -354,8 +451,10 @@ async def list_event_deliveries(
 @router.post("/events/backbone/deliveries/process")
 async def process_event_delivery_queue(
     data: dict,
+    request: Request,
     current_user: dict = Depends(require_action("platform.events.manage")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.manage", request=request)
     result = await process_due_deliveries(data.get("limit", 50))
     if result["processed"]:
         await log_activity(
@@ -373,8 +472,10 @@ async def process_event_delivery_queue(
 @router.post("/events/backbone/deliveries/{delivery_id}/retry")
 async def retry_event_delivery(
     delivery_id: str,
+    request: Request,
     current_user: dict = Depends(require_action("platform.events.manage")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.manage", request=request)
     delivery = await retry_delivery(delivery_id)
     if not delivery:
         raise HTTPException(status_code=404, detail="Event delivery not found")
@@ -392,8 +493,10 @@ async def retry_event_delivery(
 @router.get("/events/backbone/replays")
 async def list_event_replays(
     limit: int = 50,
-    current_user: dict = Depends(get_current_user),
+    request: Request = None,
+    current_user: dict = Depends(require_action("platform.events.view")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.read", request=request)
     safe_limit = max(1, min(int(limit or 50), 200))
     return await db.platform_event_replays.find(
         {},
@@ -404,8 +507,10 @@ async def list_event_replays(
 @router.post("/events/backbone/replay")
 async def replay_platform_events(
     data: dict,
+    request: Request,
     current_user: dict = Depends(require_action("platform.events.replay")),
 ):
+    await assert_global_scope(current_user, operation="platform.events.replay", request=request)
     try:
         result = await replay_events(data, current_user)
     except ValueError as exc:
@@ -432,9 +537,9 @@ async def replay_platform_events(
 @router.get("/events/stream")
 async def event_stream(request: Request, current_user: dict = Depends(get_current_user)):
     """SSE endpoint for real-time events"""
-    user_id = current_user["id"]
+    subscriber_id = str(uuid.uuid4())
     queue = asyncio.Queue(maxsize=100)
-    _event_subscribers[user_id] = queue
+    _event_subscribers[subscriber_id] = {"queue": queue, "user": current_user}
     
     async def generate():
         try:
@@ -447,7 +552,7 @@ async def event_stream(request: Request, current_user: dict = Depends(get_curren
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
         finally:
-            _event_subscribers.pop(user_id, None)
+            _event_subscribers.pop(subscriber_id, None)
     
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -460,14 +565,22 @@ async def get_recent_events(
     query = {}
     if event_type:
         query["type"] = event_type
-    events = await db.events.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+    events = await db.events.find(
+        scoped_query(current_user, query, field="client_id", site_field=None),
+        {"_id": 0},
+    ).sort("timestamp", -1).to_list(max(1, min(int(limit or 50), 200)))
     return events
 
 # ============== TICKET VIEWER TRACKING ==============
 
 @router.post("/tickets/{ticket_id}/viewing")
-async def mark_viewing_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
+async def mark_viewing_ticket(
+    ticket_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Mark that a user is currently viewing a ticket"""
+    ticket = await _scoped_ticket(ticket_id, current_user, request)
     if ticket_id not in _ticket_viewers:
         _ticket_viewers[ticket_id] = {}
     
@@ -478,49 +591,60 @@ async def mark_viewing_ticket(ticket_id: str, current_user: dict = Depends(get_c
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     
-    for uid, queue in list(_event_subscribers.items()):
-        try:
-            queue.put_nowait({
-                "type": "ticket_viewing",
-                "payload": {
-                    "ticket_id": ticket_id,
-                    "viewers": list(_ticket_viewers.get(ticket_id, {}).values()),
-                },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-        except asyncio.QueueFull:
-            pass
+    _broadcast_scoped_event({
+        "type": "ticket_viewing",
+        "client_id": ticket.get("client_id"),
+        "payload": {
+            "ticket_id": ticket_id,
+            "client_id": ticket.get("client_id"),
+            "viewers": list(_ticket_viewers.get(ticket_id, {}).values()),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
     
     return {"message": "Viewing status updated"}
 
 @router.post("/tickets/{ticket_id}/stop-viewing")
-async def stop_viewing_ticket(ticket_id: str, current_user: dict = Depends(get_current_user)):
+async def stop_viewing_ticket(
+    ticket_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Mark that a user stopped viewing a ticket"""
+    ticket = await _scoped_ticket(ticket_id, current_user, request)
     if ticket_id in _ticket_viewers:
         _ticket_viewers[ticket_id].pop(current_user["id"], None)
         if not _ticket_viewers[ticket_id]:
             del _ticket_viewers[ticket_id]
     
-    for uid, queue in list(_event_subscribers.items()):
-        try:
-            queue.put_nowait({
-                "type": "ticket_viewing",
-                "payload": {
-                    "ticket_id": ticket_id,
-                    "viewers": list(_ticket_viewers.get(ticket_id, {}).values()),
-                },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-        except asyncio.QueueFull:
-            pass
+    _broadcast_scoped_event({
+        "type": "ticket_viewing",
+        "client_id": ticket.get("client_id"),
+        "payload": {
+            "ticket_id": ticket_id,
+            "client_id": ticket.get("client_id"),
+            "viewers": list(_ticket_viewers.get(ticket_id, {}).values()),
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
     
     return {"message": "Viewing status cleared"}
 
 @router.get("/tickets/active-viewers")
-async def get_all_active_viewers(current_user: dict = Depends(get_current_user)):
+async def get_all_active_viewers(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Get all tickets currently being viewed and by whom"""
     result = {}
     for ticket_id, viewers in _ticket_viewers.items():
-        if viewers:
-            result[ticket_id] = list(viewers.values())
+        if not viewers:
+            continue
+        try:
+            await _scoped_ticket(ticket_id, current_user, request)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            continue
+        result[ticket_id] = list(viewers.values())
     return result

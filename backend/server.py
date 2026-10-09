@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request as FastAPIRequest
+from fastapi import APIRouter, FastAPI, HTTPException, Request as FastAPIRequest, Response
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
@@ -10,13 +11,26 @@ import pkgutil
 import re
 import time
 import uuid
+from pathlib import Path
 
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
-from app.services.runtime_config import background_workers_enabled, cors_origins
+from app.services.runtime_config import background_workers_enabled, cors_origins, demo_seed_enabled
+from app.services.observability import (
+    HTTP_IN_PROGRESS,
+    configure_observability,
+    deliver_alertmanager_webhook,
+    metrics_payload,
+    observe_http,
+    observability_ingest_authorized,
+    refresh_operational_metrics,
+    request_span,
+    shutdown_observability,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+configure_observability(service_name=os.getenv("OTEL_SERVICE_NAME", "nexus-api"))
 
 app = FastAPI(title="NexusOps API", version="3.0.0")
 _background_tasks: set[asyncio.Task] = set()
@@ -32,19 +46,36 @@ async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
     correlation_id = supplied if _CORRELATION_ID_RE.fullmatch(supplied) else str(uuid.uuid4())
     request.state.correlation_id = correlation_id
     started = time.perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception:
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.exception(
-            "request_failed correlation_id=%s method=%s path=%s elapsed_ms=%s",
-            correlation_id,
-            request.method,
-            request.url.path,
-            elapsed_ms,
+    HTTP_IN_PROGRESS.inc()
+    with request_span(method=request.method, correlation_id=correlation_id) as span:
+        try:
+            response = await call_next(request)
+        except Exception:
+            elapsed_seconds = time.perf_counter() - started
+            route = getattr(request.scope.get("route"), "path", "unmatched")
+            observe_http(method=request.method, route=route, status_code=500, elapsed_seconds=elapsed_seconds)
+            logger.exception(
+                "request_failed correlation_id=%s method=%s route=%s elapsed_ms=%s",
+                correlation_id,
+                request.method,
+                route,
+                round(elapsed_seconds * 1000, 1),
+            )
+            raise
+        finally:
+            HTTP_IN_PROGRESS.dec()
+        route = getattr(request.scope.get("route"), "path", "unmatched")
+        elapsed_seconds = time.perf_counter() - started
+        observe_http(
+            method=request.method,
+            route=route,
+            status_code=response.status_code,
+            elapsed_seconds=elapsed_seconds,
         )
-        raise
-    elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        if span is not None:
+            span.set_attribute("http.route", route)
+            span.set_attribute("http.response.status_code", response.status_code)
+    elapsed_ms = round(elapsed_seconds * 1000, 1)
     response.headers["X-Correlation-ID"] = correlation_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     # PDFs are displayed inside the authenticated Nexus document preview. The
@@ -61,17 +92,71 @@ async def nexus_correlation_middleware(request: FastAPIRequest, call_next):
         response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     logger.info(
-        "request_complete correlation_id=%s method=%s path=%s status=%s elapsed_ms=%s",
+        "request_complete correlation_id=%s method=%s route=%s status=%s elapsed_ms=%s",
         correlation_id,
         request.method,
-        request.url.path,
+        route,
         response.status_code,
         elapsed_ms,
     )
     return response
 
-# Static files for uploads
-app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+# Ticket evidence is served only through the scoped ticket attachment router.
+# Block the legacy static location before registering the general public upload
+# mount so known filenames cannot bypass ticket authorisation.
+@app.api_route("/api/uploads/ticket_attachments/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_ticket_attachment(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
+# Client documents are customer-owned evidence. Historical records once stored
+# them under the public uploads mount, so reject that path before static files
+# are registered and force every download through the client-scoped route.
+@app.api_route("/api/uploads/client-documents/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_client_document(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
+# Compliance evidence is customer-owned and must be retrieved only through the
+# authenticated, tenant/client-scoped compliance download endpoint.
+@app.api_route("/api/uploads/compliance-evidence/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_compliance_evidence(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
+# Field and workshop job photos and device chat attachments are customer
+# evidence. Serve them only through the authenticated, scope-checked download
+# routes in their routers; reject the historical public static locations before
+# static files are registered so known filenames cannot bypass job or device
+# authorisation.
+@app.api_route("/api/uploads/field_photos/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_field_photo(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
+@app.api_route("/api/uploads/workshop_photos/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_workshop_photo(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
+@app.api_route("/api/uploads/chat_attachments/{legacy_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+async def block_public_chat_attachment(legacy_path: str):
+    raise HTTPException(status_code=404, detail="Not found")
+
+# Static files for public uploads (avatars, branding and public help assets).
+# Runtime uploads live under UPLOADS_DIR (NEXUS_UPLOADS_DIR), while the shipped
+# public assets — demo avatars, branding and help guide visuals — are committed
+# under backend/uploads. When the runtime directory is configured elsewhere
+# (preview and acceptance stacks), those shipped assets must still resolve, so
+# the mount falls back to the committed tree after the runtime directory. The
+# sensitive-evidence blocklist above applies to both roots.
+class _PublicUploadsStatic(StaticFiles):
+    """StaticFiles that serves runtime uploads first, then shipped public assets."""
+
+    def __init__(self, runtime_dir: Path, shipped_dir: Path):
+        super().__init__(directory=str(runtime_dir))
+        directories = [str(runtime_dir)]
+        if str(shipped_dir) != str(runtime_dir):
+            directories.append(str(shipped_dir))
+        self.all_directories = directories
+
+
+app.mount("/api/uploads", _PublicUploadsStatic(UPLOADS_DIR, Path(__file__).resolve().parent / "uploads"), name="uploads")
 
 # Auto-discover and register all routers from app/routers/
 # Priority ordering ensures specific routes are matched before dynamic ones
@@ -79,17 +164,151 @@ ROUTER_PRIORITY = [
     "auth",
     # The client portal also exposes /tickets. Register the technician-facing
     # ticket router first so the main application does not match portal routes.
+    # Literal /tickets/* routes (merge-suggestions) must be claimed before the
+    # generic /tickets/{ticket_id} route, or FastAPI match-order shadows them.
+    "ticket_merge",
     "tickets",
     "ticket_attachments", "ticket_email_notifications",
     "device_discovery", "device_viewers", "device_chat",
     "invoice_pdf",
 ]
 
+# Provider-specific remote routes are no longer part of the live API. Historical
+# records stay in MongoDB for audit and migration, but cannot launch RustDesk.
+RETIRED_ROUTERS = {"remote_providers", "rustdesk"}
+
+
+# FastAPI matches route parameters by position and converter, not by the
+# parameter variable name.  Keep registry ownership equally structural so
+# ``/{invoice_id}`` and ``/{id}`` cannot silently register as two handlers for
+# the same live URL.
+_ROUTE_PARAMETER_RE = re.compile(r"\{[^}]+\}")
+
+
+def _canonical_http_path(path: str) -> str:
+    """Return the structural path FastAPI uses for collision ownership."""
+    return _ROUTE_PARAMETER_RE.sub("{param}", path)
+
+
+# Some older feature bundles still expose a handler at a path that a newer,
+# already-live router owns.  FastAPI accepts both registrations and resolves
+# requests to whichever was included first, which used to leave an unreachable
+# handler in the app and generated duplicate OpenAPI operation IDs.  Keep the
+# current public behaviour deterministic by declaring the existing owner here;
+# the registration guard below excludes only the historical shadow route.
+#
+# New duplicate HTTP operations are *not* permitted.  They fail application
+# construction with an actionable error instead of silently changing routing
+# precedence in a future release.
+_LEGACY_HTTP_OPERATION_OWNERS: dict[tuple[str, str], str] = {
+    ("/api/tickets/active-viewers", "GET"): "tickets",
+    ("/api/devices/{device_id}/chat", "GET"): "device_chat",
+    ("/api/devices/{device_id}/chat", "POST"): "device_chat",
+    ("/api/acronis/test-connection", "GET"): "acronis",
+    ("/api/acronis/subscriptions", "GET"): "acronis",
+    ("/api/schedule", "GET"): "admin",
+    ("/api/schedule", "POST"): "admin",
+    ("/api/clients/{client_id}/subscriptions", "GET"): "client_360",
+    ("/api/contracts/auto-renewal-proposals", "GET"): "contracts",
+    ("/api/huntress/test-connection", "GET"): "huntress",
+    ("/api/huntress/agents", "GET"): "huntress",
+    ("/api/proxmox/vms", "GET"): "infrastructure",
+    ("/api/warranties", "GET"): "infrastructure",
+    ("/api/warranties", "POST"): "infrastructure",
+    ("/api/warranties/{warranty_id}", "DELETE"): "infrastructure",
+    ("/api/vendors", "GET"): "infrastructure",
+    ("/api/vendors", "POST"): "infrastructure",
+    ("/api/vendors/{vendor_id}", "PUT"): "infrastructure",
+    ("/api/vendors/{vendor_id}", "DELETE"): "infrastructure",
+    # The live owner has historically been ``admin``.  The route parameter
+    # names differed, which previously hid this duplicate from the registry.
+    ("/api/schedule/{schedule_id}", "PUT"): "admin",
+    ("/api/schedule/{schedule_id}", "DELETE"): "admin",
+    ("/api/runbooks", "GET"): "it_docs",
+}
+
+# Keep the declarations readable with their public parameter names, while all
+# collision checks below use the structural representation FastAPI matches.
+_LEGACY_HTTP_OPERATION_OWNERS = {
+    (_canonical_http_path(path), method): owner
+    for (path, method), owner in _LEGACY_HTTP_OPERATION_OWNERS.items()
+}
+
+
+def _http_operation_keys(route: APIRoute, *, prefix: str) -> set[tuple[str, str]]:
+    """Return the concrete method/path keys FastAPI will register for a route."""
+    path = _canonical_http_path(f"{prefix}{route.path_format}")
+    return {(path, method.upper()) for method in (route.methods or set())}
+
+
+def _include_router_without_shadowed_operations(
+    name: str,
+    source_router: APIRouter,
+    *,
+    prefix: str,
+    operation_owners: dict[tuple[str, str], str],
+) -> None:
+    """Include one router while rejecting ambiguous HTTP operation ownership.
+
+    ``FastAPI.include_router`` deliberately permits duplicate routes.  Nexus
+    auto-discovers a large router catalogue, so that permissive behaviour made
+    accidental overlap particularly easy to miss.  A source route is skipped
+    only when every one of its operations is a documented historical shadow;
+    all other collisions stop startup so a new endpoint cannot silently become
+    unreachable.
+    """
+    selected_routes = []
+    for route in source_router.routes:
+        if not isinstance(route, APIRoute):
+            selected_routes.append(route)
+            continue
+
+        operation_keys = _http_operation_keys(route, prefix=prefix)
+        conflicts = {
+            key: operation_owners[key]
+            for key in operation_keys
+            if key in operation_owners
+        }
+        if not conflicts:
+            selected_routes.append(route)
+            for key in operation_keys:
+                operation_owners[key] = name
+            continue
+
+        if len(conflicts) != len(operation_keys):
+            raise RuntimeError(
+                f"Router '{name}' partially overlaps registered HTTP operations "
+                f"({sorted(conflicts)}). Split the route or assign explicit owners."
+            )
+
+        undeclared = {
+            key: owner
+            for key, owner in conflicts.items()
+            if _LEGACY_HTTP_OPERATION_OWNERS.get(key) != owner
+        }
+        if undeclared:
+            raise RuntimeError(
+                f"Router '{name}' duplicates HTTP operation(s) owned by {undeclared}. "
+                "Declare a single route owner or remove the duplicate registration."
+            )
+
+        logger.info(
+            "Skipped documented shadow route(s) from router '%s': %s",
+            name,
+            ", ".join(f"{method} {path} (owner: {owner})" for (path, method), owner in sorted(conflicts.items())),
+        )
+
+    # Use a lightweight route view rather than mutating a module-level router;
+    # imports and any intentional internal use of its handler functions remain
+    # unchanged, while the live ASGI application gets one owner per operation.
+    filtered_router = APIRouter(routes=selected_routes)
+    app.include_router(filtered_router, prefix=prefix)
+
 def discover_and_register_routers():
     import app.routers as routers_pkg
     discovered = {}
     for _importer, modname, _ispkg in pkgutil.iter_modules(routers_pkg.__path__):
-        if modname.startswith('_'):
+        if modname.startswith('_') or modname in RETIRED_ROUTERS:
             continue
         try:
             module = importlib.import_module(f'app.routers.{modname}')
@@ -98,17 +317,33 @@ def discover_and_register_routers():
         except Exception as e:
             logger.warning(f"Failed to import router '{modname}': {e}")
 
-    # Register priority routers first (order matters for route matching)
+    # Start with operations defined directly on the application, then register
+    # priority routers first (order matters for route matching).
+    operation_owners: dict[tuple[str, str], str] = {}
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            for operation_key in _http_operation_keys(route, prefix=""):
+                operation_owners[operation_key] = "application"
+
+    def include_discovered_router(name: str) -> None:
+        _include_router_without_shadowed_operations(
+            name,
+            discovered[name].router,
+            prefix="/api",
+            operation_owners=operation_owners,
+        )
+
+    # Register priority routers first (order matters for route matching).
     registered = set()
     for name in ROUTER_PRIORITY:
         if name in discovered:
-            app.include_router(discovered[name].router, prefix="/api")
+            include_discovered_router(name)
             registered.add(name)
 
     # Register remaining routers alphabetically
     for name in sorted(discovered.keys()):
         if name not in registered:
-            app.include_router(discovered[name].router, prefix="/api")
+            include_discovered_router(name)
             registered.add(name)
 
     logger.info(f"Auto-discovered and registered {len(registered)} routers")
@@ -145,6 +380,43 @@ async def readiness_check():
     return {"status": "ready", "service": "nexusops-api", "version": "3.0.0"}
 
 
+@app.get("/metrics", include_in_schema=False)
+async def prometheus_metrics():
+    """Private-network scrape target; the production proxy does not expose it."""
+    await refresh_operational_metrics(db)
+    payload, content_type = metrics_payload()
+    return Response(content=payload, media_type=content_type)
+
+
+@app.post("/internal/observability/alerts", include_in_schema=False)
+async def receive_observability_alerts(request: FastAPIRequest):
+    """Private Alertmanager relay to the configured HTTPS on-call destination."""
+    if not observability_ingest_authorized(request.headers.get("Authorization")):
+        raise HTTPException(
+            status_code=401,
+            detail="Observability ingest authentication failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        content_length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid content length") from None
+    if content_length > 256 * 1024:
+        raise HTTPException(status_code=413, detail="Alert payload is too large")
+    try:
+        payload = await request.json()
+        delivered = await deliver_alertmanager_webhook(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.error("observability_alert_delivery_unavailable reason=%s", str(exc))
+        raise HTTPException(status_code=503, detail="On-call alert delivery is unavailable") from None
+    except Exception:
+        logger.exception("observability_alert_delivery_failed")
+        raise HTTPException(status_code=502, detail="On-call alert delivery failed") from None
+    return {"status": "delivered", "alert_count": delivered}
+
+
 def _start_background_task(coro, name: str) -> asyncio.Task:
     task = asyncio.create_task(coro, name=name)
     _background_tasks.add(task)
@@ -154,11 +426,14 @@ def _start_background_task(coro, name: str) -> asyncio.Task:
 
 def background_worker_specs():
     """Return the durable-loop catalogue shared by API-dev and worker deployments."""
+    from app.routers.invoice_reminders import invoice_reminder_scheduler
     from app.routers.maintenance_windows import maintenance_window_scheduler
+    from app.routers.permission_elevation import nexus_elevate_reconcile_scheduler
 
     return (
-        ("rustdesk-sync", _rustdesk_auto_sync_loop),
         ("recurring-invoices", _recurring_invoice_scheduler),
+        ("invoice-reminders", invoice_reminder_scheduler),
+        ("nexus-elevate", nexus_elevate_reconcile_scheduler),
         ("standup-digest", _standup_digest_scheduler),
         ("warroom-escalation", _warroom_escalation_loop),
         ("chain-reactions", _chain_reactions_loop),
@@ -170,42 +445,243 @@ def background_worker_specs():
         ("maintenance-windows", maintenance_window_scheduler),
     )
 
+_STRIPE_SETTLEMENT_EVENTS = {
+    "checkout.session.completed": ("checkout.session", ("stripe_session_id", "session_id")),
+    "checkout.session.async_payment_succeeded": ("checkout.session", ("stripe_session_id", "session_id")),
+    "payment_intent.succeeded": ("payment_intent", ("stripe_payment_intent_id",)),
+}
+
+
+def _stripe_amount_cents(value) -> int:
+    """Convert known persisted amounts to cents without trusting webhook metadata."""
+    return int(round(float(value or 0) * 100))
+
+
+async def _settle_verified_stripe_event(event) -> str:
+    """Apply one previously-bound Stripe settlement exactly once.
+
+    Metadata is checked for consistency, but is not used as authority.  The
+    server-side payment transaction created before checkout decides the invoice,
+    amount and client that may be settled.
+    """
+    expected = _STRIPE_SETTLEMENT_EVENTS.get(event.event_type)
+    if not expected or event.object_type != expected[0] or event.payment_status != "paid" or not event.object_id:
+        return "ignored"
+
+    provider_fields = expected[1]
+    transaction = await db.payment_transactions.find_one(
+        {"$or": [{field: event.object_id} for field in provider_fields]},
+        {"_id": 0},
+    )
+    if not transaction:
+        logger.warning(
+            "stripe_webhook_ignored reason=unbound_payment event_id=%s object_id=%s",
+            event.event_id,
+            event.object_id,
+        )
+        return "ignored"
+
+    invoice_id = str(transaction.get("invoice_id") or "")
+    if not invoice_id or str(event.metadata.get("invoice_id") or "") != invoice_id:
+        logger.warning(
+            "stripe_webhook_ignored reason=invoice_binding_mismatch event_id=%s transaction_id=%s",
+            event.event_id,
+            transaction.get("id"),
+        )
+        return "ignored"
+
+    expected_amount = int(transaction.get("amount_cents") or _stripe_amount_cents(transaction.get("amount")))
+    expected_currency = str(transaction.get("currency") or "").lower()
+    if expected_amount <= 0 or event.amount_total != expected_amount or event.currency.lower() != expected_currency:
+        logger.warning(
+            "stripe_webhook_ignored reason=amount_or_currency_mismatch event_id=%s transaction_id=%s",
+            event.event_id,
+            transaction.get("id"),
+        )
+        return "ignored"
+
+    collection_name = str(transaction.get("invoice_collection") or "invoices")
+    if collection_name not in {"invoices", "xero_invoices"}:
+        logger.error(
+            "stripe_webhook_ignored reason=invalid_invoice_collection transaction_id=%s",
+            transaction.get("id"),
+        )
+        return "ignored"
+    invoice_collection = db.xero_invoices if collection_name == "xero_invoices" else db.invoices
+    invoice_query = {"id": invoice_id}
+    if transaction.get("client_id"):
+        invoice_query["client_id"] = transaction["client_id"]
+    invoice = await invoice_collection.find_one(invoice_query, {"_id": 0})
+    if not invoice:
+        logger.warning(
+            "stripe_webhook_ignored reason=bound_invoice_missing transaction_id=%s",
+            transaction.get("id"),
+        )
+        return "ignored"
+    if str(invoice.get("status") or "").strip().lower() in {"cancelled", "voided", "void"}:
+        logger.warning(
+            "stripe_webhook_ignored reason=invoice_not_collectible transaction_id=%s",
+            transaction.get("id"),
+        )
+        return "ignored"
+
+    amount = event.amount_total / 100
+    outstanding = round(float(invoice.get("total", 0)) - float(invoice.get("amount_paid", 0)), 2)
+    if amount > outstanding + 0.01:
+        logger.warning(
+            "stripe_webhook_ignored reason=amount_exceeds_current_balance transaction_id=%s",
+            transaction.get("id"),
+        )
+        return "ignored"
+
+    payment_link_id = transaction.get("payment_link_id")
+    payment_link_payment_id = transaction.get("payment_link_payment_id")
+    payment_link = None
+    if payment_link_id:
+        payment_link = await db.payment_links.find_one({"id": payment_link_id}, {"_id": 0})
+        if not payment_link or payment_link.get("status") != "active":
+            # A provider event for a checkout that was revoked/closed after it
+            # started is financial evidence, not an instruction to credit a
+            # different lifecycle state.  Preserve it for a human
+            # reconciliation rather than silently accepting or dropping it.
+            await db.payment_transactions.update_one(
+                {"id": transaction.get("id"), "payment_status": {"$ne": "paid"}},
+                {"$set": {
+                    "payment_status": "reconciliation_required",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "last_settlement_error": "payment_link_not_active",
+                    "stripe_event_id": event.event_id,
+                }},
+            )
+            logger.error(
+                "stripe_webhook_reconciliation_required reason=payment_link_not_active transaction_id=%s event_id=%s",
+                transaction.get("id"),
+                event.event_id,
+            )
+            return "reconciliation_required"
+
+    # This state transition is the idempotency gate. A Stripe redelivery or a
+    # duplicate webhook cannot get past it after the first accepted callback.
+    now = datetime.now(timezone.utc).isoformat()
+    marked = await db.payment_transactions.update_one(
+        {"id": transaction.get("id"), "payment_status": {"$ne": "paid"}},
+        {"$set": {
+            "payment_status": "paid",
+            "updated_at": now,
+            "paid_at": now,
+            "stripe_event_id": event.event_id,
+            "stripe_event_type": event.event_type,
+        }},
+    )
+    if marked.matched_count == 0:
+        return "duplicate"
+
+    new_paid = round(float(invoice.get("amount_paid", 0)) + amount, 2)
+    paid_in_full = new_paid >= float(invoice.get("total", 0)) - 0.01
+    payment_entry = {
+        "amount": amount,
+        "method": "stripe",
+        "date": now,
+        "session_id": event.object_id if event.object_type == "checkout.session" else None,
+        "payment_intent_id": event.object_id if event.object_type == "payment_intent" else None,
+        "stripe_event_id": event.event_id,
+    }
+    update_fields = {
+        "payment_status": "paid" if paid_in_full else "partial",
+        "amount_paid": new_paid,
+        "amount_due": round(float(invoice.get("total", 0)) - new_paid, 2),
+    }
+    if paid_in_full:
+        update_fields.update({"status": "paid", "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d")})
+    # The transaction state above is the idempotency gate, but it must not
+    # become a false success if a concurrent payment changed the invoice before
+    # this callback could apply its own mutation.  Bind the write to the exact
+    # client-owned invoice snapshot we validated, then release the gate for a
+    # provider retry if the update cannot be applied.
+    invoice_update_query = {
+        **invoice_query,
+        "amount_paid": invoice.get("amount_paid", 0),
+    }
+    invoice_updated = await invoice_collection.update_one(
+        invoice_update_query,
+        {"$set": update_fields, "$push": {"payments": payment_entry}},
+    )
+    if invoice_updated.matched_count == 0:
+        rollback = await db.payment_transactions.update_one(
+            {
+                "id": transaction.get("id"),
+                "payment_status": "paid",
+                "stripe_event_id": event.event_id,
+            },
+            {"$set": {
+                "payment_status": "retryable",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "last_settlement_error": "invoice_update_conflict",
+            }},
+        )
+        if rollback.matched_count == 0:
+            logger.error(
+                "stripe_webhook_invoice_conflict_rollback_failed transaction_id=%s event_id=%s",
+                transaction.get("id"),
+                event.event_id,
+            )
+        raise RuntimeError("Invoice changed before Stripe settlement could be applied")
+
+    if payment_link_id and payment_link_payment_id:
+        link = payment_link or await db.payment_links.find_one({"id": payment_link_id}, {"_id": 0})
+        if link:
+            payments = list(link.get("payments", []))
+            for payment in payments:
+                if payment.get("id") == payment_link_payment_id:
+                    payment.update({"status": "paid", "confirmed_at": now, "stripe_event_id": event.event_id})
+                    break
+            link_update = {"payments": payments}
+            checkout_lock = link.get("checkout_lock")
+            if isinstance(checkout_lock, dict) and checkout_lock.get("id") == payment_link_payment_id:
+                link_update["checkout_lock"] = {
+                    **checkout_lock,
+                    "status": "paid",
+                    "confirmed_at": now,
+                    "stripe_event_id": event.event_id,
+                }
+            if paid_in_full:
+                link_update.update({"status": "completed", "completed_at": now})
+            await db.payment_links.update_one({"id": payment_link_id}, {"$set": link_update})
+    return "processed"
+
+
 # Stripe webhook
 @app.post("/api/webhook/stripe")
 async def stripe_webhook(request: FastAPIRequest):
-    body = await request.body()
-    sig = request.headers.get("Stripe-Signature", "")
+    """Accept only cryptographically verified, Nexus-bound Stripe callbacks."""
     stripe_key = os.environ.get("STRIPE_API_KEY")
-    if not stripe_key:
-        return {"status": "stripe not configured"}
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET")
+    if not stripe_key or not webhook_secret:
+        logger.error("stripe_webhook_unavailable configuration_missing=%s", "api_key" if not stripe_key else "webhook_secret")
+        raise HTTPException(status_code=503, detail="Stripe webhook is not configured")
+
+    signature = request.headers.get("Stripe-Signature", "")
+    if not signature:
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature")
     try:
         from app.services.stripe_checkout import StripeCheckout
-        stripe_checkout = StripeCheckout(api_key=stripe_key, webhook_url="")
-        webhook_response = await stripe_checkout.handle_webhook(body, sig)
-        if webhook_response.payment_status == "paid" and webhook_response.session_id:
-            existing = await db.payment_transactions.find_one({"session_id": webhook_response.session_id, "payment_status": "paid"})
-            if not existing:
-                await db.payment_transactions.update_one(
-                    {"session_id": webhook_response.session_id},
-                    {"$set": {"payment_status": "paid", "updated_at": datetime.now(timezone.utc).isoformat()}}
-                )
-                inv_id = webhook_response.metadata.get("invoice_id")
-                if inv_id:
-                    invoice = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
-                    if invoice:
-                        new_paid = float(invoice.get("amount_paid", 0)) + float(webhook_response.amount_total / 100)
-                        p_status = "paid" if new_paid >= float(invoice.get("total", 0)) else "partial"
-                        await db.invoices.update_one({"id": inv_id}, {
-                            "$set": {"payment_status": p_status, "amount_paid": new_paid,
-                                     "status": "paid" if p_status == "paid" else invoice.get("status"),
-                                     "paid_date": datetime.now(timezone.utc).strftime("%Y-%m-%d") if p_status == "paid" else None},
-                            "$push": {"payments": {"amount": webhook_response.amount_total / 100, "method": "stripe",
-                                                   "date": datetime.now(timezone.utc).isoformat(), "session_id": webhook_response.session_id}}
-                        })
-        return {"status": "ok"}
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return {"status": "error", "detail": str(e)}
+
+        event = await StripeCheckout(api_key=stripe_key).handle_webhook(await request.body(), signature)
+    except RuntimeError:
+        logger.error("stripe_webhook_unavailable webhook_secret_not_configured")
+        raise HTTPException(status_code=503, detail="Stripe webhook is not configured") from None
+    except Exception:
+        # Provider library exception strings may contain request identifiers or
+        # parsing detail. Do not reflect them to the public webhook caller.
+        logger.warning("stripe_webhook_rejected invalid_signature_or_payload")
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook signature") from None
+
+    try:
+        return {"status": await _settle_verified_stripe_event(event)}
+    except Exception:
+        # A 5xx tells Stripe to retry a verified event; details stay in logs.
+        logger.exception("stripe_webhook_processing_failed event_id=%s", event.event_id)
+        raise HTTPException(status_code=500, detail="Stripe webhook processing failed") from None
 
 # Startup event
 @app.on_event("startup")
@@ -234,10 +710,28 @@ async def _boot_warmup():
     """Run seed + ticket-number backfill without blocking app startup."""
     global _warmup_complete
     try:
+        from app.services.upload_quarantine import cleanup_stale_quarantine, ensure_upload_quarantine_indexes
+        await ensure_upload_quarantine_indexes(db)
+        removed_quarantine_files = await cleanup_stale_quarantine(db)
+        if removed_quarantine_files:
+            logger.warning("Removed %s stale private upload quarantine files", removed_quarantine_files)
+    except Exception as e:
+        logger.error(f"Upload-quarantine initialization failed: {e}")
+    try:
+        from app.services.academy import ensure_academy_indexes
+        await ensure_academy_indexes(database=db)
+    except Exception as e:
+        logger.error(f"Academy index initialization failed: {e}")
+    try:
         from app.services.request_throttling import ensure_request_throttle_indexes
         await ensure_request_throttle_indexes()
     except Exception as e:
         logger.error(f"Request throttle index initialization failed: {e}")
+    try:
+        from app.services.audit_log_storage import ensure_audit_log_indexes
+        await ensure_audit_log_indexes()
+    except Exception as e:
+        logger.error(f"Audit-log index initialization failed: {e}")
     try:
         from app.services.event_backbone import (
             backfill_event_integrity,
@@ -269,6 +763,16 @@ async def _boot_warmup():
     except Exception as e:
         logger.error(f"Time Machine index initialization failed: {e}")
     try:
+        from app.services.native_remote import ensure_native_remote_indexes
+        await ensure_native_remote_indexes()
+    except Exception as e:
+        logger.error(f"Nexus Native Remote index initialization failed: {e}")
+    try:
+        from app.routers.invoice_pdf import ensure_document_pdf_capability_indexes
+        await ensure_document_pdf_capability_indexes()
+    except Exception as e:
+        logger.error(f"Document PDF capability index initialization failed: {e}")
+    try:
         await db.yeastar_pbxs.create_index(
             [("client_id", 1), ("pbx_url", 1)],
             unique=True,
@@ -277,9 +781,17 @@ async def _boot_warmup():
     except Exception as e:
         logger.error(f"Yeastar PBX uniqueness guard failed: {e}")
     try:
-        await seed_data()
+        from app.routers.projects import ensure_project_ticket_plan_indexes
+        await ensure_project_ticket_plan_indexes()
     except Exception as e:
-        logger.error(f"seed_data failed: {e}")
+        logger.error(f"Project ticket-plan uniqueness guard failed: {e}")
+    if demo_seed_enabled():
+        try:
+            await seed_data()
+        except Exception as e:
+            logger.error(f"seed_data failed: {e}")
+    else:
+        logger.info("Demo-data seeding is disabled for this runtime")
     try:
         from app.routers.ticket_suggestions import generate_ticket_number
         tickets_without_number = await db.tickets.find(
@@ -344,58 +856,6 @@ async def _automation_runtime_loop():
             logger.error(f"Automation runtime worker failed: {e}")
             await asyncio.sleep(10)
 
-
-async def _rustdesk_auto_sync_loop():
-    """Background loop that syncs RustDesk peers every 5 minutes if enabled."""
-    import asyncio
-    while True:
-        try:
-            await asyncio.sleep(300)  # 5 minutes
-            config = await db.settings.find_one({"key": "rustdesk_config"}, {"_id": 0})
-            if not config:
-                continue
-            val = config.get("value", {})
-            if not val.get("enabled") or not val.get("server_url") or not val.get("auto_sync", True):
-                continue
-            # Import and call sync logic
-            try:
-                from app.routers.rustdesk import _rustdesk_api_request
-                import httpx
-                server_url = val["server_url"].rstrip("/")
-                api_key = val.get("api_key", "")
-                headers_dict = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-                peers = []
-                async with httpx.AsyncClient(timeout=15.0, verify=os.environ.get('ALLOW_SELF_SIGNED_CERTS','false').lower()=='true') as cl:
-                    for path in ["/peers", "/v1/peers", "/ab/peers"]:
-                        try:
-                            resp = await cl.get(f"{server_url}/api{path}", headers=headers_dict)
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                if isinstance(data, list):
-                                    peers = data; break
-                                elif isinstance(data, dict) and "data" in data:
-                                    peers = data["data"]; break
-                        except Exception:
-                            continue
-                if peers:
-                    import uuid
-                    now = datetime.now(timezone.utc).isoformat()
-                    for p in peers:
-                        rd_id = str(p.get("id") or p.get("Id") or p.get("peer_id") or "")
-                        if not rd_id:
-                            continue
-                        online = p.get("online", False) if isinstance(p.get("online"), bool) else str(p.get("online", "")).lower() in ["true", "1"]
-                        status = "online" if online else "offline"
-                        await db.devices.update_many({"rustdesk_id": rd_id}, {"$set": {"status": status, "rd_last_seen": now}})
-                        await db.rustdesk_devices.update_many({"rustdesk_id": rd_id}, {"$set": {"status": status, "last_online": now if online else None}})
-                    await db.settings.update_one({"key": "rustdesk_config"}, {"$set": {"value.last_auto_sync": now, "value.last_auto_sync_peers": len(peers)}})
-                    logger.info(f"RustDesk auto-sync: {len(peers)} peers synced")
-            except Exception as e:
-                logger.debug(f"RustDesk auto-sync skipped: {e}")
-        except Exception as e:
-            logger.debug(f"RustDesk auto-sync loop error: {e}")
-            import asyncio
-            await asyncio.sleep(60)
 
 async def _trmm_scheduled_broadcast_loop():
     """Removed â€” TRMM has been replaced by NexusOps Agent. This stub keeps backwards-compat with any old references."""
@@ -554,11 +1014,16 @@ async def _recurring_invoice_scheduler():
 
             # Use the same guarded generation path as the operator-triggered run.
             # This prevents duplicate billing periods and records delivery results.
-            from app.routers.recurring_invoices import run_scheduler_now
-            summary = await run_scheduler_now({
+            from app.routers.recurring_invoices import _run_scheduler_now
+            summary = await _run_scheduler_now({
                 "id": "system-recurring-scheduler",
                 "name": "Automatic Scheduler",
                 "role": "system",
+                # The scheduler is a server-owned global actor.  It uses the
+                # same governed generation helper as the operator route, but
+                # has no browser-issued authentication context.
+                "client_scope_mode": "all",
+                "system_actor": True,
             })
             if summary.get("processed"):
                 logger.info(
@@ -579,6 +1044,7 @@ async def shutdown_db_client():
         task.cancel()
     if _background_tasks:
         await asyncio.gather(*tuple(_background_tasks), return_exceptions=True)
+    shutdown_observability()
     client.close()
 
 async def _standup_digest_scheduler():

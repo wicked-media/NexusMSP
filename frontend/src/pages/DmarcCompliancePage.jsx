@@ -158,7 +158,7 @@ export default function DmarcCompliancePage() {
         actions={(
           <>
           <Button variant="outline" size="sm" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=suped-settings-card")}><ExternalLink className="w-4 h-4 mr-1" />Suped Settings</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate("/settings?tab=integrations&anchor=suped-settings-card")}><ExternalLink className="w-4 h-4 mr-1" />Suped settings</Button>
           </>
         )}
       />
@@ -355,10 +355,10 @@ export default function DmarcCompliancePage() {
         </CardContent>
       </Card>
       <Dialog open={Boolean(spfDomain)} onOpenChange={(open) => { if (!open) setSpfDomain(null); }}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto border-amber-500/20 bg-[linear-gradient(160deg,#0a151b,#090b11)] sm:max-w-2xl">
-          <DialogHeader><DialogTitle>Assess SPF lookup risk</DialogTitle><p className="text-sm text-muted-foreground">{spfDomain?.domain} · Nexus creates an assessment only. It will not flatten or publish a DNS record from this screen.</p></DialogHeader>
-          <div className="space-y-4 py-2"><div className="space-y-2"><Label htmlFor="nexus-spf-record">Live SPF TXT record</Label><Textarea id="nexus-spf-record" value={spfRecord} onChange={(event) => setSpfRecord(event.target.value)} placeholder="v=spf1 include:spf.protection.outlook.com include:mailer.example -all" className="min-h-24 font-mono text-xs" /><p className="text-xs text-muted-foreground">Nexus counts DNS-triggering SPF mechanisms and flags a review from 8, or a hard limit at 10.</p></div><div className="space-y-2"><Label htmlFor="nexus-spf-senders">Known sending services</Label><Textarea id="nexus-spf-senders" value={spfSenders} onChange={(event) => setSpfSenders(event.target.value)} placeholder={"Microsoft 365\nMarketing platform\nPrinter / line-of-business relay"} /><p className="text-xs text-muted-foreground">One per line. This becomes the initial sender inventory for a technician to verify before any flattening change plan.</p></div></div>
-          <DialogFooter><Button variant="outline" onClick={() => setSpfDomain(null)}>Cancel</Button><Button className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={assessSpf} disabled={assessingSpf || !spfRecord.trim()}>{assessingSpf ? "Assessing…" : "Assess safely"}</Button></DialogFooter>
+        <DialogContent className="flex h-[min(760px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-amber-500/20 bg-[linear-gradient(160deg,#0a151b,#090b11)] p-0 sm:rounded-2xl">
+          <DialogHeader className="shrink-0 border-b border-amber-500/15 bg-amber-500/[0.04] px-5 py-5 pr-12"><DialogTitle>Assess SPF lookup risk</DialogTitle><p className="text-sm text-muted-foreground">{spfDomain?.domain} · Nexus creates an assessment only. It will not flatten or publish a DNS record from this screen.</p></DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5"><div className="space-y-2"><Label htmlFor="nexus-spf-record">Live SPF TXT record</Label><Textarea id="nexus-spf-record" value={spfRecord} onChange={(event) => setSpfRecord(event.target.value)} placeholder="v=spf1 include:spf.protection.outlook.com include:mailer.example -all" className="min-h-24 font-mono text-xs" /><p className="text-xs text-muted-foreground">Nexus counts DNS-triggering SPF mechanisms and flags a review from 8, or a hard limit at 10.</p></div><div className="space-y-2"><Label htmlFor="nexus-spf-senders">Known sending services</Label><Textarea id="nexus-spf-senders" value={spfSenders} onChange={(event) => setSpfSenders(event.target.value)} placeholder={"Microsoft 365\nMarketing platform\nPrinter / line-of-business relay"} /><p className="text-xs text-muted-foreground">One per line. This becomes the initial sender inventory for a technician to verify before any flattening change plan.</p></div></div>
+          <DialogFooter className="shrink-0 border-t border-amber-500/15 bg-black/10 px-5 py-4"><Button variant="outline" onClick={() => setSpfDomain(null)}>Cancel</Button><Button className="bg-amber-400 text-amber-950 hover:bg-amber-300" onClick={assessSpf} disabled={assessingSpf || !spfRecord.trim()}>{assessingSpf ? "Assessing…" : "Assess safely"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
       <Dialog open={receiverDialogOpen} onOpenChange={setReceiverDialogOpen}>

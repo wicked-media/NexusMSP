@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Body
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone, timedelta
+from typing import Optional
+from datetime import datetime, timezone
 import uuid
+import re
 from app.database import db, UPLOADS_DIR
-from app.auth import get_current_user, hash_password, verify_password, create_token
-from app.services.activity import log_activity, ticket_audit, ACHIEVEMENT_DEFINITIONS
+from app.auth import get_current_user
+from app.services.scope_permissions import tenant_scoped_query, scoped_query
+from app.services.activity import log_activity, ticket_audit
 from app.models import *
 import barcode
 from barcode.writer import SVGWriter
@@ -31,11 +33,14 @@ async def get_products(category: Optional[str] = None, search: Optional[str] = N
     query = {}
     if category:
         query["category"] = category
-    if search:
+    search_term = re.escape(str(search or "").strip()[:160])
+    if search_term:
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"sku": {"$regex": search, "$options": "i"}},
-            {"vendor": {"$regex": search, "$options": "i"}},
+            {"name": {"$regex": search_term, "$options": "i"}},
+            {"sku": {"$regex": search_term, "$options": "i"}},
+            {"barcode": {"$regex": search_term, "$options": "i"}},
+            {"vendor": {"$regex": search_term, "$options": "i"}},
+            {"description": {"$regex": search_term, "$options": "i"}},
         ]
     products = await db.products.find(query, {"_id": 0}).to_list(5000)
     return products
@@ -85,6 +90,27 @@ async def get_product(product_id: str, current_user: dict = Depends(get_current_
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
+
+@router.get("/products/{product_id}/related-records")
+async def get_product_related_records(product_id: str, current_user: dict = Depends(get_current_user)):
+    product = await db.products.find_one(tenant_scoped_query(current_user, {"id": product_id}), {"_id": 0, "id": 1})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    result = {}
+    for kind, collection, field, number in [
+        ("tickets", db.tickets, "products", "ticket_number"),
+        ("purchase_orders", db.purchase_orders, "line_items", "po_number"),
+        ("invoices", db.invoices, "line_items", "invoice_number"),
+    ]:
+        query = tenant_scoped_query(current_user, scoped_query(current_user, {f"{field}.product_id": product_id}))
+        rows = await collection.find(query, {"_id": 0, "id": 1, number: 1, "status": 1, "created_at": 1, field: 1}).sort("created_at", -1).to_list(101)
+        result[kind] = {"has_more": len(rows) > 100, "records": [
+            {"id": row["id"], "number": row.get(number) or row["id"], "status": row.get("status"), "created_at": row.get("created_at"),
+             "lines": [{key: line.get(key) for key in ("quantity", "received_qty", "unit_price", "total")} for line in row.get(field, []) if line.get("product_id") == product_id]}
+            for row in rows[:100]
+        ]}
+    return result
+
 
 @router.put("/products/{product_id}")
 async def update_product(product_id: str, data: dict, current_user: dict = Depends(get_current_user)):

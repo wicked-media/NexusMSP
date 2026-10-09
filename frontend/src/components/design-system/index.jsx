@@ -2,7 +2,7 @@
  * Swiss Tactical Dark design-system primitives.
  * Shared across the MSP cockpit for visual + interaction consistency.
  */
-import { ResponsiveContainer, AreaChart, Area } from "recharts";
+import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, Cell, CartesianGrid, XAxis, YAxis, Tooltip } from "recharts";
 import HeroTile from "@/components/HeroTile";
 
 export function HealthDial({ score, size = 44, showLabel = true }) {
@@ -44,6 +44,37 @@ export function Sparkline({ data, color = "#818cf8", width = 80, height = 28 }) 
           <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.5}
                 fill={`url(#sp-${color.replace("#", "")})`} dot={false} isAnimationActive={false} />
         </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/**
+ * Vertical bar comparison for numeric result sets.
+ * `data`: [{ label, value, fill? }] — `fill` overrides the series colour per bar.
+ */
+export function CompareBars({ data, color = "#818cf8", unit = "", format, height = 150, testid }) {
+  const rows = (data || [])
+    .filter((row) => row && Number.isFinite(Number(row.value)))
+    .map((row) => ({ ...row, value: Number(row.value) }));
+  if (!rows.length) return null;
+  return (
+    <div style={{ height, width: "100%" }} data-testid={testid}>
+      <ResponsiveContainer width="100%" height="100%" minWidth={80} minHeight={80}>
+        <BarChart data={rows} margin={{ top: 6, right: 8, bottom: 0, left: -18 }}>
+          <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} interval={0} axisLine={{ stroke: "rgba(148,163,184,0.2)" }} />
+          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} allowDecimals={false} width={44} />
+          <Tooltip
+            cursor={{ fill: "rgba(129,140,248,0.08)" }}
+            contentStyle={{ background: "#0f172a", border: "1px solid rgba(148,163,184,0.25)", borderRadius: 8, fontSize: 11 }}
+            labelStyle={{ color: "#e2e8f0" }}
+            formatter={(value) => [format ? format(value) : `${value}${unit}`, ""]}
+          />
+          <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={false}>
+            {rows.map((row, index) => <Cell key={`${row.label}-${index}`} fill={row.fill || color} />)}
+          </Bar>
+        </BarChart>
       </ResponsiveContainer>
     </div>
   );

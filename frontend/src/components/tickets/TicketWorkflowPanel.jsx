@@ -7,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { toast } from "sonner";
 import {
   Workflow, Link2, GitBranch, CalendarClock, Star, X, Loader2, Search, ShieldAlert,
@@ -176,13 +177,24 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
         </CardContent>
       </Card>
 
+      {/*
+        Keep these operational forms on the same shared workflow surface as the
+        rest of the ticket console. Dialog remains responsible for focus trap,
+        escape and outside-click handling; NexusWorkflowDialog provides the
+        consistent scrollable body and persistent action zone.
+      */}
       {/* Block-on dialog */}
       <Dialog open={confirm === "block"} onOpenChange={v => !v && close()}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Link2 className="w-4 h-4 text-rose-400" />Block this ticket on another</DialogTitle>
-            <DialogDescription className="text-xs">Pick a ticket that must be resolved first.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Ticket dependency"
+          title="Block this ticket on another"
+          description="Choose the work that must be resolved before this ticket can safely continue. Nexus keeps the dependency visible in both ticket records."
+          icon={Link2}
+          tone="violet"
+          className="max-w-xl"
+          contentClassName="space-y-4"
+          footer={<Button variant="outline" type="button" onClick={close}>Cancel</Button>}
+        >
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input value={blockSearch} onChange={e => setBlockSearch(e.target.value)} placeholder="Search ticket number or title…" className="pl-9" autoFocus data-testid="workflow-block-search" />
@@ -198,17 +210,21 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
               </button>
             ))}
           </div>
-          <DialogFooter><Button variant="ghost" onClick={close}>Cancel</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Convert-to-change dialog */}
       <Dialog open={confirm === "change"} onOpenChange={v => !v && close()}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><GitBranch className="w-4 h-4 text-purple-400" />Convert to Change Request</DialogTitle>
-            <DialogDescription className="text-xs">This becomes an ITIL-style change with risk + planned window.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Change control"
+          title="Convert to change request"
+          description="Move planned or higher-risk work into a controlled change record, with its risk and intended delivery window retained on the ticket."
+          icon={GitBranch}
+          tone="violet"
+          className="max-w-xl"
+          contentClassName="space-y-4"
+          footer={<><Button variant="outline" type="button" onClick={close}>Cancel</Button><Button type="button" onClick={convertToChange} disabled={busy} data-testid="workflow-change-confirm">{busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}Convert to change</Button></>}
+        >
           <div className="space-y-3">
             <div>
               <Label className="text-xs">Risk</Label>
@@ -226,20 +242,21 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
               <div><Label className="text-xs">Duration (min)</Label><Input type="number" min={5} value={changeDuration} onChange={e => setChangeDuration(e.target.value)} data-testid="workflow-change-duration" /></div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={close}>Cancel</Button>
-            <Button onClick={convertToChange} disabled={busy} data-testid="workflow-change-confirm">{busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}Convert</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* Maintenance window dialog */}
       <Dialog open={confirm === "maint"} onOpenChange={v => !v && close()}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><CalendarClock className="w-4 h-4 text-cyan-400" />Schedule maintenance window</DialogTitle>
-            <DialogDescription className="text-xs">Logs a window on the ticket and the linked device.</DialogDescription>
-          </DialogHeader>
+        <NexusWorkflowDialog
+          eyebrow="Service window"
+          title="Schedule maintenance window"
+          description="Record the planned service window and implementation notes against this ticket and its linked device."
+          icon={CalendarClock}
+          tone="cyan"
+          className="max-w-xl"
+          contentClassName="space-y-4"
+          footer={<><Button variant="outline" type="button" onClick={close}>Cancel</Button><Button type="button" onClick={scheduleMaint} disabled={busy} data-testid="workflow-maint-confirm">{busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}Schedule window</Button></>}
+        >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <div><Label className="text-xs">Start</Label><Input type="datetime-local" value={maintStart} onChange={e => setMaintStart(e.target.value)} data-testid="workflow-maint-start" /></div>
@@ -247,25 +264,25 @@ export default function TicketWorkflowPanel({ ticket, allTickets, headers, refre
             </div>
             <div><Label className="text-xs">Notes</Label><Textarea value={maintNotes} onChange={e => setMaintNotes(e.target.value)} rows={3} placeholder="Patching, reboot expected…" data-testid="workflow-maint-notes" /></div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={close}>Cancel</Button>
-            <Button onClick={scheduleMaint} disabled={busy} data-testid="workflow-maint-confirm">{busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}Schedule</Button>
-          </DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
 
       {/* CSAT confirm */}
       <Dialog open={confirm === "csat"} onOpenChange={v => !v && close()}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Star className="w-4 h-4 text-amber-400" />Send CSAT survey</DialogTitle>
-            <DialogDescription className="text-xs">A 1–5 satisfaction survey will be logged for {ticket.contact_email || ticket.requester_email || "the contact"}.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={close}>Cancel</Button>
-            <Button onClick={sendCsat} disabled={busy} data-testid="workflow-csat-confirm">{busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}Send</Button>
-          </DialogFooter>
-        </DialogContent>
+        <NexusWorkflowDialog
+          eyebrow="Customer experience"
+          title="Send CSAT survey"
+          description={`A 1–5 satisfaction survey will be logged for ${ticket.contact_email || ticket.requester_email || "the contact"}.`}
+          icon={Star}
+          tone="amber"
+          className="max-w-lg"
+          contentClassName="space-y-4"
+          footer={<><Button variant="outline" type="button" onClick={close}>Cancel</Button><Button type="button" onClick={sendCsat} disabled={busy} data-testid="workflow-csat-confirm">{busy ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}Send survey</Button></>}
+        >
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.05] p-4 text-sm text-muted-foreground">
+            The survey request is recorded on this ticket so the customer response can inform future service reviews.
+          </div>
+        </NexusWorkflowDialog>
       </Dialog>
     </>
   );

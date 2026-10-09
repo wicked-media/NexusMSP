@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from io import BytesIO
 import uuid
 import jwt
@@ -10,8 +10,73 @@ from app.auth import get_current_user
 from app.routers.financial_reports import build_accounts_receivable_aging
 from app.services.nexus_document_pdf import render_nexus_document_pdf
 from app.services.supabase_storage import archive_generated_pdf
+from app.services.scope_permissions import assert_client_scope, effective_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 
 router = APIRouter()
+
+
+async def _report_client_ids(raw_client_ids, current_user: dict) -> list[str]:
+    """Validate explicit report targets; an empty list means permitted scope."""
+    if raw_client_ids is None:
+        return []
+    if not isinstance(raw_client_ids, list):
+        raise HTTPException(status_code=422, detail="client_ids must be a list of stable client IDs")
+    client_ids = list(dict.fromkeys(str(value).strip() for value in raw_client_ids if str(value).strip()))
+    if len(client_ids) > 100:
+        raise HTTPException(status_code=422, detail="A report can target at most 100 clients")
+    for client_id in client_ids:
+        await assert_client_scope(current_user, client_id, operation="report.generate", mask_not_found=True)
+    return client_ids
+
+
+async def _retained_report_client_ids(raw_client_ids, current_user: dict) -> list[str]:
+    """Persist a concrete client boundary for restricted saved reports."""
+    selected = await _report_client_ids(raw_client_ids, current_user)
+    return selected or effective_scope(current_user)["client_ids"]
+
+
+def _report_query(current_user: dict, client_ids: list[str], query: dict | None = None) -> dict:
+    criteria = dict(query or {})
+    if client_ids:
+        criteria["client_id"] = {"$in": client_ids}
+    return scoped_query(current_user, tenant_scoped_query(current_user, criteria), site_field=None)
+
+
+async def _assert_report_scope(current_user: dict, record: dict) -> None:
+    """Ensure a retained report is still visible to the requesting operator."""
+    tenant_id = platform_tenant_id(current_user)
+    record_tenant = str(record.get("tenant_id") or "nexus-local")
+    if tenant_id != record_tenant:
+        raise HTTPException(status_code=404, detail="Generated report not found")
+    client_ids = record.get("client_ids") or (record.get("scope") or {}).get("client_ids") or []
+    if effective_scope(current_user)["mode"] == "restricted" and not client_ids:
+        # A retained record without a client boundary cannot be proven safe for
+        # a restricted technician, so it remains visible only to full scope.
+        raise HTTPException(status_code=404, detail="Generated report not found")
+    for client_id in client_ids:
+        await assert_client_scope(current_user, str(client_id), operation="report.read", mask_not_found=True)
+
+
+async def _visible_report_records(current_user: dict, records: list[dict]) -> list[dict]:
+    """Filter list responses without revealing that a hidden record exists."""
+    visible = []
+    for record in records:
+        try:
+            await _assert_report_scope(current_user, record)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                continue
+            raise
+        visible.append(record)
+    return visible
+
+
+async def _scheduled_report_in_scope(report_id: str, current_user: dict) -> dict:
+    report = await db.scheduled_reports.find_one(tenant_scoped_query(current_user, {"id": report_id}), {"_id": 0})
+    if not report:
+        raise HTTPException(status_code=404, detail="Scheduled report not found")
+    await _assert_report_scope(current_user, report)
+    return report
 
 
 async def _get_user_from_pdf_token(token: str = Query(None)):
@@ -39,10 +104,18 @@ async def _report_snapshot(report: dict, current_user: dict) -> dict:
     """
     now = datetime.now(timezone.utc).isoformat()
     report_type = report.get("report_type", "executive_summary")
-    tickets = await db.tickets.find({}, {"_id": 0}).to_list(5000)
-    devices = await db.devices.find({}, {"_id": 0}).to_list(5000)
-    invoices = await db.invoices.find({}, {"_id": 0}).to_list(5000)
-    alerts = await db.alerts.find({}, {"_id": 0}).to_list(5000)
+    selected_client_ids = await _report_client_ids(report.get("client_ids") or [], current_user)
+    # Persist the effective restricted scope into every output.  An empty list
+    # is meaningful only for a full-scope operator, never an implicit grant.
+    client_ids = selected_client_ids or effective_scope(current_user)["client_ids"]
+    tickets = await db.tickets.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    devices = await db.devices.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    invoices = await db.invoices.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    alerts = await db.alerts.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    backup_jobs = await db.backup_jobs.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    assets = await db.assets.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    remote_sessions = await db.remote_sessions.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
+    patches = await db.patches.find(_report_query(current_user, client_ids), {"_id": 0}).to_list(5000)
 
     ticket_status = {}
     ticket_priority = {}
@@ -60,10 +133,27 @@ async def _report_snapshot(report: dict, current_user: dict) -> dict:
         status = device.get("status", "unknown")
         device_status[status] = device_status.get(status, 0) + 1
 
+    backup_status = {}
+    for job in backup_jobs:
+        status = str(job.get("status") or job.get("backup_health") or "unknown").lower()
+        backup_status[status] = backup_status.get(status, 0) + 1
+    asset_status = {}
+    for asset in assets:
+        status = str(asset.get("status") or "active").lower()
+        asset_status[status] = asset_status.get(status, 0) + 1
+    remote_status = {}
+    for session in remote_sessions:
+        status = str(session.get("status") or "unknown").lower()
+        remote_status[status] = remote_status.get(status, 0) + 1
+    patch_status = {}
+    for patch in patches:
+        status = str(patch.get("status") or "unknown").lower()
+        patch_status[status] = patch_status.get(status, 0) + 1
+
     total_invoiced = round(sum(float(invoice.get("total", 0)) for invoice in invoices), 2)
     total_paid = round(sum(float(invoice.get("amount_paid", 0)) for invoice in invoices), 2)
     outstanding = round(total_invoiced - total_paid, 2)
-    compliance = await db.compliance_reports.find({}, {"_id": 0}).sort("scanned_at", -1).to_list(1)
+    compliance = await db.compliance_reports.find(_report_query(current_user, client_ids), {"_id": 0}).sort("scanned_at", -1).to_list(1)
     latest_compliance = compliance[0] if compliance else None
 
     sections = {
@@ -73,14 +163,23 @@ async def _report_snapshot(report: dict, current_user: dict) -> dict:
             "devices_total": len(devices),
             "devices_online": device_status.get("online", 0),
             "active_alerts": sum(1 for alert in alerts if alert.get("status") == "active"),
+            "backup_jobs": len(backup_jobs),
+            "backup_failures": sum(count for status, count in backup_status.items() if status in {"failed", "error", "unhealthy"}),
+            "managed_assets": len(assets),
+            "remote_sessions": len(remote_sessions),
+            "pending_patches": sum(count for status, count in patch_status.items() if status in {"pending", "missing", "failed"}),
         },
         "tickets": {"by_status": ticket_status, "by_priority": ticket_priority, "by_category": ticket_category},
         "devices": {"by_status": device_status, "total_alerts": len(alerts), "active_alerts": sum(1 for alert in alerts if alert.get("status") == "active")},
         "billing": {"total_invoiced": total_invoiced, "total_paid": total_paid, "outstanding": outstanding, "invoice_count": len(invoices)},
         "security": {"latest_compliance": latest_compliance, "security_assessed_devices": sum(1 for device in devices if device.get("security_assessed_at"))},
+        "backup_recovery": {"by_status": backup_status, "jobs_total": len(backup_jobs), "failures": sum(count for status, count in backup_status.items() if status in {"failed", "error", "unhealthy"})},
+        "asset_lifecycle": {"by_status": asset_status, "assets_total": len(assets), "warranty_expiring": sum(1 for asset in assets if asset.get("warranty_expiry") or asset.get("warranty_end"))},
+        "remote_access": {"by_status": remote_status, "sessions_total": len(remote_sessions), "active_sessions": sum(count for status, count in remote_status.items() if status in {"active", "connected", "in_progress"})},
+        "patching": {"by_status": patch_status, "patches_total": len(patches), "remediation_required": sum(count for status, count in patch_status.items() if status in {"pending", "missing", "failed"})},
     }
     if report_type == "accounts_receivable_aging":
-        aging = await build_accounts_receivable_aging()
+        aging = await build_accounts_receivable_aging(_report_query(current_user, client_ids))
         sections["accounts_receivable_aging"] = {
             "as_of": aging["as_of"],
             "grand_total": aging["grand_total"],
@@ -109,7 +208,13 @@ async def _report_snapshot(report: dict, current_user: dict) -> dict:
     elif report_type in {"ticket_analytics", "technician_utilisation", "sla_reporting", "service_operations"}:
         included = ["summary", "tickets"]
     elif report_type in {"rmm_device_estate", "patch_compliance", "endpoint_security"}:
-        included = ["summary", "devices", "security"]
+        included = ["summary", "devices", "security", "patching"]
+    elif report_type in {"backup_recovery", "backup_assurance", "disaster_recovery"}:
+        included = ["summary", "backup_recovery"]
+    elif report_type in {"asset_lifecycle", "asset_inventory", "warranty_refresh"}:
+        included = ["summary", "asset_lifecycle"]
+    elif report_type in {"remote_access", "remote_session_audit"}:
+        included = ["summary", "remote_access"]
     elif report_type in {"framework_assessments", "security_compliance"}:
         included = ["summary", "devices", "security"]
     elif report_type in {"audit_trail", "change_management", "knowledge_runbooks", "audit_governance"}:
@@ -122,12 +227,14 @@ async def _report_snapshot(report: dict, current_user: dict) -> dict:
     output = {
         "id": f"sro-{uuid.uuid4().hex[:10]}",
         "schedule_id": report["id"],
+        "tenant_id": platform_tenant_id(current_user),
+        "client_ids": client_ids,
         "schedule_name": report.get("name", "Scheduled report"),
         "report_type": report_type,
         "format": report.get("format", "json"),
         "generated_at": now,
         "generated_by": current_user.get("name", "System"),
-        "scope": {"client_ids": report.get("client_ids", []), "period": "Current system snapshot"},
+        "scope": {"client_ids": client_ids, "selected_client_ids": selected_client_ids, "period": "Current system snapshot", "scope_mode": effective_scope(current_user)["mode"]},
         "sections": {key: sections[key] for key in included if key in sections},
         "delivery_status": "generated",
     }
@@ -150,13 +257,14 @@ async def generate_report_from_hub(data: dict, current_user: dict = Depends(get_
         "report_type": report_type,
         "format": data.get("format", "json"),
         "include_sections": data.get("include_sections", []),
-        "client_ids": data.get("client_ids", []),
+        "client_ids": await _report_client_ids(data.get("client_ids") or [], current_user),
     }
     output = await _report_snapshot(report, current_user)
     output["origin"] = "on_demand"
     await db.scheduled_report_outputs.update_one({"id": output["id"]}, {"$set": {"origin": "on_demand"}})
     await db.report_run_history.insert_one({
         "id": f"rrh-{uuid.uuid4().hex[:10]}", "output_id": output["id"],
+        "tenant_id": platform_tenant_id(current_user), "client_ids": output.get("client_ids") or [],
         "report_type": report_type, "name": report["name"], "generated_at": output["generated_at"],
         "generated_by": output["generated_by"], "origin": "on_demand",
     })
@@ -165,16 +273,20 @@ async def generate_report_from_hub(data: dict, current_user: dict = Depends(get_
 
 @router.get("/reports/generated")
 async def get_generated_reports(current_user: dict = Depends(get_current_user)):
-    return await db.report_run_history.find({}, {"_id": 0}).sort("generated_at", -1).to_list(100)
+    records = await db.report_run_history.find(
+        tenant_scoped_query(current_user), {"_id": 0}
+    ).sort("generated_at", -1).to_list(100)
+    return await _visible_report_records(current_user, records)
 
 
 @router.get("/reports/generated/{output_id}")
 async def get_generated_report(output_id: str, current_user: dict = Depends(get_current_user)):
     """Return a retained report snapshot for the shared report-reader canvas."""
-    history = await db.report_run_history.find_one({"output_id": output_id}, {"_id": 0})
-    output = await db.scheduled_report_outputs.find_one({"id": output_id}, {"_id": 0})
+    history = await db.report_run_history.find_one(tenant_scoped_query(current_user, {"output_id": output_id}), {"_id": 0})
+    output = await db.scheduled_report_outputs.find_one(tenant_scoped_query(current_user, {"id": output_id}), {"_id": 0})
     if not history or not output:
         raise HTTPException(status_code=404, detail="Generated report not found")
+    await _assert_report_scope(current_user, output)
     return {"history": history, "output": output}
 
 
@@ -206,10 +318,11 @@ def _pdf_timestamp(value):
 @router.get("/reports/generated/{output_id}/pdf")
 async def download_generated_report_pdf(output_id: str, current_user: dict = Depends(_get_user_from_pdf_token)):
     """Render a retained on-demand report snapshot as a downloadable PDF."""
-    history = await db.report_run_history.find_one({"output_id": output_id}, {"_id": 0})
-    output = await db.scheduled_report_outputs.find_one({"id": output_id}, {"_id": 0})
+    history = await db.report_run_history.find_one(tenant_scoped_query(current_user, {"output_id": output_id}), {"_id": 0})
+    output = await db.scheduled_report_outputs.find_one(tenant_scoped_query(current_user, {"id": output_id}), {"_id": 0})
     if not history or not output:
         raise HTTPException(status_code=404, detail="Generated report not found")
+    await _assert_report_scope(current_user, output)
     branding_record = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
     branding = branding_record.get("value") or branding_record
     summary = output.get("sections", {}).get("summary", {})
@@ -389,8 +502,8 @@ async def download_generated_report_pdf(output_id: str, current_user: dict = Dep
 
 @router.get("/scheduled-reports")
 async def get_scheduled_reports(current_user: dict = Depends(get_current_user)):
-    reports = await db.scheduled_reports.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
-    return reports
+    reports = await db.scheduled_reports.find(tenant_scoped_query(current_user), {"_id": 0}).sort("created_at", -1).to_list(100)
+    return await _visible_report_records(current_user, reports)
 
 
 @router.post("/scheduled-reports")
@@ -398,6 +511,7 @@ async def create_scheduled_report(data: dict, current_user: dict = Depends(get_c
     now = datetime.now(timezone.utc).isoformat()
     report = {
         "id": f"sr-{uuid.uuid4().hex[:8]}",
+        "tenant_id": platform_tenant_id(current_user),
         "name": data.get("name", "Untitled Report"),
         "report_type": data.get("report_type", "executive_summary"),
         "frequency": data.get("frequency", "weekly"),  # daily, weekly, monthly
@@ -406,7 +520,7 @@ async def create_scheduled_report(data: dict, current_user: dict = Depends(get_c
         "time": data.get("time", "08:00"),
         "timezone": data.get("timezone", "Australia/Sydney"),
         "recipients": data.get("recipients", []),
-        "client_ids": data.get("client_ids", []),  # empty = all clients
+        "client_ids": await _retained_report_client_ids(data.get("client_ids") or [], current_user),
         "include_sections": data.get("include_sections", ["summary", "tickets", "devices", "billing", "security"]),
         "format": data.get("format", "json"),
         "enabled": data.get("enabled", True),
@@ -422,34 +536,33 @@ async def create_scheduled_report(data: dict, current_user: dict = Depends(get_c
 
 @router.put("/scheduled-reports/{report_id}")
 async def update_scheduled_report(report_id: str, data: dict, current_user: dict = Depends(get_current_user)):
-    sr = await db.scheduled_reports.find_one({"id": report_id})
-    if not sr:
-        raise HTTPException(status_code=404, detail="Scheduled report not found")
+    await _scheduled_report_in_scope(report_id, current_user)
     update = {k: v for k, v in data.items() if k not in ("id", "_id", "created_at", "created_by")}
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.scheduled_reports.update_one({"id": report_id}, {"$set": update})
+    if "client_ids" in update:
+        update["client_ids"] = await _retained_report_client_ids(update["client_ids"], current_user)
+    await db.scheduled_reports.update_one(tenant_scoped_query(current_user, {"id": report_id}), {"$set": update})
     return {"message": "Scheduled report updated"}
 
 
 @router.delete("/scheduled-reports/{report_id}")
 async def delete_scheduled_report(report_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.scheduled_reports.delete_one({"id": report_id})
+    await _scheduled_report_in_scope(report_id, current_user)
+    result = await db.scheduled_reports.delete_one(tenant_scoped_query(current_user, {"id": report_id}))
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
     # Generated evidence belongs to the schedule lifecycle; remove the test or
     # retired schedule cleanly so it cannot leave orphaned records behind.
-    await db.scheduled_report_logs.delete_many({"report_id": report_id})
-    await db.scheduled_report_outputs.delete_many({"schedule_id": report_id})
+    await db.scheduled_report_logs.delete_many(tenant_scoped_query(current_user, {"report_id": report_id}))
+    await db.scheduled_report_outputs.delete_many(tenant_scoped_query(current_user, {"schedule_id": report_id}))
     return {"message": "Scheduled report deleted"}
 
 
 @router.post("/scheduled-reports/{report_id}/toggle")
 async def toggle_scheduled_report(report_id: str, current_user: dict = Depends(get_current_user)):
-    sr = await db.scheduled_reports.find_one({"id": report_id}, {"_id": 0})
-    if not sr:
-        raise HTTPException(status_code=404, detail="Scheduled report not found")
+    sr = await _scheduled_report_in_scope(report_id, current_user)
     new_state = not sr.get("enabled", False)
-    await db.scheduled_reports.update_one({"id": report_id}, {"$set": {"enabled": new_state}})
+    await db.scheduled_reports.update_one(tenant_scoped_query(current_user, {"id": report_id}), {"$set": {"enabled": new_state}})
     return {"enabled": new_state}
 
 
@@ -460,14 +573,13 @@ async def send_report_now(report_id: str, current_user: dict = Depends(get_curre
     Email dispatch is intentionally not claimed until an O365 mailbox route is
     configured. The generated snapshot is always retained for audit.
     """
-    sr = await db.scheduled_reports.find_one({"id": report_id}, {"_id": 0})
-    if not sr:
-        raise HTTPException(status_code=404, detail="Scheduled report not found")
+    sr = await _scheduled_report_in_scope(report_id, current_user)
 
     output = await _report_snapshot(sr, current_user)
     now = datetime.now(timezone.utc).isoformat()
     log = {
         "id": f"srl-{uuid.uuid4().hex[:8]}",
+        "tenant_id": platform_tenant_id(current_user),
         "report_id": report_id,
         "report_name": sr.get("name", ""),
         "recipients": sr.get("recipients", []),
@@ -477,7 +589,13 @@ async def send_report_now(report_id: str, current_user: dict = Depends(get_curre
         "output_id": output["id"],
     }
     await db.scheduled_report_logs.insert_one(log)
-    await db.scheduled_reports.update_one({"id": report_id}, {"$set": {"last_sent": now}, "$inc": {"send_count": 1}})
+    await db.report_run_history.insert_one({
+        "id": f"rrh-{uuid.uuid4().hex[:10]}", "output_id": output["id"],
+        "tenant_id": platform_tenant_id(current_user), "client_ids": output.get("client_ids") or [],
+        "report_type": output.get("report_type"), "name": sr.get("name"), "generated_at": output["generated_at"],
+        "generated_by": output["generated_by"], "origin": "scheduled",
+    })
+    await db.scheduled_reports.update_one(tenant_scoped_query(current_user, {"id": report_id}), {"$set": {"last_sent": now}, "$inc": {"send_count": 1}})
 
     return {
         "message": "Report snapshot generated and retained for audit. Configure an O365 delivery route before sending email.",
@@ -487,19 +605,23 @@ async def send_report_now(report_id: str, current_user: dict = Depends(get_curre
 
 @router.get("/scheduled-reports/{report_id}/logs")
 async def get_report_logs(report_id: str, current_user: dict = Depends(get_current_user)):
-    logs = await db.scheduled_report_logs.find({"report_id": report_id}, {"_id": 0}).sort("sent_at", -1).to_list(50)
+    await _scheduled_report_in_scope(report_id, current_user)
+    logs = await db.scheduled_report_logs.find(tenant_scoped_query(current_user, {"report_id": report_id}), {"_id": 0}).sort("sent_at", -1).to_list(50)
     return logs
 
 
 @router.get("/scheduled-reports/{report_id}/outputs")
 async def get_report_outputs(report_id: str, current_user: dict = Depends(get_current_user)):
     """Return generated report snapshots for review, export, and audit."""
-    return await db.scheduled_report_outputs.find({"schedule_id": report_id}, {"_id": 0}).sort("generated_at", -1).to_list(50)
+    await _scheduled_report_in_scope(report_id, current_user)
+    outputs = await db.scheduled_report_outputs.find(tenant_scoped_query(current_user, {"schedule_id": report_id}), {"_id": 0}).sort("generated_at", -1).to_list(50)
+    return await _visible_report_records(current_user, outputs)
 
 
 @router.get("/scheduled-reports/stats/overview")
 async def get_scheduled_report_stats(current_user: dict = Depends(get_current_user)):
-    all_sr = await db.scheduled_reports.find({}, {"_id": 0}).to_list(200)
+    all_sr = await db.scheduled_reports.find(tenant_scoped_query(current_user), {"_id": 0}).to_list(200)
+    all_sr = await _visible_report_records(current_user, all_sr)
     total = len(all_sr)
     active = len([s for s in all_sr if s.get("enabled")])
     total_sent = sum(s.get("send_count", 0) for s in all_sr)

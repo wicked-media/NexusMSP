@@ -1,29 +1,34 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import ScopedFileImage from "@/components/ScopedFileImage";
 import TicketBlueprintPanel from "@/components/tickets/TicketBlueprintPanel";
-import QuoteNudgeBanner from "@/components/tickets/QuoteNudgeBanner";
 import KitPickerDialog from "@/components/tickets/KitPickerDialog";
 import TicketLinkedDevices from "@/components/tickets/TicketLinkedDevices";
-import TicketEnrichmentRail from "@/components/tickets/TicketEnrichmentRail";
+import TicketDeviceList from "@/components/tickets/TicketDeviceList";
 import TicketConversationTab from "@/components/tickets/TicketConversationTab";
 import {
   TicketWorksheetTab, TicketAttachmentsTab, TicketItemsTab,
   TicketChildrenTab, TicketTimeTab, TicketAuditTab,
 } from "@/components/tickets/TicketSecondaryTabs";
-import TicketBurndownBar from "@/components/tickets/TicketBurndownBar";
 import TicketWorkflowPanel from "@/components/tickets/TicketWorkflowPanel";
 import TicketConnectivityVerification from "@/components/tickets/TicketConnectivityVerification";
 import TicketJumpAccessRequest from "@/components/tickets/TicketJumpAccessRequest";
 import TicketServiceTierWidget from "@/components/tickets/TicketServiceTierWidget";
+import TicketServiceKitPanel from "@/components/tickets/TicketServiceKitPanel";
+import TicketServiceKitDialog from "@/components/tickets/TicketServiceKitDialog";
+import TicketElevateEvidence from "@/components/tickets/TicketElevateEvidence";
+import FlowIntelligencePanel from "@/components/tickets/FlowIntelligencePanel";
 import { TicketModuleHeader, TicketToolAction, TicketToolsCenter, TicketWorkspaceTabs } from "@/components/tickets/TicketWorkspaceShell";
 import {
   TicketRow, TicketGroupSection, useDensityMode, DensityToggle,
   GroupBySelector, useGroupedTickets,
 } from "@/components/tickets/TicketRow";
-import AICopilotStrip from "@/components/tickets/AICopilotStrip";
-import NexusVerifiedSequence from "@/components/NexusVerifiedSequence";
+import TicketRequestRecord from "@/components/tickets/TicketRequestRecord";
+import TicketHandoverDialog from "@/components/tickets/TicketHandoverDialog";
+import TicketResolutionReviewDialog from "@/components/tickets/TicketResolutionReviewDialog";
+import TicketQueueRecovery from "@/components/tickets/TicketQueueRecovery";
 import SavedViewsBar from "@/components/SavedViewsBar";
 import HeroTile from "@/components/HeroTile";
 import WorkspaceControlBar from "@/components/WorkspaceControlBar";
@@ -36,11 +41,7 @@ import {
   AddItemsDialog,
   PushInvoiceDialog,
 } from "@/components/tickets/TicketDialogs";
-import {
-  CreateTicketDialog,
-  CreateWorkshopJobDialog,
-  CreateFieldJobDialog,
-} from "@/components/tickets/CreateDialogs";
+import { CreateTicketDialog } from "@/components/tickets/CreateDialogs";
 import { TicketTimelineTab } from "@/components/ai/TicketTimelineTab";
 import { WhisperRail } from "@/components/ai/WhisperRail";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +53,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -61,56 +63,44 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 import { PageShell } from "@/components/design-system";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { LEARNING_WORKSPACES } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import {
   Plus, Search, Clock, AlertCircle, CheckCircle, Circle, Loader2, RefreshCw,
-  Ticket, MessageSquare, Mail, Send, User, ArrowLeft, Tag,
+  Ticket, MessageSquare, Mail, Send, User, ArrowLeft,
   Timer, GitBranch, Merge, Eye, History, X, Play,
   BookOpen, Sparkles, ThumbsUp, MonitorCheck, Wifi,
-  Terminal, Zap, Brain, ExternalLink, Shield, Cpu, Users,
+  Terminal, Zap, ExternalLink, Shield, Cpu, Users,
   Download, Trash2, ShoppingCart, Receipt,
   Wrench, MapPin, Radio, Pause, DollarSign, Package,
   Camera, QrCode, ClipboardList, Bell, Image as ImageIcon, ListChecks,
-  Settings2, AlertTriangle, Pencil, ChevronDown
+  Settings2, AlertTriangle, Pencil, ChevronDown, FolderKanban
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInHours } from "date-fns";
 import { priorityConfig, statusConfig, WS_STATUSES as WS_STATUSES_CONFIG } from "@/config/ticketConfig";
 import TicketConsoleHeader from "@/components/tickets/TicketConsoleHeader";
 import TicketHeaderAction from "@/components/tickets/TicketHeaderAction";
-import { collectionFromResponse, matchTicketByReference, ticketToolAvailability } from "@/lib/ticketWorkspaceHelpers";
-import "@/styles/dashboard-ticker.css";
+import {
+  buildTicketQueueSignals,
+  collectionFromResponse,
+  formatDuration,
+  matchTicketByReference,
+  resolutionMinutes,
+  ticketHasBreachedSla,
+  ticketHasStaleActivity,
+  ticketIsTerminal,
+  ticketToolAvailability,
+  uniqueByIdentity,
+} from "@/lib/ticketWorkspaceHelpers";
+import { workSessionPath } from "@/lib/workSessionNavigation";
+import { STANDARD_SERVICE_KIT, serviceKitContextFor } from "@/lib/serviceKits";
 import {
   LOCAL_PREVIEW_CLIENTS, LOCAL_PREVIEW_DEVICES, LOCAL_PREVIEW_NOTE_COUNTS,
   LOCAL_PREVIEW_PRODUCTS, LOCAL_PREVIEW_SCRIPTS, LOCAL_PREVIEW_SERVICES,
-  LOCAL_PREVIEW_TICKETS, LOCAL_PREVIEW_USERS, localPreviewCollection,
+  LOCAL_PREVIEW_TICKETS, LOCAL_PREVIEW_USERS, isLocalTicketPreview, localPreviewCollection,
   localPreviewRecord, localPreviewTicketDetail,
 } from "@/lib/ticketPreviewData";
-
-function uniqueByIdentity(items = []) {
-  const seen = new Set();
-  return items.filter((item, index) => {
-    const identity = String(item?.id || item?.email || item?.name || index).trim().toLowerCase();
-    if (seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
-  });
-}
-
-function resolutionMinutes(ticket) {
-  const explicit = Number(ticket?.resolution_time_minutes);
-  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
-  const completedAt = ticket?.closed_at || ticket?.resolved_at || ticket?.updated_at;
-  if (!ticket?.created_at || !completedAt) return null;
-  const elapsed = Math.round((new Date(completedAt).getTime() - new Date(ticket.created_at).getTime()) / 60_000);
-  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
-}
-
-function formatDuration(minutes) {
-  if (minutes == null) return "—";
-  if (minutes < 60) return `${minutes}m`;
-  if (minutes < 1440) return `${Math.round(minutes / 60)}h`;
-  return `${(minutes / 1440).toFixed(minutes < 14_400 ? 1 : 0)}d`;
-}
 
 export default function TicketsPage() {
   const { token, user } = useAuth();
@@ -162,24 +152,42 @@ export default function TicketsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Ticket details use a stable layout. Core information and tools cannot be hidden by a saved preference.
+  // Focus is session-only; ownership, billing, assets and the briefing stay available.
+  const [ticketFocusMode, setTicketFocusMode] = useState(false);
+  const [handoverOpen, setHandoverOpen] = useState(false);
   const panelVisible = {
-    serviceTier: true, aiAnalysis: true, related: true,
-    enrichment: true, copilot: true, burndown: true, workflow: true,
+    serviceTier: !ticketFocusMode, related: !ticketFocusMode,
+    burndown: !ticketFocusMode, workflow: true,
     cockpit: true, runScripts: true, quickActions: false, devicePanel: true,
   };
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   // Detail view state
   const [viewingTicket, setViewingTicket] = useState(null);
+  const [resolutionReview, setResolutionReview] = useState(null);
+  // Ticket id whose inline status write is in flight (disables the queue control).
+  const [queueStatusPendingId, setQueueStatusPendingId] = useState(null);
+  // Ticket id that just changed, for a one-shot queue highlight.
+  const [recentlyChangedTicketId, setRecentlyChangedTicketId] = useState(null);
+  const queueChangeTimerRef = useRef(null);
+  const [resolutionProcessing, setResolutionProcessing] = useState(false);
   const [runbookCreating, setRunbookCreating] = useState(false);
   const [ticketRunbook, setTicketRunbook] = useState(null);
   const [runbookSuggestions, setRunbookSuggestions] = useState([]);
   const [selectedRunbookSuggestion, setSelectedRunbookSuggestion] = useState(null);
   const [detailTab, setDetailTab] = useState("conversation");
+  const conversationPanelRef = useRef(null);
+  const ticketDetailRequestRef = useRef(0);
+  const createTicketPendingRef = useRef(false);
+  const [creatingTicket, setCreatingTicket] = useState(false);
+  useEffect(() => () => { ticketDetailRequestRef.current += 1; }, []);
+  useEffect(() => () => { if (queueChangeTimerRef.current) window.clearTimeout(queueChangeTimerRef.current); }, []);
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [edgeToolsOpen, setEdgeToolsOpen] = useState(false);
   const [ticketNotes, setTicketNotes] = useState([]);
   const [ticketEmails, setTicketEmails] = useState([]);
+  const [ticketParticipants, setTicketParticipants] = useState([]);
+  const [ticketSubscribers, setTicketSubscribers] = useState([]);
   const [childTickets, setChildTickets] = useState([]);
   const [timeEntries, setTimeEntries] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
@@ -187,8 +195,6 @@ export default function TicketsPage() {
   const [suggestions, setSuggestions] = useState(null);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   // AI enhanced features
-  const [aiAnalysis, setAiAnalysis] = useState(null);
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
   const [proofreadResult, setProofreadResult] = useState(null);
   const [proofreadLoading, setProofreadLoading] = useState(false);
   const [scripts, setScripts] = useState([]);
@@ -197,12 +203,15 @@ export default function TicketsPage() {
   const [conversationType, setConversationType] = useState("public");
   const [isEmailOpen, setIsEmailOpen] = useState(false);
   const [emailSignature, setEmailSignature] = useState("");
-  const [emailForm, setEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "" });
+  const [emailForm, setEmailForm] = useState({ to: "", cc: "", bcc: "", subject: "", body: "", attachment_ids: [] });
   const [isClientNotifyOpen, setIsClientNotifyOpen] = useState(false);
   const [notifyForm, setNotifyForm] = useState({ email: "", subject: "", message: "" });
   const [ticketAttachments, setTicketAttachments] = useState([]);
   const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentDeleteTarget, setAttachmentDeleteTarget] = useState(null);
   const [ticketProducts, setTicketProducts] = useState([]);
+  const [pendingProductRemoval, setPendingProductRemoval] = useState(null);
+  const [removingProduct, setRemovingProduct] = useState(false);
   const [ticketPurchaseOrders, setTicketPurchaseOrders] = useState([]);
   // SMS thread state
   const [ticketSms, setTicketSms] = useState([]);
@@ -212,7 +221,10 @@ export default function TicketsPage() {
   const [smsConfig, setSmsConfig] = useState({ signature: "", append_signature: true });
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
   const [isKitPickerOpen, setIsKitPickerOpen] = useState(false);
+  const [isServiceKitDialogOpen, setIsServiceKitDialogOpen] = useState(false);
   const [addItemProduct, setAddItemProduct] = useState("");
+  const addingItemRef = useRef(false);
+  const [addingItem, setAddingItem] = useState(false);
   const [addItemQty, setAddItemQty] = useState(1);
   const [allProducts, setAllProducts] = useState([]);
   const [isPushInvoiceOpen, setIsPushInvoiceOpen] = useState(false);
@@ -226,10 +238,6 @@ export default function TicketsPage() {
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [workshopJobs, setWorkshopJobs] = useState([]);
   const [fieldJobs, setFieldJobs] = useState([]);
-  const [wsDialog, setWsDialog] = useState(false);
-  const [wsForm, setWsForm] = useState({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
-  const [fjDialog, setFjDialog] = useState(false);
-  const [fjForm, setFjForm] = useState({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
   const [viewWsJob, setViewWsJob] = useState(null);
   const [viewFjJob, setViewFjJob] = useState(null);
   const [wsPartDialog, setWsPartDialog] = useState(false);
@@ -242,16 +250,57 @@ export default function TicketsPage() {
   const [timerStart, setTimerStart] = useState(null);
   const [timerElapsed, setTimerElapsed] = useState(0);
   const [tagInput, setTagInput] = useState("");
-  const [formData, setFormData] = useState({
-    title: "", description: "", client_id: "", priority: "medium", category: "support",
-    assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
-    source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
-    device_id: "",
-    cc: [], watchers: []
+  const [formData, setFormData] = useState(() => {
+    const defaults = {
+      title: "", description: "", client_id: "", priority: "medium", category: "support",
+      assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
+      source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
+      device_id: "",
+      cc: [], watchers: [], service_kit_id: STANDARD_SERVICE_KIT, service_kit_context: {}
+    };
+    try {
+      const raw = localStorage.getItem("nexus.tickets.createDraft");
+      if (raw) return { ...defaults, ...JSON.parse(raw) };
+    } catch { /* draft restore is best-effort */ }
+    return defaults;
   });
+  // Keep an unfinished intake across an accidental refresh; cleared when empty.
+  useEffect(() => {
+    try {
+      if (formData.title?.trim() || formData.description?.trim()) {
+        localStorage.setItem("nexus.tickets.createDraft", JSON.stringify(formData));
+      } else {
+        localStorage.removeItem("nexus.tickets.createDraft");
+      }
+    } catch { /* storage unavailable: drafts are best-effort */ }
+  }, [formData]);
+  const createIdempotencyRef = useRef("");
+  const [dupeCandidates, setDupeCandidates] = useState([]);
+  // Advisory: open same-client tickets that may duplicate this intake.
+  useEffect(() => {
+    const title = formData.title?.trim() || "";
+    if (!isCreateOpen || title.length < 6) { setDupeCandidates([]); return; }
+    let active = true;
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ title });
+        if (formData.client_id) params.set("client_id", formData.client_id);
+        const res = await axios.get(`${API}/ticket-intake/candidates?${params.toString()}`, { headers });
+        if (active) setDupeCandidates(res.data?.candidates || []);
+      } catch { if (active) setDupeCandidates([]); }
+    }, 600);
+    return () => { active = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.title, formData.client_id, isCreateOpen]);
   const [childForm, setChildForm] = useState({ title: "", description: "", priority: "medium" });
   const [mergeIds, setMergeIds] = useState([]);
-  const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true });
+  const [timeForm, setTimeForm] = useState({ minutes: 15, description: "", billable: true, labour_type_id: "", performed_at: "" });
+  const [labourTypes, setLabourTypes] = useState([]);
+  const conversationSubmissionRef = useRef({ signature: "", key: "" });
+  const timeSubmissionRef = useRef({ signature: "", key: "" });
+  const conversationPendingRef = useRef(false);
+  const timePendingRef = useRef(false);
+  const [loggingTime, setLoggingTime] = useState(false);
   const [noteCounts, setNoteCounts] = useState({});
   const [ticketViewers, setTicketViewers] = useState({}); // kept for internal tracking only
   const [worksheetItems, setWorksheetItems] = useState([]);
@@ -328,6 +377,23 @@ export default function TicketsPage() {
   const [createClientContacts, setCreateClientContacts] = useState([]);
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Which detail views this technician (and the team) actually opens, so the tab
+  // bar can order itself. Deliberate tab choices are the evidence: landing on a
+  // ticket's default tab is not a choice, and recording it would freeze the bar.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.TICKETS);
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let cancelled = false;
+    axios.get(`${API}/labour-types/available`, { headers })
+      .then(response => {
+        if (!cancelled) setLabourTypes(collectionFromResponse(response.data, ["labour_types", "items"]));
+      })
+      // A worker may still be restarting while a technician has the ticket
+      // open. Time logging remains usable with the trusted technician default.
+      .catch(() => { if (!cancelled) setLabourTypes([]); });
+    return () => { cancelled = true; };
+  }, [headers, token]);
 
   useEffect(() => {
     if (!isCreateOpen || !formData.client_id) {
@@ -520,6 +586,29 @@ export default function TicketsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices, searchParams]);
 
+  // A specialist workflow can be opened from an operational surface such as the
+  // Workshop Bench without bringing back a separate ticket creation system.
+  useEffect(() => {
+    const requestedKit = searchParams.get("new");
+    if (!requestedKit) return;
+    const kitId = [STANDARD_SERVICE_KIT, "workshop_repair", "cabling_field"].includes(requestedKit)
+      ? requestedKit
+      : null;
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    setSearchParams(next, { replace: true });
+    if (!kitId) {
+      toast.error("That Service Desk delivery kit is unavailable");
+      return;
+    }
+    setFormData((previous) => ({
+      ...previous,
+      service_kit_id: kitId,
+      service_kit_context: serviceKitContextFor(kitId, previous.service_kit_context),
+    }));
+    setIsCreateOpen(true);
+  }, [searchParams, setSearchParams]);
+
   // Timer effect
   useEffect(() => {
     let interval;
@@ -530,20 +619,46 @@ export default function TicketsPage() {
   }, [isTimerRunning, timerStart]);
 
   const fetchTicketDetail = async (ticket) => {
+    const requestId = ++ticketDetailRequestRef.current;
+    const isCurrent = () => ticketDetailRequestRef.current === requestId;
     setViewingTicket(ticket);
     setDetailTab("conversation");
     setToolsOpen(false);
     setSuggestions(null);
-    setAiAnalysis(null);
     setDeviceStatus(null);
     setEnrichment(null);
     setClientContacts([]);
+    setTicketParticipants([]);
+    setTicketNotes([]);
+    setTicketEmails([]);
+    setChildTickets([]);
+    setTimeEntries([]);
+    setAuditLog([]);
+    setTicketAttachments([]);
+    setTicketProducts([]);
+    setTicketPurchaseOrders([]);
+    setTicketSms([]);
+    setWorksheetItems([]);
+    setSuggestionsLoading(false);
+    const clientRec = clients.find(c => c.id === ticket.client_id);
+    const embeddedContact = (clientRec?.contacts || []).find(contact =>
+      String(contact.id || contact.name || "") === String(ticket.contact_id || ticket.contact_name || "")
+    );
+    setEmailSignature(user?.email_signature || "");
+    setEmailForm({
+      to: ticket.contact_email || embeddedContact?.email || clientRec?.email || clientRec?.contact_email || "",
+      cc: "", bcc: "", subject: `Re: ${ticket.ticket_number} - ${ticket.title}`,
+      body: "", attachment_ids: [],
+    });
+    setSmsForm({ to: clientRec?.mobile || clientRec?.phone || "", message: "", template_key: "" });
     // Mark viewing
     axios.post(`${API}/tickets/${ticket.id}/viewing`, {}, { headers }).catch(() => {});
     try {
-      const [nRes, eRes, cRes, tRes, aRes, sRes, attRes, prodRes, poRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
+      const [nRes, eRes, participantRes, subscriberRes, cRes, tRes, aRes, sRes, attRes, prodRes, poRes, enrichRes, smsRes, smsTmplRes, smsCfgRes] = await Promise.all([
         axios.get(`${API}/tickets/${ticket.id}/comments`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/emails`, { headers }),
+        axios.get(`${API}/tickets/${ticket.id}/participants`, { headers }).catch(() => ({ data: [] })),
+        axios.get(`${API}/tickets/${ticket.id}/subscribers`, { headers }).catch(() => ({ data: { subscribers: [] } })),
         axios.get(`${API}/tickets/${ticket.id}/children`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/time-entries`, { headers }),
         axios.get(`${API}/tickets/${ticket.id}/audit-log`, { headers }),
@@ -556,9 +671,12 @@ export default function TicketsPage() {
         axios.get(`${API}/sms/templates?category=ticket`, { headers }).catch(() => ({ data: [] })),
         axios.get(`${API}/settings/sms`, { headers }).catch(() => ({ data: null })),
       ]);
+      if (!isCurrent()) return;
       const previewDetail = localPreviewTicketDetail(ticket.id);
       setTicketNotes(localPreviewCollection(collectionFromResponse(nRes.data, ["comments", "notes"]), previewDetail.comments));
       setTicketEmails(localPreviewCollection(collectionFromResponse(eRes.data, ["emails"]), previewDetail.emails));
+      setTicketParticipants(collectionFromResponse(participantRes.data, ["participants"]));
+      setTicketSubscribers(collectionFromResponse(subscriberRes.data, ["subscribers"]));
       setChildTickets(localPreviewCollection(collectionFromResponse(cRes.data, ["tickets", "children"]), previewDetail.children));
       setTimeEntries(localPreviewCollection(collectionFromResponse(tRes.data, ["time_entries"]), previewDetail.time_entries));
       setAuditLog(localPreviewCollection(collectionFromResponse(aRes.data, ["audit_log", "events"]), previewDetail.audit_log));
@@ -576,6 +694,7 @@ export default function TicketsPage() {
       // Fetch client contacts for email auto-populate
       if (ticket.client_id) {
         axios.get(`${API}/clients/${ticket.client_id}/contacts`, { headers }).then(r => {
+          if (!isCurrent()) return;
           const contacts = collectionFromResponse(r.data, ["contacts"]);
           setClientContacts(contacts);
           const selectedContact = contacts.find(contact =>
@@ -588,71 +707,108 @@ export default function TicketsPage() {
       // Fetch worksheets
       try {
         const wsRes2 = await axios.get(`${API}/tickets/${ticket.id}/worksheet`, { headers });
+        if (!isCurrent()) return;
         setWorksheetItems(localPreviewCollection(collectionFromResponse(wsRes2.data, ["worksheet", "items"]), previewDetail.worksheet));
-      } catch { setWorksheetItems([]); }
-      const sig = user?.email_signature || "";
-      setEmailSignature(sig);
-      const clientRec = clients.find(c => c.id === ticket.client_id);
-      const embeddedContact = (clientRec?.contacts || []).find(contact =>
-        String(contact.id || contact.name || "") === String(ticket.contact_id || ticket.contact_name || "")
-      );
-      setEmailForm({
-        to: ticket.contact_email || embeddedContact?.email || clientRec?.email || clientRec?.contact_email || "",
-        cc: "",
-        bcc: "",
-        subject: `Re: ${ticket.ticket_number} - ${ticket.title}`,
-        body: "",
-      });
-      // Auto-populate SMS recipient from the client's mobile/phone
-      const clientPhone = clientRec?.mobile || clientRec?.phone || "";
-      setSmsForm({ to: clientPhone, message: "", template_key: "" });
+      } catch { if (isCurrent()) setWorksheetItems([]); }
+      if (!isCurrent()) return;
       // Fetch device status if device linked
       if (ticket.device_id) {
         try {
           const dRes = await axios.get(`${API}/devices/${ticket.device_id}`, { headers });
+          if (!isCurrent()) return;
           const device = dRes.data;
           setDeviceStatus(device && !Array.isArray(device) && device.id && device.status ? device : null);
-        } catch { setDeviceStatus(null); }
+        } catch { if (isCurrent()) setDeviceStatus(null); }
       }
+      if (!isCurrent()) return;
       // Fetch AI suggestions
       setSuggestionsLoading(true);
       try {
         const sugRes = await axios.get(`${API}/tickets/${ticket.id}/suggestions`, { headers });
-        setSuggestions(sugRes.data);
-      } catch { setSuggestions({ similar_tickets: [], kb_articles: [], keywords: [] }); }
-      finally { setSuggestionsLoading(false); }
-    } catch { toast.error("Failed to load ticket details"); }
+        if (isCurrent()) setSuggestions(sugRes.data);
+      } catch { if (isCurrent()) setSuggestions({ similar_tickets: [], kb_articles: [], keywords: [] }); }
+      finally { if (isCurrent()) setSuggestionsLoading(false); }
+    } catch { if (isCurrent()) toast.error("Failed to load ticket details"); }
   };
 
   const handleCreateTicket = async () => {
-    if (!formData.title || !formData.client_id) { toast.error("Title and client are required"); return; }
+    if (createTicketPendingRef.current) return;
+    if (!formData.title?.trim() || !formData.client_id) { toast.error("Title and client are required"); return; }
     const selectedClient = clients.find(c => c.id === formData.client_id);
     const selectedContact = [
       ...createClientContacts,
       ...(selectedClient?.contacts || []),
     ].find(ct => ct.id === formData.contact_id || ct.name === formData.contact_id);
+    const { service_kit_id: serviceKitId, service_kit_context: serviceKitContext, ...ticketFields } = formData;
+    if (!createIdempotencyRef.current) createIdempotencyRef.current = crypto.randomUUID();
     const payload = {
-      ...formData,
+      ...ticketFields,
+      idempotency_key: createIdempotencyRef.current,
       client_name: selectedClient?.name || "",
       contact_name: selectedContact?.name || "",
       contact_email: selectedContact?.email || "",
       estimated_hours: formData.estimated_hours ? parseFloat(formData.estimated_hours) : null,
       due_date: formData.due_date || null,
     };
+    createTicketPendingRef.current = true;
+    setCreatingTicket(true);
+    let createdTicket = null;
     try {
       const created = (await axios.post(`${API}/tickets`, payload, { headers })).data;
-      toast.success(`Ticket ${created.ticket_number || ""} created`.trim());
+      createdTicket = created;
+      let ticketToOpen = created;
+      if (serviceKitId && serviceKitId !== STANDARD_SERVICE_KIT) {
+        try {
+          const kitResponse = await axios.post(
+            `${API}/tickets/${created.id}/service-kit`,
+            { kit_id: serviceKitId, context: serviceKitContext || {} },
+            { headers },
+          );
+          ticketToOpen = kitResponse.data?.ticket || created;
+          toast.success(`Ticket ${created.ticket_number || ""} created with its delivery kit`.trim());
+        } catch (kitError) {
+          toast.warning("Ticket created — delivery kit needs attention", {
+            description: kitError.response?.data?.detail || "Open the ticket and attach the kit from Tools.",
+          });
+        }
+      } else {
+        toast.success(`Ticket ${created.ticket_number || ""} created`.trim());
+      }
       setIsCreateOpen(false);
+      createIdempotencyRef.current = "";
       setFormData({
         title: "", description: "", client_id: "", priority: "medium", category: "support",
         assigned_to: "", parent_id: "", tags: [], ticket_type: "incident", impact: "medium",
         source: "internal", due_date: "", estimated_hours: "", contact_id: "", asset_id: "",
         device_id: "",
-        cc: [], watchers: []
+        cc: [], watchers: [], service_kit_id: STANDARD_SERVICE_KIT, service_kit_context: {}
       });
+      if (ticketToOpen?.id) await fetchTicketDetail(ticketToOpen);
       await fetchTickets();
-      if (created?.id) await fetchTicketDetail(created);
-    } catch { toast.error("Failed to create ticket"); }
+    } catch {
+      if (createdTicket?.id) {
+        toast.warning(`Ticket ${createdTicket.ticket_number || ""} was created, but the workspace could not refresh`, {
+          description: "Do not create it again. Refresh the ticket queue to open the existing record.",
+        });
+      } else {
+        toast.error("Ticket creation could not be confirmed", {
+          description: "Check the ticket queue before retrying to avoid creating a duplicate.",
+        });
+      }
+    }
+    finally {
+      createTicketPendingRef.current = false;
+      setCreatingTicket(false);
+    }
+  };
+
+  const startServiceKitIntake = (kitId = STANDARD_SERVICE_KIT) => {
+    setFormData((previous) => ({
+      ...previous,
+      service_kit_id: kitId,
+      service_kit_context: serviceKitContextFor(kitId, previous.service_kit_context),
+    }));
+    setIsCreateOpen(true);
   };
 
   const handleAiTriage = async () => {
@@ -689,62 +845,214 @@ export default function TicketsPage() {
       setViewingTicket(prev => ({ ...prev, [field]: resolvedToClosed ? "closed" : value, ...(response.data?.ticket || {}) }));
       await fetchTickets();
       if (resolvedToClosed) toast.success("Ticket resolved, closed and retained in client history");
-    } catch { toast.error("Failed to update ticket"); }
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      if (field === "status" && Number(error.response?.status) === 409 && viewingTicket?.project_ticket_plan_role === "parent") {
+        toast.error("Project delivery is still open", {
+          description: detail || "Complete the required child work tickets before closing this parent ticket.",
+        });
+        return;
+      }
+      toast.error(detail || "Failed to update ticket");
+    }
+  };
+
+  const requestResolutionReview = (ticketsForReview, target = "resolved") => {
+    const selected = (Array.isArray(ticketsForReview) ? ticketsForReview : [ticketsForReview]).filter(ticket => ticket?.id);
+    if (selected.length === 0) return;
+    setResolutionReview({ tickets: selected, target });
+  };
+
+  const confirmResolutionReview = async (evidence = {}) => {
+    const review = resolutionReview;
+    const ticketsForReview = review?.tickets || [];
+    if (ticketsForReview.length === 0) return;
+    setResolutionProcessing(true);
+    try {
+      if (ticketsForReview.length === 1) {
+        const ticket = ticketsForReview[0];
+        const response = review.target === "reopen"
+          ? await axios.post(`${API}/tickets/${ticket.id}/reopen`, { reason: evidence.closure_reason }, { headers })
+          : await axios.post(`${API}/tickets/${ticket.id}/resolution`, { status: review.target, ...evidence }, { headers });
+        if (viewingTicket?.id === ticket.id) {
+          setViewingTicket(previous => ({ ...previous, ...(response.data?.ticket || {}), status: review.target === "resolved" ? "closed" : review.target }));
+        }
+        toast.success(review.target === "reopen" ? "Ticket reopened and returned to the active queue" : review.target === "closed" ? "Ticket closed and retained in service history" : "Ticket resolved, closed and retained in service history");
+      } else {
+        const response = await axios.post(`${API}/tickets/bulk-action`, {
+          ticket_ids: ticketsForReview.map(ticket => ticket.id),
+          action: "close",
+          value: "",
+          ...evidence,
+        }, { headers });
+        toast.success(response.data?.message || `Closed ${ticketsForReview.length} tickets`);
+        setSelectedTickets(new Set());
+        setBulkAction("");
+        setBulkValue("");
+      }
+      await fetchTickets();
+      setResolutionReview(null);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update the selected ticket transition");
+    } finally {
+      setResolutionProcessing(false);
+    }
+  };
+
+  const updateTicketSubscriber = async (userId, subscribed) => {
+    if (!viewingTicket?.id || !userId) return;
+    if (isLocalTicketPreview() && viewingTicket.id.startsWith("ticket-preview-")) {
+      toast.info("Subscribers are available on live tickets. Create or open a live ticket to test notifications.");
+      return;
+    }
+    try {
+      const { data } = await axios.put(`${API}/tickets/${viewingTicket.id}/subscribers`, {
+        user_id: userId,
+        subscribed,
+      }, { headers });
+      setTicketSubscribers(data?.subscribers || []);
+      const auditResponse = await axios.get(`${API}/tickets/${viewingTicket.id}/audit-log`, { headers }).catch(() => null);
+      if (auditResponse) setAuditLog(collectionFromResponse(auditResponse.data, ["audit_log", "events"]));
+      toast.success(subscribed ? "Ticket subscriber added" : "Ticket subscriber removed");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Could not update ticket subscribers");
+    }
   };
 
   const handleQueueQuickAction = async (ticket, action) => {
     if (!ticket?.id) return;
+    if (action === "copy") {
+      const link = `${window.location.origin}/tickets?ticket=${encodeURIComponent(ticket.id)}`;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+        await navigator.clipboard.writeText(link);
+        toast.success(`${ticket.ticket_number || "Ticket"} link copied`);
+      } catch {
+        toast.error("This browser blocked clipboard access — open the ticket to copy its address");
+      }
+      return;
+    }
     if (action === "remote") {
       const deviceId = ticket.device_id || ticket.asset_id || ticket.device_ids?.[0];
       if (!deviceId) { toast.error("Link a managed asset before starting a remote session"); return; }
       navigate(`/remote-access?device=${encodeURIComponent(deviceId)}&ticket=${encodeURIComponent(ticket.id)}`);
       return;
     }
+    if (action === "resolve") {
+      requestResolutionReview(ticket, "resolved");
+      return;
+    }
     const patches = {
       claim: { assigned_to: user?.id },
       start: { status: "in_progress" },
-      resolve: { status: "resolved" },
     };
     const patch = patches[action];
     if (!patch || (action === "claim" && !user?.id)) return;
     try {
       await axios.put(`${API}/tickets/${ticket.id}`, patch, { headers });
       await fetchTickets();
-      const label = action === "claim" ? "Ticket claimed" : action === "start" ? "Work started" : "Ticket resolved, closed and retained in client history";
+      const label = action === "claim" ? "Ticket claimed" : "Work started";
       toast.success(label);
     } catch (error) {
       toast.error(error.response?.data?.detail || "Could not update ticket");
     }
   };
 
-  const handleAddNote = async (options = {}) => {
-    if (!newNote.trim()) return;
-    const visibility = options.visibility || (conversationType === "public" ? "public" : "internal");
+  // Inline queue status change. Only reversible states reach this handler;
+  // terminal closure and reopen keep their governed review flow
+  // (`requestResolutionReview` → `/tickets/{id}/resolution` or `/reopen`).
+  const handleQueueStatusChange = async (ticket, nextStatus) => {
+    if (!ticket?.id || !nextStatus || ticket.status === nextStatus) return;
+    setQueueStatusPendingId(ticket.id);
     try {
-      const response = await axios.post(`${API}/tickets/${viewingTicket.id}/comments`, {
-        content: newNote,
-        visibility,
-        is_internal: visibility === "internal",
-        notify_client: Boolean(options.notify_client),
-        to_addresses: options.to_addresses || [],
-        subject_label: options.subject_label || "Update",
-        status_after: options.status_after || "",
+      await axios.put(`${API}/tickets/${ticket.id}`, { status: nextStatus }, { headers });
+      await fetchTickets();
+      // Acknowledge the change only after the write succeeded.
+      setRecentlyChangedTicketId(ticket.id);
+      if (queueChangeTimerRef.current) window.clearTimeout(queueChangeTimerRef.current);
+      queueChangeTimerRef.current = window.setTimeout(() => setRecentlyChangedTicketId(null), 1600);
+      toast.success(`${ticket.ticket_number || "Ticket"} → ${statusConfig[nextStatus]?.label || nextStatus}`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not update ticket status");
+    } finally {
+      setQueueStatusPendingId(null);
+    }
+  };
+
+  const handleAddNote = async (options = {}) => {
+    if (!newNote.trim() || !viewingTicket?.id || conversationPendingRef.current) return false;
+    const visibility = options.visibility || (conversationType === "public" ? "public" : "internal");
+    const time = options.time && Number(options.time.minutes) > 0 ? {
+      minutes: Number(options.time.minutes),
+      labour_type_id: options.time.labour_type_id || null,
+      billable: Boolean(options.time.billable),
+      description: options.time.description || "",
+    } : null;
+    const requestPayload = {
+      content: newNote,
+      visibility,
+      notify_client: Boolean(options.notify_client),
+      to_addresses: options.to_addresses || [],
+      subject_label: options.subject_label || "Update",
+      status_after: options.status_after || null,
+      time,
+    };
+    const requestSignature = JSON.stringify({ ticket_id: viewingTicket.id, ...requestPayload });
+    if (conversationSubmissionRef.current.signature !== requestSignature) {
+      conversationSubmissionRef.current = {
+        signature: requestSignature,
+        key: typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `conversation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      };
+    }
+    conversationPendingRef.current = true;
+    try {
+      const response = await axios.post(`${API}/tickets/${viewingTicket.id}/conversation-entries`, {
+        ...requestPayload,
+        idempotency_key: conversationSubmissionRef.current.key,
       }, { headers });
+      const comment = response.data?.comment || response.data;
       setNewNote("");
-      const res = await axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers });
-      setTicketNotes(collectionFromResponse(res.data, ["comments", "notes"]));
+      conversationSubmissionRef.current = { signature: "", key: "" };
+      try {
+      const [notesResponse, timeResponse] = await Promise.all([
+        axios.get(`${API}/tickets/${viewingTicket.id}/comments`, { headers }),
+        axios.get(`${API}/tickets/${viewingTicket.id}/time-entries`, { headers }),
+      ]);
+      setTicketNotes(collectionFromResponse(notesResponse.data, ["comments", "notes"]));
+      const refreshedTimeEntries = collectionFromResponse(timeResponse.data, ["time_entries"]);
+      setTimeEntries(refreshedTimeEntries);
+      const canonicalMinutes = refreshedTimeEntries.filter(entry => entry.authoritative !== false).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+      setViewingTicket(previous => previous ? { ...previous, total_time_minutes: canonicalMinutes } : previous);
       if (response.data?.status_after) {
         setViewingTicket(previous => ({ ...previous, status: response.data.status_after }));
         await fetchTickets();
       }
-      toast.success(
-        visibility === "public"
-          ? options.notify_client ? "Public update published and email delivery recorded" : "Public update published to the client portal"
-          : "Private technician note added"
-      );
+      } catch {
+        toast.warning("Update saved. The conversation could not refresh; reopen this ticket to load the latest activity. Do not submit it again.");
+      }
+      if (visibility !== "public") {
+        toast.success(time ? `Private note and ${time.minutes} minutes logged` : "Private technician note added");
+      } else if (!options.notify_client) {
+        toast.success(time ? `Public update published and ${time.minutes} minutes logged` : "Public update published to the client portal");
+      } else {
+        const deliveryStatus = String(comment?.delivery_status || "").toLowerCase();
+        if (deliveryStatus === "sent") {
+          toast.success(time ? `Public update emailed and ${time.minutes} minutes logged` : "Public update published and email sent");
+        } else if (deliveryStatus === "mocked") {
+          toast.warning("Public update published; email was logged only because the Microsoft 365 mailbox is not connected");
+        } else if (deliveryStatus === "attempt_unknown") {
+          toast.warning("Public update was published, but Nexus cannot confirm the email provider outcome. It will not resend automatically.");
+        } else {
+          toast.warning("Public update published, but email delivery failed. Review the delivery status in the conversation.");
+        }
+      }
+      return true;
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to publish update");
-    }
+      return false;
+    } finally { conversationPendingRef.current = false; }
   };
 
   const handleSendEmail = async () => {
@@ -755,11 +1063,12 @@ export default function TicketsPage() {
       return;
     }
     try {
-      await axios.post(`${API}/tickets/${viewingTicket.id}/emails`, {
+      const response = await axios.post(`${API}/tickets/${viewingTicket.id}/emails`, {
         ticket_id: viewingTicket.id,
         to_addresses: emailForm.to.split(",").map(e => e.trim()).filter(Boolean),
         cc_addresses: emailForm.cc ? emailForm.cc.split(",").map(e => e.trim()).filter(Boolean) : [],
         bcc_addresses: emailForm.bcc ? emailForm.bcc.split(",").map(e => e.trim()).filter(Boolean) : [],
+        attachment_ids: emailForm.attachment_ids || [],
         subject: emailForm.subject,
         body: emailForm.body,
         body_type: emailForm.body?.includes("<") ? "html" : "text",
@@ -772,7 +1081,15 @@ export default function TicketsPage() {
       ]);
       setTicketNotes(collectionFromResponse(nRes.data, ["comments", "notes"]));
       setTicketEmails(collectionFromResponse(eRes.data, ["emails"]));
-      toast.success("Email sent");
+      setEmailForm(previous => ({ ...previous, attachment_ids: [] }));
+      const deliveryStatus = String(response.data?.delivery_status || response.data?.status || "").toLowerCase();
+      if (deliveryStatus === "sent") {
+        toast.success("Email sent and recorded");
+      } else if (deliveryStatus === "mocked") {
+        toast.warning("Email was recorded only; connect the Microsoft 365 mailbox to deliver it");
+      } else {
+        toast.warning("Email was recorded, but delivery failed. Review its status in the conversation.");
+      }
     } catch { toast.error("Failed to send email"); }
   };
 
@@ -831,7 +1148,10 @@ export default function TicketsPage() {
   };
 
   const handleAddItemToTicket = async () => {
-    if (!addItemProduct || !viewingTicket) return;
+    if (!addItemProduct || !viewingTicket || addingItemRef.current) return;
+    if (!Number.isInteger(Number(addItemQty)) || Number(addItemQty) < 1) { toast.error("Enter a whole quantity of at least one"); return; }
+    addingItemRef.current = true;
+    setAddingItem(true);
     try {
       const res = await axios.post(`${API}/tickets/${viewingTicket.id}/products`, {
         product_id: addItemProduct, quantity: addItemQty
@@ -840,16 +1160,27 @@ export default function TicketsPage() {
       setAddItemProduct("");
       setAddItemQty(1);
       toast.success("Item added to ticket");
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed to add item"); }
+    } catch (e) { toast.error(e.response?.data?.detail || "Item could not be confirmed. Check the ticket items before retrying."); }
+    finally { addingItemRef.current = false; setAddingItem(false); }
   };
 
-  const handleRemoveItemFromTicket = async (itemId) => {
+  const handleRemoveItemFromTicket = (itemId) => {
+    const item = ticketProducts.find((product) => product.id === itemId);
+    if (item) setPendingProductRemoval(item);
+  };
+
+  const confirmRemoveItemFromTicket = async () => {
+    const itemId = pendingProductRemoval?.id;
     if (!viewingTicket) return;
+    if (!itemId) return;
+    setRemovingProduct(true);
     try {
       await axios.delete(`${API}/tickets/${viewingTicket.id}/products/${itemId}`, { headers });
       setTicketProducts(prev => prev.filter(p => p.id !== itemId));
+      setPendingProductRemoval(null);
       toast.success("Item removed");
     } catch { toast.error("Failed to remove item"); }
+    finally { setRemovingProduct(false); }
   };
 
   const handlePushToInvoice = async (invoiceId) => {
@@ -895,16 +1226,22 @@ export default function TicketsPage() {
       toast.success("Attachment uploaded");
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/attachments`, { headers });
       setTicketAttachments(collectionFromResponse(res.data, ["attachments"]));
-    } catch { toast.error("Upload failed"); }
+    } catch (error) { toast.error(error.response?.data?.detail || "Upload failed"); }
     finally { setAttachmentUploading(false); e.target.value = ""; }
   };
 
   const handleDeleteAttachment = async (attId) => {
+    setAttachmentDeleteTarget(ticketAttachments.find(attachment => attachment.id === attId) || null);
+  };
+
+  const confirmDeleteAttachment = async () => {
+    if (!attachmentDeleteTarget?.id || !viewingTicket?.id) return;
     try {
-      await axios.delete(`${API}/tickets/${viewingTicket.id}/attachments/${attId}`, { headers });
-      setTicketAttachments(prev => prev.filter(a => a.id !== attId));
-      toast.success("Attachment deleted");
-    } catch { toast.error("Failed to delete"); }
+      await axios.delete(`${API}/tickets/${viewingTicket.id}/attachments/${attachmentDeleteTarget.id}`, { headers });
+      setTicketAttachments(prev => prev.filter(attachment => attachment.id !== attachmentDeleteTarget.id));
+      toast.success("Attachment deleted and recorded in the ticket audit");
+    } catch (error) { toast.error(error.response?.data?.detail || "Failed to delete attachment"); }
+    finally { setAttachmentDeleteTarget(null); }
   };
 
   const handleCreateChild = async () => {
@@ -931,20 +1268,68 @@ export default function TicketsPage() {
   };
 
   const handleAddTime = async () => {
+    if (loggingTime || timePendingRef.current || !viewingTicket?.id) return false;
+    const minutes = Number(timeForm.minutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+      toast.error("Enter whole minutes between 1 and 1,440");
+      return false;
+    }
+    let performedAt = null;
+    if (timeForm.performed_at) {
+      const parsedPerformedAt = new Date(timeForm.performed_at);
+      if (Number.isNaN(parsedPerformedAt.getTime())) {
+        toast.error("Choose a valid performed time");
+        return false;
+      }
+      performedAt = parsedPerformedAt.toISOString();
+    }
+    const requestPayload = {
+      minutes,
+      description: timeForm.description || "",
+      billable: Boolean(timeForm.billable),
+      labour_type_id: timeForm.labour_type_id || null,
+      performed_at: performedAt,
+    };
+    const requestSignature = JSON.stringify({ ticket_id: viewingTicket.id, ...requestPayload });
+    if (timeSubmissionRef.current.signature !== requestSignature) {
+      timeSubmissionRef.current = {
+        signature: requestSignature,
+        key: typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `ticket-time-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      };
+    }
+    timePendingRef.current = true;
+    setLoggingTime(true);
     try {
-      await axios.post(`${API}/tickets/${viewingTicket.id}/time-entries`, timeForm, { headers });
+      await axios.post(`${API}/tickets/${viewingTicket.id}/time-entries`, {
+        ...requestPayload,
+        idempotency_key: timeSubmissionRef.current.key,
+      }, { headers });
       setIsTimeOpen(false);
-      setTimeForm({ minutes: 15, description: "", billable: true });
+      setTimeForm({ minutes: 15, description: "", billable: true, labour_type_id: "", performed_at: "" });
+      timeSubmissionRef.current = { signature: "", key: "" };
+      try {
       const res = await axios.get(`${API}/tickets/${viewingTicket.id}/time-entries`, { headers });
-      setTimeEntries(collectionFromResponse(res.data, ["time_entries"]));
+      const refreshedTimeEntries = collectionFromResponse(res.data, ["time_entries"]);
+      setTimeEntries(refreshedTimeEntries);
+      const canonicalMinutes = refreshedTimeEntries.filter(entry => entry.authoritative !== false).reduce((sum, entry) => sum + Number(entry.minutes || 0), 0);
+      setViewingTicket(previous => previous ? { ...previous, total_time_minutes: canonicalMinutes } : previous);
+      } catch {
+        toast.warning("Time saved. Totals could not refresh; reopen this ticket to load the latest time. Do not log it again.");
+      }
       toast.success("Time logged");
-    } catch { toast.error("Failed to log time"); }
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to log time");
+      return false;
+    } finally { timePendingRef.current = false; setLoggingTime(false); }
   };
 
   const toggleTimer = () => {
     if (isTimerRunning) {
       const mins = Math.max(1, Math.round(timerElapsed / 60));
-      setTimeForm({ minutes: mins, description: "Timer entry", billable: true });
+      setTimeForm({ minutes: mins, description: "Timer entry", billable: true, labour_type_id: "", performed_at: "" });
       setIsTimeOpen(true);
       setIsTimerRunning(false);
       setTimerStart(null);
@@ -1007,16 +1392,6 @@ export default function TicketsPage() {
     finally { setBulkProcessing(false); }
   };
 
-  const handleCreateWsJob = async () => {
-    try {
-      const res = await axios.post(`${API}/workshop/jobs`, wsForm, { headers });
-      toast.success(`Workshop job ${res.data.job_number} created`);
-      setWsDialog(false); setWsForm({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", device_type: "", device_brand: "", device_model: "", serial_number: "", fault_description: "", priority: "normal", assigned_to: "", assigned_to_name: "" });
-      await fetchTickets();
-      if (res.data?.id) await fetchWsJobDetail(res.data);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-  };
-
   const handleWsStatus = async (jobId, status) => {
     try {
       const response = await axios.put(`${API}/workshop/jobs/${jobId}/status`, { status }, { headers });
@@ -1051,16 +1426,6 @@ export default function TicketsPage() {
     } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
   };
 
-  const handleCreateFjJob = async () => {
-    try {
-      const res = await axios.post(`${API}/field-jobs`, fjForm, { headers });
-      toast.success(`Field job ${res.data.job_number} created`);
-      setFjDialog(false); setFjForm({ client_id: "", customer_name: "", customer_phone: "", customer_email: "", service_address: "", zone: "", description: "", job_category: "installation", priority: "normal", assigned_to: "", assigned_to_name: "", scheduled_date: "", scheduled_time: "" });
-      await fetchTickets();
-      if (res.data?.id) await fetchFjJobDetail(res.data);
-    } catch (e) { toast.error(e.response?.data?.detail || "Failed"); }
-  };
-
   const handleFjStatus = async (jobId, status) => {
     try {
       const response = await axios.put(`${API}/field-jobs/${jobId}/status`, { status }, { headers });
@@ -1072,10 +1437,6 @@ export default function TicketsPage() {
 
   const handleDownloadAttachment = async (attachment) => {
     if (!attachment?.id) return;
-    if (!attachment.artifact_storage?.object_path) {
-      window.open(`${API}${attachment.url}`, "_blank", "noopener,noreferrer");
-      return;
-    }
     try {
       const response = await axios.get(
         `${API}/tickets/${viewingTicket.id}/attachments/${attachment.id}/download`,
@@ -1450,6 +1811,29 @@ export default function TicketsPage() {
     } catch { /* silent */ }
   };
 
+  const openTicketServiceKitWorkflow = async (serviceKit) => {
+    const workRecord = serviceKit?.work_record;
+    if (!workRecord?.id) {
+      toast.error("The linked delivery record is unavailable");
+      return;
+    }
+    try {
+      if (workRecord.type === "workshop_job") {
+        const response = await axios.get(`${API}/workshop/jobs/${workRecord.id}`, { headers });
+        setViewingTicket(null);
+        await fetchWsJobDetail(response.data);
+      } else if (workRecord.type === "field_job") {
+        const response = await axios.get(`${API}/field-jobs/${workRecord.id}`, { headers });
+        setViewingTicket(null);
+        await fetchFjJobDetail(response.data);
+      } else {
+        toast.error("Nexus does not recognise this delivery workflow");
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not open the linked delivery workflow");
+    }
+  };
+
   const handleAddFjNote = async () => {
     if (!fjNewNote.trim() || !viewFjJob) return;
     try {
@@ -1650,13 +2034,10 @@ export default function TicketsPage() {
     if (statusFilter === "completed" && !["resolved", "closed"].includes(t.status)) return false;
     if (statusFilter !== "all" && statusFilter !== "completed" && t.status !== statusFilter) return false;
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
-    if (attentionFilter === "no_response" && (t.last_response_at || Date.now() - new Date(t.created_at).getTime() <= 4 * 60 * 60 * 1000 || ["closed", "resolved"].includes(t.status))) return false;
-    if (attentionFilter === "sla_breach") {
-      const dueAt = t.sla_due || t.sla_due_at;
-      if (!dueAt || new Date(dueAt) >= new Date() || ["closed", "resolved"].includes(t.status)) return false;
-    }
-    if (attentionFilter === "unassigned" && t.assigned_to) return false;
-    if (attentionFilter === "critical_high" && !["critical", "high"].includes(t.priority)) return false;
+    if (attentionFilter === "no_response" && !ticketHasStaleActivity(t)) return false;
+    if (attentionFilter === "sla_breach" && !ticketHasBreachedSla(t)) return false;
+    if (attentionFilter === "unassigned" && (t.assigned_to || t.assignee_id || ticketIsTerminal(t))) return false;
+    if (attentionFilter === "critical_high" && (!["critical", "high"].includes(String(t.priority || "").toLowerCase()) || ticketIsTerminal(t))) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (t.title?.toLowerCase().includes(q) || t.ticket_number?.toLowerCase().includes(q) || t.client_name?.toLowerCase().includes(q));
@@ -1665,26 +2046,31 @@ export default function TicketsPage() {
   });
 
   const normalizedSearch = searchQuery.trim().toLowerCase();
-  const filteredWorkshopJobs = workshopJobs.filter(job => {
+  // Kit-linked jobs live behind their canonical parent ticket so a technician
+  // never sees the same customer request twice in the main queue.  Historical
+  // standalone jobs remain visible and keep their existing routes.
+  const standaloneWorkshopJobs = workshopJobs.filter(job => !job.service_kit_id);
+  const standaloneFieldJobs = fieldJobs.filter(job => !job.service_kit_id);
+  const filteredWorkshopJobs = standaloneWorkshopJobs.filter(job => {
     if (!normalizedSearch) return true;
     return [
       job.job_number, job.customer_name, job.fault_description, job.device_type,
       job.device_brand, job.device_model, job.serial_number, job.assigned_to_name,
     ].some(value => String(value || "").toLowerCase().includes(normalizedSearch));
   });
-  const filteredFieldJobs = fieldJobs.filter(job => {
+  const filteredFieldJobs = standaloneFieldJobs.filter(job => {
     if (!normalizedSearch) return true;
     return [
       job.job_number, job.customer_name, job.description, job.service_address,
       job.zone, job.job_category, job.assigned_to_name,
     ].some(value => String(value || "").toLowerCase().includes(normalizedSearch));
   });
-  const supportFiltersClear = statusFilter === "all" && priorityFilter === "all" && attentionFilter === "all";
 
   const groupedTickets = useGroupedTickets(filteredTickets, groupBy, statusConfig, priorityConfig);
+  const queueRecoverySignals = useMemo(() => buildTicketQueueSignals(tickets), [tickets]);
 
   const attentionLabel = {
-    no_response: "No response",
+    no_response: "No verified activity",
     sla_breach: "SLA breached",
     unassigned: "Unassigned",
     critical_high: "Critical & high",
@@ -1702,21 +2088,6 @@ export default function TicketsPage() {
     setSearchParams(next, { replace: true });
   };
 
-
-  // AI Analysis
-  const handleAiAnalysis = async () => {
-    if (!viewingTicket) return;
-    setAiAnalyzing(true);
-    try {
-      const res = await axios.post(`${API}/ai/analyze-device`, {
-        device_id: viewingTicket.device_id || "",
-        ticket_title: viewingTicket.title,
-        ticket_description: viewingTicket.description,
-      }, { headers });
-      setAiAnalysis(res.data);
-    } catch { toast.error("AI analysis failed"); }
-    finally { setAiAnalyzing(false); }
-  };
 
   // Proofread text
   const handleProofread = async (text, target) => {
@@ -1765,14 +2136,13 @@ export default function TicketsPage() {
   // ============ DETAIL VIEW ============
   if (viewingTicket) {
     const ticketCompleted = ["resolved", "closed"].includes(String(viewingTicket.status || "").toLowerCase());
-    const ticketStage = (() => {
-      const status = String(viewingTicket.status || "").toLowerCase();
-      if (status === "closed") return 6;
-      if (status === "resolved") return 5;
-      if (status === "in_progress" || status === "on_hold") return 2;
-      return 1;
-    })();
     const slaHours = viewingTicket.sla_due && !ticketCompleted ? differenceInHours(new Date(viewingTicket.sla_due), new Date()) : null;
+    const formatSlaDuration = (hours) => {
+      const absoluteHours = Math.abs(Number(hours) || 0);
+      const days = Math.floor(absoluteHours / 24);
+      const remainder = absoluteHours % 24;
+      return days ? `${days}d${remainder ? ` ${remainder}h` : ""}` : `${remainder}h`;
+    };
     const toolAvailability = ticketToolAvailability(viewingTicket, scripts);
     const linkedDeviceId = viewingTicket.device_id || viewingTicket.device_ids?.[0];
     const unbilledTicketItems = ticketProducts.filter(item => !item.invoice_id);
@@ -1790,13 +2160,24 @@ export default function TicketsPage() {
           }}
           onReply={() => {
             setDetailTab("conversation");
-            setConversationType("email");
-            window.scrollTo({ top: 800, behavior: "smooth" });
+            setConversationType("public");
+            setComposerFocusRequest((request) => request + 1);
+            window.requestAnimationFrame(() => {
+              conversationPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
           }}
           onResolve={() => handleUpdateTicket("status", "resolved")}
-          onStatusChange={(s) => handleUpdateTicket("status", s)}
+          onStatusChange={(status) => ["resolved", "closed"].includes(status)
+            ? requestResolutionReview(viewingTicket, status)
+            : handleUpdateTicket("status", status)}
+          onRequestResolution={(ticket, target) => requestResolutionReview(ticket, target)}
           onOpenTools={() => setToolsOpen(true)}
           onInvoice={openTicketInvoiceWorkflow}
+          onAddItems={() => setIsAddItemOpen(true)}
+          itemCount={ticketProducts.length}
+          focusMode={ticketFocusMode}
+          onCatchUp={() => setHandoverOpen(true)}
+          onToggleFocus={() => setTicketFocusMode(previous => !previous)}
           onChangeCustomer={(updated) => updated && setViewingTicket(updated)}
           onTitleSave={(t) => { if (t && t !== viewingTicket.title) handleUpdateTicket("title", t); }}
           onDescriptionSave={(d) => { if (d !== (viewingTicket.description || "")) handleUpdateTicket("description", d); }}
@@ -1816,7 +2197,7 @@ export default function TicketsPage() {
           isTimerRunning={isTimerRunning}
           timerElapsed={timerElapsed}
           onToggleTimer={toggleTimer}
-          onStartWork={() => navigate(`/work-session?ticket=${encodeURIComponent(viewingTicket.id)}`)}
+          onStartWork={() => navigate(workSessionPath(viewingTicket))}
           onPinObject={() => {
             window.dispatchEvent(new CustomEvent("nexus:pin-object", { detail: {
               id: viewingTicket.id,
@@ -1828,8 +2209,69 @@ export default function TicketsPage() {
             toast.success("Ticket pinned to your Object Dock");
           }}
         />
+        <TicketResolutionReviewDialog
+          review={resolutionReview}
+          onOpenChange={(open) => !open && setResolutionReview(null)}
+          onConfirm={confirmResolutionReview}
+          busy={resolutionProcessing}
+        />
+        <AlertDialog open={Boolean(pendingProductRemoval)} onOpenChange={(open) => !open && !removingProduct && setPendingProductRemoval(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove ticket line item?</AlertDialogTitle>
+              <AlertDialogDescription>
+                {pendingProductRemoval
+                  ? `Remove ${pendingProductRemoval.product_name || "this item"} · $${Number(pendingProductRemoval.total || 0).toFixed(2)} from this ticket? It will no longer be available for invoicing.`
+                  : ""}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={removingProduct}>Keep item</AlertDialogCancel>
+              <AlertDialogAction onClick={confirmRemoveItemFromTicket} disabled={removingProduct} className="bg-rose-600 text-white hover:bg-rose-500">
+                {removingProduct ? "Removing…" : "Remove item"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
-        <NexusVerifiedSequence complete={ticketStage} label="Nexus service record" className="shadow-sm" />
+        {ticketFocusMode && <p className="text-xs text-muted-foreground" role="status">Focus view · conversation, SLA and ticket controls remain available. Use Show full context to restore service, related-ticket and diagnostic panels.</p>}
+
+        <TicketServiceKitPanel
+          ticket={viewingTicket}
+          onOpenWorkflow={openTicketServiceKitWorkflow}
+        />
+
+        {viewingTicket.project_id && (() => {
+          const isPlanParent = viewingTicket.project_ticket_plan_role === "parent";
+          const completedChildren = childTickets.filter((child) => ["resolved", "closed", "completed"].includes(String(child.status || "").toLowerCase())).length;
+          const totalChildren = Number(viewingTicket.child_ticket_count ?? childTickets.length);
+          return (
+            <div className="flex flex-col gap-3 rounded-xl border border-violet-400/20 bg-[linear-gradient(120deg,rgba(124,58,237,0.12),rgba(14,165,233,0.05))] px-4 py-3 sm:flex-row sm:items-center sm:justify-between" data-testid="ticket-project-plan-context">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-400/25 bg-violet-500/10 text-violet-200"><FolderKanban className="h-4 w-4" /></div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-200">Project delivery</p>
+                  <p className="mt-0.5 truncate text-sm font-semibold text-foreground">{viewingTicket.project_name || "Linked project"}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {isPlanParent
+                      ? `${completedChildren} of ${totalChildren} child work ticket${totalChildren === 1 ? "" : "s"} complete`
+                      : "This work ticket is part of the managed project delivery plan."}
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="border-violet-400/25 bg-violet-500/5 text-violet-100 hover:bg-violet-500/15" onClick={() => navigate(`/projects?project=${encodeURIComponent(viewingTicket.project_id)}`)}>
+                  <FolderKanban className="mr-1.5 h-3.5 w-3.5" />Open project
+                </Button>
+                {!isPlanParent && ticketCompleted && viewingTicket.project_task_id && (
+                  <Button variant="outline" size="sm" className="border-emerald-400/25 bg-emerald-500/5 text-emerald-100 hover:bg-emerald-500/15" onClick={() => navigate(`/projects?project=${encodeURIComponent(viewingTicket.project_id)}&review_task=${encodeURIComponent(viewingTicket.project_task_id)}`)}>
+                    <CheckCircle className="mr-1.5 h-3.5 w-3.5" />Open review
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {runbookSuggestions.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5" data-testid="ticket-runbook-suggestions">
@@ -1888,7 +2330,7 @@ export default function TicketsPage() {
                 variant="outline"
                 size="sm"
                 className="border-emerald-500/30 bg-emerald-500/5 text-emerald-200 hover:bg-emerald-500/15 hover:text-emerald-100"
-                onClick={() => { window.location.assign("/runbooks?tab=knowledge"); }}
+                onClick={() => { window.location.assign("/documentation-hub?tab=library"); }}
                 data-testid="view-ticket-runbook"
               >
                 <BookOpen className="mr-2 h-3.5 w-3.5" />
@@ -1915,15 +2357,6 @@ export default function TicketsPage() {
           onOpenChange={setToolsOpen}
           ticket={viewingTicket}
           sections={[
-            {
-              id: "ai",
-              title: "AI assistance",
-              description: "One focused diagnostic action. Ticket summaries remain in the main ticket header.",
-              icon: Sparkles,
-              content: <>
-                <TicketToolAction icon={Brain} title="AI diagnosis" description="Analyse likely cause, severity, and recommended next steps." busy={aiAnalyzing} onClick={handleAiAnalysis} testId="tools-ai-diagnose" />
-              </>,
-            },
             {
               id: "work",
               title: "Ticket actions",
@@ -1953,7 +2386,10 @@ export default function TicketsPage() {
               title: "Workflow & lifecycle",
               description: "Manage dependencies, planned work, change control, and closure follow-up.",
               icon: GitBranch,
-              content: <TicketWorkflowPanel embedded ticket={viewingTicket} allTickets={tickets} headers={headers} refresh={() => fetchTicketDetail(viewingTicket)} />,
+              content: <>
+                {!viewingTicket.service_kit?.work_record?.id && <TicketToolAction icon={Wrench} title="Attach delivery kit" description="Keep this ticket as the parent record, then add a Workshop or Cabling workflow when needed." state="connected" stateLabel="Kit" onClick={() => setIsServiceKitDialogOpen(true)} testId="tools-attach-delivery-kit" />}
+                <TicketWorkflowPanel embedded ticket={viewingTicket} allTickets={tickets} headers={headers} refresh={() => fetchTicketDetail(viewingTicket)} />
+              </>,
             },
             {
               id: "billing",
@@ -1970,38 +2406,32 @@ export default function TicketsPage() {
           ]}
         />
 
-        {/* AI Co-Pilot Strip — heuristic next-best-action + optional AI summary */}
-        {panelVisible.copilot && (
-          <AICopilotStrip
-            ticket={viewingTicket}
-            deviceStatus={deviceStatus}
-            headers={headers}
-            onActionClick={(target) => {
-              if (target === "csat") { axios.post(`${API}/tickets/${viewingTicket.id}/send-csat`, {}, { headers }).then(() => toast.success("CSAT sent")).catch(e => toast.error(e.response?.data?.detail || "Failed")); }
-              else if (target === "assign") { try { document.querySelector('[data-testid="ticket-assignee-select"]')?.click(); } catch { /* noop */ } }
-              else if (target === "wol") axios.post(`${API}/tickets/${viewingTicket.id}/device/wol`, {}, { headers }).then(r => toast(r.data?.message || "Logged")).catch(() => {});
-              else if (target === "patches") axios.post(`${API}/tickets/${viewingTicket.id}/device/install-patches`, {}, { headers }).then(() => toast.success("Patch install started")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
-              else if (target === "checks") axios.post(`${API}/tickets/${viewingTicket.id}/device/run-checks`, {}, { headers }).then(() => toast.success("Checks running")).catch(e => toast.error(e.response?.data?.detail || "Failed"));
-            }}
-          />
-        )}
+        <TicketServiceKitDialog
+          open={isServiceKitDialogOpen}
+          onOpenChange={setIsServiceKitDialogOpen}
+          ticket={viewingTicket}
+          headers={headers}
+          onApplied={(updatedTicket) => {
+            setViewingTicket(updatedTicket);
+            fetchTickets();
+          }}
+        />
 
-        {/* Finance Intel: Quote Nudge banner */}
-        <QuoteNudgeBanner ticketId={viewingTicket.id} token={token} />
+        {!ticketFocusMode && <TicketElevateEvidence ticket={viewingTicket} headers={headers} />}
 
-        <Card className="overflow-hidden border border-border/70 bg-muted/[0.12]" data-testid="ticket-advanced-edge-tools">
-          <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <Card className={`${ticketFocusMode ? "hidden" : ""} overflow-hidden rounded-xl border border-violet-400/12 bg-violet-500/[0.035]`} data-testid="ticket-advanced-edge-tools">
+          <CardContent className="flex flex-col gap-2.5 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-500/20 bg-violet-500/[0.08]"><Shield className="h-4 w-4 text-violet-300" /></div>
-              <div><p className="text-sm font-medium">Advanced site access</p><p className="text-xs text-muted-foreground">Use Nexus Edge verification or Jump only when this ticket needs site-level diagnostics or controlled local access.</p></div>
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-violet-400/20 bg-violet-500/[0.09]"><Shield className="h-3.5 w-3.5 text-violet-200" /></div>
+              <div><p className="text-xs font-semibold text-zinc-200">Site access <span className="ml-1 rounded border border-violet-400/20 bg-violet-500/[0.08] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-violet-200">Optional</span></p><p className="mt-0.5 text-[11px] text-muted-foreground">Open Nexus Edge verification or a controlled Jump only when site-level diagnostics are needed.</p></div>
             </div>
-            <Button variant="outline" size="sm" className="shrink-0" onClick={() => setEdgeToolsOpen((open) => !open)} data-testid="ticket-advanced-edge-tools-toggle">
-              {edgeToolsOpen ? "Hide advanced tools" : "Open advanced tools"}
+            <Button variant="outline" size="sm" className="h-8 shrink-0 border-violet-400/20 bg-violet-500/[0.04] text-xs text-violet-100 hover:bg-violet-500/[0.12]" onClick={() => setEdgeToolsOpen((open) => !open)} data-testid="ticket-advanced-edge-tools-toggle">
+              {edgeToolsOpen ? "Close site tools" : "Use site tools"}
             </Button>
           </CardContent>
         </Card>
 
-        {edgeToolsOpen && (
+        {edgeToolsOpen && !ticketFocusMode && (
           <div className="grid gap-3 animate-in fade-in-0 slide-in-from-top-1 duration-200" data-testid="ticket-advanced-edge-tools-panel">
             <TicketConnectivityVerification ticket={viewingTicket} headers={headers} />
             <TicketJumpAccessRequest ticket={viewingTicket} headers={headers} />
@@ -2009,43 +2439,17 @@ export default function TicketsPage() {
         )}
 
         {/* Title + Compact Progress side-by-side (saves vertical space) */}
-        <div className="grid grid-cols-1 gap-4">
-          {/* LEFT — request summary (title and customer live in the console header) */}
-          <Card className="overflow-hidden border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.11),transparent_32%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.06),transparent_25%),linear-gradient(135deg,rgba(17,19,24,0.98),rgba(10,12,17,0.98))] shadow-[0_12px_36px_rgba(0,0,0,0.14)]">
-            <CardHeader className="border-b border-white/[0.06] pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />Case brief</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="max-w-5xl text-sm leading-6 text-zinc-300 whitespace-pre-wrap">{viewingTicket.description || "No request details have been recorded yet."}</p>
-              {/* Tags */}
-              <div className="flex items-center gap-2 mt-4 flex-wrap">
-                <Tag className="w-4 h-4 text-muted-foreground" />
-                {(viewingTicket.tags || []).map(tag => (
-                  <Badge key={tag} variant="secondary" className="gap-1 cursor-pointer" onClick={() => handleRemoveTag(tag)}>
-                    {tag}<X className="w-3 h-3" />
-                  </Badge>
-                ))}
-                <Input className="w-24 h-6 text-xs" placeholder="Add tag" value={tagInput} onChange={e => setTagInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleAddTag()} data-testid="tag-input" />
-              </div>
-              {/* SLA indicator */}
-              {ticketCompleted ? (
-                <div className="mt-4 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.08] px-3 py-2 text-sm text-emerald-300">
-                  <CheckCircle className="h-4 w-4" />
-                  <span>Service record completed · SLA timing retained in the audit trail</span>
-                </div>
-              ) : slaHours !== null && (
-                <div className={`mt-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${slaHours < 2 ? 'border-red-500/25 bg-red-500/[0.08] text-red-300' : slaHours < 8 ? 'border-yellow-500/25 bg-yellow-500/[0.08] text-yellow-300' : 'border-emerald-500/25 bg-emerald-500/[0.08] text-emerald-300'}`}>
-                  <Clock className="w-4 h-4" />
-                  <span>SLA: {slaHours > 0 ? `${slaHours}h remaining` : `Overdue by ${Math.abs(slaHours)}h`}</span>
-                  <div className={`h-2 rounded-full flex-1 max-w-[240px] ${slaHours < 2 ? 'bg-red-500/20' : slaHours < 8 ? 'bg-yellow-500/20' : 'bg-green-500/20'}`}>
-                    <div className={`h-2 rounded-full transition-all ${slaHours < 2 ? 'bg-red-500' : slaHours < 8 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                      style={{ width: `${Math.max(5, Math.min(100, (1 - slaHours / 24) * 100))}%` }} />
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        <div className={ticketFocusMode ? "hidden" : "grid grid-cols-1 gap-4"} data-testid="ticket-case-context">
+          <TicketRequestRecord
+            ticket={viewingTicket}
+            deviceStatus={deviceStatus}
+            tagInput={tagInput}
+            onTagInputChange={setTagInput}
+            onAddTag={handleAddTag}
+            onRemoveTag={handleRemoveTag}
+            ticketCompleted={ticketCompleted}
+            slaHours={slaHours}
+          />
 
           {/* RIGHT — Compact progress + related-tickets quick chips */}
         </div>
@@ -2053,97 +2457,34 @@ export default function TicketsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Main content */}
           <div className="lg:col-span-2 space-y-4">
-            {/* AI ANALYSIS PANEL */}
-            {panelVisible.aiAnalysis && aiAnalysis && (
-              <Card className="border-purple-500/20 bg-purple-500/[0.02]" data-testid="ai-analysis-panel">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Brain className="w-5 h-5 text-purple-400" />
-                      <CardTitle className="text-base text-purple-400">AI Diagnosis</CardTitle>
-                      <Badge className={`text-[10px] ${aiAnalysis.severity === "critical" ? "bg-red-500/20 text-red-400" : aiAnalysis.severity === "high" ? "bg-orange-500/20 text-orange-400" : aiAnalysis.severity === "medium" ? "bg-yellow-500/20 text-yellow-400" : "bg-green-500/20 text-green-400"}`}>
-                        {aiAnalysis.severity} severity
-                      </Badge>
-                      {aiAnalysis.estimated_time_minutes > 0 && (
-                        <Badge variant="outline" className="text-[10px]"><Clock className="w-2.5 h-2.5 mr-0.5" />Est. {aiAnalysis.estimated_time_minutes}m</Badge>
-                      )}
-                    </div>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setAiAnalysis(null)}><X className="w-3 h-3" /></Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div>
-                    <p className="text-sm">{aiAnalysis.diagnosis}</p>
-                  </div>
-                  {aiAnalysis.potential_causes?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Potential Causes</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {aiAnalysis.potential_causes.map((cause, i) => (
-                          <Badge key={`k-${i}`} variant="outline" className="text-[10px] bg-orange-500/5 border-orange-500/20">{cause}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {aiAnalysis.steps?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Recommended Fix Steps</p>
-                      <div className="space-y-1.5">
-                        {aiAnalysis.steps.map((step, i) => (
-                          <div key={`k-${i}`} className="flex items-start gap-2 py-1 px-2 rounded bg-muted/30">
-                            <span className="text-xs font-bold text-purple-400 mt-0.5">{i + 1}.</span>
-                            <span className="text-xs">{step}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {aiAnalysis.recommended_scripts?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Scripts / Commands</p>
-                      {aiAnalysis.recommended_scripts.map((script, i) => (
-                        <code key={`k-${i}`} className="block text-[11px] bg-muted/50 px-2 py-1 rounded font-mono mb-1">{script}</code>
-                      ))}
-                    </div>
-                  )}
-                  {aiAnalysis.kb_references?.length > 0 && (
-                    <div>
-                      <p className="text-xs font-semibold text-muted-foreground mb-1">Related KB Articles</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {aiAnalysis.kb_references.map((ref, i) => (
-                          <Badge key={`k-${i}`} variant="outline" className="text-[10px] text-blue-400 border-blue-500/20"><BookOpen className="w-2.5 h-2.5 mr-0.5" />{ref}</Badge>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Related Tickets — promoted from sidebar to give better visibility */}
+            {/* Related tickets are deliberately presented as a compact review strip.
+                They are suggestions, not confirmed relationships, so they should
+                inform the technician without taking focus from the live record. */}
             {panelVisible.related && enrichment?.merge_candidates?.length > 0 && (
-              <Card data-testid="related-tickets-banner" className="border-violet-500/20 bg-violet-500/[0.02]">
-                <CardContent className="pt-3 pb-3 space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <Users className="w-3.5 h-3.5 text-violet-400" />
-                    <span className="text-xs font-semibold text-violet-400 uppercase tracking-wider">Related Tickets</span>
-                    <span className="text-[10px] text-muted-foreground">({enrichment.merge_candidates.length} potential duplicates / related issues)</span>
+              <Card data-testid="related-tickets-banner" className="overflow-hidden border-violet-500/20 bg-[linear-gradient(105deg,rgba(124,58,237,0.08),rgba(17,19,24,0.5)_46%,rgba(34,211,238,0.035))]">
+                <CardContent className="space-y-2.5 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="grid h-6 w-6 place-items-center rounded-md border border-violet-400/20 bg-violet-500/10"><Users className="h-3 w-3 text-violet-300" /></span>
+                      <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-200">Related signals</p><p className="truncate text-[10px] text-muted-foreground">Review before linking or merging—nothing below is connected yet.</p></div>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-violet-400/20 bg-violet-500/10 px-2 py-1 text-[9px] font-medium text-violet-200">{enrichment.merge_candidates.length} to review</span>
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex snap-x gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch]">
                     {enrichment.merge_candidates.map(mc => (
                       <button
                         key={mc.id}
-                        className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-violet-500/30 hover:bg-violet-500/10 transition-colors text-[11px]"
-                        onClick={() => fetchTicketDetail(mc)}
+                        className="group min-w-[205px] max-w-[250px] shrink-0 snap-start rounded-lg border border-violet-500/20 bg-black/10 px-3 py-2 text-left transition-colors hover:border-violet-300/35 hover:bg-violet-500/[0.10]"
+                        onClick={async () => { try { const response = await axios.get(`${API}/tickets/${mc.id}`, { headers }); await fetchTicketDetail(response.data); } catch { toast.error("Suggested ticket could not be opened"); } }}
                         data-testid={`related-ticket-chip-${mc.id}`}
+                        title={`Open ${mc.ticket_number}: ${mc.title}`}
                       >
-                        <span className="font-mono text-violet-400">{mc.ticket_number}</span>
-                        <span className="truncate max-w-[200px]">{mc.title}</span>
-                        <span className={`px-1 py-0.5 rounded text-[9px] ${
+                        <div className="flex items-center justify-between gap-2"><span className="font-mono text-[10px] text-violet-300">{mc.ticket_number}</span><span className={`rounded px-1.5 py-0.5 text-[9px] ${
                           mc.priority === "critical" ? "bg-red-500/15 text-red-400" :
                           mc.priority === "high" ? "bg-orange-500/15 text-orange-400" :
                           "bg-muted text-muted-foreground"
-                        }`}>{mc.priority}</span>
+                        }`}>{mc.priority}</span></div>
+                        <p className="mt-1 truncate text-xs font-medium text-zinc-200 transition-colors group-hover:text-white">{mc.title}</p>
                       </button>
                     ))}
                   </div>
@@ -2155,6 +2496,10 @@ export default function TicketsPage() {
               <TicketWorkspaceTabs
                 activeTab={detailTab}
                 onTabChange={setDetailTab}
+                personal={learning.personal}
+                team={learning.team}
+                onRecordAction={learning.record}
+                onForgetLearning={learning.forget}
                 counts={{
                   conversation: ticketNotes.length + ticketEmails.length + ticketSms.length,
                   tasks: worksheetItems.length,
@@ -2176,6 +2521,10 @@ export default function TicketsPage() {
 
               {/* AI SUGGESTIONS TAB */}
               <TabsContent value="suggestions" className="space-y-4">
+                <div className="flex items-start gap-2 rounded-xl border border-sky-500/15 bg-sky-500/[0.035] px-3 py-2.5 text-xs text-muted-foreground">
+                  <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300" />
+                  <p>Historical Matches uses recorded resolutions from this client and authorised knowledge articles. Review the source record before reusing a fix.</p>
+                </div>
                 {suggestionsLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="w-6 h-6 animate-spin text-primary mr-2" />
@@ -2197,14 +2546,13 @@ export default function TicketsPage() {
                     <div>
                       <div className="flex items-center gap-2 mb-2">
                         <Sparkles className="w-4 h-4 text-amber-400" />
-                        <h4 className="text-sm font-semibold">Similar Resolved Tickets ({suggestions.similar_tickets?.length || 0})</h4>
+                        <h4 className="text-sm font-semibold">Same-client resolved tickets ({suggestions.similar_tickets?.length || 0})</h4>
                       </div>
                       {suggestions.similar_tickets?.length > 0 ? (
                         <ScrollArea className="h-[220px]">
                           <div className="space-y-2">
                             {suggestions.similar_tickets.map(st => (
-                              <Card key={st.ticket_id} className="border-amber-500/10 hover:border-amber-500/30 transition-colors cursor-pointer"
-                                onClick={() => { const t = tickets.find(x => x.id === st.ticket_id); if (t) fetchTicketDetail(t); }}
+                              <Card key={st.ticket_id} className="border-amber-500/10 hover:border-amber-500/30 transition-colors"
                                 data-testid={`suggestion-ticket-${st.ticket_id}`}>
                                 <CardContent className="py-2.5 px-3">
                                   <div className="flex items-start justify-between mb-1">
@@ -2218,6 +2566,14 @@ export default function TicketsPage() {
                                     </Badge>
                                   </div>
                                   <p className="text-sm font-medium mb-1">{st.title}</p>
+                                  <p className="mb-2 text-xs text-muted-foreground">Suggested by keyword overlap—not a confirmed related incident.</p>
+                                  <Button variant="outline" size="sm" className="mb-2" onClick={async () => {
+                                    try {
+                                      const related = tickets.find(ticket => ticket.id === st.ticket_id) || (await axios.get(`${API}/tickets/${st.ticket_id}`, { headers })).data;
+                                      if (!related?.id) throw new Error("Unavailable ticket");
+                                      await fetchTicketDetail(related);
+                                    } catch { toast.error("This ticket could not be opened. It may be unavailable or outside your access."); }
+                                  }}>Open ticket {st.ticket_number}</Button>
                                   {st.resolution_notes && (
                                     <div className="bg-emerald-500/5 border border-emerald-500/10 rounded p-2 mt-1">
                                       <p className="text-xs text-emerald-400 font-medium mb-0.5">Resolution:</p>
@@ -2300,16 +2656,21 @@ export default function TicketsPage() {
 
 
               {/* UNIFIED CONVERSATION TAB */}
-              <TabsContent value="conversation" className="space-y-3">
+              <TabsContent ref={conversationPanelRef} value="conversation" className="space-y-3">
                 <TicketConversationTab
                   conversationType={conversationType} setConversationType={setConversationType}
                   newNote={newNote} setNewNote={setNewNote} handleAddNote={handleAddNote} cannedResponses={cannedResponses}
                   emailForm={emailForm} setEmailForm={setEmailForm} handleSendEmail={handleSendEmail}
                   emailSignature={emailSignature} clientContacts={clientContacts}
+                  ticketAttachments={ticketAttachments}
                   smsForm={smsForm} setSmsForm={setSmsForm} handleSendSms={handleSendSms}
                   applySmsTemplate={applySmsTemplate} smsTemplates={smsTemplates}
                   smsConfig={smsConfig} smsSending={smsSending}
                   ticketNotes={ticketNotes} ticketEmails={ticketEmails} ticketSms={ticketSms}
+                  ticketTimeEntries={timeEntries} labourTypes={labourTypes}
+                  ticketParticipants={ticketParticipants}
+                  ticketSubscribers={ticketSubscribers}
+                  composerFocusRequest={composerFocusRequest}
                 />
               </TabsContent>
 
@@ -2321,6 +2682,22 @@ export default function TicketsPage() {
                   handleAttachmentUpload={handleAttachmentUpload}
                   handleDeleteAttachment={handleDeleteAttachment}
                   handleDownloadAttachment={handleDownloadAttachment}
+                />
+              </TabsContent>
+
+              <TabsContent value="devices" className="space-y-3">
+                <TicketDeviceList
+                  ticketId={viewingTicket.id}
+                  headers={headers}
+                  refreshTicketDetails={async () => {
+                    try {
+                      const response = await axios.get(`${API}/tickets/${viewingTicket.id}`, { headers });
+                      setViewingTicket(response.data);
+                      fetchTickets();
+                    } catch {
+                      toast.warning("Endpoint action completed, but the ticket could not refresh. Reopen it to load the latest evidence.");
+                    }
+                  }}
                 />
               </TabsContent>
 
@@ -2365,12 +2742,17 @@ export default function TicketsPage() {
 
               {/* TIME TAB */}
               <TabsContent value="time">
-                <TicketTimeTab timeEntries={timeEntries} />
+                <TicketTimeTab timeEntries={timeEntries} ticketId={viewingTicket.id} headers={headers} onUpdated={async () => { const response = await axios.get(`${API}/tickets/${viewingTicket.id}/time-entries`, { headers }); setTimeEntries(collectionFromResponse(response.data, ["time_entries", "entries"])); }} />
               </TabsContent>
 
               {/* AUDIT TAB */}
               <TabsContent value="audit">
                 <TicketAuditTab auditLog={auditLog} />
+              </TabsContent>
+
+              {/* OUTCOME & FLOW TAB */}
+              <TabsContent value="flow" className="space-y-4">
+                <FlowIntelligencePanel ticketId={viewingTicket.id} headers={headers} />
               </TabsContent>
 
               <TabsContent value="timeline">
@@ -2396,6 +2778,25 @@ export default function TicketsPage() {
                 />
               </div>
             )}
+            <div key="sla-posture" className="min-w-0" data-testid="ticket-sla-posture">
+                <Card className="overflow-hidden border border-amber-400/20 bg-[linear-gradient(125deg,rgba(251,191,36,0.10),rgba(17,19,24,0.92)_55%,rgba(10,12,17,0.92))]">
+                  <CardContent className="flex items-center justify-between gap-3 p-3">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200"><Timer className="h-3.5 w-3.5" />SLA posture</p>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {ticketCompleted
+                          ? "Resolution is recorded; service history remains available."
+                          : viewingTicket.sla_due
+                            ? `Resolution target ${format(new Date(viewingTicket.sla_due), "MMM d, HH:mm")}`
+                            : "No resolution target is recorded for this ticket."}
+                      </p>
+                    </div>
+                    <Badge className={ticketCompleted ? "shrink-0 border-emerald-400/30 bg-emerald-500/15 text-emerald-200" : slaHours == null ? "shrink-0 border-zinc-500/30 bg-zinc-500/10 text-zinc-300" : slaHours < 0 ? "shrink-0 border-rose-400/30 bg-rose-500/15 text-rose-200" : slaHours <= 4 ? "shrink-0 border-amber-400/30 bg-amber-500/15 text-amber-100" : "shrink-0 border-cyan-400/30 bg-cyan-500/15 text-cyan-100"}>
+                      {ticketCompleted ? "Closed" : slaHours == null ? "No target" : slaHours < 0 ? `${formatSlaDuration(slaHours)} overdue` : `${formatSlaDuration(slaHours)} remaining`}
+                    </Badge>
+                  </CardContent>
+                </Card>
+            </div>
             <div key="statusCard" className="min-w-0">
               <Card className="overflow-hidden rounded-2xl border border-cyan-500/20 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.13),transparent_40%),radial-gradient(circle_at_top_left,rgba(16,185,129,0.07),transparent_28%),linear-gradient(145deg,rgba(17,19,24,0.92),rgba(10,12,17,0.92))] shadow-[0_16px_42px_rgba(0,0,0,0.2)]">
               <CardContent className="space-y-4 p-4">
@@ -2415,6 +2816,13 @@ export default function TicketsPage() {
                     <SelectTrigger data-testid="ticket-assignee-select"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                     <SelectContent>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
                   </Select>
+                </div>
+                <div className="rounded-xl border border-violet-400/15 bg-violet-500/[0.045] p-3" data-testid="ticket-subscribers">
+                  <div className="flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-200">Subscribers</p><p className="mt-1 text-[11px] leading-4 text-zinc-400">{isLocalTicketPreview() && viewingTicket.id?.startsWith("ticket-preview-") ? "Preview ticket — create or open a live ticket to manage handover notifications." : "Receive in-app alerts for replies and internal notes through handover."}</p></div><Bell className="mt-0.5 h-4 w-4 text-violet-300" /></div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {ticketSubscribers.length ? ticketSubscribers.map((subscriber) => <Badge key={subscriber.user_id} variant="outline" className="h-6 border-violet-400/20 bg-black/10 px-2 text-[10px] text-violet-100">{subscriber.user?.name || "Technician"}{subscriber.user_id === user?.id && <span className="ml-1 text-violet-300/70">· You</span>}</Badge>) : <span className="text-[11px] text-zinc-500">No subscribers yet</span>}
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2"><Button type="button" size="sm" variant="outline" className="h-8 border-violet-400/25 text-xs text-violet-100" disabled={isLocalTicketPreview() && viewingTicket.id?.startsWith("ticket-preview-")} onClick={() => updateTicketSubscriber(user?.id, !ticketSubscribers.some((subscriber) => subscriber.user_id === user?.id))}>{ticketSubscribers.some((subscriber) => subscriber.user_id === user?.id) ? "Following · unsubscribe" : "Follow this ticket"}</Button><Select value="" disabled={isLocalTicketPreview() && viewingTicket.id?.startsWith("ticket-preview-")} onValueChange={(userId) => updateTicketSubscriber(userId, true)}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Add technician" /></SelectTrigger><SelectContent>{users.filter((technician) => technician.id !== user?.id && !ticketSubscribers.some((subscriber) => subscriber.user_id === technician.id)).map((technician) => <SelectItem key={technician.id} value={technician.id}>{technician.name}</SelectItem>)}</SelectContent></Select></div>
                 </div>
                 <div><Label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">Category</Label>
                   <Select value={viewingTicket.category || "support"} onValueChange={v => handleUpdateTicket("category", v)}>
@@ -2443,7 +2851,7 @@ export default function TicketsPage() {
                 </div>
                 <div className="rounded-xl border border-emerald-400/15 bg-emerald-500/[0.045] p-3" data-testid="ticket-commercial-context">
                   <div className="flex items-start justify-between gap-3">
-                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">Commercial context</p><p className="mt-1 text-[11px] text-zinc-500">Tracked effort and ticket items remain linked to the billing audit.</p></div>
+                    <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">Time & billing</p><p className="mt-1 text-[11px] text-zinc-400">Review recorded effort and unbilled items. These are not a final invoice total.</p></div>
                     <Receipt className="h-4 w-4 text-emerald-300" />
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2">
@@ -2503,21 +2911,8 @@ export default function TicketsPage() {
             </Card>
             </div>
 
-            {/* SLA Burn-down */}
-            {panelVisible.burndown && (
-              <div key="burndown" className="min-w-0">
-                <TicketBurndownBar ticketId={viewingTicket.id} headers={headers} />
-              </div>
-            )}
-
             {/* Live Device Cockpit — per-device row with 3-dot CRAIG-style action menu */}
 
-            {/* ── AI Enrichment: TTR + Blast Radius + Client Health (extracted) ── */}
-            {panelVisible.enrichment && (
-              <div key="enrichment" className="min-w-0">
-                <TicketEnrichmentRail enrichment={enrichment} />
-              </div>
-            )}
           </aside>
         </div>
 
@@ -2525,6 +2920,7 @@ export default function TicketsPage() {
           open={isEmailOpen} onOpenChange={setIsEmailOpen}
           emailForm={emailForm} setEmailForm={setEmailForm}
           emailSignature={emailSignature} handleSendEmail={handleSendEmail}
+          ticketAttachments={ticketAttachments}
           clientContacts={clientContacts}
           handleProofread={handleProofread} proofreadResult={proofreadResult}
           setProofreadResult={setProofreadResult} proofreadLoading={proofreadLoading}
@@ -2544,7 +2940,7 @@ export default function TicketsPage() {
 
         <LogTimeDialog
           open={isTimeOpen} onOpenChange={setIsTimeOpen}
-          timeForm={timeForm} setTimeForm={setTimeForm} handleAddTime={handleAddTime}
+          timeForm={timeForm} setTimeForm={setTimeForm} handleAddTime={handleAddTime} labourTypes={labourTypes} loggingTime={loggingTime}
         />
 
         <NotifyClientDialog
@@ -2553,8 +2949,26 @@ export default function TicketsPage() {
           handleNotifyClient={handleNotifyClient}
         />
 
+        <TicketHandoverDialog key={`handover-${viewingTicket.id}`} open={handoverOpen} onOpenChange={setHandoverOpen} ticket={viewingTicket} headers={headers}
+          onOpenActivity={(noteId) => {
+            if (!noteId) {
+              setDetailTab("audit");
+              window.requestAnimationFrame(() => document.querySelector('[data-testid="ticket-workspace-tabs"]')?.scrollIntoView({ behavior: "smooth", block: "start" }));
+              return;
+            }
+            setDetailTab("conversation");
+            window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+              const note = noteId && Array.from(document.querySelectorAll('[data-testid]')).find(element => element.getAttribute('data-testid') === `note-${noteId}`);
+              const target = note || conversationPanelRef.current;
+              target?.scrollIntoView({ behavior: "smooth", block: "center" });
+              if (note) { note.setAttribute("tabindex", "-1"); note.focus({ preventScroll: true }); }
+              else if (noteId) toast.info("Choose All updates in the activity filter to find this note; refresh the ticket if it is not loaded.");
+            }));
+          }}
+          onOpenChild={async (id) => { try { const response = await axios.get(`${API}/tickets/${id}`, { headers }); await fetchTicketDetail(response.data); } catch { toast.error("Related ticket could not be opened"); } }} />
         <AddItemsDialog
-          open={isAddItemOpen} onOpenChange={setIsAddItemOpen}
+          open={isAddItemOpen} onOpenChange={(open) => { if (!addingItemRef.current) setIsAddItemOpen(open); }}
+          adding={addingItem}
           allProducts={allProducts} addItemProduct={addItemProduct} setAddItemProduct={setAddItemProduct}
           addItemQty={addItemQty} setAddItemQty={setAddItemQty}
           handleAddItemToTicket={handleAddItemToTicket}
@@ -2723,6 +3137,7 @@ export default function TicketsPage() {
                   ticketNotes={wsConversation.notes} ticketEmails={wsConversation.emails} ticketSms={wsConversation.sms}
                   recordLabel="workshop job"
                   allowStatusChange={false}
+                  allowTimeCapture={false}
                 />
               </TabsContent>
 
@@ -2806,7 +3221,7 @@ export default function TicketsPage() {
                   <div className="grid grid-cols-3 gap-3">
                     {wsPhotos.map(p => (
                       <div key={p.id} className="relative group rounded-lg border overflow-hidden" data-testid={`ws-photo-${p.id}`}>
-                        <img src={`${API}/uploads/workshop_photos/${p.filename}`} alt={p.original_name} className="w-full h-40 object-cover" />
+                        <ScopedFileImage src={`${API}/workshop/jobs/${viewWsJob.id}/photos/${p.id}/file`} alt={p.original_name} className="w-full h-40 object-cover" />
                         <div className="absolute top-1 left-1"><Badge className="text-[9px] bg-black/60 text-white">{p.photo_type}</Badge></div>
                         <Button variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteWsPhoto(p.id)}><X className="w-3 h-3" /></Button>
                         <div className="p-1.5 text-[10px] text-muted-foreground truncate">{p.uploaded_by_name} - {p.created_at?.slice(0, 10)}</div>
@@ -3055,14 +3470,17 @@ export default function TicketsPage() {
 
         {/* Device Intake Dialog */}
         <Dialog open={wsIntakeDialog} onOpenChange={setWsIntakeDialog}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden p-0 gap-0">
-            <DialogHeader className="px-6 pt-6 pb-5 border-b border-cyan-500/15 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.16),transparent_35%),linear-gradient(135deg,rgba(8,20,28,0.98),rgba(12,14,20,0.98))]">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center"><ClipboardList className="w-5 h-5 text-cyan-200" /></div>
-                <div><DialogTitle>Edit workshop service record</DialogTitle><p className="mt-1 text-sm text-muted-foreground">Correct the customer, asset and intake details while preserving the audit trail.</p></div>
-              </div>
-            </DialogHeader>
-            <div className="space-y-4 px-6 py-5 overflow-y-auto max-h-[63vh]">
+          <NexusWorkflowDialog
+            eyebrow="Workshop intake · evidence retained"
+            title="Edit workshop service record"
+            description="Correct the customer, asset and intake details while preserving the repair timeline and audit trail. The form stays in one scrollable workspace so no intake evidence is hidden below the fold."
+            icon={ClipboardList}
+            tone="cyan"
+            className="max-w-2xl"
+            contentClassName="scrollbar-thin space-y-4"
+            data-testid="ws-intake-workflow"
+            footer={<><p className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex"><Shield className="h-3.5 w-3.5 text-emerald-300" />Only diagnostic access details needed for this repair should be retained.</p><div className="flex gap-2"><Button variant="outline" onClick={() => setWsIntakeDialog(false)}>Cancel</Button><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="mr-1 h-4 w-4" />Save service record</Button></div></>}
+          >
               <section className="space-y-3 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.035] p-4">
                 <div className="flex items-center gap-2"><Wrench className="h-4 w-4 text-cyan-300" /><h3 className="text-sm font-semibold">Customer & repair brief</h3></div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><div><Label>Customer name</Label><Input value={wsIntakeForm.customer_name} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_name: e.target.value })} placeholder="Customer or organisation" /></div><div><Label>Phone</Label><Input value={wsIntakeForm.customer_phone} onChange={e => setWsIntakeForm({ ...wsIntakeForm, customer_phone: e.target.value })} placeholder="Contact number" /></div></div>
@@ -3126,11 +3544,7 @@ export default function TicketsPage() {
                 </div>
               </section>
               <p className="text-xs text-muted-foreground px-1">Tip: take a before photo from the Photos tab for any existing damage, then save this intake record.</p>
-            </div>
-            <DialogFooter className="px-6 py-4 border-t bg-muted/[0.12]">
-              <Button variant="outline" onClick={() => setWsIntakeDialog(false)}>Cancel</Button><Button onClick={handleSaveWsIntake} data-testid="ws-save-intake"><CheckCircle className="w-4 h-4 mr-1" />Save service record</Button>
-            </DialogFooter>
-          </DialogContent>
+          </NexusWorkflowDialog>
         </Dialog>
 
         {/* Diagnostic Template Picker Dialog */}
@@ -3222,7 +3636,7 @@ export default function TicketsPage() {
           <div className="lg:col-span-2 space-y-4">
             {/* Job Details */}
             <Card className="overflow-hidden border-cyan-500/20">
-              <CardHeader className="border-b border-cyan-500/15 bg-cyan-500/[0.045] pb-3"><CardTitle className="text-sm flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-300" />Service record</CardTitle><p className="text-[11px] font-normal text-muted-foreground">Client, site and dispatch information retained with the job.</p></CardHeader>
+              <CardHeader className="border-b border-cyan-500/15 bg-cyan-500/[0.045] pb-3"><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-sm flex items-center gap-2"><Wifi className="w-4 h-4 text-cyan-300" />Service record</CardTitle><p className="mt-1 text-[11px] font-normal text-muted-foreground">Client, site and dispatch information retained with the job.</p></div><Button type="button" variant="outline" size="sm" className="h-8 shrink-0 border-cyan-500/25 bg-cyan-500/[0.04] text-cyan-100 hover:bg-cyan-500/10" onClick={() => setFjSiteDialog(true)} data-testid="fj-edit-service-record"><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit record</Button></div></CardHeader>
               <CardContent className="space-y-2 pt-4 text-sm">
                 <div className="grid grid-cols-3 gap-3">
                   <div><span className="text-muted-foreground block text-xs">Customer</span><span className="font-medium">{viewFjJob.customer_name}</span></div>
@@ -3268,6 +3682,7 @@ export default function TicketsPage() {
                   ticketNotes={fjConversation.notes} ticketEmails={fjConversation.emails} ticketSms={fjConversation.sms}
                   recordLabel="field job"
                   allowStatusChange={false}
+                  allowTimeCapture={false}
                 />
               </TabsContent>
 
@@ -3343,7 +3758,7 @@ export default function TicketsPage() {
                   <div className="grid grid-cols-3 gap-3">
                     {fjPhotos.map(p => (
                       <div key={p.id} className="relative group rounded-lg border overflow-hidden">
-                        <img src={`${API}/uploads/field_photos/${p.filename}`} alt={p.original_name} className="w-full h-40 object-cover" />
+                        <ScopedFileImage src={`${API}/field-jobs/${viewFjJob.id}/photos/${p.id}/file`} alt={p.original_name} className="w-full h-40 object-cover" />
                         <div className="absolute top-1 left-1"><Badge className="text-[9px] bg-black/60 text-white">{p.photo_type.replace("_", " ")}</Badge></div>
                         <Button variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteFjPhoto(p.id)}><X className="w-3 h-3" /></Button>
                         <div className="p-1.5 text-[10px] text-muted-foreground truncate">{p.uploaded_by_name} - {p.created_at?.slice(0, 10)}</div>
@@ -3755,26 +4170,31 @@ export default function TicketsPage() {
   const completedTickets = tickets.filter(t => ["resolved", "closed"].includes(t.status));
   const completedCount = completedTickets.length;
   const criticalCount = tickets.filter(t => t.priority === "critical" && t.status !== "closed" && t.status !== "resolved").length;
-  const staleCount = tickets.filter(t => !t.last_response_at && Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000 && !["closed", "resolved"].includes(t.status)).length;
+  const staleCount = queueRecoverySignals.find(signal => signal.attention === "no_response")?.count || 0;
   const completedDurations = completedTickets.map(resolutionMinutes).filter(value => value != null);
   const avgResTime = completedDurations.length
     ? Math.round(completedDurations.reduce((total, value) => total + value, 0) / completedDurations.length)
     : null;
   const queueCountLabel = typeFilter === "workshop"
-    ? `${filteredWorkshopJobs.length} of ${workshopJobs.length} workshop jobs`
+    ? `${filteredWorkshopJobs.length} of ${standaloneWorkshopJobs.length} legacy workshop records`
     : typeFilter === "cabling_wisp"
-      ? `${filteredFieldJobs.length} of ${fieldJobs.length} field jobs`
-      : typeFilter === "all" && supportFiltersClear
-        ? `${filteredTickets.length} support · ${filteredWorkshopJobs.length} workshop · ${filteredFieldJobs.length} field`
-        : `${filteredTickets.length} of ${tickets.length} support tickets`;
+      ? `${filteredFieldJobs.length} of ${standaloneFieldJobs.length} legacy cabling & field records`
+      : `${filteredTickets.length} of ${tickets.length} Service Desk tickets`;
 
   return (
     <PageShell className="min-w-0 max-w-full overflow-x-hidden" data-testid="tickets-page">
       <div className="flex-1 min-w-0 overflow-y-auto p-6 space-y-5">
 
       <TicketModuleHeader
-        title="Ticket queue"
-        subtitle={`${tickets.length} support · ${workshopJobs.length} workshop · ${fieldJobs.length} field jobs · saved views and live service signals`}
+        title="Service Desk"
+        subtitle={`${tickets.length} service records · Prioritise, assign and resolve client requests`}
+        personal={learning.personal}
+        team={learning.team}
+        onRecordAction={learning.record}
+        onForgetLearning={learning.forget}
+        signal={criticalCount > 0 ? "critical" : staleCount > 0 ? "attention" : openCount > 0 ? "working" : "healthy"}
+        signalLabel={criticalCount > 0 ? `${criticalCount} critical ticket${criticalCount === 1 ? "" : "s"}` : staleCount > 0 ? `${staleCount} ticket${staleCount === 1 ? "" : "s"} need an update` : openCount > 0 ? `${openCount} active ticket${openCount === 1 ? "" : "s"}` : "Queue is clear"}
+        signalDescription="Live, access-scoped service evidence for the current queue."
         actions={<>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -3782,10 +4202,12 @@ export default function TicketsPage() {
                 <Plus className="mr-1 h-3 w-3" />New work<ChevronDown className="ml-1 h-3 w-3 opacity-70" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem onClick={() => setIsCreateOpen(true)} data-testid="create-ticket-btn"><Ticket className="mr-2 h-3.5 w-3.5 text-cyan-300" />Support ticket</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setWsDialog(true)} data-testid="create-ws-btn"><Wrench className="mr-2 h-3.5 w-3.5 text-amber-300" />Workshop job</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setFjDialog(true)} data-testid="create-fj-btn"><Radio className="mr-2 h-3.5 w-3.5 text-violet-300" />Cabling / field job</DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={() => startServiceKitIntake()} data-testid="create-ticket-btn"><Ticket className="mr-2 h-3.5 w-3.5 text-cyan-300" />Service ticket</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => startServiceKitIntake("workshop_repair")} data-testid="create-ws-kit-btn"><Wrench className="mr-2 h-3.5 w-3.5 text-cyan-300" />Workshop repair kit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => startServiceKitIntake("cabling_field")} data-testid="create-fj-kit-btn"><Radio className="mr-2 h-3.5 w-3.5 text-violet-300" />Cabling & field kit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTypeFilter("workshop")} className="mt-1 border-t border-white/[0.06] pt-2 text-xs text-muted-foreground" data-testid="view-legacy-ws-records"><History className="mr-2 h-3.5 w-3.5" />View legacy workshop records</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setTypeFilter("cabling_wisp")} className="text-xs text-muted-foreground" data-testid="view-legacy-fj-records"><History className="mr-2 h-3.5 w-3.5" />View legacy cabling &amp; field records</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground" onClick={fetchTickets} data-testid="refresh-tickets-btn" aria-label="Refresh ticket queue" title="Refresh ticket queue">
@@ -3796,79 +4218,51 @@ export default function TicketsPage() {
 
       <div className="space-y-3" data-testid="ticket-queue-controls">
 
-      {/* HeroTile metric strip */}
-      <div key="hero-tiles" className="min-w-0">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 h-full">
-          <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
-          <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
-          <HeroTile label="Completed" value={completedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && attentionFilter === "all"} testId="stat-resolved" />
-          <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
-          <HeroTile label="Awaiting Reply" value={staleCount} icon={MessageSquare} glow={staleCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
-          <HeroTile label="Avg Resolve" value={formatDuration(avgResTime)} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
-        </div>
-      </div>
+      <details className="rounded-xl border border-white/[0.08] bg-black/[0.12] px-3 py-2 text-xs text-muted-foreground" data-testid="ticket-queue-overview">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-1 py-1 font-medium hover:text-foreground focus-visible:outline-cyan-300">
+          <span>Queue overview</span>
+          <span className={criticalCount > 0 ? "text-rose-300" : staleCount > 0 ? "text-amber-300" : "text-emerald-300"}>
+            {criticalCount > 0 ? `${criticalCount} critical` : staleCount > 0 ? `${staleCount} need an update` : "No immediate exceptions"}
+          </span>
+        </summary>
+        <div className="space-y-3 pb-1 pt-3">
+          <div className="flex min-w-0 items-start gap-3 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3" data-testid="service-desk-delivery-model">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-300/25 bg-violet-400/[0.1] text-violet-100"><GitBranch className="h-4 w-4" /></div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-zinc-100">One request. One authoritative service record.</p>
+              <p className="mt-0.5 text-xs leading-5 text-muted-foreground">Workshop Repair and Cabling &amp; Field Kits add their specialist checklists, evidence and billing context below the parent ticket—without creating a competing queue.</p>
+            </div>
+          </div>
 
-      {/* Live ticket attention ticker */}
-      <div key="smart-inbox" className="w-full max-w-full min-w-0 overflow-hidden">
-        {(() => {
-          const breached = tickets.filter(t => t.sla_due_at && new Date(t.sla_due_at) < new Date() && !["closed", "resolved"].includes(t.status));
-          const critical = tickets.filter(t => (t.priority === "critical" || t.priority === "urgent" || t.priority === "p1") && !["closed", "resolved"].includes(t.status));
-          const stale = tickets.filter(t => !t.last_response_at && (Date.now() - new Date(t.created_at).getTime() > 4 * 60 * 60 * 1000) && !["closed", "resolved"].includes(t.status));
-          const items = [
-            ...breached.map(t => ({ ...t, _kind: "breached", _label: "SLA breached", _tone: "critical" })),
-            ...critical.map(t => ({ ...t, _kind: "critical", _label: t.priority?.toUpperCase() || "CRITICAL", _tone: "critical" })),
-            ...stale.map(t => ({ ...t, _kind: "stale", _label: "No response 4h+", _tone: "warning" })),
-          ].reduce((unique, item) => {
-            if (!unique.some(existing => existing.id === item.id)) unique.push(item);
-            return unique;
-          }, []).slice(0, 12);
-          if (items.length === 0) return (
-            <div className="nx-live-ticker" data-testid="tickets-smart-inbox-empty">
-              <div className="nx-live-ticker__label"><CheckCircle className="w-3.5 h-3.5" /><span>Attention feed</span><span className="nx-live-ticker__pulse" /></div>
-              <div className="min-w-0 flex-1 text-sm text-emerald-300">All clear - no tickets need attention right now.</div>
-              <span className="nx-live-ticker__refresh">Refreshes every minute</span>
+          <div key="hero-tiles" className="min-w-0">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+              <HeroTile label="Open" value={openCount} icon={Circle} glow="cyan" onClick={() => applyQueueFilter({ status: "open" })} active={statusFilter === "open" && attentionFilter === "all"} testId="stat-open" />
+              <HeroTile label="In Progress" value={inProgressCount} icon={Clock} glow="amber" onClick={() => applyQueueFilter({ status: "in_progress" })} active={statusFilter === "in_progress" && attentionFilter === "all"} testId="stat-progress" />
+              <HeroTile label="Completed" value={completedCount} icon={CheckCircle} glow="emerald" onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && attentionFilter === "all"} testId="stat-resolved" />
+              <HeroTile label="Critical" value={criticalCount} icon={AlertCircle} glow={criticalCount > 0 ? "rose" : "emerald"} onClick={() => applyQueueFilter({ priority: "critical" })} active={priorityFilter === "critical" && attentionFilter === "all"} testId="stat-critical" />
+              <HeroTile label="Activity Stale" value={staleCount} icon={MessageSquare} glow={staleCount > 0 ? "amber" : "emerald"} onClick={() => applyQueueFilter({ attention: "no_response" })} active={attentionFilter === "no_response"} testId="stat-no-notes" />
+              <HeroTile label="Avg Resolve" value={formatDuration(avgResTime)} icon={Timer} glow="violet" animated={false} onClick={() => applyQueueFilter({ status: "completed" })} active={statusFilter === "completed" && priorityFilter === "all" && attentionFilter === "all"} testId="stat-avg-time" />
             </div>
-          );
-          const repeatedItems = [...items, ...items];
-          return (
-            <div className="nx-live-ticker" data-testid="tickets-smart-inbox">
-              <div className="nx-live-ticker__label">
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-300" />
-                <span>Needs attention</span>
-                <span className="nx-live-ticker__pulse" />
-                <Badge variant="outline" className="border-rose-500/25 bg-rose-500/[0.08] text-[9px] text-rose-200">{items.length}</Badge>
-              </div>
-              <div className="nx-live-ticker__viewport">
-                <div className="nx-live-ticker__track">
-                  {repeatedItems.map((t, index) => (
-                    <button
-                      key={`${t.id}-${t._kind}-${index}`}
-                      onClick={() => { setViewingTicket(t); fetchTicketDetail(t); }}
-                      className={`nx-live-ticker__item nx-live-ticker__item--${t._tone}`}
-                      data-testid={index < items.length ? `tickets-inbox-${t.id}-${t._kind}` : undefined}
-                      title={`Open ${t.ticket_number || "ticket"}`}
-                    >
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span className="font-medium">{t._label}</span>
-                      <span className="nx-live-ticker__detail">{t.ticket_number ? `#${t.ticket_number}` : "Ticket"} | {t.title}{t.client_name ? ` | ${t.client_name}` : ""}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <span className="nx-live-ticker__refresh">{breached.length} breached | {critical.length} critical | {stale.length} stale</span>
-            </div>
-          );
-        })()}
-       </div>
+          </div>
+
+          <TicketQueueRecovery
+            signals={queueRecoverySignals}
+            activeAttention={attentionFilter}
+            onFilterChange={attention => applyQueueFilter({ attention })}
+            onClear={() => applyQueueFilter({})}
+            onOpenTicket={ticket => fetchTicketDetail(ticket)}
+          />
+        </div>
+      </details>
 
        {/* Type Filter Tabs */}
       <div key="type-tabs" className="min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap rounded-xl border border-white/[0.08] bg-black/[0.14] p-1.5 h-full">
           {[
-            { val: "all", label: "All", icon: Ticket, count: tickets.length + workshopJobs.length + fieldJobs.length },
+            { val: "all", label: "Service Desk", icon: Ticket, count: tickets.length },
             { val: "sla", label: "SLA", icon: Shield, count: tickets.length, color: "text-blue-400" },
-            { val: "workshop", label: "Workshop", icon: Wrench, count: workshopJobs.length, color: "text-purple-400" },
-            { val: "cabling_wisp", label: "Cabling / WISP", icon: Wifi, count: fieldJobs.length, color: "text-cyan-400" },
+            { val: "workshop", label: "Historical workshop", icon: Wrench, count: standaloneWorkshopJobs.length, color: "text-purple-400" },
+            { val: "cabling_wisp", label: "Historical field work", icon: Wifi, count: standaloneFieldJobs.length, color: "text-cyan-400" },
           ].map(t => (
             <Button key={t.val} variant="outline" size="sm"
               onClick={() => setTypeFilter(t.val)}
@@ -3905,26 +4299,32 @@ export default function TicketsPage() {
         </WorkspaceControlBar>
       </div>
 
-      {/* Saved Views · Density · Group By toolbar */}
+      {/* Saved views and display preferences stay together so the queue reads as
+          one intentional control area rather than separate toolbars. */}
       <div key="toolbar" className="min-w-0">
         {(typeFilter === "all" || typeFilter === "sla") ? (
-          <>
-            <SavedViewsBar
-              scope="tickets" headers={headers}
-              currentSnapshot={currentSnapshot}
-              activeViewId={activeViewId}
-              onApply={applyView}
-              onClearActive={() => applyView(null)}
-            />
-            <div className="flex items-center gap-1 px-1 -mb-1 mt-1">
-              <DensityToggle density={density} setDensity={setDensity} />
-              <span className="text-zinc-700">·</span>
-              <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
+          <div className="rounded-xl border border-white/[0.08] bg-black/[0.14] px-2.5 py-2 sm:px-3">
+            <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <SavedViewsBar
+                  scope="tickets" headers={headers}
+                  currentSnapshot={currentSnapshot}
+                  activeViewId={activeViewId}
+                  onApply={applyView}
+                  onClearActive={() => applyView(null)}
+                />
+              </div>
+              <div className="flex items-center gap-1.5 border-t border-white/[0.06] pt-2 lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0">
+                <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-600">Display</span>
+                <DensityToggle density={density} setDensity={setDensity} />
+                <span className="text-zinc-700">·</span>
+                <GroupBySelector groupBy={groupBy} setGroupBy={setGroupBy} />
+              </div>
             </div>
-          </>
+          </div>
         ) : (
           <div className="text-[11px] text-zinc-500 flex items-center gap-2 h-full">
-            <Settings2 className="w-3 h-3" />Saved Views & grouping available on SLA / All tab
+            <Settings2 className="w-3 h-3" />Saved Views & grouping are available in Service Desk and SLA
           </div>
         )}
       </div>
@@ -3948,7 +4348,7 @@ export default function TicketsPage() {
               <Select value={bulkAction} onValueChange={v => { setBulkAction(v); setBulkValue(""); }}>
                 <SelectTrigger className="w-[150px] h-8 text-xs" data-testid="bulk-action-select"><SelectValue placeholder="Bulk action..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="close">Close All</SelectItem>
+                  <SelectItem value="close">Close selected</SelectItem>
                   <SelectItem value="assign">Assign To...</SelectItem>
                   <SelectItem value="priority">Change Priority</SelectItem>
                   <SelectItem value="status">Change Status</SelectItem>
@@ -3976,7 +4376,19 @@ export default function TicketsPage() {
               {bulkAction === "tag" && (
                 <Input className="w-[130px] h-8 text-xs" placeholder="Tag name..." value={bulkValue} onChange={e => setBulkValue(e.target.value)} />
               )}
-              <Button size="sm" className="h-8 text-xs" onClick={handleBulkAction} disabled={bulkProcessing || !bulkAction || (bulkAction !== "close" && !bulkValue)} data-testid="apply-bulk-btn">
+              <Button
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => {
+                  if (bulkAction === "close") {
+                    requestResolutionReview(filteredTickets.filter(ticket => selectedTickets.has(ticket.id)), "closed");
+                    return;
+                  }
+                  handleBulkAction();
+                }}
+                disabled={bulkProcessing || !bulkAction || (bulkAction !== "close" && !bulkValue)}
+                data-testid="apply-bulk-btn"
+              >
                 {bulkProcessing ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Zap className="w-3 h-3 mr-1" />}
                 Apply ({selectedTickets.size})
               </Button>
@@ -4016,13 +4428,18 @@ export default function TicketsPage() {
               tone={group.tone} defaultOpen={group.defaultOpen !== false}
               testId={`group-${group.key}`}
             >
-              {group.items.map(t => (
+              {group.items.map((t, rowIndex) => (
                 <TicketRow
                   key={t.id} ticket={t} density={density}
                   isSelected={selectedTickets.has(t.id)}
                   onToggleSelect={toggleTicketSelect}
                   onOpen={fetchTicketDetail}
                   onQuickAction={handleQueueQuickAction}
+                  onStatusChange={handleQueueStatusChange}
+                  onRequestTerminal={requestResolutionReview}
+                  statusPending={queueStatusPendingId === t.id}
+                  recentlyChanged={recentlyChangedTicketId === t.id}
+                  index={rowIndex}
                   viewers={ticketViewers[t.id] || []}
                   noteCount={noteCounts[t.id]}
                   attachmentCount={t.attachment_count}
@@ -4032,13 +4449,18 @@ export default function TicketsPage() {
               ))}
             </TicketGroupSection>
           ) : (
-            group.items.map(t => (
+            group.items.map((t, rowIndex) => (
               <TicketRow
                 key={t.id} ticket={t} density={density}
                 isSelected={selectedTickets.has(t.id)}
                 onToggleSelect={toggleTicketSelect}
                 onOpen={fetchTicketDetail}
                 onQuickAction={handleQueueQuickAction}
+                onStatusChange={handleQueueStatusChange}
+                onRequestTerminal={requestResolutionReview}
+                statusPending={queueStatusPendingId === t.id}
+                recentlyChanged={recentlyChangedTicketId === t.id}
+                index={rowIndex}
                 viewers={ticketViewers[t.id] || []}
                 noteCount={noteCounts[t.id]}
                 attachmentCount={t.attachment_count}
@@ -4052,16 +4474,20 @@ export default function TicketsPage() {
         {(typeFilter === "all" || typeFilter === "sla") && filteredTickets.length === 0 && (
           <div className="py-16 text-center" data-testid="ticket-list-empty">
             <Ticket className="w-10 h-10 mx-auto text-zinc-700 mb-3" />
-            <p className="text-sm text-zinc-500 mb-3">No tickets match your filters</p>
-            <Button variant="outline" size="sm" onClick={() => { applyQueueFilter({}); setSearchQuery(""); }}>Clear filters</Button>
+            <p className="text-sm text-zinc-500 mb-3">No Service Desk tickets match your filters</p>
+            <div className="flex justify-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => { applyQueueFilter({}); setSearchQuery(""); }}>Clear filters</Button>
+              <Button size="sm" onClick={() => startServiceKitIntake()}><Plus className="mr-1.5 h-3.5 w-3.5" />Create service ticket</Button>
+            </div>
           </div>
         )}
       </div>}
       <div className="space-y-2">
-        {/* Workshop / Field jobs continue rendering below */}
+        {/* Legacy standalone records remain operationally available for historical work,
+            but new delivery starts through a Service Kit on the parent ticket. */}
 
-        {/* Workshop Job Cards (inline in unified list) */}
-        {((typeFilter === "all" && supportFiltersClear) || typeFilter === "workshop") && filteredWorkshopJobs.map(j => {
+        {/* Legacy Workshop Job Cards */}
+        {typeFilter === "workshop" && filteredWorkshopJobs.map(j => {
           const wsStatus = WS_STATUSES[j.repair_status] || WS_STATUSES.checked_in;
           return (
             <Card key={`ws-${j.id}`} className="group cursor-pointer overflow-hidden border border-cyan-500/15 bg-gradient-to-r from-cyan-500/[0.05] via-background to-background transition-all hover:border-cyan-500/35 hover:shadow-md hover:shadow-cyan-950/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
@@ -4101,8 +4527,8 @@ export default function TicketsPage() {
           );
         })}
 
-        {/* Cabling/WISP Job Cards (inline in unified list) */}
-        {((typeFilter === "all" && supportFiltersClear) || typeFilter === "cabling_wisp") && filteredFieldJobs.map(j => {
+        {/* Legacy Cabling/WISP Job Cards */}
+        {typeFilter === "cabling_wisp" && filteredFieldJobs.map(j => {
           const fjStatus = FJ_STATUSES[j.field_status] || FJ_STATUSES.scheduled;
           return (
             <Card key={`fj-${j.id}`} className="group cursor-pointer overflow-hidden border border-cyan-500/15 border-l-4 border-l-cyan-500 bg-gradient-to-r from-cyan-500/[0.05] via-background to-background transition-all hover:border-cyan-500/35 hover:shadow-md hover:shadow-cyan-950/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/70"
@@ -4144,31 +4570,47 @@ export default function TicketsPage() {
         {((typeFilter === "workshop" && filteredWorkshopJobs.length === 0) || (typeFilter === "cabling_wisp" && filteredFieldJobs.length === 0)) && (
           <Card className="border-dashed"><CardContent className="py-12 text-center">
             <Ticket className="w-12 h-12 mx-auto text-muted-foreground mb-3 opacity-30" />
-            <p className="text-muted-foreground mb-3">No items match your filters</p>
+            <p className="text-muted-foreground mb-1">No legacy records match your filters</p>
+            <p className="mx-auto mb-3 max-w-md text-xs leading-5 text-muted-foreground">New delivery work is created from the parent ticket with a Service Kit, so its customer history, SLA and billing evidence stay together.</p>
+            <Button size="sm" onClick={() => startServiceKitIntake(typeFilter === "workshop" ? "workshop_repair" : "cabling_field")}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />Create {typeFilter === "workshop" ? "Workshop" : "Cabling & field"} kit
+            </Button>
           </CardContent></Card>
         )}
       </div>
 
       <CreateTicketDialog
-        open={isCreateOpen} onOpenChange={setIsCreateOpen}
+        open={isCreateOpen} onOpenChange={(open) => { if (!createTicketPendingRef.current) setIsCreateOpen(open); }}
         formData={formData} setFormData={setFormData}
         clients={clients} clientContacts={createClientContacts} devices={devices} users={users} tickets={tickets}
         services={services}
         handleAiTriage={handleAiTriage} triaging={triaging}
         triageResult={triageResult} applyTriage={applyTriage}
         handleCreateTicket={handleCreateTicket}
+        creating={creatingTicket}
+        dupeCandidates={dupeCandidates}
       />
 
-      <CreateWorkshopJobDialog
-        open={wsDialog} onOpenChange={setWsDialog}
-        wsForm={wsForm} setWsForm={setWsForm} users={users} clients={clients}
-        handleCreateWsJob={handleCreateWsJob}
-      />
+      <AlertDialog open={Boolean(attachmentDeleteTarget)} onOpenChange={(open) => !open && setAttachmentDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {attachmentDeleteTarget?.filename || "this attachment"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the retained file. Nexus will preserve an audit record of who removed it and when.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep file</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={confirmDeleteAttachment} data-testid="confirm-delete-ticket-attachment">Remove file</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      <CreateFieldJobDialog
-        open={fjDialog} onOpenChange={setFjDialog}
-        fjForm={fjForm} setFjForm={setFjForm} users={users} clients={clients}
-        handleCreateFjJob={handleCreateFjJob}
+      <TicketResolutionReviewDialog
+        review={resolutionReview}
+        onOpenChange={(open) => !open && setResolutionReview(null)}
+        onConfirm={confirmResolutionReview}
+        busy={resolutionProcessing}
       />
 
       </div>

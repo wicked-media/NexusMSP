@@ -17,6 +17,8 @@ import {
   LayoutGrid, Wrench, Sparkles, PaintBucket, FileText, Receipt, ScanLine, FileSignature, Tag,
   RefreshCw,
 } from "lucide-react";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
+import BillingWorkspaceNav from "@/components/billing/BillingWorkspaceNav";
 
 const MERGE_TAGS = [
   "{{invoice_number}}", "{{client_name}}", "{{due_date}}", "{{issue_date}}",
@@ -41,6 +43,7 @@ const PRESET_ICONS = {
   hardware_procurement: { icon: Receipt, gradient: "from-blue-800/30 to-sky-400/20" },
   renewal_notice: { icon: RefreshCw, gradient: "from-orange-600/30 to-amber-400/20" },
   technology_proposal: { icon: FileEdit, gradient: "from-sky-600/30 to-cyan-400/20" },
+  purchase_order_standard: { icon: Receipt, gradient: "from-blue-800/30 to-sky-400/20" },
   qbr_value_review: { icon: LayoutGrid, gradient: "from-violet-700/30 to-purple-400/20" },
 };
 
@@ -56,19 +59,28 @@ export default function InvoiceTemplatesPage() {
   const [saving, setSaving] = useState(false);
   const [previewUrl, setPreviewUrl] = useState("");
   const [editorTab, setEditorTab] = useState("blocks");
+  const [documentProfiles, setDocumentProfiles] = useState({});
+  const [profileSavingType, setProfileSavingType] = useState("");
   const dragKey = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [g, l, c] = await Promise.all([
+      const [g, l, c, invoiceProfile, purchaseOrderProfile] = await Promise.allSettled([
         axios.get(`${API}/invoice-templates/gallery`, { headers }),
         axios.get(`${API}/invoice-templates?include_presets=false`, { headers }),
         axios.get(`${API}/invoice-templates/blocks/catalog`, { headers }),
+        axios.get(`${API}/commercial-documents/invoice/profile`, { headers }),
+        axios.get(`${API}/commercial-documents/purchase_order/profile`, { headers }),
       ]);
-      setGallery(g.data || []);
-      setList(l.data || []);
-      setCatalog(c.data || []);
+      if (g.status !== "fulfilled" || l.status !== "fulfilled" || c.status !== "fulfilled") throw new Error("Document Studio is unavailable");
+      setGallery(g.value.data || []);
+      setList(l.value.data || []);
+      setCatalog(c.value.data || []);
+      setDocumentProfiles({
+        invoice: invoiceProfile.status === "fulfilled" ? invoiceProfile.value.data : undefined,
+        purchase_order: purchaseOrderProfile.status === "fulfilled" ? purchaseOrderProfile.value.data : undefined,
+      });
     } catch { toast.error("Load failed"); }
     finally { setLoading(false); }
   }, [headers]);
@@ -151,6 +163,31 @@ export default function InvoiceTemplatesPage() {
 
   useEffect(() => { refreshPreview(); }, [refreshPreview]);
 
+  const updateDocumentProfile = (documentType, patch) => {
+    setDocumentProfiles((current) => ({
+      ...current,
+      [documentType]: {
+        ...(current[documentType] || {}),
+        profile: { ...(current[documentType]?.profile || {}), ...patch },
+      },
+    }));
+  };
+
+  const saveDocumentProfile = async (documentType) => {
+    const profile = documentProfiles[documentType]?.profile;
+    if (!profile) return;
+    setProfileSavingType(documentType);
+    try {
+      const response = await axios.put(`${API}/commercial-documents/${documentType}/profile`, { profile }, { headers });
+      setDocumentProfiles((current) => ({ ...current, [documentType]: response.data }));
+      toast.success(`${documentType === "invoice" ? "Invoice" : "Purchase order"} defaults saved`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not save document defaults");
+    } finally {
+      setProfileSavingType("");
+    }
+  };
+
   // ───────── Block helpers ─────────
   const toggleBlock = (key) => {
     setSelected((s) => ({
@@ -190,6 +227,14 @@ export default function InvoiceTemplatesPage() {
   // ─────────────────────────── Render ───────────────────────────
   return (
     <div className="p-6 space-y-5" data-testid="invoice-templates-page">
+      {view === "gallery" && <DocumentDefaultsPanel
+        gallery={gallery}
+        list={list}
+        profiles={documentProfiles}
+        savingType={profileSavingType}
+        updateProfile={updateDocumentProfile}
+        saveProfile={saveDocumentProfile}
+      />}
       {view === "gallery" ? (
         <GalleryView gallery={gallery} list={list} loading={loading} clonePreset={clonePreset} open={open} remove={remove} duplicate={duplicate} setDefault={setDefault} token={token} onToggleView={() => setView("builder")} onCreateBlank={createBlank} />
       ) : (
@@ -206,6 +251,43 @@ export default function InvoiceTemplatesPage() {
   );
 }
 
+function DocumentDefaultsPanel({ gallery, list, profiles, savingType, updateProfile, saveProfile }) {
+  const [documentType, setDocumentType] = useState("invoice");
+  const profile = profiles[documentType]?.profile;
+  if (!profile) return null;
+  const templates = [...gallery, ...list]
+    .filter((template, index, all) => template.doc_type === documentType && all.findIndex(candidate => candidate.id === template.id) === index);
+  const label = documentType === "invoice" ? "Invoice" : "Purchase order";
+
+  return (
+    <Card className="overflow-hidden border-cyan-400/20 bg-[linear-gradient(130deg,rgba(8,29,42,0.9),rgba(12,20,31,0.82))]" data-testid="commercial-document-defaults">
+      <CardContent className="space-y-4 p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Organisation document defaults</p>
+            <h2 className="mt-1 text-lg font-semibold text-zinc-100">One polished language across billing and procurement</h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">These defaults apply to new drafts. A technician may tailor an individual draft, but the exact profile is frozen with the document when it is sent.</p>
+          </div>
+          <div className="flex rounded-lg border border-white/10 bg-black/15 p-1">
+            {[['invoice', 'Invoices'], ['purchase_order', 'Purchase orders']].map(([value, text]) => <Button key={value} type="button" size="sm" variant={documentType === value ? "default" : "ghost"} className="h-8" onClick={() => setDocumentType(value)}>{text}</Button>)}
+          </div>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div><Label className="text-xs">Customer-facing title</Label><Input value={profile.label || ""} maxLength={120} onChange={(event) => updateProfile(documentType, { label: event.target.value })} placeholder={documentType === "invoice" ? "Tax Invoice" : "Purchase Order"} data-testid={`commercial-default-${documentType}-label`} /></div>
+          <div><Label className="text-xs">Default design</Label><Select value={profile.template_id || "__default"} onValueChange={(value) => updateProfile(documentType, { template_id: value === "__default" ? "" : value })}><SelectTrigger data-testid={`commercial-default-${documentType}-template`}><SelectValue placeholder="Nexus standard" /></SelectTrigger><SelectContent><SelectItem value="__default">Nexus standard</SelectItem>{templates.map(template => <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="md:col-span-2"><Label className="text-xs">Subtitle <span className="font-normal text-muted-foreground">(optional)</span></Label><Input value={profile.subtitle || ""} maxLength={240} onChange={(event) => updateProfile(documentType, { subtitle: event.target.value })} placeholder={documentType === "invoice" ? "Managed services and technology partnership" : "Approved vendor commitment and delivery instruction"} /></div>
+          <div className="md:col-span-2"><Label className="text-xs">Terms <span className="font-normal text-muted-foreground">(optional)</span></Label><Textarea rows={3} maxLength={5000} value={profile.terms || ""} onChange={(event) => updateProfile(documentType, { terms: event.target.value })} placeholder={documentType === "invoice" ? "Payment, service or remittance terms" : "Delivery, acceptance or supplier payment terms"} /></div>
+          <div className="md:col-span-2"><Label className="text-xs">Footer and provenance note</Label><Textarea rows={3} maxLength={1000} value={profile.footer || ""} onChange={(event) => updateProfile(documentType, { footer: event.target.value })} placeholder="Retained NexusMSP commercial record" /></div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.08] pt-3">
+          <p className="text-xs text-muted-foreground"><span className="font-medium text-zinc-300">{label} safety:</span> formal number, approval status, totals, tax and audit evidence cannot be changed here.</p>
+          <Button size="sm" onClick={() => saveProfile(documentType)} disabled={savingType === documentType} data-testid={`save-commercial-default-${documentType}`}><Save className={`mr-1.5 h-3.5 w-3.5 ${savingType === documentType ? "animate-pulse" : ""}`} />{savingType === documentType ? "Saving…" : `Save ${label.toLowerCase()} defaults`}</Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ════════════════════════════════════════ Gallery View ════════════════════════════════════════
 function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplicate, setDefault, token, onToggleView, onCreateBlank }) {
   const [typeFilter, setTypeFilter] = useState("all");
@@ -214,16 +296,13 @@ function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplic
   if (loading) return <div className="p-12 text-center"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.12] via-background to-cyan-500/[0.08] p-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">Client-facing documents</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Document design studio</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Start from a proven MSP document system, then tailor the blocks, brand colours, payment language, and layout for your organisation.</p></div>
-          <div className="flex flex-wrap items-center gap-2"><div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">{gallery.length}</p><p className="text-[10px] text-muted-foreground">Presets</p></div><div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">{list.length}</p><p className="text-[10px] text-muted-foreground">Your designs</p></div><div className="rounded-xl border border-border/60 bg-background/60 px-3 py-2"><p className="text-lg font-semibold">4</p><p className="text-[10px] text-muted-foreground">Document types</p></div></div><Button variant="outline" size="sm" onClick={onToggleView} data-testid="invoice-studio-toggle-view"><Wrench className="mr-1.5 h-3.5 w-3.5" />My Templates</Button><Button size="sm" onClick={onCreateBlank} data-testid="invoice-tpl-new-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />New template</Button></div>
-        </div>
-      </section>
+      <OperationalPageHeader eyebrow="Commercial documents · governed design" title="Document design studio" description="Tailor Nexus document systems, brand language and payment guidance without changing financial or audit evidence." icon={FileEdit} tone="emerald" meta={[`${gallery.length} presets`, `${list.length} saved designs`, `${new Set(gallery.map(template => template.doc_type)).size} document types`]} actions={<><Button variant="outline" size="sm" onClick={onToggleView} data-testid="invoice-studio-toggle-view"><Wrench className="mr-1.5 h-3.5 w-3.5" />My templates</Button><Button size="sm" onClick={onCreateBlank} data-testid="invoice-tpl-new-btn"><Plus className="mr-1.5 h-3.5 w-3.5" />New template</Button></>} />
+
+      <BillingWorkspaceNav />
 
       <div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3"><div className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /><h2 className="text-base font-medium">Designer Gallery</h2><Badge variant="outline" className="text-[10px]">{filteredGallery.length} shown</Badge></div><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search designs" className="h-9 sm:w-56" /></div>
-        <div className="mb-4 flex flex-wrap gap-2">{[["all", "All designs"], ["invoice", "Invoices"], ["estimate", "Quotes"], ["statement", "Statements"], ["qbr", "QBRs"]].map(([value, label]) => <Button key={value} size="sm" variant={typeFilter === value ? "default" : "outline"} onClick={() => setTypeFilter(value)}>{label}</Button>)}</div>
+        <div className="mb-4 flex flex-wrap gap-2">{[["all", "All designs"], ["invoice", "Invoices"], ["purchase_order", "Purchase orders"], ["estimate", "Quotes"], ["statement", "Statements"], ["qbr", "QBRs"]].map(([value, label]) => <Button key={value} size="sm" variant={typeFilter === value ? "default" : "outline"} onClick={() => setTypeFilter(value)}>{label}</Button>)}</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
           {filteredGallery.map((p) => {
             const meta = PRESET_ICONS[p.preset_key] || { icon: FileEdit, gradient: "from-emerald-500/20 to-slate-800" };
@@ -286,7 +365,9 @@ function GalleryView({ gallery, list, loading, clonePreset, open, remove, duplic
 function BuilderView({ selected, setSelected, list, catalog, loading, saving, open, save, remove, duplicate, setDefault, previewUrl, refreshPreview, editorTab, setEditorTab, toggleBlock, updateBlock, updateBlockStyle, reorderBlock, updatePage, dragKey }) {
   if (loading) return <div className="p-12 text-center"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
   return (
-    <div className="grid grid-cols-12 gap-4">
+    <div className="space-y-4">
+      <BillingWorkspaceNav />
+      <div className="grid grid-cols-12 gap-4">
       {/* Left: Template list */}
       <Card className="col-span-3 h-[82vh] overflow-y-auto">
         <CardContent className="p-2">
@@ -336,6 +417,7 @@ function BuilderView({ selected, setSelected, list, catalog, loading, saving, op
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="invoice">Invoice</SelectItem>
+                      <SelectItem value="purchase_order">Purchase order</SelectItem>
                       <SelectItem value="estimate">Estimate</SelectItem>
                       <SelectItem value="qbr">QBR</SelectItem>
                       <SelectItem value="statement">Statement</SelectItem>
@@ -343,6 +425,13 @@ function BuilderView({ selected, setSelected, list, catalog, loading, saving, op
                   </Select>
                 </div>
               </div>
+
+              {['invoice', 'purchase_order'].includes(selected.doc_type) && (
+                <div className="rounded-xl border border-cyan-400/15 bg-cyan-400/[0.055] px-3 py-2.5 text-xs text-slate-300" data-testid="commercial-renderer-contract">
+                  <p className="font-medium text-cyan-200">Delivery-grade commercial renderer</p>
+                  <p className="mt-1 leading-relaxed text-muted-foreground">This preview uses the exact engine used for download and email. Brand palette, title, terms, footer, remittance details, signature and safe custom text are honoured; financial totals, tax, approval and audit evidence remain protected.</p>
+                </div>
+              )}
 
               <Tabs value={editorTab} onValueChange={setEditorTab}>
                 <TabsList className="grid grid-cols-3 w-full">
@@ -403,6 +492,7 @@ function BuilderView({ selected, setSelected, list, catalog, loading, saving, op
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,11 @@
+[flake8]
+# Gate on real defects only: syntax errors, undefined names, unused imports,
+# unused locals, and redefinitions. pycodestyle layout rules (E1/E2/E3/E5/W) are
+# deliberately out of scope: the codebase predates a formatter gate, black owns
+# line length, and E501/E302 alone would be ~30k findings of pure noise.
+select = E9,F
+# `from app.models import *` is a deliberate pattern in the router layer and
+# several modules resolve model symbols through it. pyflakes cannot follow star
+# imports, so F403/F405 carry no signal here.
+extend-ignore = F403,F405
+exclude = .venv,__pycache__,uploads,private_uploads

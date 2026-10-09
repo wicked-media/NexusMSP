@@ -41,7 +41,7 @@
     "backend": "96% (23/24 passed, 1 skipped)",
     "frontend": "100% - All new components verified"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -77,7 +77,7 @@
         "data-testid='workflow-maint-btn'": "PASS",
         "data-testid='workflow-csat-btn'": "PASS",
         "maintenance_scheduled_card": "PASS",
-        "change_badge": "PASS (purple 'Change · medium risk · draft')"
+        "change_badge": "PASS (purple 'Change Â· medium risk Â· draft')"
       },
       "TicketDeviceCockpit": {
         "data-testid='device-cockpit'": "PASS",

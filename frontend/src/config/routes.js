@@ -14,7 +14,15 @@ export const routeConfig = [
   { path: "/", component: page("DashboardPage"), auth: true, layout: true },
   { path: "/nexus-suite", component: page("NexusSuitePage"), auth: true, layout: true },
   { path: "/deployment-hub", component: DeploymentHubPage, auth: true, layout: true },
-  { path: "/shadow-it", component: page("ShadowITPage"), auth: true, layout: true },
+  { path: "/nexus-switchboard", component: page("NexusSwitchboardPage"), auth: true, layout: true },
+  { path: "/nexus-continuity", component: page("NexusContinuityPage"), auth: true, layout: true },
+  { path: "/nexus-data-quality", component: page("NexusDataQualityPage"), auth: true, layout: true },
+  { path: "/nexus-pulse", component: page("NexusPulsePage"), auth: true, layout: true },
+  { path: "/nexus-proving-ground", component: page("NexusProvingGroundPage"), auth: true, layout: true },
+  // The component name must match the file on disk exactly: this route resolves
+  // through a webpack dynamic-import context, which does not case-fold, so the
+  // mixed-case name previously used here failed to load on Linux builds.
+  { path: "/shadow-it", component: page("ShadowItPage"), auth: true, layout: true },
   { path: "/nexus-elevate", component: page("NexusElevatePage"), auth: true, layout: true },
   { path: "/hudu", component: page("HuduCommandCenterPage"), auth: true, layout: true },
   { path: "/control-plane", component: page("NexusControlPlanePage"), auth: true, layout: true },
@@ -27,6 +35,7 @@ export const routeConfig = [
   { path: "/m365", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=security" },
   { path: "/unifi", component: page("UnifiCommandCenterPage"), auth: true, layout: true },
   { path: "/nexus-agent", component: page("NexusAgentCenterPage"), auth: true, layout: true },
+  { path: "/application-manager", component: page("NexusApplicationManagerPage"), auth: true, layout: true },
   { path: "/warroom", component: page("WarRoomPage"), auth: true, layout: true },
   { path: "/warroom/:id", component: page("WarRoomPage"), auth: true, layout: false },
   { path: "/warroom/public/:slug", component: page("WarRoomPublicPage"), auth: false, layout: false },
@@ -77,7 +86,10 @@ export const routeConfig = [
   // Integrations
   { path: "/pax8", component: page("Pax8CommandCenterPage"), auth: true, layout: true },
   { path: "/domotz", component: page("DomotzPage"), auth: true, layout: true },
-  { path: "/remote-access", component: page("RemoteAccessPage"), auth: true, layout: true },
+  // Nexus Remote is the product-facing workspace. Keep /remote-access as a
+  // compatibility path for existing ticket, device and Work Session links.
+  { path: "/nexus-remote", component: page("NativeRemoteAccessPage"), auth: true, layout: true },
+  { path: "/remote-access", component: page("NativeRemoteAccessPage"), auth: true, layout: true },
   { path: "/acronis", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/backup-center?tab=tenants" },
   { path: "/proxmox", component: page("ProxmoxPage"), auth: true, layout: true },
   { path: "/splynx-dashboard", component: page("SplynxDashboardPage"), auth: true, layout: true },
@@ -124,8 +136,12 @@ export const routeConfig = [
   { path: "/doc-scanner", component: page("DocScannerPage"), auth: true, layout: true },
   // NexusMSP does not manage credentials or MFA. Legacy links point to the external credential workspace.
   { path: "/vault", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/hudu" },
-  { path: "/runbooks", component: page("RunbooksPage"), auth: true, layout: true },
+  // Legacy runbooks could create ungoverned, simulated automations. Keep old
+  // bookmarks working but take technicians to the single governed workflow studio.
+  { path: "/runbooks", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/workflow-automation" },
   { path: "/scripting", component: page("ScriptingPage"), auth: true, layout: true },
+  { path: "/script-library", component: page("ScriptLibraryPage"), auth: true, layout: true },
+  { path: "/nexus-guardian", component: page("NexusGuardianPage"), auth: true, layout: true },
 
   // People & Scheduling — Team Command is the single workspace; retain old URLs as redirects.
   { path: "/tech-command", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/team-hub?tab=command&view=directory" },
@@ -142,6 +158,11 @@ export const routeConfig = [
   { path: "/client-compare", component: page("ClientComparePage"), auth: true, layout: true },
   { path: "/client-risk", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "client-risk" },
   { path: "/csat-surveys", component: page("CsatSurveysPage"), auth: true, layout: true },
+  { path: "/technician-onboarding", component: page("TechnicianOnboardingPage"), auth: true, layout: true },
+  { path: "/onboarding-checklists", component: page("OnboardingChecklistsPage"), auth: true, layout: true },
+  { path: "/tech-rewards", component: page("TechRewardsPage"), auth: true, layout: true },
+  { path: "/toolbox", component: page("TechToolboxPage"), auth: true, layout: true },
+  { path: "/nexus-academy", component: page("NexusAcademyPage"), auth: true, layout: true },
   { path: "/onboarding", component: page("OnboardingWizardPage"), auth: true, layout: true },
   { path: "/sentiment", component: page("ClientInsightsTabRedirectPage"), auth: true, layout: true, redirectTab: "sentiment" },
   // Legacy Upsell Detector links now resolve to the richer Revenue Growth pipeline.
@@ -160,7 +181,9 @@ export const routeConfig = [
   { path: "/vendors", component: page("VendorsPage"), auth: true, layout: true },
   { path: "/rentals", component: page("RentalsPage"), auth: true, layout: true },
   { path: "/projects", component: page("ProjectsPage"), auth: true, layout: true },
-  { path: "/estimates", component: page("EstimatesPage"), auth: true, layout: true },
+  // Proposals & Quotes is the single commercial authoring workflow. Keep old
+  // estimate links working without maintaining a second quote builder.
+  { path: "/estimates", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/proposals" },
   { path: "/billing-recon", component: page("BillingReconPage"), auth: true, layout: true },
 
   // Communication
@@ -195,6 +218,7 @@ export const routeConfig = [
   { path: "/security-dashboard", component: page("SecurityDashboardPage"), auth: true, layout: true },
   { path: "/security-graph", component: page("SecurityGraphPage"), auth: true, layout: true },
   { path: "/nexus-shield", component: page("NexusShieldPage"), auth: true, layout: true },
+  { path: "/nexus-exposure", component: page("NexusExposurePage"), auth: true, layout: true },
   { path: "/mail-shield", component: page("NexusMailShieldPage"), auth: true, layout: true },
   { path: "/endpoint-security", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-shield?tab=endpoints" },
   { path: "/threat-timeline", component: page("ThreatTimelinePage"), auth: true, layout: true },
@@ -237,13 +261,16 @@ export const routeConfig = [
   { path: "/zero-trust", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/control-plane?module=microsoft365&view=security" },
   { path: "/webhook-builder", component: page("WebhookBuilderPage"), auth: true, layout: true },
   { path: "/git-scripts", component: page("GitScriptsPage"), auth: true, layout: true },
+  { path: "/invoice-reminders", component: page("InvoiceRemindersPage"), auth: true, layout: true },
   { path: "/late-payment", component: page("LatePaymentPage"), auth: true, layout: true },
+  { path: "/billing-settings", component: page("BillingSettingsPage"), auth: true, layout: true },
   { path: "/ransomware-tabletop", component: page("RansomwareTabletopPage"), auth: true, layout: true },
 
   // Dashboard Builder was a duplicate cockpit. Preserve old bookmarks without exposing it.
   { path: "/dashboard-builder", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/" },
   { path: "/channel-mode", component: page("ChannelModePage"), auth: true, layout: true },
   { path: "/soc-realtime", component: page("SocRealtimePage"), auth: true, layout: true },
+  { path: "/smart-automation", component: page("SmartAutomationPage"), auth: true, layout: true },
   { path: "/revenue-tracker", component: page("FinancialRouteRedirectPage"), auth: true, layout: true, redirectTo: "/revenue-forecast" },
 
   { path: "/billing-dashboard", component: page("BillingDashboardPage"), auth: true, layout: true },
@@ -329,7 +356,8 @@ export const routeConfig = [
   { path: "/client-insights", component: page("ClientInsightsHubPage"), auth: true, layout: true },
   { path: "/nexus-verify", component: page("NexusVerifyPage"), auth: true, layout: true },
   { path: "/work-session", component: page("WorkSessionPage"), auth: true, layout: true },
-  { path: "/expected-state", component: page("ExpectedStatePage"), auth: true, layout: true },
+  { path: "/nexus-assurance", component: page("NexusAssurancePage"), auth: true, layout: true },
+  { path: "/expected-state", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/nexus-assurance" },
   { path: "/auto-ops", component: page("AutoOpsHubPage"), auth: true, layout: true },
   { path: "/credentials", component: page("LegacyRouteRedirectPage"), auth: true, layout: true, redirectTo: "/hudu" },
   { path: "/team-hub", component: page("TeamHubPage"), auth: true, layout: true },

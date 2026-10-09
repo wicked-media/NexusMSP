@@ -22,7 +22,7 @@
     "backend": "100% (30/30 tests passed)",
     "frontend": "100%"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None required - articles auto-seeded on first access",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -65,7 +65,7 @@
     },
     "frontend_easter_eggs_articles": {
       "/help/easter-eggs-overview": "PASS - Article loads with TOC (3 entries: Welcome to rabbit hole, At a glance, Philosophy)",
-      "/help/konami-crt-mode": "PASS - Article loads with title '🎮 Konami Code → CRT Mode'",
+      "/help/konami-crt-mode": "PASS - Article loads with title 'ðŸŽ® Konami Code â†’ CRT Mode'",
       "Markdown tables": "PASS - Rendered as HTML tables (not inline pipes)"
     },
     "frontend_admin_editor": {
@@ -111,6 +111,6 @@
     "copilot_ai": "Uses Claude Sonnet 4.5 via Emergent LLM key - working correctly",
     "screenshot_upload": "Saves to /app/backend/uploads/help/ with UUID filename",
     "freeze_enforcement": "SLA auto-page now checks _is_frozen() per ticket's client_id with kind='broadcast'",
-    "konami_crt": "Component mounted globally in App.js - triggers on ↑↑↓↓←→←→BA sequence, auto-disables after 30s"
+    "konami_crt": "Component mounted globally in App.js - triggers on â†‘â†‘â†“â†“â†â†’â†â†’BA sequence, auto-disables after 30s"
   }
 }

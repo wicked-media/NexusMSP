@@ -17,13 +17,15 @@ import {
   Shield, Database, Play, Activity, ExternalLink, Zap, Cloud, Wifi, WifiOff,
   Ghost, Skull, AlertCircle, Sparkles, RotateCw, Eye, Settings,
   Server, ArrowUpRight, Trash2, FileQuestion, Bell, StopCircle, Wand2,
-  Users, DollarSign, ChevronLeft, ChevronRight, Gauge, LockKeyhole, Route,
+  Users, ChevronLeft, ChevronRight, Gauge, LockKeyhole, Route,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import ChangePlanDialog from "@/components/backups/ChangePlanDialog";
 import TenantsTab from "@/components/backups/TenantsTab";
 import BackupStatusTab from "@/components/backups/BackupStatusTab";
 import BillingTab from "@/components/backups/BillingTab";
+import NexusBackupTab from "@/components/backups/NexusBackupTab";
+import BackupWorkspaceNav from "@/components/backups/BackupWorkspaceNav";
 import HeroTile, { AnimatedCounter as _AC } from "@/components/HeroTile";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
@@ -33,7 +35,6 @@ import { Responsive, WidthProvider } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "@/styles/dashboard-grid.css";
-import "@/styles/dashboard-ticker.css";
 import { useWidgetGrid } from "@/hooks/useWidgetGrid";
 
 const BackupResponsiveGridLayout = WidthProvider(Responsive);
@@ -117,9 +118,9 @@ function RunningBackupCard({ activity, onCancel }) {
 
             {/* CRT-style scrolling stats */}
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono text-muted-foreground/80">
-              {transferred && total && <span>📦 {transferred}/{total} GB</span>}
-              {speedMB && <span>⚡ {speedMB} MB/s</span>}
-              {activity.tenant_name && <span className="truncate max-w-[140px]">🏢 {activity.tenant_name}</span>}
+              {transferred && total && <span className="inline-flex items-center gap-1"><Database className="h-3 w-3" />{transferred}/{total} GB</span>}
+              {speedMB && <span className="inline-flex items-center gap-1"><Zap className="h-3 w-3" />{speedMB} MB/s</span>}
+              {activity.tenant_name && <span className="inline-flex max-w-[160px] items-center gap-1 truncate"><Users className="h-3 w-3 shrink-0" />{activity.tenant_name}</span>}
             </div>
 
             {/* Progress bar with shimmer */}
@@ -158,96 +159,55 @@ function RunningBackupCard({ activity, onCancel }) {
 function HeroMetric(props) { return <HeroTile {...props} />; }
 /* legacy local impl preserved below for reference, no longer used */
 
-function BackupOperationsTicker({ items, onNavigate, statusText = "Select an item to investigate" }) {
-  const repeatedItems = [...items, ...items];
-
+/**
+ * A missing provider is an onboarding state, not an outage.  Keep the
+ * recovery workspace usable and explain the shortest path to live evidence
+ * instead of presenting a wall of empty failure metrics.
+ */
+function BackupProviderSetup({ detail, recoveryTests = 0, onConfigure, onReviewRecovery }) {
   return (
-    <div className="nx-live-ticker" data-testid="backup-assurance-strip" aria-label="Live backup operations ticker">
-      <div className="nx-live-ticker__label">
-        <Activity className="h-3.5 w-3.5" />
-        <span>Live backup</span>
-        <span className="nx-live-ticker__pulse" />
-      </div>
-      <div className="nx-live-ticker__viewport">
-        <div className="nx-live-ticker__track">
-          {repeatedItems.map((item, index) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={`${item.key}-${index}`}
-                type="button"
-                onClick={() => onNavigate(item.action)}
-                className={`nx-live-ticker__item nx-live-ticker__item--${item.tone}`}
-                data-testid={index < items.length ? `backup-ticker-${item.key}` : undefined}
-                title={item.title}
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="font-medium">{item.label}</span>
-                <span className="nx-live-ticker__detail">{item.detail}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <span className="nx-live-ticker__refresh">{statusText}</span>
-    </div>
-  );
-}
-
-function BackupLifecycleNavigator({ activeTab, onSelect, orphanCount = 0 }) {
-  const groups = [
-    {
-      label: "Operate", description: "See protection and live activity", tone: "sky",
-      items: [["dashboard", "Overview", Database], ["live", "Live activity", Activity], ["status", "Coverage", Server]],
-    },
-    {
-      label: "Organise", description: "Keep tenant data clean", tone: "violet",
-      items: [["tenants", "Tenant mapping", Users], ["acronis", "Provider health", Cloud], ["orphans", "Hygiene", Ghost]],
-    },
-    {
-      label: "Assure", description: "Prove recoverability", tone: "emerald",
-      items: [["compliance", "Assurance", Shield], ["verify", "Recovery tests", CheckCircle]],
-    },
-    {
-      label: "Bill", description: "Reconcile protected usage", tone: "amber",
-      items: [["billing", "Usage billing", DollarSign]],
-    },
-  ];
-
-  const toneClasses = {
-    sky: "data-[active=true]:border-sky-400/45 data-[active=true]:bg-sky-500/10 data-[active=true]:text-sky-100",
-    violet: "data-[active=true]:border-violet-400/45 data-[active=true]:bg-violet-500/10 data-[active=true]:text-violet-100",
-    emerald: "data-[active=true]:border-emerald-400/45 data-[active=true]:bg-emerald-500/10 data-[active=true]:text-emerald-100",
-    amber: "data-[active=true]:border-amber-400/45 data-[active=true]:bg-amber-500/10 data-[active=true]:text-amber-100",
-  };
-
-  return (
-    <nav className="grid gap-3 lg:grid-cols-4" aria-label="Backup Centre workflow" data-testid="backup-lifecycle-navigator">
-      {groups.map((group) => (
-        <section key={group.label} className="rounded-2xl border border-border/60 bg-muted/[0.12] p-3">
-          <div className="mb-2"><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">{group.label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{group.description}</p></div>
-          <div className="flex flex-wrap gap-1.5">
-            {group.items.map(([value, label, Icon]) => (
-              <button
-                key={value}
-                type="button"
-                data-active={activeTab === value}
-                onClick={() => onSelect(value)}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted/50 hover:text-foreground ${toneClasses[group.tone]}`}
-                data-testid={`tab-${value}`}
-              >
-                <Icon className="h-3.5 w-3.5" />{label}
-                {value === "orphans" && orphanCount > 0 && <span className="rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-rose-200">{orphanCount}</span>}
-              </button>
-            ))}
+    <Card className="overflow-hidden border-amber-400/25 bg-[linear-gradient(135deg,rgba(245,158,11,0.09),rgba(6,182,212,0.045)_48%,rgba(15,23,42,0.58))]" data-testid="backup-provider-setup">
+      <CardContent className="p-5 sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-3.5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-amber-400/25 bg-amber-400/[0.10] shadow-[0_0_28px_rgba(251,191,36,0.08)]">
+              <Cloud className="h-5 w-5 text-amber-200" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-200">Backup monitoring setup</p>
+              <h2 className="mt-1 text-lg font-semibold tracking-tight">Connect Acronis before relying on live protection status</h2>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted-foreground">{detail || "Nexus has not received a configured Acronis source yet. It will never treat missing provider data as protected, healthy, or recoverable."}</p>
+            </div>
           </div>
-        </section>
-      ))}
-    </nav>
+          <Badge variant="outline" className="w-fit shrink-0 border-amber-400/25 bg-amber-400/[0.08] px-2.5 py-1 text-amber-100">Configuration required</Badge>
+        </div>
+
+        <ol className="mt-5 grid gap-3 md:grid-cols-3" aria-label="Acronis connection steps">
+          {[
+            ["1", "Add the provider credential", "Enter the Acronis data-centre URL, API client ID and secret in Integrations."],
+            ["2", "Test before enabling", "Verify the connection from Settings, then save the confirmed configuration."],
+            ["3", "Return to live evidence", "Refresh this workspace once Acronis can return protected workloads and jobs."],
+          ].map(([step, title, description]) => (
+            <li key={step} className="flex gap-3 rounded-xl border border-white/[0.08] bg-black/[0.12] p-3.5">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-cyan-400/20 bg-cyan-400/[0.08] text-[11px] font-semibold text-cyan-200">{step}</span>
+              <div><p className="text-xs font-semibold">{title}</p><p className="mt-1 text-[11px] leading-5 text-muted-foreground">{description}</p></div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-5 flex flex-col gap-3 border-t border-white/[0.08] pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">{recoveryTests ? `${recoveryTests} recorded recovery test${recoveryTests === 1 ? " is" : "s are"} still available while live monitoring is configured.` : "Recovery tests can be scheduled and recorded independently of a live provider connection."}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={onReviewRecovery} data-testid="review-recovery-evidence"><Shield className="mr-1.5 h-3.5 w-3.5" />Review recovery evidence</Button>
+            <Button size="sm" onClick={onConfigure} data-testid="configure-backup-provider"><Settings className="mr-1.5 h-3.5 w-3.5" />Configure Acronis</Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis", "orphans", "compliance", "billing", "verify"]);
+const BACKUP_TABS = new Set(["dashboard", "live", "tenants", "status", "acronis", "orphans", "compliance", "billing", "verify", "native"]);
 const BACKUP_STATUS_FILTERS = new Set(["all", "success", "failed", "running"]);
 
 export default function BackupCenterPage() {
@@ -257,6 +217,7 @@ export default function BackupCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const requestedStatusFilter = searchParams.get("status");
+  const requestedJobId = searchParams.get("job");
   const [tab, setTab] = useState(() => BACKUP_TABS.has(requestedTab) ? requestedTab : "dashboard");
   const [dashData, setDashData] = useState(null);
   const [compData, setCompData] = useState(null);
@@ -264,7 +225,6 @@ export default function BackupCenterPage() {
   const [assuranceData, setAssuranceData] = useState(null);
   const [assuranceClientId, setAssuranceClientId] = useState("");
   const [assuranceLoading, setAssuranceLoading] = useState(false);
-  const [acronisUsage, setAcronisUsage] = useState(null);
   const [agentsHealth, setAgentsHealth] = useState(null);
   const [acronisAlerts, setAcronisAlerts] = useState([]);
   const [orphans, setOrphans] = useState(null);
@@ -296,6 +256,9 @@ export default function BackupCenterPage() {
   const [simulationResult, setSimulationResult] = useState(null);
   const [dismissAlertTarget, setDismissAlertTarget] = useState(null);
   const [dismissingAlert, setDismissingAlert] = useState(false);
+  const [nativeBackupData, setNativeBackupData] = useState(null);
+  const [nativeBackupLoading, setNativeBackupLoading] = useState(false);
+  const [nativeBackupError, setNativeBackupError] = useState("");
 
   useEffect(() => {
     if (requestedTab && BACKUP_TABS.has(requestedTab)) setTab(requestedTab);
@@ -305,6 +268,19 @@ export default function BackupCenterPage() {
     if (BACKUP_STATUS_FILTERS.has(requestedStatusFilter)) setStatusFilter(requestedStatusFilter);
     else setStatusFilter("all");
   }, [requestedStatusFilter]);
+
+  useEffect(() => {
+    if (!requestedJobId || !(dashData?.backups || []).length) return;
+    const matchedJob = dashData.backups.find((backup) => String(backup.id) === requestedJobId);
+    if (!matchedJob) return;
+    // A result from Nexus Command should land on its actual operational row,
+    // rather than merely opening the backup workspace and making the next
+    // action ambiguous.  The row stays highlighted while its deep link is in
+    // the URL, so it is safe to refresh or share internally.
+    setTab("dashboard");
+    setStatusFilter("all");
+    setSearch(String(matchedJob.id));
+  }, [dashData?.backups, requestedJobId]);
 
   useEffect(() => {
     setDashboardPage(1);
@@ -351,12 +327,11 @@ export default function BackupCenterPage() {
     setLoading(true);
     setLoadError("");
     try {
-      const [dash, comp, verify, assurance, usage, agents, alerts, clientList, config] = await Promise.allSettled([
+      const [dash, comp, verify, assurance, agents, alerts, clientList, config] = await Promise.allSettled([
         axios.get(`${API}/backup-dashboard/overview`, { headers }),
         axios.get(`${API}/backup-compliance/dashboard`, { headers }),
         axios.get(`${API}/backup-verify/overview`, { headers }),
         axios.get(`${API}/backup-assurance/overview`, { headers }),
-        axios.get(`${API}/acronis/usage-summary`, { headers }),
         axios.get(`${API}/acronis/agents/health`, { headers }),
         axios.get(`${API}/acronis/alerts`, { headers }),
         axios.get(`${API}/clients`, { headers }),
@@ -370,13 +345,12 @@ export default function BackupCenterPage() {
       if (comp.status === "fulfilled") setCompData(comp.value.data);
       if (verify.status === "fulfilled") setVerifyData(verify.value.data);
       if (assurance.status === "fulfilled") setAssuranceData(assurance.value.data);
-      if (usage.status === "fulfilled") setAcronisUsage(usage.value.data);
       if (agents.status === "fulfilled") setAgentsHealth(agents.value.data);
       if (alerts.status === "fulfilled") setAcronisAlerts(alerts.value.data?.items || []);
       if (clientList.status === "fulfilled") setClients(clientList.value.data || []);
       if (config.status === "fulfilled") setAcronisConfig(config.value.data || {});
       else setAcronisConfig({ configured: false, error: "Unable to load Acronis connection status" });
-      if (![dash, comp, verify, assurance, usage, agents, alerts, clientList, config].some(result => result.status === "fulfilled")) {
+      if (![dash, comp, verify, assurance, agents, alerts, clientList, config].some(result => result.status === "fulfilled")) {
         setLoadError("Nexus could not reach the backup evidence services. No recovery or billing actions have been changed.");
       }
     } catch {
@@ -395,7 +369,23 @@ export default function BackupCenterPage() {
     }
   }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fetchNativeBackup = useCallback(async () => {
+    setNativeBackupLoading(true);
+    setNativeBackupError("");
+    try {
+      const response = await axios.get(`${API}/nexus-backup/overview`, { headers });
+      setNativeBackupData(response.data || null);
+    } catch (error) {
+      setNativeBackupError(error.response?.data?.detail || "Nexus Backup control-plane evidence could not be loaded.");
+    } finally {
+      setNativeBackupLoading(false);
+    }
+  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { fetchData(); fetchLive(); }, [fetchData, fetchLive]);
+  useEffect(() => {
+    if (tab === "native") fetchNativeBackup();
+  }, [tab, fetchNativeBackup]);
   useEffect(() => {
     if (tab !== "live") return;
     const id = setInterval(fetchLive, 5000);
@@ -634,78 +624,24 @@ export default function BackupCenterPage() {
   const simulations = assuranceData?.simulations || [];
   const ah = agentsHealth?.summary || {};
   const liveCount = liveActivities.running?.length || 0;
-  const sourceIssues = [
-    !acronisConfig?.configured ? acronisConfig?.error || "Acronis API credentials have not been configured." : null,
+  const providerNeedsSetup = !acronisConfig?.configured;
+  const providerConnectionMessage = acronisConfig?.error || "Acronis API credentials have not been configured.";
+  const telemetryIssues = [
     agentsHealth?.error ? `Agent health: ${agentsHealth.error}` : null,
     liveActivities?.error ? `Live activity feed: ${liveActivities.error}` : null,
   ].filter(Boolean);
-  const backupSourceUnavailable = !loading && sourceIssues.length > 0;
-  const backupTickerItems = [
-    {
-      key: "activity",
-      icon: Activity,
-      label: "Backup activity",
-      detail: backupSourceUnavailable ? "Feed unavailable" : liveCount ? `${liveCount} run${liveCount === 1 ? "" : "s"} in progress` : "Standing by",
-      tone: backupSourceUnavailable ? "critical" : "healthy",
-      action: backupSourceUnavailable ? "settings" : "live",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open live backup activity",
-    },
-    {
-      key: "failures",
-      icon: XCircle,
-      label: "Failed backups",
-      detail: `${ds.failed || 0} need${ds.failed === 1 ? "s" : ""} attention`,
-      tone: ds.failed ? "critical" : "healthy",
-      action: "failed",
-      title: "Review failed backups",
-    },
-    {
-      key: "coverage",
-      icon: Shield,
-      label: "Protection coverage",
-      detail: backupSourceUnavailable
-        ? "Source unavailable"
-        : cs.evidence_available
-        ? `${cs.no_backup || 0} asset${cs.no_backup === 1 ? "" : "s"} without backup`
-        : `${cs.not_assessed || 0} asset${cs.not_assessed === 1 ? "" : "s"} awaiting evidence`,
-      tone: backupSourceUnavailable ? "critical" : cs.evidence_available && !cs.no_backup ? "healthy" : "warning",
-      action: backupSourceUnavailable ? "settings" : "compliance",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open protection coverage",
-    },
-    {
-      key: "recovery",
-      icon: CheckCircle,
-      label: "Recovery verification",
-      detail: `${vs.pending || 0} test${vs.pending === 1 ? "" : "s"} pending`,
-      tone: vs.pending ? "warning" : "healthy",
-      action: "verify",
-      title: "Open recovery evidence",
-    },
-    {
-      key: "agents",
-      icon: Wifi,
-      label: "Backup agents",
-      detail: backupSourceUnavailable ? "Status unavailable" : `${ah.online || 0}/${ah.total || 0} online`,
-      tone: backupSourceUnavailable ? "critical" : ah.total && ah.online < ah.total ? "warning" : "healthy",
-      action: backupSourceUnavailable ? "settings" : "status",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open backup agent status",
-    },
-    {
-      key: "alerts",
-      icon: Bell,
-      label: "Acronis alerts",
-      detail: backupSourceUnavailable ? "Monitoring unavailable" : acronisAlerts.length ? `${acronisAlerts.length} active alert${acronisAlerts.length === 1 ? "" : "s"}` : "No active alerts",
-      tone: backupSourceUnavailable ? "critical" : acronisAlerts.length ? "warning" : "healthy",
-      action: backupSourceUnavailable ? "settings" : "acronis",
-      title: backupSourceUnavailable ? "Open Acronis integration settings" : "Open Acronis alerts",
-    },
-  ];
+  const providerIssues = [providerNeedsSetup ? providerConnectionMessage : null, ...telemetryIssues].filter(Boolean);
+  const hasDashboardRecords = (dashData?.backups || []).length > 0;
+  const showProviderSetup = tab === "dashboard" && providerNeedsSetup && !hasDashboardRecords;
+  const providerDependentTab = ["dashboard", "live", "tenants", "status", "acronis", "orphans", "billing"].includes(tab);
+  const showProviderNotice = providerDependentTab && !showProviderSetup && providerIssues.length > 0;
   const normalizedBackupSearch = search.trim().toLowerCase();
   const filteredBackups = (dashData?.backups || []).filter((backup) => {
     const matchesStatus = statusFilter === "all" || backup.status === statusFilter;
     if (!matchesStatus) return false;
     if (!normalizedBackupSearch) return true;
     return [
+      backup.id,
       backup.client_name,
       backup.device_name,
       backup.plan_names,
@@ -728,53 +664,57 @@ export default function BackupCenterPage() {
         description="Monitor protected assets, investigate backup exceptions, validate recoverability, and retain auditable recovery evidence."
         icon={HardDrive}
         tone="sky"
+        signal={providerNeedsSetup || telemetryIssues.length || ds.failed ? "attention" : "connected"}
+        meta={[providerNeedsSetup ? "Provider setup required" : telemetryIssues.length ? "Live telemetry delayed" : `${ds.success_rate || 0}% successful`, `${vs.pending || 0} recovery test${vs.pending === 1 ? "" : "s"} pending`]}
         actions={<>
-          <Button variant="outline" onClick={openVerificationRequest} data-testid="header-schedule-recovery-test"><Play className="mr-1.5 h-4 w-4" />Recovery test</Button>
-          <Button variant="outline" onClick={() => handleOpenAcronis()} data-testid="open-acronis-console"><ExternalLink className="mr-1.5 h-4 w-4" />Acronis Cloud</Button>
-          <Button variant="outline" onClick={() => { fetchData(); fetchLive(); }}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+          <Button variant="outline" size="sm" onClick={() => { fetchData(); fetchLive(); }}><RefreshCw className="mr-1.5 h-4 w-4" />Refresh</Button>
+          <Button size="sm" onClick={openVerificationRequest} data-testid="header-schedule-recovery-test"><Play className="mr-1.5 h-4 w-4" />Recovery test</Button>
         </>}
       />
 
-      <BackupOperationsTicker
-        items={backupTickerItems}
-        statusText={backupSourceUnavailable ? "Acronis source needs attention" : "Select an item to investigate"}
-        onNavigate={(action) => {
-          if (action === "settings") openAcronisSettings();
-          else if (action === "failed") openDashboardFilter("failed");
-          else selectTab(action);
-        }}
+      <BackupWorkspaceNav
+        activeTab={tab}
+        onSelect={selectTab}
+        orphanCount={orphans?.totals?.total_orphans || 0}
+        alertCount={acronisAlerts.length}
+        onOpenAcronis={() => handleOpenAcronis()}
+        onOpenSettings={openAcronisSettings}
       />
 
-      {backupSourceUnavailable && (
-        <Card className="border-rose-500/30 bg-rose-500/[0.045]" data-testid="backup-source-warning">
+      {showProviderNotice && (
+        <Card className={providerNeedsSetup ? "border-amber-400/25 bg-amber-500/[0.045]" : "border-sky-400/25 bg-sky-500/[0.035]"} data-testid="backup-source-warning">
           <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-2.5">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
-              <div><p className="text-sm font-semibold text-rose-100">Backup source unavailable</p><p className="mt-0.5 text-xs text-muted-foreground">{sourceIssues[0]}</p></div>
+              <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${providerNeedsSetup ? "text-amber-300" : "text-sky-300"}`} />
+              <div><p className={`text-sm font-semibold ${providerNeedsSetup ? "text-amber-100" : "text-sky-100"}`}>{providerNeedsSetup ? "Live provider setup is incomplete" : "Backup telemetry needs attention"}</p><p className="mt-0.5 text-xs text-muted-foreground">{providerIssues.join(" · ")}</p></div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Button size="sm" variant="ghost" className="text-rose-100 hover:bg-rose-500/10" onClick={() => { fetchData(); fetchLive(); }}>Retry connection</Button>
-              <Button size="sm" variant="outline" className="border-rose-400/35 text-rose-100 hover:bg-rose-500/10" onClick={openAcronisSettings}>Open Acronis settings</Button>
+              <Button size="sm" variant="ghost" className={providerNeedsSetup ? "text-amber-100 hover:bg-amber-500/10" : "text-sky-100 hover:bg-sky-500/10"} onClick={() => { fetchData(); fetchLive(); }}>Refresh workspace</Button>
+              {providerNeedsSetup && <Button size="sm" variant="outline" className="border-amber-400/35 text-amber-100 hover:bg-amber-500/10" onClick={openAcronisSettings}>Open Acronis settings</Button>}
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Hero metric strip */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <HeroMetric label="Total backups" value={ds.total_jobs || 0} icon={Database} glow="cyan" subtitle="All protected workloads" onClick={() => openDashboardFilter("all")} />
-        <HeroMetric label="Successful" value={ds.successful || 0} icon={CheckCircle} glow="emerald" subtitle={`${ds.success_rate || 0}% success rate`} onClick={() => openDashboardFilter("success")} />
-        <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle={ds.failed ? "Needs attention" : "All healthy"} onClick={() => openDashboardFilter("failed")} />
-        <HeroMetric label="Running" value={liveCount} icon={Activity} glow={backupSourceUnavailable ? "rose" : "violet"} subtitle={backupSourceUnavailable ? "Source unavailable" : "Live now"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("live")} />
-        <HeroMetric label="Online agents" value={ah.online || 0} icon={Wifi} glow={backupSourceUnavailable ? "rose" : "emerald"} subtitle={backupSourceUnavailable ? "Source unavailable" : `${ah.online_pct || 0}% of ${ah.total || 0}`} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("status")} />
-        <HeroMetric label="Active alerts" value={acronisAlerts.length} icon={Bell} glow={backupSourceUnavailable ? "rose" : acronisAlerts.length > 0 ? "amber" : "cyan"} subtitle={backupSourceUnavailable ? "Source unavailable" : acronisUsage?.critical_alerts ? `${acronisUsage.critical_alerts} critical` : "Acronis monitoring"} onClick={() => backupSourceUnavailable ? openAcronisSettings() : selectTab("acronis")} />
-      </div>
+      {/* Keep overview signals in the overview. Other operational tabs have their own
+          focused metrics; repeating this strip was pushing their actual work below the fold. */}
+      {tab === "dashboard" && !showProviderSetup && <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <HeroMetric label="Protected workloads" value={ds.total_jobs || 0} icon={Database} glow="cyan" subtitle={providerNeedsSetup ? "Last recorded workload state" : "In active backup scope"} onClick={() => openDashboardFilter("all")} />
+        <HeroMetric label="Success rate" value={ds.success_rate || 0} suffix="%" icon={CheckCircle} glow="emerald" subtitle={providerNeedsSetup ? "Last recorded evidence" : `${ds.successful || 0} successful`} onClick={() => openDashboardFilter("success")} />
+        <HeroMetric label="Failed" value={ds.failed || 0} icon={XCircle} glow="rose" subtitle={ds.failed ? "Needs attention" : providerNeedsSetup ? "No current provider feed" : "All healthy"} onClick={() => openDashboardFilter("failed")} />
+        <HeroMetric label="Running now" value={liveCount} icon={Activity} glow="violet" subtitle={telemetryIssues.length ? "Live feed delayed" : "Live operations"} onClick={() => selectTab("live")} />
+        <HeroMetric label="Recovery pending" value={vs.pending || 0} icon={Shield} glow={vs.pending ? "amber" : "sky"} subtitle={vs.pending ? "Tests need completion" : "Recovery evidence current"} onClick={() => selectTab("verify")} />
+      </div>}
 
       <Tabs value={tab} onValueChange={selectTab}>
-        <BackupLifecycleNavigator activeTab={tab} onSelect={selectTab} orphanCount={orphans?.totals?.total_orphans || 0} />
-
         {/* DASHBOARD */}
         <TabsContent value="dashboard" className="mt-4 space-y-4">
+          {showProviderSetup ? <BackupProviderSetup
+            detail={providerConnectionMessage}
+            recoveryTests={vs.total_tests || 0}
+            onConfigure={openAcronisSettings}
+            onReviewRecovery={() => selectTab("verify")}
+          /> : <>
           <div className="flex flex-col gap-3 sm:flex-row">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -815,7 +755,7 @@ export default function BackupCenterPage() {
                     {dashboardPageBackups.map((b, i) => {
                       const Ico = STATUS_ICON[b.status] || Clock;
                       return (
-                        <TableRow key={`k-${b.id || dashboardStartIndex + i}`} data-testid={`backup-row-${b.id || dashboardStartIndex + i}`}>
+                        <TableRow key={`k-${b.id || dashboardStartIndex + i}`} className={requestedJobId === String(b.id) ? "bg-cyan-500/[0.08] ring-1 ring-inset ring-cyan-400/30" : undefined} data-testid={`backup-row-${b.id || dashboardStartIndex + i}`}>
                           <TableCell className="text-sm">{b.client_name || "—"}</TableCell>
                           <TableCell className="font-medium">{b.device_name}</TableCell>
                           <TableCell className="text-xs text-muted-foreground truncate max-w-[260px]" title={b.plan_names || ""}>{b.plan_names || "—"}</TableCell>
@@ -866,12 +806,18 @@ export default function BackupCenterPage() {
               </div>
             </CardContent>
           </Card>
+          </>}
         </TabsContent>
 
         {/* LIVE */}
         <TabsContent value="live" className="mt-4 space-y-4">
-          <Card className="border-cyan-500/30 bg-cyan-500/[0.02]">
-            <CardContent className="py-3 px-4 flex items-center gap-3">
+          {liveActivities.error ? <Card className="border-amber-400/25 bg-amber-500/[0.045]" data-testid="backup-live-feed-unavailable">
+            <CardContent className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3"><span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-amber-400/25 bg-amber-400/[0.10]"><WifiOff className="h-4 w-4 text-amber-200" /></span><div><p className="text-sm font-semibold text-amber-100">Live backup activity is unavailable</p><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{liveActivities.error} Nexus cannot infer that no backups are running while the provider feed is unavailable.</p></div></div>
+              <Button size="sm" variant="outline" className="w-fit border-amber-400/25 text-amber-100 hover:bg-amber-500/10" onClick={fetchLive} data-testid="retry-backup-live-feed"><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Retry live feed</Button>
+            </CardContent>
+          </Card> : <Card className="border-cyan-500/30 bg-cyan-500/[0.02]">
+            <CardContent className="py-3 px-4 flex items-center gap-3" role="status" aria-live="polite">
               <div className="relative">
                 <Zap className="w-5 h-5 text-cyan-400" />
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
@@ -886,10 +832,10 @@ export default function BackupCenterPage() {
                 LIVE
               </Badge>
             </CardContent>
-          </Card>
+          </Card>}
 
           {/* Running */}
-          {liveCount === 0 ? (
+          {!liveActivities.error && (liveCount === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 <Activity className="w-12 h-12 mx-auto mb-3 opacity-30" />
@@ -901,10 +847,10 @@ export default function BackupCenterPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {liveActivities.running.map(a => <RunningBackupCard key={a.id} activity={a} onCancel={handleCancelBackup} />)}
             </div>
-          )}
+          ))}
 
           {/* Recent */}
-          <div>
+          {!liveActivities.error && <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Recent (last 30)</p>
             <Card>
               <CardContent className="p-0">
@@ -941,7 +887,7 @@ export default function BackupCenterPage() {
                 </ScrollArea>
               </CardContent>
             </Card>
-          </div>
+          </div>}
         </TabsContent>
 
         {/* TENANTS */}
@@ -1419,6 +1365,19 @@ export default function BackupCenterPage() {
           <BillingTab token={token} onOpenTenants={() => selectTab("tenants")} />
         </TabsContent>
 
+        {/* NEXUS BACKUP — native control plane, intentionally non-executing */}
+        <TabsContent value="native" className="mt-4 space-y-4">
+          <NexusBackupTab
+            data={nativeBackupData}
+            loading={nativeBackupLoading}
+            error={nativeBackupError}
+            clients={clients}
+            api={API}
+            headers={headers}
+            onChanged={fetchNativeBackup}
+          />
+        </TabsContent>
+
         {/* VERIFICATION */}
         <TabsContent value="verify" className="mt-4 space-y-4">
           {!verifyData ? <p className="text-muted-foreground text-center py-12">No verification data</p> : <>
@@ -1507,13 +1466,13 @@ export default function BackupCenterPage() {
       </Tabs>
 
       <Dialog open={!!simulationRequest} onOpenChange={(open) => { if (!open && !simulationSaving) setSimulationRequest(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-violet-400/20 bg-background p-0" data-testid="recovery-simulation-dialog">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-violet-400/20 bg-background p-0 sm:rounded-2xl" data-testid="recovery-simulation-dialog">
           <DialogHeader className="border-b border-violet-400/15 bg-[linear-gradient(135deg,rgba(139,92,246,0.13),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-300">Recovery assurance</p>
             <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-400/10"><Route className="h-4 w-4 text-violet-300" /></span>Simulate customer recovery</DialogTitle>
             <DialogDescription>Preview whether current evidence supports the required RTO and RPO. This records a plan only—no provider call, restore, failover or production change occurs.</DialogDescription>
           </DialogHeader>
-          {simulationRequest && <div className="space-y-4 px-6 py-5">
+          {simulationRequest && <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <div className="rounded-xl border border-amber-400/20 bg-amber-500/[0.05] p-3 text-xs text-amber-100"><AlertTriangle className="mr-2 inline h-4 w-4" />Simulation results are evidence-dependent estimates, not a recovery guarantee. Validate them with a measured restore test.</div>
             <div><label className="text-sm font-medium">Customer</label><Select value={simulationRequest.client_id} onValueChange={(client_id) => setSimulationRequest(current => ({ ...current, client_id }))}><SelectTrigger className="mt-1"><SelectValue placeholder="Choose customer" /></SelectTrigger><SelectContent>{clients.map(client => <SelectItem key={client.id} value={client.id}>{client.name || client.company_name || client.id}</SelectItem>)}</SelectContent></Select></div>
             <div><label className="text-sm font-medium">Workload or service</label><Input className="mt-1" value={simulationRequest.workload} onChange={event => setSimulationRequest(current => ({ ...current, workload: event.target.value }))} placeholder="e.g. Finance SQL and application server" /></div>
@@ -1521,18 +1480,18 @@ export default function BackupCenterPage() {
             <div><label className="text-sm font-medium">Dependencies in restore order</label><Input className="mt-1" value={simulationRequest.dependencies} onChange={event => setSimulationRequest(current => ({ ...current, dependencies: event.target.value }))} placeholder="Domain Controller, DNS, Application Server" /><p className="mt-1 text-[11px] text-muted-foreground">Separate dependencies with commas. The workload is restored after these services.</p></div>
             <div><label className="text-sm font-medium">Assumptions and recovery constraints</label><Textarea className="mt-1 min-h-20" value={simulationRequest.assumptions} onChange={event => setSimulationRequest(current => ({ ...current, assumptions: event.target.value }))} placeholder="Available bandwidth, alternate site, credentials, licensing, maintenance window…" /></div>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setSimulationRequest(null)} disabled={simulationSaving}>Cancel</Button><Button onClick={submitRecoverySimulation} disabled={simulationSaving || !simulationRequest?.client_id || !simulationRequest?.workload.trim()}>{simulationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Record simulation</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setSimulationRequest(null)} disabled={simulationSaving}>Cancel</Button><Button onClick={submitRecoverySimulation} disabled={simulationSaving || !simulationRequest?.client_id || !simulationRequest?.workload.trim()}>{simulationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Record simulation</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!simulationResult} onOpenChange={(open) => { if (!open) setSimulationResult(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-2xl overflow-y-auto border-cyan-400/20 bg-background p-0" data-testid="recovery-simulation-result-dialog">
+        <DialogContent className="flex h-[min(860px,calc(100vh-1.5rem))] max-h-[calc(100vh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-2xl flex-col gap-0 overflow-hidden border-cyan-400/20 bg-background p-0 sm:rounded-2xl" data-testid="recovery-simulation-result-dialog">
           <DialogHeader className="border-b border-cyan-400/15 bg-[linear-gradient(135deg,rgba(6,182,212,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">Recorded recovery preview</p>
             <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><Gauge className="h-5 w-5 text-cyan-300" />{simulationResult?.client_name} · {simulationResult?.workload}</DialogTitle>
             <DialogDescription>Explainable recovery readiness based on the evidence Nexus could observe when this simulation was created.</DialogDescription>
           </DialogHeader>
-          {simulationResult && <div className="space-y-4 px-6 py-5">
+          {simulationResult && <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4"><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Readiness</p><p className="mt-1 text-sm font-semibold capitalize">{String(simulationResult.readiness).replaceAll("_", " ")}</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">RTO</p><p className="mt-1 text-sm font-semibold capitalize">{simulationResult.rto_status?.replaceAll("_", " ")}</p><p className="text-[10px] text-muted-foreground">Target {simulationResult.target_rto_hours}h</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">RPO</p><p className="mt-1 text-sm font-semibold capitalize">{simulationResult.rpo_status?.replaceAll("_", " ")}</p><p className="text-[10px] text-muted-foreground">Target {simulationResult.target_rpo_hours}h</p></div><div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-3"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Immutability</p><p className="mt-1 text-sm font-semibold capitalize">{simulationResult.immutability?.replaceAll("_", " ")}</p></div></div>
             <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-xl border border-cyan-400/15 bg-cyan-500/[0.035] p-4"><p className="text-xs font-semibold text-cyan-100">Recovery estimate</p><p className="mt-2 text-2xl font-semibold">{simulationResult.estimated_restore_range_minutes ? `${simulationResult.estimated_restore_range_minutes[0]}–${simulationResult.estimated_restore_range_minutes[1]} min` : "Not enough evidence"}</p><p className="mt-1 text-[11px] text-muted-foreground">Based on {simulationResult.evidence?.successful_restore_tests || 0} successful measured restore test{simulationResult.evidence?.successful_restore_tests === 1 ? "" : "s"}.</p></div><div className="rounded-xl border border-violet-400/15 bg-violet-500/[0.035] p-4"><p className="text-xs font-semibold text-violet-100">Recovery staging</p><p className="mt-2 text-2xl font-semibold">{simulationResult.required_staging_storage_gb == null ? "Not supplied" : `${simulationResult.required_staging_storage_gb} GB`}</p><p className="mt-1 text-[11px] text-muted-foreground">Includes a 20% planning allowance; validate against the recovery platform.</p></div></div>
             <div className="rounded-xl border border-white/[0.08] bg-black/[0.10] p-4"><p className="text-xs font-semibold">Recommended restore order</p><div className="mt-3 flex flex-wrap items-center gap-2">{(simulationResult.restore_order || []).map((step, index) => <div key={`${step}-${index}`} className="flex items-center gap-2"><span className="rounded-lg border border-cyan-400/20 bg-cyan-500/[0.05] px-2.5 py-1.5 text-xs">{index + 1}. {step}</span>{index < simulationResult.restore_order.length - 1 && <ArrowUpRight className="h-3.5 w-3.5 rotate-45 text-muted-foreground" />}</div>)}</div></div>
@@ -1540,40 +1499,45 @@ export default function BackupCenterPage() {
             {simulationResult.assumptions && <div><p className="text-xs font-semibold">Recorded assumptions</p><p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{simulationResult.assumptions}</p></div>}
             <p className="rounded-lg border border-white/[0.07] bg-muted/10 p-3 text-[11px] text-muted-foreground">{simulationResult.notice}</p>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button onClick={() => setSimulationResult(null)}>Done</Button></DialogFooter>
+          <DialogFooter className="shrink-0 border-t bg-muted/20 px-6 py-4"><Button onClick={() => setSimulationResult(null)}>Done</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={!!verificationRequest} onOpenChange={(open) => { if (!open) setVerificationRequest(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-xl overflow-y-auto border-sky-400/20 bg-background p-0" data-testid="backup-verification-request-dialog">
-          <DialogHeader className="border-b border-sky-400/15 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sky-300">Recovery assurance</p>
-            <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-400/25 bg-sky-400/10"><Play className="h-4 w-4 text-sky-300" /></span>Schedule a recovery test</DialogTitle>
-            <DialogDescription>Choose the customer and recovery scope before creating the request. NexusMSP will log the request and the eventual outcome as audit evidence.</DialogDescription>
-          </DialogHeader>
-          {verificationRequest && <div className="space-y-4 px-6 py-5">
+        <NexusWorkflowDialog
+          eyebrow="Recovery assurance"
+          title="Schedule a recovery test"
+          description="Choose the customer and recovery scope before creating the request. NexusMSP will log the request and the eventual outcome as audit evidence."
+          icon={Play}
+          tone="cyan"
+          className="max-w-xl"
+          data-testid="backup-verification-request-dialog"
+          footer={<><Button variant="outline" onClick={() => setVerificationRequest(null)} disabled={verificationRequestSaving}>Cancel</Button><Button onClick={submitVerificationRequest} disabled={verificationRequestSaving || !verificationRequest?.client_id}>{verificationRequestSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Schedule test</Button></>}
+        >
+          {verificationRequest && <div className="space-y-4">
             <div><label className="text-sm font-medium">Customer</label><Select value={verificationRequest.client_id} onValueChange={(client_id) => setVerificationRequest((current) => ({ ...current, client_id }))}><SelectTrigger className="mt-1"><SelectValue placeholder="Choose customer" /></SelectTrigger><SelectContent>{clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.name || client.company_name || client.id}</SelectItem>)}</SelectContent></Select></div>
             <div className="grid gap-3 sm:grid-cols-2"><div><label className="text-sm font-medium">Recovery scope</label><Select value={verificationRequest.backup_type} onValueChange={(backup_type) => setVerificationRequest((current) => ({ ...current, backup_type }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Recovery test">Recovery test</SelectItem><SelectItem value="File restore">File restore</SelectItem><SelectItem value="System recovery">System recovery</SelectItem><SelectItem value="Application recovery">Application recovery</SelectItem></SelectContent></Select></div><div><label className="text-sm font-medium">Backup solution</label><Select value={verificationRequest.backup_solution} onValueChange={(backup_solution) => setVerificationRequest((current) => ({ ...current, backup_solution }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Acronis">Acronis</SelectItem><SelectItem value="Veeam">Veeam</SelectItem><SelectItem value="Microsoft 365">Microsoft 365</SelectItem><SelectItem value="Other">Other</SelectItem></SelectContent></Select></div></div>
             <div><label className="text-sm font-medium">Technician brief</label><Input className="mt-1" value={verificationRequest.notes} onChange={(event) => setVerificationRequest((current) => ({ ...current, notes: event.target.value }))} placeholder="What should be restored and what must be validated?" /></div>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setVerificationRequest(null)} disabled={verificationRequestSaving}>Cancel</Button><Button onClick={submitVerificationRequest} disabled={verificationRequestSaving || !verificationRequest?.client_id}>{verificationRequestSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Schedule test</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={!!verificationCompletion} onOpenChange={(open) => { if (!open) setVerificationCompletion(null); }}>
-        <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto border-emerald-400/20 bg-background p-0">
-          <DialogHeader className="border-b border-emerald-400/15 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(15,23,42,0.94))] px-6 py-5 pr-14">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Recovery evidence</p>
-            <DialogTitle className="mt-1 flex items-center gap-2 text-xl"><span className="flex h-9 w-9 items-center justify-center rounded-xl border border-emerald-400/25 bg-emerald-400/10"><CheckCircle className="h-4 w-4 text-emerald-300" /></span>Record restore verification</DialogTitle>
-            <DialogDescription>Document the measured restore result. This becomes audit evidence for the selected backup verification request.</DialogDescription>
-          </DialogHeader>
-          {verificationCompletion && <div className="space-y-4 px-6 py-5">
+        <NexusWorkflowDialog
+          eyebrow="Recovery evidence"
+          title="Record restore verification"
+          description="Document the measured restore result. This becomes audit evidence for the selected backup verification request."
+          icon={CheckCircle}
+          tone="emerald"
+          className="max-w-lg"
+          footer={<><Button variant="outline" onClick={() => setVerificationCompletion(null)}>Cancel</Button><Button onClick={completeVerification} disabled={verificationSaving || !verificationCompletion?.restore_time_minutes}>{verificationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save verification</Button></>}
+        >
+          {verificationCompletion && <div className="space-y-4">
             <div className="rounded-lg border border-border/70 bg-muted/20 p-3 text-sm"><p className="font-medium">{verificationCompletion.test.client_name}</p><p className="mt-1 text-xs text-muted-foreground">{verificationCompletion.test.backup_solution} · {verificationCompletion.test.backup_type}</p></div>
             <div className="grid gap-3 sm:grid-cols-2"><div><label className="text-sm font-medium">Outcome</label><Select value={verificationCompletion.result} onValueChange={(result) => setVerificationCompletion((current) => ({ ...current, result }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="pass">Pass</SelectItem><SelectItem value="fail">Fail</SelectItem></SelectContent></Select></div><div><label className="text-sm font-medium">Restore time (minutes)</label><Input className="mt-1" type="number" min="0" value={verificationCompletion.restore_time_minutes} onChange={(event) => setVerificationCompletion((current) => ({ ...current, restore_time_minutes: event.target.value }))} placeholder="e.g. 18" /></div></div>
             <div><label className="text-sm font-medium">Integrity check</label><Select value={verificationCompletion.data_integrity_check} onValueChange={(data_integrity_check) => setVerificationCompletion((current) => ({ ...current, data_integrity_check }))}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="passed">Passed</SelectItem><SelectItem value="failed">Failed</SelectItem><SelectItem value="not_applicable">Not applicable</SelectItem></SelectContent></Select></div>
             <div><label className="text-sm font-medium">Technician notes</label><Input className="mt-1" value={verificationCompletion.notes} onChange={(event) => setVerificationCompletion((current) => ({ ...current, notes: event.target.value }))} placeholder="What was restored and what was validated?" /></div>
           </div>}
-          <DialogFooter className="border-t bg-muted/20 px-6 py-4"><Button variant="outline" onClick={() => setVerificationCompletion(null)}>Cancel</Button><Button onClick={completeVerification} disabled={verificationSaving || !verificationCompletion?.restore_time_minutes}>{verificationSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save verification</Button></DialogFooter>
-        </DialogContent>
+        </NexusWorkflowDialog>
       </Dialog>
       <Dialog open={!!dismissAlertTarget} onOpenChange={(open) => { if (!open && !dismissingAlert) setDismissAlertTarget(null); }}>
         <NexusWorkflowDialog

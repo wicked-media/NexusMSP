@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import {
+  loadVoiceWorkspaceSupplementalData,
+  VOICE_WORKSPACE_CORE_TIMEOUT_MS,
+} from "@/lib/voiceWorkspaceLoad";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
 import { WorkspaceErrorState, WorkspaceLoadingState } from "@/components/WorkspaceState";
 import SetupGuideCallout from "@/components/SetupGuideCallout";
 import { MetricStrip, MetricTile } from "@/components/design-system";
@@ -15,15 +20,20 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import VoiceCapabilityConsole from "@/components/voice/VoiceCapabilityConsole";
+// The voice view bar owns the view catalogue; the workspace only needs the slugs
+// to validate a deep link against.
+import VoiceWorkspaceTabs, { VOICE_TABS } from "@/components/voice/VoiceWorkspaceTabs";
 import {
   Activity, AlertTriangle, Building2, CheckCircle2, Cloud, CreditCard, ExternalLink,
-  Loader2, Phone, Plus, Radio, RefreshCw, Search, Settings, Users, Wifi, WifiOff,
+  Loader2, Phone, Plus, Radio, RefreshCw, RotateCcw, Search, Settings, Users, Wifi, WifiOff,
 } from "lucide-react";
+import { LEARNING_VIEW, LEARNING_WORKSPACES, learningHint } from "@/lib/workspaceLearning";
+import { useWorkspaceLearning } from "@/hooks/useWorkspaceLearning";
 
-const VOICE_TABS = ["dashboard", "monitoring", "pbxs", "extensions", "billing", "sync", "activity", "diagnostics"];
 const emptyPbxForm = {
   client_id: "", name: "", pbx_url: "", client_api_id: "", client_secret: "",
   billing_policy: "all_enabled", agreement_mapping: "", product_mapping: "",
@@ -32,6 +42,12 @@ const emptyPbxForm = {
 };
 
 const compactDate = (value) => value ? new Date(value).toLocaleString() : "Not yet";
+// Call durations are shown as m:ss, with a dash for a value the PBX did not send.
+const formatCallClock = (seconds) => {
+  if (seconds === null || seconds === undefined || seconds === "") return "—";
+  const total = Math.max(0, Number(seconds) || 0);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
 const readable = (value) => String(value || "unknown").replaceAll("_", " ");
 
 export default function VoiceWorkspacePage() {
@@ -39,6 +55,9 @@ export default function VoiceWorkspacePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const headers = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Which voice view this technician (and the team) actually opens, so the tab
+  // bar can order itself. A deliberate tab click is the evidence.
+  const learning = useWorkspaceLearning(token, LEARNING_WORKSPACES.VOICE);
   const [workspace, setWorkspace] = useState(null);
   const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState("dashboard");
@@ -61,6 +80,47 @@ export default function VoiceWorkspacePage() {
   const monitoringInFlight = useRef(false);
 
   const clientScope = searchParams.get("clientId") || "";
+  const [callHistory, setCallHistory] = useState(null);
+  const [callBusy, setCallBusy] = useState(false);
+  const [callFilters, setCallFilters] = useState({ direction: "all", status: "all", search: "", abandoned_only: false });
+
+  // Call history is always resolved against one client PBX, because a call has
+  // to belong to a customer before it can become a ticket.
+  const loadCallHistory = useCallback(async (overrides = {}) => {
+    const filters = { ...callFilters, ...overrides };
+    if (!monitoringPbxId) {
+      toast.error("Choose a client PBX to view its call history");
+      return;
+    }
+    setCallBusy(true);
+    try {
+      const { data } = await axios.get(`${API}/voice/call-history`, {
+        headers,
+        params: {
+          pbx_id: monitoringPbxId,
+          direction: filters.direction,
+          status: filters.status,
+          search: filters.search,
+          abandoned_only: filters.abandoned_only,
+          page: 1,
+          page_size: 50,
+        },
+      });
+      setCallHistory(data);
+      setCallFilters(filters);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Could not load call history");
+    } finally {
+      setCallBusy(false);
+    }
+  }, [callFilters, headers, monitoringPbxId]);
+
+  useEffect(() => {
+    if (tab === "calls" && monitoringPbxId) loadCallHistory();
+    // A tab change or a different PBX is the only trigger; the search button
+    // handles every other filter change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, monitoringPbxId]);
   const openAddPbx = () => {
     setPbxForm({ ...emptyPbxForm, client_id: clientScope });
     setShowAddPbx(true);
@@ -85,18 +145,21 @@ export default function VoiceWorkspacePage() {
   const load = useCallback(async () => {
     setBusy("load");
     setLoadError(false);
-    try {
-      const [{ data: voice }, { data: clientRows }, { data: productRows }, { data: ycmOverview }] = await Promise.all([
-        axios.get(`${API}/yeastar/voice-workspace`, { headers, timeout: 8000 }),
-        axios.get(`${API}/clients`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/products`, { headers }).catch(() => ({ data: [] })),
-        axios.get(`${API}/yeastar/ycm/overview`, { headers }).catch(() => ({ data: { connection: {}, discoveries: [] } })),
-      ]);
-      setWorkspace(voice);
-      setClients(clientRows || []);
-      setProducts(productRows || []);
-      setYcm(ycmOverview || { connection: {}, discoveries: [] });
+    // Start optional catalogue/YCM reads in parallel, but never await them
+    // before rendering the customer-scoped Voice workspace. A provider/admin
+    // 403 or a stalled supplemental request must not leave this page spinning.
+    void loadVoiceWorkspaceSupplementalData({ api: API, headers }).then(({ clients: clientRows, products: productRows, ycm: ycmOverview }) => {
+      setClients(clientRows);
+      setProducts(productRows);
+      setYcm(ycmOverview);
       setYcmForm(current => ({ ...current, base_url: ycmOverview?.connection?.base_url || current.base_url, client_id: ycmOverview?.connection?.client_id || current.client_id, user_agent: ycmOverview?.connection?.user_agent || current.user_agent }));
+    });
+    try {
+      const { data: voice } = await axios.get(`${API}/yeastar/voice-workspace`, {
+        headers,
+        timeout: VOICE_WORKSPACE_CORE_TIMEOUT_MS,
+      });
+      setWorkspace(voice);
     } catch {
       setLoadError(true);
       toast.error("Could not load Voice services");
@@ -108,7 +171,9 @@ export default function VoiceWorkspacePage() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (tab !== "monitoring" || monitoringPbxId || !workspace?.pbxs?.length) return;
+    // Every tab that talks to a live PBX needs one selected, so the default is
+    // applied here rather than repeated in each tab.
+    if (!["monitoring", "calls", "capabilities"].includes(tab) || monitoringPbxId || !workspace?.pbxs?.length) return;
     const permittedPbxs = clientScope ? workspace.pbxs.filter((pbx) => pbx.client_id === clientScope) : workspace.pbxs;
     const preferredPbx = permittedPbxs.find((pbx) => pbx.has_credentials);
     if (preferredPbx?.id) setMonitoringPbxId(preferredPbx.id);
@@ -366,6 +431,21 @@ export default function VoiceWorkspacePage() {
   const ycmClaimed = ycmDiscoveries.filter((item) => item.claimed_pbx_id).length;
   const ycmAwaitingClaim = ycmDiscoveries.length - ycmClaimed;
   const ycmLiveApiPending = allPbxs.filter((pbx) => pbx.connection_mode === "ycm_discovered" && !pbx.has_credentials).length;
+  const voiceCounts = { pbxs: pbxs.length, extensions: scopedExtensions.length };
+  // The view bar shows this itself; the workspace menu only needs to know whether
+  // there is anything to forget.
+  const voiceHint = learningHint({ surface: LEARNING_VIEW, personal: learning.personal, team: learning.team });
+
+  const forgetVoiceLearning = async () => {
+    try {
+      const removed = await learning.forget();
+      toast.success(`${removed || 0} learned view signal${removed === 1 ? "" : "s"} forgotten`, {
+        description: "The voice tabs are back to the Nexus default order and will learn again from your next visit.",
+      });
+    } catch {
+      toast.error("Nexus could not forget the learned ordering. Nothing has been changed.");
+    }
+  };
 
   return <div className="space-y-5" data-testid="voice-workspace-page">
     <OperationalPageHeader
@@ -375,9 +455,14 @@ export default function VoiceWorkspacePage() {
       icon={Phone}
       tone="sky"
       actions={<>
-        <Button variant="outline" size="sm" onClick={() => navigate("/help/voice-yeastar-pbx-onboarding")} disabled={!!busy} data-testid="voice-open-setup-guide"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Setup guide</Button>
-        <Button variant="outline" size="sm" onClick={() => setYcmOpen(true)} disabled={!!busy} data-testid="voice-open-ycm"><Cloud className="mr-1.5 h-3.5 w-3.5" />YCM fleet</Button>
-        <Button variant="outline" size="sm" onClick={() => testScopedPbxs(pbxs)} disabled={!!busy} data-testid="voice-test-connection"><Wifi className="mr-1.5 h-3.5 w-3.5" />Test PBXs</Button>
+        <WorkspaceActionMenu disabled={!!busy} testId="voice-more-actions">
+          <WorkspaceActionMenuItem icon={ExternalLink} onSelect={() => navigate("/help/voice-yeastar-pbx-onboarding")} testId="voice-open-setup-guide">Setup guide</WorkspaceActionMenuItem>
+          <WorkspaceActionMenuItem icon={Cloud} onSelect={() => setYcmOpen(true)} testId="voice-open-ycm">YCM fleet</WorkspaceActionMenuItem>
+          <WorkspaceActionMenuItem icon={Wifi} onSelect={() => testScopedPbxs(pbxs)} testId="voice-test-connection">Test PBXs</WorkspaceActionMenuItem>
+          {voiceHint && (
+            <WorkspaceActionMenuItem icon={RotateCcw} onSelect={forgetVoiceLearning} testId="voice-forget-learning">Forget learned ordering</WorkspaceActionMenuItem>
+          )}
+        </WorkspaceActionMenu>
         <Button variant="outline" size="sm" onClick={() => runSync()} disabled={!!busy} data-testid="voice-sync"><RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${busy === "sync" ? "animate-spin" : ""}`} />Sync now</Button>
         <Button size="sm" onClick={openAddPbx} disabled={!!busy} data-testid="voice-add-pbx"><Plus className="mr-1.5 h-3.5 w-3.5" />Add PBX</Button>
       </>}
@@ -407,9 +492,47 @@ export default function VoiceWorkspacePage() {
     </Card>
 
     <Tabs value={tab} onValueChange={(next) => updateRoute(next)}>
-      <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/50 bg-card/70 p-1.5 sm:w-fit">
-        <TabsTrigger value="dashboard">Dashboard</TabsTrigger><TabsTrigger value="monitoring">Live monitor</TabsTrigger><TabsTrigger value="pbxs">PBXs ({pbxs.length})</TabsTrigger><TabsTrigger value="extensions">Extensions ({scopedExtensions.length})</TabsTrigger><TabsTrigger value="billing">Billing</TabsTrigger><TabsTrigger value="sync">Sync history</TabsTrigger><TabsTrigger value="activity">Activity</TabsTrigger><TabsTrigger value="diagnostics">API diagnostics</TabsTrigger>
-      </TabsList>
+      <VoiceWorkspaceTabs
+        counts={voiceCounts}
+        personal={learning.personal}
+        team={learning.team}
+        onRecordAction={learning.record}
+      />
+
+      <TabsContent value="calls" className="mt-4 space-y-4">
+        <Card className="border-cyan-500/20"><CardContent className="grid gap-3 p-4 lg:grid-cols-[1.1fr_1.2fr_0.8fr_0.8fr_auto] lg:items-end">
+          <div className="space-y-1.5"><Label>PBX</Label><Select value={monitoringPbxId} onValueChange={setMonitoringPbxId} disabled={!monitorablePbxs.length}><SelectTrigger><SelectValue placeholder={monitorablePbxs.length ? "Choose a client PBX" : "No live-enabled PBXs"} /></SelectTrigger><SelectContent>{monitorablePbxs.map((pbx) => <SelectItem key={pbx.id} value={pbx.id}>{pbx.client_name} · {pbx.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Caller, name or number</Label><Input value={callFilters.search} onChange={(event) => setCallFilters((current) => ({ ...current, search: event.target.value }))} placeholder="Search the call history" data-testid="voice-call-search" /></div>
+          <div className="space-y-1.5"><Label>Direction</Label><Select value={callFilters.direction} onValueChange={(value) => loadCallHistory({ direction: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All directions</SelectItem><SelectItem value="inbound">Inbound</SelectItem><SelectItem value="outbound">Outbound</SelectItem><SelectItem value="internal">Internal</SelectItem></SelectContent></Select></div>
+          <div className="space-y-1.5"><Label>Outcome</Label><Select value={callFilters.status} onValueChange={(value) => loadCallHistory({ status: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All outcomes</SelectItem><SelectItem value="answered">Answered</SelectItem><SelectItem value="missed">Missed</SelectItem><SelectItem value="failed">Failed</SelectItem></SelectContent></Select></div>
+          <Button onClick={() => loadCallHistory()} disabled={callBusy || !monitoringPbxId} data-testid="voice-call-search-run"><Search className={`mr-2 h-4 w-4 ${callBusy ? "animate-pulse" : ""}`} />{callBusy ? "Loading…" : "Search calls"}</Button>
+        </CardContent></Card>
+        {callHistory ? <>
+          <MetricStrip columns={4}>
+            <MetricTile label="Returned" value={callHistory.counts?.returned ?? 0} accent="sky" icon={Phone} />
+            <MetricTile label="Answered" value={callHistory.counts?.answered ?? 0} accent="emerald" icon={CheckCircle2} />
+            <MetricTile label="Missed" value={callHistory.counts?.missed ?? 0} accent={(callHistory.counts?.missed ?? 0) ? "amber" : "emerald"} icon={AlertTriangle} />
+            <MetricTile label="Recorded" value={callHistory.counts?.recorded ?? 0} accent="cyan" icon={Radio} />
+          </MetricStrip>
+          <Card>
+            <CardHeader className="pb-3"><CardTitle className="text-sm">Call detail records</CardTitle><CardDescription>{callHistory.pbx?.client_name} · {callHistory.pbx?.name}. {callHistory.wait_time_reported ? `Average queue wait ${formatCallClock(callHistory.average_wait_time)}.` : "This PBX did not report queue wait times."}</CardDescription></CardHeader>
+            <CardContent className="p-0"><Table><TableHeader><TableRow><TableHead>Started</TableHead><TableHead>Direction</TableHead><TableHead>From</TableHead><TableHead>To</TableHead><TableHead>Outcome</TableHead><TableHead>Talk</TableHead><TableHead>Wait</TableHead></TableRow></TableHeader>
+              <TableBody>{callHistory.data?.length ? callHistory.data.map((call) => <TableRow key={call.id}>
+                <TableCell className="whitespace-nowrap text-xs">{compactDate(call.timestamp)}</TableCell>
+                <TableCell className="text-xs capitalize">{call.direction}</TableCell>
+                <TableCell className="max-w-48 truncate text-xs"><p className="font-medium">{call.caller_name || call.caller || "Unknown"}</p><p className="text-muted-foreground">{call.caller}</p></TableCell>
+                <TableCell className="max-w-48 truncate text-xs">{call.callee_name || call.callee || "Not reported"}</TableCell>
+                <TableCell><Badge variant="outline" className={call.status === "answered" ? "border-emerald-500/30 text-emerald-300" : call.status === "missed" ? "border-amber-500/30 text-amber-300" : "border-border/60 text-muted-foreground"}>{readable(call.status || "unknown")}</Badge></TableCell>
+                <TableCell className="font-mono text-xs">{formatCallClock(call.talking_time)}</TableCell>
+                <TableCell className="font-mono text-xs">{formatCallClock(call.wait_time)}</TableCell>
+              </TableRow>) : <TableRow><TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">No calls match this view.</TableCell></TableRow>}</TableBody></Table></CardContent>
+          </Card>
+        </> : <Card><CardContent className="py-14 text-center"><Phone className="mx-auto mb-3 h-9 w-9 text-cyan-300/50" /><p className="text-sm font-medium">Choose a PBX and search its call history</p><p className="mt-1 text-xs text-muted-foreground">Filter by direction and outcome, or search a name or number. Queue wait is shown only when the PBX reports it — Nexus never estimates it.</p></CardContent></Card>}
+      </TabsContent>
+
+      <TabsContent value="capabilities" className="mt-4">
+        <VoiceCapabilityConsole api={API} headers={headers} pbxs={monitorablePbxs} pbxId={monitoringPbxId} onPbxChange={setMonitoringPbxId} personal={learning.personal} team={learning.team} onRecordAction={learning.record} />
+      </TabsContent>
 
       <TabsContent value="dashboard" className="mt-4 grid gap-4 lg:grid-cols-3">
         <Card className="border-sky-500/20 lg:col-span-2"><CardHeader><CardTitle className="text-sm">Direct PBX health</CardTitle><CardDescription>Connection readiness is measured from client-owned P-Series API credentials, never a shared provider credential.</CardDescription></CardHeader><CardContent className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/40 p-4"><div className="flex items-center gap-3"><div className={`flex h-10 w-10 items-center justify-center rounded-lg ${workspace.provider?.connected ? "bg-emerald-500/10" : "bg-amber-500/10"}`}><Cloud className={`h-5 w-5 ${workspace.provider?.connected ? "text-emerald-300" : "text-amber-300"}`} /></div><div><p className="font-semibold">Yeastar P-Series OpenAPI</p><p className="text-xs text-muted-foreground">{workspace.provider?.connected ? "Client PBX connections are ready for live checks" : "Add a client PBX to begin managed voice operations"}</p></div></div><Badge variant="outline" className={workspace.provider?.connected ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}>{readable(workspace.system_health)}</Badge></div><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg border border-border/60 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Last successful sync</p><p className="mt-1 text-sm font-medium">{workspace.last_successful_sync ? compactDate(workspace.last_successful_sync) : "Not yet synchronised"}</p></div><div className="rounded-lg border border-border/60 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Client linkage</p><p className="mt-1 text-sm font-medium">{allPbxs.length} client PBX{allPbxs.length === 1 ? "" : "s"}</p></div><div className="rounded-lg border border-border/60 p-3"><p className="text-[10px] uppercase tracking-wider text-muted-foreground">Billing review</p><p className="mt-1 text-sm font-medium">{(workspace.billing?.pending_changes || 0)} change{(workspace.billing?.pending_changes || 0) === 1 ? "" : "s"} pending</p></div></div></CardContent></Card>

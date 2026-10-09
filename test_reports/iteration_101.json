@@ -22,7 +22,7 @@
     "backend": "100% (9/9 tests passed)",
     "frontend": "100% (all features verified)"
   },
-  "test_credentials": "aaron@stech.com.au / Lucky@2871$!",
+  "test_credentials": "aaron@stech.com.au / [redacted-test-password]",
   "seed_data_creation": "None",
   "retest_needed": false,
   "should_main_agent_self_test": false,
@@ -50,7 +50,7 @@
     },
     "sms_composer_in_tickets": {
       "sms_form": "PASS - data-testid='sms-form' found",
-      "character_counter": "PASS - Shows '24 chars · 1 segment' format",
+      "character_counter": "PASS - Shows '24 chars Â· 1 segment' format",
       "signature_hint": "PASS - Shows 'Signature auto-appended: \"Kind Regards, NexusMSP\"' when message doesn't contain signature"
     },
     "regression": {

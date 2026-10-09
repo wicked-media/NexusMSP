@@ -21,19 +21,27 @@
 8. Predictive Auto-Quote trigger           POST /api/tickets/{id}/quote-nudge
 9. Pre-Emptive DisputeShield scan          POST /api/invoices/{id}/dispute-scan
 """
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from typing import Any, Optional
 import os, uuid
 
 from app.database import db
 from app.auth import get_current_user
+from app.services.action_permissions import evaluate_action_permission, require_action
+from app.services.activity import log_activity
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_global_scope,
+    assert_tenant_record_scope,
+    tenant_scoped_query,
+)
 
 router = APIRouter()
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from app.services.time_utils import now_iso as _now_iso
 
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
@@ -45,6 +53,134 @@ def _parse_iso(s: Optional[str]) -> Optional[datetime]:
         return dt
     except Exception:
         return None
+
+
+_CATALOGUE_PRICING_ACTION = "billing.catalogue.pricing.manage"
+_MAX_MONEY = Decimal("1000000000")
+_MAX_QUANTITY = Decimal("100000")
+_MAX_LABOUR_HOURS = Decimal("10000")
+
+
+def _required_identifier(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise HTTPException(422, f"{field} must be a non-empty identifier")
+    identifier = value.strip()
+    if not identifier or len(identifier) > 200:
+        raise HTTPException(422, f"{field} must be a non-empty identifier")
+    return identifier
+
+
+def _bounded_decimal(value: Any, field: str, *, maximum: Decimal, places: int = 2) -> float:
+    """Parse only finite, non-negative financial or quantity values.
+
+    ``float`` accepts NaN and infinity, which would otherwise become persistent
+    catalogue values and poison invoice/ticket calculations.  Decimal parsing
+    also gives every browser and API client the same minor-unit rounding.
+    """
+    try:
+        amount = Decimal(str(value).strip())
+    except (AttributeError, InvalidOperation, TypeError, ValueError):
+        raise HTTPException(422, f"{field} must be a finite non-negative number") from None
+    if not amount.is_finite() or amount < 0 or amount > maximum:
+        raise HTTPException(422, f"{field} must be a finite non-negative number")
+    try:
+        return float(amount.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
+    except InvalidOperation:
+        raise HTTPException(422, f"{field} must be a finite non-negative number") from None
+
+
+def _bounded_money(value: Any, field: str) -> float:
+    return _bounded_decimal(value, field, maximum=_MAX_MONEY)
+
+
+def _bounded_hours(value: Any, field: str) -> float:
+    return _bounded_decimal(value, field, maximum=_MAX_LABOUR_HOURS)
+
+
+def _bounded_quantity(value: Any, field: str) -> int:
+    try:
+        quantity = Decimal(str(value).strip())
+    except (AttributeError, InvalidOperation, TypeError, ValueError):
+        raise HTTPException(422, f"{field} must be a finite non-negative whole number") from None
+    if (
+        not quantity.is_finite()
+        or quantity < 0
+        or quantity > _MAX_QUANTITY
+        or quantity != quantity.to_integral_value()
+    ):
+        raise HTTPException(422, f"{field} must be a finite non-negative whole number")
+    return int(quantity)
+
+
+def _bounded_text(value: Any, field: str, *, maximum: int, allow_empty: bool = True) -> str:
+    if not isinstance(value, str):
+        raise HTTPException(422, f"{field} must be text")
+    text = value.strip()
+    if (not allow_empty and not text) or len(text) > maximum:
+        raise HTTPException(422, f"{field} must be {'non-empty ' if not allow_empty else ''}text up to {maximum} characters")
+    return text
+
+
+def _normalise_kit_items(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 200:
+        raise HTTPException(422, "items must be an array containing at most 200 products")
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise HTTPException(422, f"items[{index}] must be an object")
+        product_id = _required_identifier(item.get("product_id"), f"items[{index}].product_id")
+        quantity = _bounded_quantity(item["quantity"] if "quantity" in item else 1, f"items[{index}].quantity")
+        items.append({"product_id": product_id, "quantity": quantity})
+    return items
+
+
+async def _require_catalogue_pricing_permission(current_user: dict) -> None:
+    """Protect direct service calls as well as the FastAPI dependency path."""
+    result = await evaluate_action_permission(current_user, _CATALOGUE_PRICING_ACTION)
+    if result["allowed"]:
+        return
+    await db.permission_denials.insert_one(
+        {
+            "permission": _CATALOGUE_PRICING_ACTION,
+            "user_id": current_user.get("id"),
+            "user_name": current_user.get("name"),
+            "role": current_user.get("role"),
+            "source": result.get("source"),
+            "operation": "billing.catalogue.pricing",
+            "occurred_at": _now_iso(),
+        }
+    )
+    raise HTTPException(
+        status_code=403,
+        detail=f"Action permission required: {_CATALOGUE_PRICING_ACTION}",
+        headers={"X-Required-Permission": _CATALOGUE_PRICING_ACTION},
+    )
+
+
+async def _load_scoped_client(
+    client_id: str,
+    current_user: dict,
+    *,
+    operation: str,
+    site_id: str | None = None,
+    request: Request | None = None,
+) -> dict:
+    """Resolve the Nexus client record before using a client-bound URL ID."""
+    canonical_id = _required_identifier(client_id, "client_id")
+    client = await db.clients.find_one({"id": canonical_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(404, "client not found")
+    await assert_client_scope(
+        current_user,
+        client.get("id"),
+        site_id=site_id,
+        operation=operation,
+        request=request,
+        mask_not_found=True,
+    )
+    return client
 
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 1) SMART PRODUCT CATALOG â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -104,22 +240,49 @@ async def product_price_history(product_id: str, current_user: dict = Depends(ge
     return {"product_id": product_id, "name": p.get("name"), "history": p.get("price_history") or []}
 
 
-@router.post("/finance/product/{product_id}/price-change")
+@router.post(
+    "/finance/product/{product_id}/price-change",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def record_price_change(product_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
     """Record a cost or retail price change with timestamp."""
+    await _require_catalogue_pricing_permission(current_user)
+    await assert_global_scope(current_user, operation="billing.catalogue.price.change")
     p = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not p: raise HTTPException(404, "product not found")
+    cost_price = _bounded_money(
+        payload["cost_price"] if "cost_price" in payload else p.get("cost_price", 0),
+        "cost_price",
+    )
+    retail_price = _bounded_money(
+        payload["retail_price"] if "retail_price" in payload else p.get("retail_price", 0),
+        "retail_price",
+    )
+    reason = "" if payload.get("reason") is None else _bounded_text(payload.get("reason"), "reason", maximum=200)
     entry = {
         "ts": _now_iso(),
         "changed_by": current_user.get("email"),
-        "cost_price": float(payload.get("cost_price", p.get("cost_price", 0))),
-        "retail_price": float(payload.get("retail_price", p.get("retail_price", 0))),
-        "reason": (payload.get("reason") or "")[:200],
+        "cost_price": cost_price,
+        "retail_price": retail_price,
+        "reason": reason,
     }
     await db.products.update_one(
         {"id": product_id},
         {"$push": {"price_history": entry},
          "$set": {"cost_price": entry["cost_price"], "retail_price": entry["retail_price"], "updated_at": _now_iso()}},
+    )
+    await log_activity(
+        current_user,
+        "catalogue_price_changed",
+        "product",
+        product_id,
+        p.get("name") or product_id,
+        "Changed global catalogue pricing",
+        changes={
+            "cost_price": {"from": p.get("cost_price"), "to": cost_price},
+            "retail_price": {"from": p.get("retail_price"), "to": retail_price},
+        },
+        metadata={"scope": "global", "reason": reason},
     )
     return {"ok": True, "entry": entry}
 
@@ -148,73 +311,192 @@ async def list_kits(current_user: dict = Depends(get_current_user)):
     return {"kits": kits, "count": len(kits)}
 
 
-@router.post("/product-kits")
+@router.post(
+    "/product-kits",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def create_kit(payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    name = (payload.get("name") or "").strip()
-    if not name: raise HTTPException(400, "name required")
+    await _require_catalogue_pricing_permission(current_user)
+    await assert_global_scope(current_user, operation="billing.catalogue.kit.create")
+    name = _bounded_text(payload.get("name"), "name", maximum=160, allow_empty=False)
+    description = "" if payload.get("description") is None else _bounded_text(payload.get("description"), "description", maximum=500)
+    category = "general" if payload.get("category") is None else _bounded_text(payload.get("category"), "category", maximum=80, allow_empty=False)
+    items = _normalise_kit_items(payload.get("items"))
+    labor_hours = _bounded_hours(payload["labor_hours"], "labor_hours") if "labor_hours" in payload else 0.0
+    labor_rate = _bounded_money(payload["labor_rate"], "labor_rate") if "labor_rate" in payload else 150.0
     doc = {
         "id": uuid.uuid4().hex,
         "name": name,
-        "description": (payload.get("description") or "")[:500],
-        "items": payload.get("items") or [],  # [{product_id, quantity}]
-        "labor_hours": float(payload.get("labor_hours") or 0),
-        "labor_rate": float(payload.get("labor_rate") or 150),
-        "category": payload.get("category") or "general",
+        "description": description,
+        "items": items,
+        "labor_hours": labor_hours,
+        "labor_rate": labor_rate,
+        "category": category,
         "created_at": _now_iso(),
         "created_by": current_user.get("email"),
+        "version": 1,
     }
     await db.product_kits.insert_one(dict(doc))
+    await log_activity(
+        current_user,
+        "catalogue_kit_created",
+        "product_kit",
+        doc["id"],
+        doc["name"],
+        "Created global product kit",
+        metadata={"scope": "global", "item_count": len(items)},
+    )
     doc.pop("_id", None)
     return doc
 
 
-@router.put("/product-kits/{kit_id}")
+@router.put(
+    "/product-kits/{kit_id}",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def update_kit(kit_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    allowed = {"name", "description", "items", "labor_hours", "labor_rate", "category"}
-    patch = {k: v for k, v in payload.items() if k in allowed}
-    if "labor_hours" in patch: patch["labor_hours"] = float(patch["labor_hours"])
-    if "labor_rate" in patch: patch["labor_rate"] = float(patch["labor_rate"])
+    await _require_catalogue_pricing_permission(current_user)
+    await assert_global_scope(current_user, operation="billing.catalogue.kit.update")
+    kit = await db.product_kits.find_one({"id": kit_id}, {"_id": 0})
+    if not kit: raise HTTPException(404, "kit not found")
+    patch: dict[str, Any] = {}
+    if "name" in payload:
+        patch["name"] = _bounded_text(payload["name"], "name", maximum=160, allow_empty=False)
+    if "description" in payload:
+        patch["description"] = _bounded_text(payload["description"], "description", maximum=500)
+    if "items" in payload:
+        patch["items"] = _normalise_kit_items(payload["items"])
+    if "labor_hours" in payload:
+        patch["labor_hours"] = _bounded_hours(payload["labor_hours"], "labor_hours")
+    if "labor_rate" in payload:
+        patch["labor_rate"] = _bounded_money(payload["labor_rate"], "labor_rate")
+    if "category" in payload:
+        patch["category"] = _bounded_text(payload["category"], "category", maximum=80, allow_empty=False)
+    if not patch:
+        raise HTTPException(422, "At least one editable kit field is required")
     patch["updated_at"] = _now_iso()
     res = await db.product_kits.update_one({"id": kit_id}, {"$set": patch})
     if res.matched_count == 0: raise HTTPException(404, "kit not found")
+    await log_activity(
+        current_user,
+        "catalogue_kit_updated",
+        "product_kit",
+        kit_id,
+        kit.get("name") or kit_id,
+        "Updated global product kit",
+        changes={field: {"from": kit.get(field), "to": value} for field, value in patch.items() if field != "updated_at"},
+        metadata={"scope": "global"},
+    )
     return {"ok": True}
 
 
-@router.delete("/product-kits/{kit_id}")
+@router.delete(
+    "/product-kits/{kit_id}",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def delete_kit(kit_id: str, current_user: dict = Depends(get_current_user)):
+    await _require_catalogue_pricing_permission(current_user)
+    await assert_global_scope(current_user, operation="billing.catalogue.kit.delete")
+    kit = await db.product_kits.find_one({"id": kit_id}, {"_id": 0})
+    if not kit: raise HTTPException(404, "kit not found")
     res = await db.product_kits.delete_one({"id": kit_id})
     if res.deleted_count == 0: raise HTTPException(404, "kit not found")
+    await log_activity(
+        current_user,
+        "catalogue_kit_deleted",
+        "product_kit",
+        kit_id,
+        kit.get("name") or kit_id,
+        "Deleted global product kit",
+        metadata={"scope": "global", "item_count": len(kit.get("items") or [])},
+    )
     return {"deleted": True}
 
 
-@router.post("/tickets/{ticket_id}/apply-kit/{kit_id}")
+@router.post(
+    "/tickets/{ticket_id}/apply-kit/{kit_id}",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def apply_kit_to_ticket(ticket_id: str, kit_id: str, current_user: dict = Depends(get_current_user)):
-    t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-    if not t: raise HTTPException(404, "ticket not found")
+    await _require_catalogue_pricing_permission(current_user)
+    t = await assert_tenant_record_scope(
+        current_user,
+        db.tickets,
+        ticket_id,
+        operation="ticket.billing.quote_advisory",
+        resource_name="Ticket",
+    )
+    client = await _load_scoped_client(
+        t.get("client_id"),
+        current_user,
+        operation="billing.catalogue.kit.apply",
+        site_id=t.get("site_id"),
+    )
+    canonical_client_id = str(client.get("id"))
     kit = await db.product_kits.find_one({"id": kit_id}, {"_id": 0})
     if not kit: raise HTTPException(404, "kit not found")
-    # Attach each product as a ticket product
+    try:
+        kit_items = _normalise_kit_items(kit.get("items"))
+    except HTTPException:
+        raise HTTPException(409, "Kit contains invalid product or quantity data and cannot be applied") from None
+
+    # Validate every billable item before inserting any ticket product, so a
+    # retired catalogue item cannot leave the ticket half-updated.
+    resolved_items: list[tuple[dict[str, Any], dict[str, Any], float, float]] = []
+    for item in kit_items:
+        quantity = item["quantity"]
+        if quantity == 0:
+            continue
+        product = await db.products.find_one(
+            {"id": item["product_id"]},
+            {"_id": 0, "name": 1, "sku": 1, "retail_price": 1, "cost_price": 1},
+        )
+        if not product:
+            raise HTTPException(409, "Kit references an unavailable catalogue product")
+        try:
+            retail_price = _bounded_money(product.get("retail_price", 0), "catalogue retail_price")
+            cost_price = _bounded_money(product.get("cost_price", 0), "catalogue cost_price")
+        except HTTPException:
+            raise HTTPException(409, "Kit references a product with invalid catalogue pricing") from None
+        resolved_items.append((item, product, retail_price, cost_price))
+
+    # Attach each validated product as a client-bound ticket product.
     attached = []
-    for item in kit.get("items") or []:
-        pid = item.get("product_id")
-        qty = int(item.get("quantity") or 1)
-        p = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1, "sku": 1, "retail_price": 1, "cost_price": 1})
-        if not p: continue
+    for item, product, retail_price, cost_price in resolved_items:
+        qty = item["quantity"]
         doc = {
             "id": uuid.uuid4().hex,
             "ticket_id": ticket_id,
-            "product_id": pid,
-            "name": p.get("name"),
-            "sku": p.get("sku"),
+            "client_id": canonical_client_id,
+            "site_id": t.get("site_id"),
+            "product_id": item["product_id"],
+            "name": product.get("name"),
+            "sku": product.get("sku"),
             "quantity": qty,
-            "unit_price": p.get("retail_price", 0),
-            "cost_price": p.get("cost_price", 0),
-            "total": qty * float(p.get("retail_price") or 0),
+            "unit_price": retail_price,
+            "cost_price": cost_price,
+            "total": round(qty * retail_price, 2),
             "source": f"kit:{kit_id}",
             "added_at": _now_iso(),
+            "added_by": current_user.get("id"),
         }
         await db.ticket_products.insert_one(dict(doc))
-        attached.append({"name": p.get("name"), "quantity": qty, "total": doc["total"]})
+        attached.append({"name": product.get("name"), "quantity": qty, "total": doc["total"]})
+    await log_activity(
+        current_user,
+        "ticket_product_kit_applied",
+        "ticket",
+        ticket_id,
+        t.get("subject") or ticket_id,
+        "Applied product kit to ticket",
+        metadata={
+            "client_id": canonical_client_id,
+            "site_id": t.get("site_id"),
+            "kit_id": kit_id,
+            "kit_name": kit.get("name"),
+            "attached_count": len(attached),
+        },
+    )
     return {"ok": True, "attached_count": len(attached), "attached": attached, "kit_name": kit.get("name")}
 
 
@@ -222,7 +504,9 @@ async def apply_kit_to_ticket(ticket_id: str, kit_id: str, current_user: dict = 
 
 @router.get("/clients/{client_id}/price-book")
 async def get_price_book(client_id: str, current_user: dict = Depends(get_current_user)):
-    rows = await db.client_price_overrides.find({"client_id": client_id}, {"_id": 0}).to_list(500)
+    client = await _load_scoped_client(client_id, current_user, operation="billing.client_price_book.view")
+    canonical_client_id = str(client.get("id"))
+    rows = await db.client_price_overrides.find({"client_id": canonical_client_id}, {"_id": 0}).to_list(500)
     # Hydrate product names
     for r in rows:
         p = await db.products.find_one({"id": r.get("product_id")}, {"_id": 0, "name": 1, "sku": 1, "retail_price": 1})
@@ -234,14 +518,27 @@ async def get_price_book(client_id: str, current_user: dict = Depends(get_curren
     return {"overrides": rows, "count": len(rows)}
 
 
-@router.post("/clients/{client_id}/price-book")
+@router.post(
+    "/clients/{client_id}/price-book",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def upsert_price_book(client_id: str, payload: dict = Body(...), current_user: dict = Depends(get_current_user)):
-    pid = payload.get("product_id")
-    if not pid: raise HTTPException(400, "product_id required")
-    override_price = float(payload.get("override_price") or 0)
-    reason = (payload.get("reason") or "")[:200]
+    await _require_catalogue_pricing_permission(current_user)
+    client = await _load_scoped_client(client_id, current_user, operation="billing.client_price_book.upsert")
+    canonical_client_id = str(client.get("id"))
+    pid = _required_identifier(payload.get("product_id"), "product_id")
+    if "override_price" not in payload:
+        raise HTTPException(422, "override_price is required")
+    override_price = _bounded_money(payload["override_price"], "override_price")
+    reason = "" if payload.get("reason") is None else _bounded_text(payload.get("reason"), "reason", maximum=200)
+    product = await db.products.find_one({"id": pid}, {"_id": 0, "name": 1})
+    if not product:
+        raise HTTPException(404, "product not found")
+    existing = await db.client_price_overrides.find_one(
+        {"client_id": canonical_client_id, "product_id": pid}, {"_id": 0}
+    )
     doc = {
-        "client_id": client_id,
+        "client_id": canonical_client_id,
         "product_id": pid,
         "override_price": override_price,
         "reason": reason,
@@ -249,25 +546,64 @@ async def upsert_price_book(client_id: str, payload: dict = Body(...), current_u
         "updated_by": current_user.get("email"),
     }
     await db.client_price_overrides.update_one(
-        {"client_id": client_id, "product_id": pid},
+        {"client_id": canonical_client_id, "product_id": pid},
         {"$set": doc},
         upsert=True,
+    )
+    await log_activity(
+        current_user,
+        "client_price_book_updated",
+        "client_price_override",
+        f"{canonical_client_id}:{pid}",
+        product.get("name") or pid,
+        "Updated client-specific catalogue price",
+        changes={"override_price": {"from": existing.get("override_price") if existing else None, "to": override_price}},
+        metadata={"client_id": canonical_client_id, "product_id": pid, "reason": reason},
     )
     return {"ok": True}
 
 
-@router.delete("/clients/{client_id}/price-book/{product_id}")
+@router.delete(
+    "/clients/{client_id}/price-book/{product_id}",
+    dependencies=[Depends(require_action(_CATALOGUE_PRICING_ACTION))],
+)
 async def delete_price_override(client_id: str, product_id: str, current_user: dict = Depends(get_current_user)):
-    res = await db.client_price_overrides.delete_one({"client_id": client_id, "product_id": product_id})
+    await _require_catalogue_pricing_permission(current_user)
+    client = await _load_scoped_client(client_id, current_user, operation="billing.client_price_book.delete")
+    canonical_client_id = str(client.get("id"))
+    canonical_product_id = _required_identifier(product_id, "product_id")
+    override = await db.client_price_overrides.find_one(
+        {"client_id": canonical_client_id, "product_id": canonical_product_id}, {"_id": 0}
+    )
+    if not override:
+        raise HTTPException(404, "override not found")
+    res = await db.client_price_overrides.delete_one(
+        {"client_id": canonical_client_id, "product_id": canonical_product_id}
+    )
     if res.deleted_count == 0: raise HTTPException(404, "override not found")
+    await log_activity(
+        current_user,
+        "client_price_book_deleted",
+        "client_price_override",
+        f"{canonical_client_id}:{canonical_product_id}",
+        canonical_product_id,
+        "Deleted client-specific catalogue price",
+        changes={"override_price": {"from": override.get("override_price"), "to": None}},
+        metadata={"client_id": canonical_client_id, "product_id": canonical_product_id},
+    )
     return {"deleted": True}
 
 
 @router.get("/clients/{client_id}/price-for/{product_id}")
 async def client_price_for_product(client_id: str, product_id: str, current_user: dict = Depends(get_current_user)):
-    p = await db.products.find_one({"id": product_id}, {"_id": 0, "retail_price": 1, "name": 1})
+    client = await _load_scoped_client(client_id, current_user, operation="billing.client_price_book.view")
+    canonical_client_id = str(client.get("id"))
+    canonical_product_id = _required_identifier(product_id, "product_id")
+    p = await db.products.find_one({"id": canonical_product_id}, {"_id": 0, "retail_price": 1, "name": 1})
     if not p: raise HTTPException(404, "product not found")
-    override = await db.client_price_overrides.find_one({"client_id": client_id, "product_id": product_id}, {"_id": 0})
+    override = await db.client_price_overrides.find_one(
+        {"client_id": canonical_client_id, "product_id": canonical_product_id}, {"_id": 0}
+    )
     if override:
         return {"price": override["override_price"], "source": "client_override", "reason": override.get("reason"), "standard": p.get("retail_price")}
     return {"price": p.get("retail_price"), "source": "standard", "standard": p.get("retail_price")}
@@ -562,8 +898,13 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     t = await db.tickets.find_one({"id": ticket_id}, {"_id": 0})
     if not t: raise HTTPException(404, "ticket not found")
     # Signals
-    comments = await db.ticket_comments.count_documents({"ticket_id": ticket_id})
-    timelog = await db.time_entries.find({"ticket_id": ticket_id}, {"_id": 0, "duration_minutes": 1}).to_list(100)
+    comments = await db.ticket_comments.count_documents(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id})
+    )
+    timelog = await db.time_entries.find(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"_id": 0, "duration_minutes": 1},
+    ).to_list(100)
     mins = sum(int(e.get("duration_minutes") or 0) for e in timelog)
     text = f"{t.get('title','')} {t.get('description','')}"
     keyword_hits = sum(1 for kw in ["install", "migrate", "deploy", "setup", "onboard", "upgrade", "refresh", "replace", "procure", "license", "project"] if kw in text.lower())
@@ -575,11 +916,14 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
     elif comments >= 3: score += 15
     if mins >= 120: score += 30; signals.append(f"{mins}min logged already")
     elif mins >= 60: score += 15
-    if keyword_hits >= 3: score += 30; signals.append(f"Keywords: project/deploy/migrate")
+    if keyword_hits >= 3: score += 30; signals.append("Keywords: project/deploy/migrate")
     elif keyword_hits >= 1: score += 10
 
     # Existing quote/estimate?
-    existing = await db.estimates.find_one({"ticket_id": ticket_id}, {"_id": 0, "id": 1})
+    existing = await db.estimates.find_one(
+        tenant_scoped_query(current_user, {"ticket_id": ticket_id}),
+        {"_id": 0, "id": 1},
+    )
     if existing:
         signals.append("Estimate already exists")
         return {"should_quote": False, "score": score, "existing_estimate_id": existing["id"], "signals": signals}
@@ -598,25 +942,144 @@ async def quote_nudge(ticket_id: str, current_user: dict = Depends(get_current_u
 
 # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• 9) PRE-EMPTIVE DISPUTESHIELD SCAN â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-@router.post("/invoices/{invoice_id}/dispute-scan")
-async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current_user)):
+def _safe_finance_number(value: Any, *, default: float = 0.0) -> float:
+    """Return a bounded non-negative number for local heuristic analysis only."""
+    try:
+        return _bounded_money(value, "stored invoice value")
+    except HTTPException:
+        return default
+
+
+def _dispute_amount_band(amount: float) -> str:
+    if amount >= 5000:
+        return "very_high"
+    if amount >= 1500:
+        return "high"
+    if amount >= 500:
+        return "medium"
+    return "low"
+
+
+def _dispute_quantity_band(quantity: float) -> str:
+    if quantity >= 10:
+        return "10_plus"
+    if quantity >= 6:
+        return "6_to_9"
+    if quantity >= 2:
+        return "2_to_5"
+    return "one"
+
+
+def _minimised_dispute_context(invoice: dict, *, resolved_ticket_count: int) -> str:
+    """Build anonymous, structural context for the external AI provider.
+
+    The model can identify billing-evidence patterns without customer names,
+    invoice IDs/numbers, full line descriptions, exact monetary values, or
+    ticket titles.  Nexus retains the detailed local heuristic result.
+    """
+    lines: list[str] = []
+    for index, raw_line in enumerate((invoice.get("line_items") or [])[:50], start=1):
+        line = raw_line if isinstance(raw_line, dict) else {}
+        description = str(line.get("description") or "").strip().lower()
+        quantity = _safe_finance_number(line.get("quantity", 1), default=1.0)
+        unit_price = _safe_finance_number(line.get("unit_price"), default=0.0)
+        total = _safe_finance_number(line.get("total"), default=round(quantity * unit_price, 2))
+        description_quality = "missing" if not description else "brief" if len(description) < 30 else "detailed"
+        lines.append(
+            "line_{index}: description={description_quality}; value_band={value_band}; "
+            "quantity_band={quantity_band}; emergency={emergency}; after_hours={after_hours}".format(
+                index=index,
+                description_quality=description_quality,
+                value_band=_dispute_amount_band(total),
+                quantity_band=_dispute_quantity_band(quantity),
+                emergency="yes" if "emergency" in description else "no",
+                after_hours="yes" if "after hours" in description else "no",
+            )
+        )
+    invoice_total = _safe_finance_number(invoice.get("total"), default=0.0)
+    return "\n".join(
+        [
+            "Anonymous invoice dispute-evidence analysis.",
+            f"invoice_total_band={_dispute_amount_band(invoice_total)}",
+            f"line_count={len(lines)}",
+            f"recent_resolved_ticket_count={max(0, min(int(resolved_ticket_count), 1000))}",
+            "lines:",
+            *(lines or ["none"]),
+        ]
+    )
+
+
+async def _audit_dispute_scan(
+    *,
+    current_user: dict,
+    invoice: dict,
+    client_id: str,
+    correlation_id: str | None,
+    outcome: str,
+    ai_used: bool,
+    line_count: int,
+    resolved_ticket_count: int,
+) -> None:
+    """Record analysis provenance without retaining an AI prompt or raw error."""
+    await log_activity(
+        current_user,
+        "invoice_dispute_scan_completed",
+        "invoice",
+        str(invoice.get("id") or ""),
+        str(invoice.get("invoice_number") or invoice.get("id") or "Invoice"),
+        "Ran pre-emptive invoice dispute analysis",
+        metadata={
+            "client_id": client_id,
+            "correlation_id": correlation_id,
+            "outcome": outcome,
+            "ai_used": ai_used,
+            "line_count": line_count,
+            "resolved_ticket_count": resolved_ticket_count,
+        },
+    )
+
+
+@router.post(
+    "/invoices/{invoice_id}/dispute-scan",
+    dependencies=[Depends(require_action("billing.analytics.view"))],
+)
+async def dispute_scan(
+    invoice_id: str,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
     """Nexus AI scans invoice line items and client history for dispute risks and drafts justifications."""
+    # The route dependency is the HTTP boundary; retain the check here for
+    # direct/internal callers as well so the AI path cannot bypass it.
+    await require_action("billing.analytics.view")(request=request, current_user=current_user)
     inv = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not inv: raise HTTPException(404, "invoice not found")
+    invoice_client_id = inv.get("client_id")
+    if not isinstance(invoice_client_id, str) or not invoice_client_id.strip():
+        raise HTTPException(409, "Invoice does not have a client ownership binding")
+    client = await _load_scoped_client(
+        invoice_client_id,
+        current_user,
+        operation="billing.invoice.dispute_scan",
+        request=request,
+    )
+    canonical_client_id = str(client.get("id"))
+    correlation_id = getattr(getattr(request, "state", None), "correlation_id", None)
 
     api_key = os.environ.get("OPENAI_API_KEY")
-    client_tickets = await db.tickets.find(
-        {"client_id": inv.get("client_id"), "status": {"$in": ["resolved", "closed"]}},
-        {"_id": 0, "title": 1, "ticket_number": 1, "resolved_at": 1}
-    ).sort("resolved_at", -1).limit(10).to_list(10)
+    resolved_ticket_count = await db.tickets.count_documents(
+        {"client_id": canonical_client_id, "status": {"$in": ["resolved", "closed"]}}
+    )
 
     # Heuristic pre-scan
     flags = []
     for li in inv.get("line_items") or []:
-        unit = float(li.get("unit_price") or 0)
-        qty = float(li.get("quantity") or 1)
-        total = float(li.get("total") or (unit * qty))
-        desc = (li.get("description") or "").lower()
+        if not isinstance(li, dict):
+            continue
+        unit = _safe_finance_number(li.get("unit_price"), default=0.0)
+        qty = _safe_finance_number(li.get("quantity", 1), default=1.0)
+        total = _safe_finance_number(li.get("total"), default=round(unit * qty, 2))
+        desc = str(li.get("description") or "").lower()
         if total >= 1500 and len(desc) < 30:
             flags.append({"line": li.get("description"), "risk": "Vague high-value line â€” add detail", "severity": "high"})
         if "emergency" in desc and "after hours" not in desc:
@@ -624,24 +1087,30 @@ async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current
         if qty > 5 and unit > 100:
             flags.append({"line": li.get("description"), "risk": f"{qty} Ã— ${unit} â€” ensure quantity is explained", "severity": "low"})
 
+    line_count = len(inv.get("line_items") or [])
     if not api_key:
+        await _audit_dispute_scan(
+            current_user=current_user,
+            invoice=inv,
+            client_id=canonical_client_id,
+            correlation_id=correlation_id,
+            outcome="heuristic_only",
+            ai_used=False,
+            line_count=line_count,
+            resolved_ticket_count=resolved_ticket_count,
+        )
         return {"flags": flags, "justification": None, "model": "heuristic-only"}
 
     try:
         from app.services.ai_provider import LlmChat, UserMessage
-        corpus = (
-            f"Invoice total: ${inv.get('total',0):,.2f}\n"
-            f"Line items:\n" +
-            "\n".join([f"- {li.get('description','')} Ã— {li.get('quantity',1)} = ${li.get('total',0):.2f}" for li in inv.get('line_items') or []]) +
-            f"\n\nRecent resolved tickets for this client:\n" +
-            "\n".join([f"- {t.get('ticket_number')}: {t.get('title','')[:100]}" for t in client_tickets])
-        )
+        corpus = _minimised_dispute_context(inv, resolved_ticket_count=resolved_ticket_count)
         chat = LlmChat(
             api_key=api_key,
             session_id=f"dispute-{uuid.uuid4().hex[:8]}",
             system_message=(
-                "You are an MSP invoice-defense assistant. Scan the invoice for lines a client could dispute and draft "
-                "a short, professional justification referencing the actual resolved tickets. "
+                "You are an MSP invoice-defense assistant. You receive anonymised structural billing metadata only. "
+                "Identify dispute-evidence patterns and draft neutral, generic justifications. Do not invent customer, "
+                "invoice, ticket, device, or contract details. State uncertainty where the metadata is insufficient. "
                 "Output JSON ONLY: {risks:[{line,reason,severity,justification}], summary:'...'}. "
                 "Severity: high|medium|low. Keep justifications under 50 words each."
             ),
@@ -650,11 +1119,43 @@ async def dispute_scan(invoice_id: str, current_user: dict = Depends(get_current
         import json as _json, re as _re
         m = _re.search(r"\{[\s\S]*\}", resp or "")
         parsed = _json.loads(m.group(0)) if m else None
+        ai_risks = (parsed or {}).get("risks")
+        ai_summary = (parsed or {}).get("summary")
+        if not isinstance(ai_risks, list):
+            ai_risks = []
+        if not isinstance(ai_summary, str):
+            ai_summary = None
+        await _audit_dispute_scan(
+            current_user=current_user,
+            invoice=inv,
+            client_id=canonical_client_id,
+            correlation_id=correlation_id,
+            outcome="ai_completed",
+            ai_used=True,
+            line_count=line_count,
+            resolved_ticket_count=resolved_ticket_count,
+        )
         return {
             "flags": flags,
-            "ai_risks": (parsed or {}).get("risks", []),
-            "ai_summary": (parsed or {}).get("summary"),
+            "ai_risks": ai_risks,
+            "ai_summary": ai_summary,
             "model": "gpt-5.6-terra",
         }
-    except Exception as e:
-        return {"flags": flags, "justification": None, "error": str(e)[:200]}
+    except Exception:
+        # Do not return provider errors because they can include customer
+        # context, identifiers, or an upstream request representation.
+        await _audit_dispute_scan(
+            current_user=current_user,
+            invoice=inv,
+            client_id=canonical_client_id,
+            correlation_id=correlation_id,
+            outcome="ai_unavailable",
+            ai_used=False,
+            line_count=line_count,
+            resolved_ticket_count=resolved_ticket_count,
+        )
+        return {
+            "flags": flags,
+            "justification": None,
+            "error": "AI analysis is temporarily unavailable; heuristic scan completed.",
+        }

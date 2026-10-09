@@ -1,0 +1,72 @@
+groups:
+  - name: nexus-production
+    rules:
+      - alert: NexusApiUnavailable
+        expr: up{job="nexus-api"} == 0
+        for: 2m
+        labels: {severity: critical, service: api, owner: platform-operations, escalation: incident-commander}
+        annotations:
+          summary: Nexus API metrics target is unavailable
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#api-or-worker-unavailable
+      - alert: NexusWorkerUnavailable
+        expr: up{job="nexus-worker"} == 0
+        for: 2m
+        labels: {severity: critical, service: worker, owner: platform-operations, escalation: incident-commander}
+        annotations:
+          summary: Nexus durable worker metrics target is unavailable
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#api-or-worker-unavailable
+      - alert: NexusDependencyUnavailable
+        expr: nexus_dependency_ready == 0
+        for: 2m
+        labels: {severity: critical, service: dependency, owner: platform-operations, escalation: incident-commander}
+        annotations:
+          summary: A required Nexus dependency is unavailable
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#dependency-unavailable
+      - alert: NexusApiErrorRateHigh
+        expr: sum(rate(nexus_http_requests_total{status_class="5xx"}[5m])) / clamp_min(sum(rate(nexus_http_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels: {severity: warning, service: api, owner: platform-operations, escalation: engineering-lead}
+        annotations:
+          summary: Nexus API 5xx rate exceeds 5 percent
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#api-errors-or-latency
+      - alert: NexusApiLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(nexus_http_request_duration_seconds_bucket[10m]))) > 2
+        for: 10m
+        labels: {severity: warning, service: api, owner: platform-operations, escalation: engineering-lead}
+        annotations:
+          summary: Nexus API p95 latency exceeds two seconds
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#api-errors-or-latency
+      - alert: NexusProviderUnverified
+        expr: nexus_provider_configured == 1 and on(provider) nexus_provider_ready == 0
+        for: 15m
+        labels: {severity: warning, service: integration, owner: integration-owner, escalation: platform-operations}
+        annotations:
+          summary: A configured provider lacks verified healthy evidence
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#provider-unverified
+      - alert: NexusEventQueueBacklog
+        expr: nexus_event_queue_depth > 100
+        for: 10m
+        labels: {severity: warning, service: event-queue, owner: platform-operations, escalation: automation-owner}
+        annotations:
+          summary: Nexus event delivery backlog exceeds 100
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#queue-or-automation-degraded
+      - alert: NexusEventDeadLetters
+        expr: nexus_event_dead_letters > 0
+        for: 2m
+        labels: {severity: critical, service: event-queue, owner: platform-operations, escalation: automation-owner}
+        annotations:
+          summary: Nexus has dead-letter event deliveries
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#queue-or-automation-degraded
+      - alert: NexusAutomationLeaseExpired
+        expr: nexus_automation_expired_leases > 0
+        for: 2m
+        labels: {severity: critical, service: automation, owner: automation-owner, escalation: incident-commander}
+        annotations:
+          summary: Nexus automation has expired worker leases
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#queue-or-automation-degraded
+      - alert: NexusAlertDeliveryFailed
+        expr: increase(nexus_alert_deliveries_total{status=~"failed|not_configured|rejected"}[10m]) > 0
+        labels: {severity: critical, service: alerting, owner: platform-operations, escalation: incident-commander}
+        annotations:
+          summary: Nexus could not deliver an on-call alert
+          runbook_url: /docs/OBSERVABILITY_RUNBOOK.md#alert-delivery-failed

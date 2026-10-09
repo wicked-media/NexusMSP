@@ -14,8 +14,10 @@ This plan follows the audit-first rule. It does not authorise database migration
 1. Keep `docs/DATA_OWNERSHIP.md` current for every new table, collection, cache or replica.
 2. Introduce repository/data-access boundaries only while touching high-risk domains (Identity, Client, Ticket, Billing, Agent, Security); do not mass-refactor routers.
 3. Define the universal action envelope: actor, tenant, target, permission, policy/risk, approval, idempotency, audit, correlation, timeout, verification and compensation.
-4. Version the event backbone schema and document retry, failure and replay semantics.
+4. Continue to version the event backbone schema and document retry, failure and replay semantics. The current durable backbone already has idempotency, retry/dead-letter handling and API-level client/tenant scope enforcement; future changes must preserve those contracts.
 5. Inventory production query patterns and add only evidence-backed compound indexes. The first metadata check found 183 collections with no non-`_id` index; index changes require query evidence, rollout monitoring and rollback.
+6. Progressively retire duplicate compatibility webhook builders in favour of the governed event backbone. Until then, every compatibility route must use the shared URL policy, explicit global action permission, secret redaction and audit boundary.
+7. Require provider-authenticated, replay-safe callback handling before enabling external accounting, payment, mail or telecom mutation workflows. Signed Xero callback verification and event-ID deduplication are now the baseline for the accounting path.
 
 ## P2 — reliability and operations
 
