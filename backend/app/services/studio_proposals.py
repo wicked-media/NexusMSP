@@ -1,6 +1,6 @@
 """Nexus catalogue consolidation — one record per proposed capability.
 
-Batches 2 to 5 proposed 112 operational ideas between them. Written batch by
+Batches 2 to 6 proposed 142 operational ideas between them. Written batch by
 batch, the same capability appears more than once under different names: batch 4's
 *Browser* and batch 5's *Browser Management* describe one managed-browser policy
 with one blocker; batch 4's *Service Catalogue*, *Licensing Compliance* and batch
@@ -64,7 +64,7 @@ DISPOSITION_LABELS: dict[str, str] = {
 }
 
 PROPOSAL_NOTE = (
-    "Every catalogue idea from batches 2-5 is recorded once with one disposition: a "
+    "Every catalogue idea from batches 2-6 is recorded once with one disposition: a "
     "gated studio (planned_studios), a section of a registered studio, a merge into a "
     "shared work item, a named gap on an existing surface, or already delivered. A "
     "proposal that is not already served either names the gate blocking it or names "
@@ -282,6 +282,80 @@ GATES: dict[str, dict] = {
               "Per-technician operational memory needs a retention decision before it is "
               "assembled, and it must never surface during a critical incident.",
               "batch 2 assembled-context cluster"),
+        # --- Batch 6 gates: communications, protection and physical infrastructure.
+        #
+        # The 30 studios of batch 6 (156-185) are wide rather than deep: ten are
+        # communications, ten are data protection and governance, ten are physical
+        # infrastructure. Almost every one of them is blocked by the same shape of
+        # decision — a provider contract Nexus does not read yet, or a collection and
+        # retention boundary nobody has agreed to — so the gates below are named once
+        # and referenced by every studio they actually block.
+        _gate("carrier-call-path-evidence", "Carrier-to-agent call-path evidence",
+              "Diagnosing a customer call from carrier to agent needs per-leg evidence "
+              "from the carrier, the PBX and the endpoint, each with its own access, "
+              "rate and retention decision.",
+              "batch 6 #156, #159, #160, #162"),
+        _gate("messaging-carrier-contract", "Messaging provider delivery and charge contract",
+              "Sender identities, delivery reports, transmission failures and carrier "
+              "charge reconciliation come from per-provider APIs plus a charge record "
+              "Nexus does not collect.", "batch 6 #157, #158, #164"),
+        _gate("meeting-quality-evidence", "Meeting endpoint and call-quality ingestion",
+              "Whether poor meeting quality came from the endpoint, the network or the "
+              "service needs call-quality records from the conferencing platform, which "
+              "are permission-scoped and retained for a bounded window.",
+              "batch 6 #159, #161"),
+        _gate("carrier-number-ownership", "Carrier number ownership and billing record",
+              "DID allocation, porting state, assignment and carrier billing need a "
+              "number-ownership record joined to the number; without it a number is "
+              "orphaned or billed twice with nothing able to say which.",
+              "batch 6 #163"),
+        _gate("data-classification-model", "Data classification and retention model",
+              "Governance, loss prevention, eDiscovery, privacy requests and messaging "
+              "retention all need one declared classification-and-retention model with "
+              "a named owner before any policy engine exists.",
+              "batch 6 #164, #166, #167, #168, #169"),
+        _gate("key-management-integration", "Key-management provider integration",
+              "Encryption status and recovery-key governance must read the customer's "
+              "key-management provider; Nexus must not become the key authority.",
+              "batch 6 #170"),
+        _gate("secret-provider-integration", "Secret-manager provider integration",
+              "Secrets must be read, leased and rotated through established secret "
+              "managers with their own audit trail, so the provider contract and the "
+              "rotation-ownership decision come first and a home-grown vault is the "
+              "last resort rather than the starting point.", "batch 6 #171"),
+        _gate("sbom-ingestion", "Software bill-of-materials ingestion",
+              "Package provenance, dependency vulnerabilities and release integrity need "
+              "SBOM and attestation data collected where a build is produced.",
+              "batch 6 #173"),
+        _gate("power-placement-and-runtime-model", "Rack placement, power and runtime model",
+              "Rack units, power allocation, UPS battery health, runtime estimates and "
+              "shutdown coordination need a declared placement-and-power model joined to "
+              "the asset record.", "batch 6 #176, #180"),
+        _gate("passive-infrastructure-inventory", "Passive infrastructure inventory",
+              "Patch panels, ports, copper and fibre runs, optical levels and test "
+              "results have no source of truth, so a run cannot be traced and a fault "
+              "cannot be attributed to one.", "batch 6 #177, #178"),
+        _gate("facility-sensor-feed", "Equipment-room sensor feed",
+              "Temperature, humidity and water-leak readings need the sensor-gateway "
+              "feed plus a retention and alarm-threshold decision.", "batch 6 #179"),
+        _gate("kiosk-public-device-inventory", "Managed public-access device inventory",
+              "The public kiosk surface exists; managing a fleet of terminals needs the "
+              "device inventory, connectivity and remote-maintenance consent decision.",
+              "batch 6 #181"),
+        _gate("laboratory-equipment-monitoring-consent", "Laboratory-equipment monitoring boundary",
+              "Monitoring network-connected laboratory equipment is read-only and needs "
+              "the equipment owner's authorisation plus a boundary that never touches "
+              "the instrument's own control system.", "batch 6 #182"),
+        _gate("media-pipeline-inventory", "Media pipeline inventory",
+              "Encoders, media servers and distribution paths need a declared inventory "
+              "before broadcast health can be attributed to any of them.", "batch 6 #183"),
+        _gate("satellite-provider-contract", "Satellite terminal and provider read contract",
+              "Signal quality, service usage and connectivity come from the terminal and "
+              "its provider API, each with its own contract.", "batch 6 #184"),
+        _gate("edge-node-inventory", "Edge node and local-application inventory",
+              "Edge nodes, remote gateways, local applications and synchronisation state "
+              "are not collected by the agent yet, so resilient offline operation cannot "
+              "be observed.", "batch 6 #185"),
     )
 }
 
@@ -1014,6 +1088,271 @@ PROPOSALS: dict[str, dict] = {
             note="Batch 2's own conclusion: it overlaps the existing SLA, timer and "
                  "notification surfaces, so the honest next step is a review of those "
                  "workspaces on Service Desk rather than a new tool.",
+        ),
+
+        # --- Batch 6, studios 156-165: communications and collaboration ---
+        #
+        # The batch files these under Nexus Communications, with Telecom Studio
+        # remaining the technical administration hub, and the dispositions keep that
+        # true: the ten become eight plans, one section of the voice studio that
+        # already owns the domain, and one named gap on the voice service desk that
+        # already answers calls with a ticket.
+        _proposal(
+            "contact-centre", "Contact Centre Studio", "nexus-communications", "studio",
+            ("batch 6 #156",),
+            gates=("carrier-call-path-evidence",),
+            note="Queues, agents, IVR, recordings and wallboards are a product family of "
+                 "their own, and the differentiator the batch names — diagnosing a "
+                 "customer call from carrier to agent — is the gate, not the wallboard.",
+        ),
+        _proposal(
+            "business-sms", "Business SMS Studio", "nexus-communications", "studio",
+            ("batch 6 #157",),
+            gates=("messaging-carrier-contract",),
+            note="Business messaging is a different provider family from voice: sender "
+                 "identities, templates, delivery reports and carrier charges each need "
+                 "the provider contract before a failed message can be traced.",
+        ),
+        _proposal(
+            "cloud-fax", "Cloud Fax Studio", "nexus-communications", "studio",
+            ("batch 6 #158",),
+            gates=("messaging-carrier-contract",),
+            note="Legacy fax is still a live service in most client estates, and it shares "
+                 "the messaging provider contract with SMS rather than deserving a second "
+                 "collection decision.",
+        ),
+        _proposal(
+            "unified-communications", "Unified Communications Studio",
+            "nexus-communications", "studio", ("batch 6 #159",),
+            gates=("carrier-call-path-evidence", "meeting-quality-evidence"),
+            note="Correlating a communication failure across devices, networks and "
+                 "providers needs both halves of the evidence — the call path and the "
+                 "meeting quality — so it is gated on both rather than on either.",
+        ),
+        _proposal(
+            "sip", "SIP Studio", "nexus-communications", "studio", ("batch 6 #160",),
+            gates=("carrier-call-path-evidence",),
+            note="Registrations, trunks, codec negotiation and session border controllers "
+                 "are the signalling half of the call-path gate; the batch's own "
+                 "standout capability is a visualised signalling sequence.",
+        ),
+        _proposal(
+            "video-conferencing", "Video Conferencing Studio", "nexus-communications",
+            "studio", ("batch 6 #161",),
+            gates=("meeting-quality-evidence",),
+            note="Meeting platforms and room endpoints sit with communications, not with "
+                 "the endpoint estate: the question the batch asks — endpoint, network or "
+                 "service — is answered from platform call-quality records.",
+        ),
+        _proposal(
+            "voice-quality", "Voice Quality Studio", "nexus-communications", "section",
+            ("batch 6 #162",),
+            merges_into="voice",
+            gates=("carrier-call-path-evidence",),
+            note="Jitter, latency, packet loss and MOS estimates are a view over the call "
+                 "path Voice Studio already owns, so this is a section of that studio "
+                 "rather than a second voice product.",
+        ),
+        _proposal(
+            "number-management", "Number Management Studio", "nexus-communications",
+            "studio", ("batch 6 #163",),
+            gates=("carrier-number-ownership",),
+            note="A number register is only useful if it knows who is billed for the "
+                 "number, which is the ownership record the batch's standout capability "
+                 "— no orphaned or incorrectly billed numbers — depends on.",
+        ),
+        _proposal(
+            "messaging-compliance", "Messaging Compliance Studio", "nexus-communications",
+            "studio", ("batch 6 #164",),
+            gates=("messaging-carrier-contract", "data-classification-model"),
+            note="Retention, approved channels and audit evidence over business messaging "
+                 "needs both the messaging inventory and the classification and retention "
+                 "model, because measuring a communication against policy requires a "
+                 "policy that exists.",
+        ),
+        _proposal(
+            "reception", "Reception Studio", "nexus-communications", "extend",
+            ("batch 6 #165",),
+            already_exists_at="backend/app/routers/voice_service_desk.py",
+            buildable_from=("backend/app/routers/tickets.py",),
+            note="Call answering already produces a service-desk record, so what remains "
+                 "is a named gap on that surface — answering workflows and business-hours "
+                 "configuration across a customer's offices — not a parallel reception "
+                 "product.",
+        ),
+
+        # --- Batch 6, studios 166-175: data, protection and governance ---
+        #
+        # Five of these are one missing model, not five products: classification and
+        # retention decide all of them. Secrets is deliberately filed under Nexus
+        # Platform as a shared capability, and it integrates established secret
+        # managers rather than becoming a vault.
+        _proposal(
+            "data-governance", "Data Governance Studio", "nexus-shield", "studio",
+            ("batch 6 #166",),
+            gates=("data-classification-model",),
+            note="Classification, ownership, sharing and lifecycle are the model itself, "
+                 "so this is the studio the model is declared in rather than a projection "
+                 "of one.",
+        ),
+        _proposal(
+            "data-loss-prevention", "Data Loss Prevention Studio", "nexus-shield", "studio",
+            ("batch 6 #167",),
+            gates=("data-classification-model",),
+            note="A DLP policy is only meaningful against a classification: the batch's "
+                 "incidents and approved remediation cannot be ranked before something "
+                 "says which data matters.",
+        ),
+        _proposal(
+            "ediscovery", "eDiscovery Studio", "nexus-shield", "studio",
+            ("batch 6 #168",),
+            gates=("data-classification-model",),
+            note="Authorised searches, legal holds and chain of custody need the same "
+                 "classification and retention model, plus the authorisation boundary the "
+                 "gate names.",
+        ),
+        _proposal(
+            "privacy-operations", "Privacy Operations Studio", "nexus-shield", "studio",
+            ("batch 6 #169",),
+            gates=("data-classification-model",),
+            note="Access requests, deletion workflows and consent records are where the "
+                 "classification model meets an obligation; without it a deletion request "
+                 "has nothing to search.",
+        ),
+        _proposal(
+            "encryption", "Encryption Studio", "nexus-shield", "studio",
+            ("batch 6 #170",),
+            gates=("key-management-integration",),
+            note="Encryption status and recovery-key governance are read from the "
+                 "customer's key-management provider. Nexus is never the key authority, "
+                 "which is a provider contract before it is a screen.",
+        ),
+        _proposal(
+            "secrets", "Secrets Studio", "nexus-platform", "studio",
+            ("batch 6 #171",),
+            gates=("secret-provider-integration",),
+            note="Filed under Nexus Platform because every other product consumes it, and "
+                 "gated on integrating established secret managers: a home-grown "
+                 "cryptographic vault needs a compelling reason Nexus does not have.",
+        ),
+        _proposal(
+            "threat-exposure", "Threat Exposure Studio", "nexus-shield", "extend",
+            ("batch 6 #172",),
+            already_exists_at="backend/app/routers/nexus_exposure.py",
+            gates=("authorised-network-probes",),
+            note="An exposure surface already exists; what the batch adds is "
+                 "internet-facing discovery and remediation tracking, which needs "
+                 "authorised observation points rather than a second exposure workspace.",
+        ),
+        _proposal(
+            "software-supply-chain", "Software Supply Chain Studio", "nexus-build",
+            "studio", ("batch 6 #173",),
+            gates=("sbom-ingestion",),
+            note="Provenance and dependency vulnerability are read where software is "
+                 "built, so this belongs to Nexus Build beside DevOps Studio and is "
+                 "gated on SBOM collection.",
+        ),
+        _proposal(
+            "identity-threat", "Identity Threat Studio", "nexus-identity", "extend",
+            ("batch 6 #174",),
+            already_exists_at="backend/app/routers/identity_threats.py",
+            gates=("authentication-journey",),
+            note="Identity threat investigation is a named gap on the existing identity "
+                 "threats surface: risky sign-ins and privileged anomalies need the "
+                 "identity-provider sign-in ingestion to be complete first.",
+        ),
+        _proposal(
+            "data-recovery", "Data Recovery Studio", "nexus-recovery", "section",
+            ("batch 6 #175",),
+            merges_into="backup",
+            gates=("restore-test-evidence",),
+            note="File-level recovery, deleted-data investigation and recovery "
+                 "verification are Backup Studio's own restore surface, so this is a "
+                 "section of it; the planned storage-recovery proposal covers "
+                 "storage-level fault recovery, which is a different evidence set.",
+        ),
+
+        # --- Batch 6, studios 176-185: physical infrastructure and specialists ---
+        #
+        # These extend Nexus beyond conventional MSP software into communications and
+        # facilities infrastructure. Each one needs an inventory Nexus does not collect "
+        # yet, which is why the batch's hardware provider families stay plans rather "
+        # than being folded into Monitoring Studio for looking like telemetry.
+        _proposal(
+            "rack", "Rack Studio", "nexus-infrastructure", "studio", ("batch 6 #176",),
+            gates=("power-placement-and-runtime-model",),
+            note="Interactive rack layouts, unit allocation and patching are the placement "
+                 "half of the power model; without it a rack diagram is a drawing rather "
+                 "than a record.",
+        ),
+        _proposal(
+            "cabling", "Cabling Studio", "nexus-infrastructure", "studio",
+            ("batch 6 #177",),
+            gates=("passive-infrastructure-inventory",),
+            note="Structured cabling, patch panels, ports and test results share one "
+                 "missing source of truth with fibre, so both are blocked by the same "
+                 "inventory decision rather than by two.",
+        ),
+        _proposal(
+            "fibre", "Fibre Studio", "nexus-infrastructure", "studio", ("batch 6 #178",),
+            gates=("passive-infrastructure-inventory",),
+            note="Optical levels, transceivers and link diagnostics only mean something "
+                 "against recorded runs and endpoints; for an MSP that also runs ISP "
+                 "services this is the specialist capability the batch asked for.",
+        ),
+        _proposal(
+            "environmental", "Environmental Studio", "nexus-observability", "studio",
+            ("batch 6 #179",),
+            gates=("facility-sensor-feed",),
+            note="Filed under Nexus Observability because it is telemetry and alarms, but "
+                 "kept as a plan rather than a section of Monitoring Studio: equipment-room "
+                 "sensors are a facility-collection decision Monitoring Studio does not own.",
+        ),
+        _proposal(
+            "ups", "UPS Studio", "nexus-infrastructure", "studio", ("batch 6 #180",),
+            gates=("power-placement-and-runtime-model",),
+            note="Battery health, runtime estimates and shutdown coordination are the "
+                 "runtime half of the power model, and they are read from the UPS rather "
+                 "than inferred from a device record.",
+        ),
+        _proposal(
+            "kiosk", "Kiosk Studio", "nexus-endpoint", "extend", ("batch 6 #181",),
+            already_exists_at="backend/app/routers/kiosk.py",
+            gates=("kiosk-public-device-inventory",),
+            note="A tokenised public kiosk surface already ships; managing self-service "
+                 "terminals as a fleet — software, connectivity and remote maintenance — "
+                 "is the named gap on it.",
+        ),
+        _proposal(
+            "laboratory-equipment", "Laboratory Equipment Studio", "nexus-observability",
+            "studio", ("batch 6 #182",),
+            gates=("laboratory-equipment-monitoring-consent",),
+            note="Deliberately narrow: authorised, read-only monitoring of "
+                 "network-connected laboratory equipment and the IT systems supporting it, "
+                 "bounded so it never reaches into an instrument's own control system.",
+        ),
+        _proposal(
+            "broadcast", "Broadcast Studio", "nexus-infrastructure", "studio",
+            ("batch 6 #183",),
+            gates=("media-pipeline-inventory",),
+            note="Streaming infrastructure, encoders and distribution sit on the network "
+                 "Nexus already observes, but attributing broadcast health needs the "
+                 "pipeline inventory first.",
+        ),
+        _proposal(
+            "satellite", "Satellite Studio", "nexus-infrastructure", "studio",
+            ("batch 6 #184",),
+            gates=("satellite-provider-contract",),
+            note="Terminals, signal quality and provider usage are a connectivity provider "
+                 "family of their own; the batch calls this out for ISP operations "
+                 "alongside fibre and cabling.",
+        ),
+        _proposal(
+            "edge", "Edge Studio", "nexus-endpoint", "studio", ("batch 6 #185",),
+            gates=("edge-node-inventory",),
+            note="Edge nodes and remote gateways are managed endpoints with resident "
+                 "applications and offline behaviour, so the studio belongs to the "
+                 "endpoint estate but is blocked on inventory the agent does not collect.",
         ),
     )
 }

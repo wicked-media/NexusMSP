@@ -1,16 +1,19 @@
 # Nexus studio merge review — what happened to every proposed capability
 
-Last reviewed: 2026-10-12
+Last reviewed: 2026-10-13
 Governed by: [Nexus Product Constitution](NEXUS_PRODUCT_CONSTITUTION.md) · [Studio fleet](NEXUS_STUDIO_FLEET.md) · [Master capability register](NEXUS_MASTER_CAPABILITY_REGISTER.md)
-Sources consolidated: [batch 2](NEXUS_INVENT_BATCH_2.md) · [batch 3](NEXUS_INVENT_BATCH_3.md) · [batch 4 foundations](NEXUS_FOUNDATIONS_BATCH_4.md) · [batch 5](NEXUS_INVENT_BATCH_5.md)
+Sources consolidated: [batch 2](NEXUS_INVENT_BATCH_2.md) · [batch 3](NEXUS_INVENT_BATCH_3.md) · [batch 4 foundations](NEXUS_FOUNDATIONS_BATCH_4.md) · [batch 5](NEXUS_INVENT_BATCH_5.md) · [batch 6](NEXUS_INVENT_BATCH_6.md)
 Register: `backend/app/services/studio_proposals.py`
 
-Batches 2 to 5 proposed **112** operational ideas between them: catalogue numbers
-81–105 (batch 4), 106–130 (batch 5), and the deferred lists batch 2 and batch 3
-recorded instead of building. Each batch wrote its own documents and none of them
-cross-referenced another's list, so the same capability appeared several times
-under several names. This document is the consolidation record; the register
-above is the machine-checkable form of it.
+Batches 2 to 6 proposed **142** operational ideas between them: catalogue numbers
+81–105 (batch 4), 106–130 (batch 5), 156–185 (batch 6), and the deferred lists
+batch 2 and batch 3 recorded instead of building. Each of the first four batches
+wrote its own documents and none of them cross-referenced another's list, so the
+same capability appeared several times under several names. Batch 6 arrived the
+other way round — as a portfolio batch written *about* the catalogue — and its 30
+ideas were filed into the fourteen products that already exist rather than adding
+a fifteenth. This document is the consolidation record; the register above is the
+machine-checkable form of it.
 
 ## The problem this settles
 
@@ -37,22 +40,22 @@ Left alone, each pair would have become two owners for one datum — the outcome
 
 ## The result
 
-**112 catalogue ideas became 74 records.** Every idea appears exactly once.
+**142 catalogue ideas became 104 records.** Every idea appears exactly once.
 
 | Disposition | Records | Meaning |
 |---|---|---|
-| `studio` | 44 | A real capability that does not exist yet. Filed under a product and counted in its `planned_studios`. |
-| `section` | 8 | A specialist section inside a studio that is already registered, which owns the domain. |
+| `studio` | 68 | A real capability that does not exist yet. Filed under a product and counted in its `planned_studios`. |
+| `section` | 10 | A specialist section inside a studio that is already registered, which owns the domain. |
 | `merged` | 2 | The same capability as another record, under a second name. |
-| `extend` | 10 | An existing non-studio surface owns it; what remains is a named gap on that surface. |
+| `extend` | 14 | An existing non-studio surface owns it; what remains is a named gap on that surface. |
 | `served` | 10 | Already delivered. |
 
-Two of the 46 plan records have since left the plan by the route this document
+Two of the 70 plan records have since left the plan by the route this document
 intends: **Windows Studio and Endpoint Performance Studio were blocked by one gate
 that was then decided** (see below), so they are `served` rather than `studio` and
 the roster they entered is 29 studios, not 27.
 
-42 of the 112 names are now `covers` of the record that owns the idea, so a
+42 of the 142 names are now `covers` of the record that owns the idea, so a
 proposal cannot quietly disappear into a merge — the register names what each
 record absorbed.
 
@@ -152,6 +155,56 @@ dependency-edge model, plus the collection that would author those edges. Until
 then, every one of the ten would infer a consequence from timing alone, which
 batch 2 itself rules out.
 
+## Batch 6: the batch that arrived about the catalogue
+
+Batches 2–5 wrote capability lists and this document consolidated them afterwards.
+Batch 6 was written the other way round: it is a **portfolio** batch — business
+communications, data protection and physical infrastructure — that names 30
+capabilities against the products and tiers the fleet already has, so its 30 ideas
+were filed into the existing fourteen products and no fifteenth product was
+proposed. It is also the first batch that needed no `covers` entry at all: nothing
+it proposed duplicated a record an earlier batch had already filed, so all 30 ideas
+are records in their own right rather than names absorbed by someone else's.
+
+Its dispositions are deliberately mixed, and that mix is the point the batch makes
+about the catalogue as a whole:
+
+| Idea | Disposition | Owner |
+|---|---|---|
+| Voice Quality Studio (162) | `section` | the registered `voice` studio — jitter, latency and MOS are a view over the call path Voice Studio already owns |
+| Data Recovery Studio (175) | `section` | the registered `backup` studio — file-level recovery is Backup Studio's own restore surface |
+| Reception Studio (165) | `extend` | `backend/app/routers/voice_service_desk.py` — call answering already produces a service-desk record |
+| Threat Exposure Studio (172) | `extend` | `backend/app/routers/nexus_exposure.py` — what remains is internet-facing discovery, which is a gate rather than a second exposure workspace |
+| Identity Threat Studio (174) | `extend` | `backend/app/routers/identity_threats.py` — an investigation gap on a surface that exists |
+| Kiosk Studio (181) | `extend` | `backend/app/routers/kiosk.py` — a tokenised kiosk surface ships; managing the terminal fleet is the gap |
+| the other 24 ideas | `studio` | a product each, with the gate named below |
+
+Sixteen new gates record what blocks the plans, and one of them decides five
+studios at once: **`data-classification-model`** — a declared
+classification-and-retention model with a named owner — blocks `data-governance`,
+`data-loss-prevention`, `ediscovery`, `privacy-operations` and
+`messaging-compliance`, because all five measure something against a policy that
+does not exist yet. The rest are provider contracts and collection boundaries:
+`carrier-call-path-evidence`, `messaging-carrier-contract`,
+`meeting-quality-evidence`, `carrier-number-ownership`,
+`key-management-integration`, `secret-provider-integration`, `sbom-ingestion`,
+`power-placement-and-runtime-model`, `passive-infrastructure-inventory`,
+`facility-sensor-feed`, `kiosk-public-device-inventory`,
+`laboratory-equipment-monitoring-consent`, `media-pipeline-inventory`,
+`satellite-provider-contract` and `edge-node-inventory`. Two decisions are recorded
+in the gate text itself rather than left implied: **Secrets Studio integrates
+established secret managers** instead of becoming a vault, and **Encryption Studio
+reads the customer's key-management provider** rather than making Nexus the key
+authority.
+
+What batch 6 did **not** do matters as much as what it did: it built nothing,
+cleared no gate, and admitted no studio. Every one of its 30 ideas is a plan with an
+owner, a product, a tier and a blocker — exactly the register state this document
+exists to keep honest. What did change outside the register is how the catalogue is
+reached: the `MSP Studios` navigation section became **Market Place** with one
+searchable catalogue instead of a sidebar link per studio, because a fleet of 185+
+numbered studios is a catalogue to search rather than a menu to scroll.
+
 ## Clusters that collapsed into one record
 
 These are the merges that changed a batch's own conclusion. A merge here is a
@@ -213,20 +266,21 @@ The consolidation is not a document people have to remember:
 The merge's whole claim is that a smaller number of owners is worth more than a
 longer list, and it is falsifiable:
 
-1. **Do the 44 proposed studios stay 44?** A proposal that quietly becomes a
+1. **Do the 68 proposed studios stay 68?** A proposal that quietly becomes a
    section, or a section that reappears as a studio in a later batch, means the
    register is being routed around rather than used. A proposal that leaves the
    plan *because its gate was decided* is the register working, and it says so:
    `windows` and `endpoint-performance` are `served` with the file they are served
    by, not silently dropped.
-2. **Do the 44 open gates get decided?** A gate that is still unnamed a quarter
+2. **Do the 60 open gates get decided?** A gate that is still unnamed a quarter
    later was never a real gate — the honest response is to delete the proposal,
    not to restate it. One is decided: `fleet-baseline` is recorded as cleared with
    the artifact that cleared it, and that artifact exists.
 3. **Do the extensions ship?** Licensing Compliance, Quoting, Subscription,
    Escalation, Runbook, Release, Handover, Temporary Access Expiry, Change Witness
-   and Hardware Swap extend surfaces that exist. If those ten never produce a
-   change, the `extend` disposition is a euphemism for abandoned.
+   and Hardware Swap extend surfaces that exist — and batch 6 added four more
+   (Reception, Threat Exposure, Identity Threat and Kiosk). If those never produce
+   a change, the `extend` disposition is a euphemism for abandoned.
 4. **Does a new idea arrive with a disposition?** The consolidation is only
    working if the next batch's first question is *which product, which owner,
    which gate* rather than *which new studio*.
@@ -243,15 +297,15 @@ cd backend && JWT_SECRET=test-only-secret-that-is-long-and-random-enough \
 python3 -m flake8 app server.py worker.py
 
 cd frontend && CI=true npx craco test --watchAll=false \
-  --testPathPattern="studioProducts|StudiosHubPage"
+  --testPathPattern="studioProducts|studioCatalogue|StudiosHubPage"
 npx eslint src --ext .js,.jsx
 ```
 
-`backend/tests/test_studio_fleet.py` (32 tests) and
+`backend/tests/test_studio_fleet.py` (39 tests) and
 `backend/tests/test_fleet_baseline.py` (52 tests) prove this rather than
 describing it:
 
-- every catalogue idea from batches 2–5 is recorded exactly once, as a record or
+- every catalogue idea from batches 2–6 is recorded exactly once, as a record or
   as a `covers` entry, and no concept is covered twice;
 - `planned_studios` holds only `studio` dispositions, and a proposed studio has no
   registry entry — so nothing can render a proposal as shipped;
@@ -282,12 +336,23 @@ describing it:
   it, so the owner's own validation and the two fields a derived request adds are
   exercised on the request that matters.
 
-The frontend tests (27 across `studioProducts.test.js` and
-`StudiosHubPage.test.jsx`, plus 17 in `components/studios/FleetBaselinePanel.test.jsx`
-and 8 in `pages/FleetBaselinePage.test.jsx`)
+The frontend tests (45 across `StudiosHubPage.test.jsx` (20),
+`studioCatalogue.test.js` (13) and `studioProducts.test.js` (12), plus 17 in
+`components/studios/FleetBaselinePanel.test.jsx` and 8 in
+`pages/FleetBaselinePage.test.jsx`)
 prove the hub counts proposals as proposals, renders a consolidated idea with its
 target and gate, never renders a proposed studio as delivered, and degrades to the
-previous listing when the payload carries no `proposals`; and prove that the tab
-which raises a shape shows the request, its verification and its rollback, names
-the change when one is already open instead of proposing a second, and states an
-empty result rather than rendering a clean panel.
+previous listing when the payload carries no `proposals`; that the catalogue
+searches admitted studios and plans in one index, ranks a name match above a note
+that merely mentions the word, narrows with every token, filters by tier and by
+what an entry is, never offers a surface a plan does not have, and states an empty
+search instead of an empty catalogue; and prove that the tab which raises a shape
+shows the request, its verification and its rollback, names the change when one is
+already open instead of proposing a second, and states an empty result rather than
+rendering a clean panel. The whole frontend suite is 86 suites and 632 tests.
+
+None of this is asserted batch by batch. The ledger is re-derived from
+`backend/app/services/studio_proposals.py` every time the suite runs, so a seventh
+batch extends the same register, the same gate vocabulary and the same `covers`
+ledger instead of starting a second list — which is why batch 6 could be added by
+declaration alone, with no change to what a record *means*.

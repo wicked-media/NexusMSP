@@ -286,15 +286,62 @@ OPEN_ADMISSION_NOTE = (
 # released by being listed here.
 
 
+# ============== THE COMMERCIAL TIERS ==============
+#
+# The catalogue is a product portfolio, not a backlog (docs/NEXUS_INVENT_BATCH_6.md):
+# the tiers below are the packaging that follows from it. A tier is a *commercial*
+# statement about a product — what a Nexus subscription includes, what is an optional
+# specialist addition, and what is shared platform capability every other product
+# inherits — so it is declared once here rather than inferred from a price list
+# somewhere else.
+#
+# Tiers are derived from the products that already exist and change no persistence:
+# like the rest of this register they are static declaration, so they need no tenant
+# partition (docs/DATA_OWNERSHIP.md).
+
+TIERS: dict[str, dict] = {
+    tier["id"]: tier
+    for tier in (
+        {
+            "id": "core",
+            "label": "Core",
+            "blurb": "Everyday MSP operations: the products a technician works in all day.",
+        },
+        {
+            "id": "specialist",
+            "label": "Specialist",
+            "blurb": "Advanced capability a client buys because their estate needs it.",
+        },
+        {
+            "id": "platform",
+            "label": "Platform",
+            "blurb": "Shared engines every other product inherits: policy, evidence, "
+                     "commercials and integration management.",
+        },
+    )
+}
+
+TIER_NOTE = (
+    "Tiers are the commercial packaging of the same portfolio: a core subscription, "
+    "optional specialist capability, and the platform features that make every product "
+    "stronger. A product belongs to exactly one tier, and a tier is never claimed by a "
+    "studio that has not been admitted."
+)
+
+
 def _product(
     product_id: str,
     name: str,
     tagline: str,
+    tier: str,
 ) -> dict:
+    if tier not in TIERS:
+        raise ValueError(f"product '{product_id}': unknown tier '{tier}'")
     return {
         "id": product_id,
         "name": name,
         "tagline": tagline,
+        "tier": tier,
         # Filled in below from the consolidated proposal register.
         "planned_studios": [],
     }
@@ -307,71 +354,85 @@ PRODUCTS: dict[str, dict] = {
             "nexus-endpoint", "Nexus Endpoint",
             "One endpoint estate: the device record, the agent, patching, remote control "
             "and the per-platform specialist views technicians work in.",
+            "core",
         ),
         _product(
             "nexus-infrastructure", "Nexus Infrastructure",
             "The estate under the estate: virtualisation, network, DNS, connectivity and "
             "cloud resources Nexus can observe and act on.",
+            "specialist",
         ),
         _product(
             "nexus-recovery", "Nexus Recovery",
             "Backup, restore and storage: recovery intent, restore evidence and the storage "
             "faults that threaten a business service.",
+            "core",
         ),
         _product(
             "nexus-shield", "Nexus Shield",
             "Security and compliance: detection, evidence, control mapping and the audit "
             "trail that proves them.",
+            "core",
         ),
         _product(
             "nexus-identity", "Nexus Identity",
             "Identity and the Microsoft control plane: tenants, directories, access decisions "
             "and why an authentication attempt succeeded or failed.",
+            "core",
         ),
         _product(
             "nexus-service", "Nexus Service",
             "Service operations: tickets, the customer environment, commitments honoured, "
             "response clocks and dispatched work.",
+            "core",
         ),
         _product(
             "nexus-communications", "Nexus Communications",
             "Voice, telecom and messaging: calls, numbers, circuits and the conversations "
             "around them.",
+            "specialist",
         ),
         _product(
             "nexus-knowledge", "Nexus Knowledge",
             "Documentation and the operational memory that keeps a technician from relearning "
             "what the platform already knows.",
+            "platform",
         ),
         _product(
             "nexus-automation", "Nexus Automation",
             "Automation and AI: workflows, approvals, simulation, rollback and the agents that "
             "propose work for a person to accept.",
+            "platform",
         ),
         _product(
             "nexus-observability", "Nexus Observability",
             "Telemetry and its meaning: metrics, logs, traces, alerts and the evidence-backed "
             "explanation of a degradation Nexus is asked to produce.",
+            "platform",
         ),
         _product(
             "nexus-commerce", "Nexus Commerce",
             "Commercial operations on one engine: quoting, procurement, stock, subscriptions, "
             "billing and real customer profitability.",
+            "platform",
         ),
         _product(
             "nexus-growth", "Nexus Growth",
             "Customer growth: the client record, the technology roadmap, evidence-backed "
             "proposals and the partners Nexus delivers with.",
+            "specialist",
         ),
         _product(
             "nexus-build", "Nexus Build",
             "Build and release: repositories, pipelines, application runtimes, data movement "
             "and governed releases with verification and rollback.",
+            "specialist",
         ),
         _product(
             "nexus-platform", "Nexus Platform",
             "Platform and ecosystem: the extension and integration lifecycle, publishers, "
             "versions and the shared capabilities every other product inherits.",
+            "platform",
         ),
     )
 }
@@ -1445,6 +1506,8 @@ def product_catalogue() -> list[dict]:
             "id": product["id"],
             "name": product["name"],
             "tagline": product["tagline"],
+            "tier": product["tier"],
+            "tier_label": TIERS[product["tier"]]["label"],
             "studios": studios,
             "count": len(studios),
             "planned_studios": list(product["planned_studios"]),
@@ -1452,6 +1515,34 @@ def product_catalogue() -> list[dict]:
             "proposal_count": len(proposals),
         })
     return catalogue
+
+
+def tier_rollup() -> list[dict]:
+    """The three tiers with what each currently holds, in declaration order.
+
+    Emitted from the tier declaration, so a tier with no product is disclosed as
+    empty rather than omitted, and a consumer cannot invent a fourth one.
+    """
+    catalogue = product_catalogue()
+    return [
+        {
+            "id": tier["id"],
+            "label": tier["label"],
+            "blurb": tier["blurb"],
+            "products": [
+                product["id"] for product in catalogue if product["tier"] == tier["id"]
+            ],
+            "studio_count": sum(
+                product["count"] for product in catalogue if product["tier"] == tier["id"]
+            ),
+            "planned_count": sum(
+                len(product["planned_studios"])
+                for product in catalogue
+                if product["tier"] == tier["id"]
+            ),
+        }
+        for tier in TIERS.values()
+    ]
 
 
 def list_studios() -> dict:
@@ -1465,6 +1556,8 @@ def list_studios() -> dict:
             "domain": studio["domain"],
             "product": studio["product"],
             "product_name": PRODUCTS[studio["product"]]["name"],
+            "tier": PRODUCTS[studio["product"]]["tier"],
+            "tier_label": TIERS[PRODUCTS[studio["product"]]["tier"]]["label"],
             "tagline": studio["tagline"],
             "status": studio["status"],
             "priority": studio["priority"],
@@ -1484,6 +1577,7 @@ def list_studios() -> dict:
             for tab in SPINE_TABS
         ],
         "products": product_catalogue(),
+        "tiers": tier_rollup(),
         "studios": rows,
         "count": len(rows),
         "summary": {
@@ -1495,6 +1589,9 @@ def list_studios() -> dict:
             "by_product": {
                 product["id"]: product["count"] for product in product_catalogue()
             },
+            "by_tier": {
+                tier["id"]: tier["studio_count"] for tier in tier_rollup()
+            },
         },
         "note": (
             "Static capability contract: statuses and tab states are admission-gate "
@@ -1502,6 +1599,7 @@ def list_studios() -> dict:
         ),
         "product_note": PRODUCT_NOTE,
         "proposal_note": studio_proposals.PROPOSAL_NOTE,
+        "tier_note": TIER_NOTE,
     }
 
 
@@ -1512,6 +1610,8 @@ def get_studio(studio_id: str) -> dict | None:
         return None
     contract = dict(studio)
     contract["registry_version"] = REGISTRY_VERSION
+    contract["tier"] = PRODUCTS[studio["product"]]["tier"]
+    contract["tier_label"] = TIERS[contract["tier"]]["label"]
     contract["tabs"] = {tab: dict(spec) for tab, spec in studio["tabs"].items()}
     return contract
 

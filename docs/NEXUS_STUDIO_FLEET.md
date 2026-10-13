@@ -4,7 +4,8 @@ Last reviewed: 2026-10-13
 Governed by: [Nexus Product Constitution](NEXUS_PRODUCT_CONSTITUTION.md) (capability admission gate, autonomy contract, Safety Kernel)
 Status vocabulary and completion contract: [Nexus Master Capability Register](NEXUS_MASTER_CAPABILITY_REGISTER.md)
 Machine source of truth: `backend/app/services/studio_registry.py` — this document is the human-readable plan that registry encodes.
-Catalogue consolidation: [Nexus studio catalogue merge review](NEXUS_STUDIO_MERGE_REVIEW.md) — what each capability proposed by batches 2-5 became, encoded in `backend/app/services/studio_proposals.py`.
+Catalogue consolidation: [Nexus studio catalogue merge review](NEXUS_STUDIO_MERGE_REVIEW.md) — what each capability proposed by batches 2-6 became, encoded in `backend/app/services/studio_proposals.py`.
+Batch 6 and the Market Place: [Nexus invent batch 6](NEXUS_INVENT_BATCH_6.md) — the 30 studios numbered 156-185, the three commercial tiers and the searchable catalogue.
 
 ## What a Studio is
 
@@ -77,6 +78,25 @@ Current products: `nexus-endpoint`, `nexus-infrastructure`, `nexus-recovery`, `n
 `nexus-automation`, `nexus-observability`, `nexus-commerce`, `nexus-growth`, `nexus-build`,
 `nexus-platform`. Per-product membership is machine-served — read it from `GET /api/studios`
 rather than duplicating it here.
+
+### Commercial tiers
+
+The catalogue is a product portfolio, not a backlog ([batch 6](NEXUS_INVENT_BATCH_6.md)), and the
+tiers are the packaging that follows from it. `TIERS` in `studio_registry.py` declares three:
+
+- **Core** — everyday MSP operations: `nexus-endpoint`, `nexus-identity`, `nexus-shield`,
+  `nexus-recovery`, `nexus-service`.
+- **Specialist** — advanced capability a client buys because their estate needs it:
+  `nexus-infrastructure`, `nexus-communications`, `nexus-growth`, `nexus-build`.
+- **Platform** — the shared engines every other product inherits: `nexus-automation`,
+  `nexus-observability`, `nexus-commerce`, `nexus-knowledge`, `nexus-platform`.
+
+Every product belongs to exactly one tier, an unknown tier refuses registry construction the
+same way an undeclared product does, and `GET /api/studios` serves `tiers`, `tier_note`,
+`products[].tier` and each studio row's `tier`/`tier_label`, so the catalogue can be searched by
+packaging instead of the packaging being asserted somewhere else. A tier is a commercial
+statement about a *product*: it is never claimed for a studio that has not been admitted, which
+is why a Core count counts admitted studios and the proposed count is labelled as a plan.
 
 ## Studio contract laws
 
@@ -205,19 +225,31 @@ switch cohorts on the full-estate page.
 
 ## Operating surfaces and API
 
-- **`MSP Studios` — the navigation section** (`frontend/src/config/navigation.js`): the
-  fleet's entry point from every other workspace, so a studio is reachable as a studio and
-  not only through the hub. Each item resolves to a registered route — the studio's own
-  operating surface where it has one (`/proxmox`, `/fleet-baseline?platform=windows`,
-  `/fleet-baseline?view=recurrence`, `/customer-environment`, `/operations-assurance`,
-  `/extension-studio`) and its page on the shared studio shell otherwise (`/studios/web`,
-  `/studios/m365`). A studio whose capability is only proposed stays on `/studios`, which
-  reports its admission gate honestly rather than presenting a plan as a delivered surface.
-  `frontend/src/config/navigationRoutes.test.js` fails if a listed item stops resolving to a
-  registered route or two items claim one path, so a menu entry cannot outlive the page it
-  names.
-- **`/studios` — Studio Fleet hub** (`frontend/src/pages/StudiosHubPage.jsx`): one listing,
-  one status vocabulary, the shared spine, and links into each studio.
+- **`Market Place` — the navigation section** (`frontend/src/config/navigation.js`): the
+  fleet's entry point from every other workspace, and it holds **one** row — the searchable
+  catalogue at `/studios`. The fleet is 185+ studios across 14 products, so one sidebar link
+  per studio is how a capability becomes unfindable ([batch 6](NEXUS_INVENT_BATCH_6.md)); the
+  admitted studio surfaces live as children of that row (`/proxmox`,
+  `/fleet-baseline?platform=windows`, `/fleet-baseline?view=recurrence`,
+  `/customer-environment`, `/operations-assurance`, `/extension-studio`, `/studios/web`,
+  `/studios/m365`), so sidebar search and the command palette still resolve a studio by name
+  while the sidebar itself shows one entry. A studio whose capability is only proposed appears
+  in the catalogue as a proposal, never as a link. `frontend/src/config/navigationRoutes.test.js`
+  fails if a listed item stops resolving to a registered route or two items claim one path, so
+  a menu entry cannot outlive the page it names. The group id stays `msp_studios` through the
+  rename, because visibility preferences and enabled modules are stored against it.
+- **`/studios` (and its `/marketplace` alias) — the Market Place catalogue**
+  (`frontend/src/pages/StudiosHubPage.jsx`, index in `frontend/src/lib/studioCatalogue.js`): one
+  searchable catalogue over admitted studios *and* catalogue ideas, one status vocabulary, the
+  shared spine, and links into each studio. Search is over names, products, tiers, gates and the
+  problem a studio solves, every query token narrows rather than widens, and an admitted studio
+  outranks a plan that matches as well. Two views, one index: with nothing searched and no facet
+  set, the fleet still reads as the product sections it always did — the product is the
+  navigation boundary — and as soon as anything narrows, the page answers with a ranked flat
+  list. A catalogue idea states the disposition it was given and what blocks it, carries no
+  operating surface of its own, and only links to a registered studio when that studio owns the
+  domain the idea belongs to. Facet counts are computed over the whole index, so a chip cannot
+  vanish mid-search, and the summary always says how many of how many entries are shown.
 - **`/studios/:studioId` — studio detail on the shared shell**
   (`frontend/src/components/studios/StudioShell.jsx`): renders the nine tabs from the
   registry contract; wired tabs fetch their named endpoint, unwired tabs render the
@@ -306,10 +338,42 @@ New subjects must be added to the governed `EVENT_SUBJECTS` catalogue in
 Full worked example: [batch 5](NEXUS_INVENT_BATCH_5.md) classified 25 proposals into 14
 products without registering a single new studio, because most were already sections of an
 existing studio and the rest needed a persistence, tenancy or provider decision first. That
-classification is now consolidated across batches 2-5 instead of asserted batch by batch:
-112 catalogue ideas, each appearing exactly once with one disposition and, where it is not
+classification is now consolidated across batches 2-6 instead of asserted batch by batch:
+142 catalogue ideas, each appearing exactly once with one disposition and, where it is not
 already served, the named gate that blocks it — one datum, one owner, and no proposal left to
 be found twice or not at all. See [Nexus studio catalogue merge review](NEXUS_STUDIO_MERGE_REVIEW.md).
+
+[Batch 6](NEXUS_INVENT_BATCH_6.md) is the worked example of the other half of that
+instruction — treating the catalogue as a portfolio rather than a backlog. It arrived with 30
+ideas across business communications, data protection and physical infrastructure, and
+registered none of them as a studio: 24 became plans under the existing products, 2 became
+sections of the studios that already own their domain (`voice-quality` in Voice Studio,
+`data-recovery` in Backup Studio), and 4 became named gaps on surfaces that already exist
+(`reception`, `threat-exposure`, `identity-threat`, `kiosk`). It is also the batch that made the
+fleet navigable: three commercial tiers, and one searchable catalogue instead of a sidebar link
+per studio.
+
+## The catalogue's address
+
+The Market Place is one catalogue over the whole fleet, so a search is a **link** rather than a
+keystroke count. `/studios` owns exactly three query keys — `q` (the words), `tier` (the
+packaging) and `kind` (admitted studio or catalogue idea) — and the page reads them from the
+address instead of keeping its own filter state:
+
+| Address | Opens |
+| --- | --- |
+| `/studios` | the fleet grouped by product, with each product's catalogue and consolidations |
+| `/studios?q=fibre` | the ranked flat catalogue — admitted studios first, plans labelled as plans |
+| `/studios?tier=specialist&kind=studio` | the admitted studios packaged in one tier |
+| `/studios/<studio-id>` | that studio's own operating shell and spine tabs |
+
+`parseCatalogueQuery` and `catalogueQueryString` in `frontend/src/lib/studioCatalogue.js` are
+the only implementation of that contract, so the page and anything that links into it cannot
+disagree about what a catalogue URL means. A cleared filter is **removed** from the query
+string rather than written empty, and a parameter the catalogue does not own (another
+workspace's `view`, for example) is left exactly as it was found. The command palette uses the
+same helper: a topic typed into ⌘K that names no workspace is offered as a catalogue search,
+because 185+ studios are reached by searching them rather than by memorising a menu.
 
 ## Verification
 
@@ -319,7 +383,7 @@ cd backend && JWT_SECRET=test-only-secret-that-is-long-and-random-enough \
   python3 -m pytest tests/test_studio_fleet.py -q
 
 cd frontend && CI=true npx craco test --watchAll=false \
-  --testPathPattern="(StudiosHubPage|FleetBaselinePanel|navigationRoutes)"
+  --testPathPattern="(StudiosHubPage|studioCatalogue|FleetBaselinePanel|navigationRoutes)"
 ```
 
 The tests prove: the fleet loads with honest statuses; admission states match statuses;
@@ -330,14 +394,17 @@ placeholder is refused at registration; unknown studios 404 to a not-found state
 declared product and a studio outside one cannot be constructed; the product catalogue is
 smaller than the fleet and holds each studio exactly once; `planned_studios` is derived and
 holds only `studio` dispositions, none of which has a registry entry; every catalogue idea
-from batches 2-5 is recorded exactly once, every `section` and `merged` target resolves, no
+from batches 2-6 is recorded exactly once, every `section` and `merged` target resolves, no
 idea is covered twice, every cited file and every open gate exists, and an open gate that
 blocks nothing is refused; a cleared gate cites evidence that exists, says what cleared it
 and blocks no proposal, and the studios it unblocked are registered rather than planned; the
 hub groups by product, disclosing an empty product, an unfiled studio and each product's
-consolidated proposals instead of hiding any of them; and every studio named in the
-`MSP Studios` navigation section resolves to a registered route, with no path claimed twice,
-so the menu cannot point at a surface that no longer exists.
+consolidated proposals instead of hiding any of them; the catalogue finds an admitted studio and
+a plan by name, by product, by tier and by the problem it solves, ranks the studio above the
+plan, keeps every facet count over the whole index, states an unmatchable search rather than an
+empty catalogue, and indexes a payload that declares no tiers at all; and every studio named
+under the `Market Place` navigation row resolves to a registered route, with no path claimed
+twice, so the menu cannot point at a surface that no longer exists.
 
 ## What this document must not become
 

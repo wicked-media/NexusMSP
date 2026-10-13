@@ -214,7 +214,8 @@ Until those exist, treat the batch's ranking as a strategy assessment.
 This batch's disposition table is the batch's own opinion, and it stands. What
 changed is that the opinions from batches 2, 3, 4 and 5 now live in one
 checkable place. `backend/app/services/studio_proposals.py` holds **one record
-per catalogue idea from batches 2 to 5** — 74 records against 45 named gates —
+per catalogue idea from batches 2 to 6** — 104 records against 61 named gates
+(60 open, one recorded as cleared) over 142 proposed ideas —
 and every record carries one disposition: `studio` (a gated future studio),
 `section` (a section of a studio that already exists), `merged` (the same
 capability under a second name), `extend` (a named gap on an existing surface),

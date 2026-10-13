@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import PortalTechnicianConnections from "@/components/portal/PortalTechnicianConnections";
+import { EmptyState } from "@/components/design-system";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,7 +22,7 @@ import {
   Gauge, HardDrive, Headphones, HeartPulse, History, Home, Layers3,
   LifeBuoy, Loader2, LockKeyhole, LogOut, Menu, MessageSquareText, Monitor, Network, PackageCheck, Plus, Power,
   ReceiptText, RefreshCw, Search, Send, Settings2, ShieldCheck,
-  Sparkles, Ticket, UserRound, UsersRound, Wifi, WifiOff, X, XCircle,
+  Ticket, UserRound, UsersRound, Wifi, WifiOff, X, XCircle,
 } from "lucide-react";
 
 // The portal deliberately follows the Nexus workspace pattern, but keeps its
@@ -142,19 +143,6 @@ function SectionHeader({ eyebrow, title, description, action }) {
         {description && <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-400">{description}</p>}
       </div>
       {action}
-    </div>
-  );
-}
-
-function EmptyState({ icon: Icon = Sparkles, title, description, action }) {
-  return (
-    <div className="flex min-h-[260px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.015] px-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/20">
-        <Icon className="h-6 w-6" />
-      </div>
-      <h3 className="mt-4 text-base font-semibold text-white">{title}</h3>
-      <p className="mt-1 max-w-md text-sm leading-relaxed text-slate-500">{description}</p>
-      {action && <div className="mt-5">{action}</div>}
     </div>
   );
 }
@@ -997,7 +985,12 @@ export default function CustomerPortalWorkspace() {
                   <ChevronRight className="hidden h-4 w-4 text-slate-700 transition group-hover:translate-x-0.5 group-hover:text-emerald-300 sm:block" />
                 </button>
               )) : (
-                <EmptyState icon={Search} title="No matching requests" description="Try changing the search or status filter." />
+                <EmptyState
+                  className="min-h-[260px] rounded-2xl border border-dashed border-white/10 bg-white/[0.015]"
+                  icon={<Search className="h-6 w-6 text-emerald-300" />}
+                  title="No matching requests"
+                  description="Try changing the search or status filter."
+                />
               )}
             </CardContent>
           </Card>
@@ -1101,7 +1094,14 @@ export default function CustomerPortalWorkspace() {
             </Card>
           ))}
         </div>
-      ) : <EmptyState icon={Monitor} title="No managed assets are linked" description="Once your MSP links managed devices to this account, their health and support actions will appear here." />}
+      ) : (
+        <EmptyState
+          className="min-h-[260px] rounded-2xl border border-dashed border-white/10 bg-white/[0.015]"
+          icon={<Monitor className="h-6 w-6 text-emerald-300" />}
+          title="No managed assets are linked"
+          description="Once your MSP links managed devices to this account, their health and support actions will appear here."
+        />
+      )}
 
       {canRemote && (
         <Card className="rounded-2xl border-white/[0.08] bg-[#101820] shadow-none">
@@ -1249,7 +1249,12 @@ export default function CustomerPortalWorkspace() {
             <MetricTile icon={ReceiptText} label="Invoice records" value={invoices.length} detail="Available to this portal account" tone="sky" />
           </div>
           {!canViewInvoices ? (
-            <EmptyState icon={LockKeyhole} title="Billing access is restricted" description="Your portal administrator can grant invoice permissions to authorised contacts." />
+            <EmptyState
+              className="min-h-[260px] rounded-2xl border border-dashed border-white/10 bg-white/[0.015]"
+              icon={<LockKeyhole className="h-6 w-6 text-emerald-300" />}
+              title="Billing access is restricted"
+              description="Your portal administrator can grant invoice permissions to authorised contacts."
+            />
           ) : invoices.length ? (
             <Card className="rounded-2xl border-white/[0.08] bg-[#101820] shadow-none">
               <CardContent className="p-0">
@@ -1270,7 +1275,14 @@ export default function CustomerPortalWorkspace() {
                 })}
               </CardContent>
             </Card>
-          ) : <EmptyState icon={ReceiptText} title="No invoices to show" description="Invoice records shared with your portal will appear here." />}
+          ) : (
+            <EmptyState
+              className="min-h-[260px] rounded-2xl border border-dashed border-white/10 bg-white/[0.015]"
+              icon={<ReceiptText className="h-6 w-6 text-emerald-300" />}
+              title="No invoices to show"
+              description="Invoice records shared with your portal will appear here."
+            />
+          )}
         </>
       )}
     </div>
@@ -1352,7 +1364,14 @@ export default function CustomerPortalWorkspace() {
             </button>
           ))}
         </div>
-      ) : <EmptyState icon={Search} title="No matching guides" description="Try a broader search, or raise a request so the service desk can help." />}
+      ) : (
+        <EmptyState
+          className="min-h-[260px] rounded-2xl border border-dashed border-white/10 bg-white/[0.015]"
+          icon={<Search className="h-6 w-6 text-emerald-300" />}
+          title="No matching guides"
+          description="Try a broader search, or raise a request so the service desk can help."
+        />
+      )}
     </div>
   );
 
@@ -1379,7 +1398,14 @@ export default function CustomerPortalWorkspace() {
             </Card>
           ))}
         </div>
-      ) : <EmptyState icon={FileCheck2} title="No documents have been shared" description="Documents remain private by default. Files explicitly approved for your portal will appear here." />}
+      ) : (
+        <EmptyState
+          className="min-h-[260px] rounded-2xl border border-dashed border-white/10 bg-white/[0.015]"
+          icon={<FileCheck2 className="h-6 w-6 text-emerald-300" />}
+          title="No documents have been shared"
+          description="Documents remain private by default. Files explicitly approved for your portal will appear here."
+        />
+      )}
     </div>
   );
 

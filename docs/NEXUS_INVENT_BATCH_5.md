@@ -68,7 +68,7 @@ Three rules the registry now enforces, each with a test:
 |---|---|
 | Product taxonomy (declared, enforced) | `backend/app/services/studio_registry.py` (`PRODUCTS`, `product_catalogue()`, `PRODUCT_NOTE`) |
 | API exposure | `GET /api/studios` → `products`, `summary.by_product`, `product_note`, per-studio `product`/`product_name` |
-| Consolidated catalogue (derived plan) | `backend/app/services/studio_proposals.py` — one record per catalogue idea from batches 2–5, 45 named gates of which one (`fleet-baseline`) is recorded as cleared; `PRODUCTS[*].planned_studios` is derived from it |
+| Consolidated catalogue (derived plan) | `backend/app/services/studio_proposals.py` — one record per catalogue idea from batches 2–6, 61 named gates of which one (`fleet-baseline`) is recorded as cleared; `PRODUCTS[*].planned_studios` is derived from it (batch 5 shipped the register at 45 gates; [batch 6](NEXUS_INVENT_BATCH_6.md) extended it) |
 | Fleet baseline projection (the cleared gate) | `backend/app/services/fleet_baseline.py`, `backend/app/routers/fleet_baseline.py` — `GET /api/fleet-baseline/contract`, `/cohorts/{platform}/deviations`, `/cohorts/{platform}/recurrence`; read-only, scoped, no new store |
 | API exposure (extended) | `GET /api/studios` → per-product `proposals`, `proposal_count` and `proposal_note`, so a product shows what it plans and what was consolidated into existing capability |
 | Hub grouping (pure) | `frontend/src/lib/studioProducts.js` |
@@ -194,9 +194,10 @@ order of weight:
 This batch's own finding was that most of the 25 already exist as specialised
 surfaces and that the genuinely new ones need a decision before code. The merge
 review turned that finding into data: `backend/app/services/studio_proposals.py`
-holds **one record per catalogue idea from batches 2 to 5** — 74 records against
-45 named gates, one of which is now recorded as cleared — each with one
-disposition, and `PRODUCTS[*].planned_studios` is
+holds **one record per catalogue idea from batches 2 to 6** — 104 records
+against 61 named gates (60 open, one of which is recorded as cleared) over the
+142 ideas those batches proposed — each with one disposition, and
+`PRODUCTS[*].planned_studios` is
 **derived** from it. Only a `studio` proposal lands in a product's plan;
 everything else appears in that product's `proposals` on `GET /api/studios` and
 is rendered by the hub, so a product cannot claim work it has decided not to do.

@@ -96,4 +96,19 @@ webpackConfig.devServer = (devServerConfig) => {
   return devServerConfig;
 };
 
+// Jest reaches `@/...` through the jsconfig paths, but the Babel module resolver only
+// rewrites file targets: a directory import such as `@/components/design-system`
+// survives to Jest unmapped and fails, even though webpack resolves it against the
+// directory's index.jsx. That made every workspace importing a directory alias
+// impossible to unit-test. Mapping the alias for Jest as well closes the gap.
+webpackConfig.jest = {
+  configure: (jestConfig) => {
+    const existing = Array.isArray(jestConfig.moduleNameMapper)
+      ? Object.fromEntries(jestConfig.moduleNameMapper)
+      : { ...(jestConfig.moduleNameMapper || {}) };
+    jestConfig.moduleNameMapper = { ...existing, "^@/(.*)$": "<rootDir>/src/$1" };
+    return jestConfig;
+  },
+};
+
 module.exports = webpackConfig;

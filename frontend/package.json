@@ -59,7 +59,9 @@
     "lint:ci": "eslint \"src/**/*.{js,jsx}\" --max-warnings 127",
     "audit:production": "node scripts/audit-production.mjs",
     "audit:consistency": "node scripts/audit-workspace-consistency.mjs",
-    "audit:controls": "node scripts/audit-controls.mjs"
+    "audit:controls": "node scripts/audit-controls.mjs",
+    "audit:experience": "node scripts/audit-experience-readiness.mjs",
+    "audit:accessibility": "node scripts/audit-accessibility.mjs"
   },
   "browserslist": {
     "production": [

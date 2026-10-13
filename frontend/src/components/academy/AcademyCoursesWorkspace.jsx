@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
+import { EmptyState } from "@/components/design-system";
 import AcademyAssignmentEvidence from "./AcademyAssignmentEvidence";
 import { AcademyCertificateCard, AcademyCertificateSheet } from "./AcademyCertificate";
 import AcademyCoursePlayerDialog from "./AcademyCoursePlayer";
@@ -139,10 +140,6 @@ function CourseCard({ course, onOpen, onEdit, onAssign, admin = false }) {
       {admin && blocks.length ? <p className="text-[11px] text-muted-foreground">{blocks.length} lesson block{blocks.length === 1 ? "" : "s"} · {course.published ? "Published" : "Not visible to learners"}</p> : null}
     </CardContent>
   </Card>;
-}
-
-function EmptyState({ title, description, action }) {
-  return <Card className="border-dashed border-border/80 bg-muted/[0.08]"><CardContent className="px-6 py-10 text-center"><GraduationCap className="mx-auto h-8 w-8 text-muted-foreground" /><p className="mt-3 text-sm font-semibold">{title}</p><p className="mx-auto mt-1 max-w-md text-xs leading-5 text-muted-foreground">{description}</p>{action ? <div className="mt-4">{action}</div> : null}</CardContent></Card>;
 }
 
 export default function AcademyCoursesWorkspace({ token, isAdmin }) {
@@ -388,7 +385,7 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
 
   const learnerContent = (courses, emptyTitle, emptyDescription) => courses.length
     ? <div className="grid gap-4 xl:grid-cols-3">{courses.map((course) => <CourseCard key={course.assignment?.id || course.id} course={course} onOpen={beginCourse} />)}</div>
-    : <EmptyState title={emptyTitle} description={emptyDescription} />;
+    : <EmptyState icon={<GraduationCap className="h-8 w-8 text-muted-foreground" />} title={emptyTitle} description={emptyDescription} className="rounded-xl border border-dashed border-border/80 bg-muted/[0.08] py-10" />;
 
   return <section className="space-y-4" aria-labelledby="academy-courses-title" data-testid="academy-courses-workspace">
     <div className="flex flex-col gap-3 px-1 sm:flex-row sm:items-end sm:justify-between">
@@ -428,7 +425,7 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
 
       <TabsContent value="certificates" className="mt-4 space-y-4">
         <Card className="border-amber-400/20 bg-amber-400/[0.035]"><CardContent className="p-3.5"><p className="text-[10px] font-semibold uppercase tracking-wide text-amber-300">Certificates earned</p><p className="mt-1 text-xl font-semibold">{certificates.length}</p></CardContent></Card>
-        {certificatesLoading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading certificates…</CardContent></Card> : certificatesError ? <Card className="border-amber-400/25 bg-amber-400/[0.04]"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs leading-5 text-muted-foreground">Nexus could not load your certificates. Your completion evidence is unchanged.</p><Button size="sm" variant="outline" onClick={() => { setCertificatesError(false); setCertificatesLoaded(false); }} data-testid="academy-certificates-retry">Retry safely</Button></CardContent></Card> : certificates.length ? <div className="grid gap-4 xl:grid-cols-3">{certificates.map((certificate) => <AcademyCertificateCard key={certificate.id} certificate={certificate} onOpen={setSelectedCertificate} />)}</div> : <EmptyState title="No certificates yet" description="Complete an assigned course and pass its knowledge check. Nexus issues a verifiable completion certificate against the exact assigned version." />}
+        {certificatesLoading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading certificates…</CardContent></Card> : certificatesError ? <Card className="border-amber-400/25 bg-amber-400/[0.04]"><CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs leading-5 text-muted-foreground">Nexus could not load your certificates. Your completion evidence is unchanged.</p><Button size="sm" variant="outline" onClick={() => { setCertificatesError(false); setCertificatesLoaded(false); }} data-testid="academy-certificates-retry">Retry safely</Button></CardContent></Card> : certificates.length ? <div className="grid gap-4 xl:grid-cols-3">{certificates.map((certificate) => <AcademyCertificateCard key={certificate.id} certificate={certificate} onOpen={setSelectedCertificate} />)}</div> : <EmptyState icon={<GraduationCap className="h-8 w-8 text-muted-foreground" />} title="No certificates yet" description="Complete an assigned course and pass its knowledge check. Nexus issues a verifiable completion certificate against the exact assigned version." className="rounded-xl border border-dashed border-border/80 bg-muted/[0.08] py-10" />}
       </TabsContent>
 
       {isAdmin ? <TabsContent value="studio" className="mt-4 space-y-4">
@@ -482,7 +479,7 @@ export default function AcademyCoursesWorkspace({ token, isAdmin }) {
           </CardContent>
         </Card>
         {studioError ? <Card className="border-amber-400/25 bg-amber-400/[0.04]"><CardContent className="flex items-center justify-between gap-3 p-4"><p className="text-xs text-muted-foreground">{studioError}</p><Button size="sm" variant="outline" onClick={() => loadCourses({ background: true })}>Retry</Button></CardContent></Card> : null}
-        {loading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading the course library…</CardContent></Card> : adminCourses.length ? <div className="grid gap-4 xl:grid-cols-3">{adminCourses.map((course) => <CourseCard key={course.id} course={course} admin onEdit={beginEdit} onAssign={openAssignments} />)}</div> : <EmptyState title="Your Academy library is ready for its first course" description="Start with an internal security-awareness lesson or a capability course. Publishing does not assign the course automatically." action={<Button size="sm" onClick={() => beginCreate()}><Plus className="mr-1.5 h-3.5 w-3.5" />Create the first course</Button>} />}
+        {loading ? <Card><CardContent className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading the course library…</CardContent></Card> : adminCourses.length ? <div className="grid gap-4 xl:grid-cols-3">{adminCourses.map((course) => <CourseCard key={course.id} course={course} admin onEdit={beginEdit} onAssign={openAssignments} />)}</div> : <EmptyState icon={<GraduationCap className="h-8 w-8 text-muted-foreground" />} title="Your Academy library is ready for its first course" description="Start with an internal security-awareness lesson or a capability course. Publishing does not assign the course automatically." action={<Button size="sm" onClick={() => beginCreate()}><Plus className="mr-1.5 h-3.5 w-3.5" />Create the first course</Button>} className="rounded-xl border border-dashed border-border/80 bg-muted/[0.08] py-10" />}
       </TabsContent> : null}
     </Tabs>
 

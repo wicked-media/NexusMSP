@@ -16,6 +16,7 @@ from pathlib import Path
 from app.database import db, client, UPLOADS_DIR
 from app.services.seed import seed_data
 from app.services.runtime_config import background_workers_enabled, cors_origins, demo_seed_enabled
+from app.services import schema_migrations
 from app.services.observability import (
     HTTP_IN_PROGRESS,
     configure_observability,
@@ -377,7 +378,21 @@ async def readiness_check():
     except Exception as exc:
         logger.error("Readiness database ping failed: %s", exc)
         raise HTTPException(status_code=503, detail="Database is unavailable") from exc
-    return {"status": "ready", "service": "nexusops-api", "version": "3.0.0"}
+    # Readiness also reports the migration ledger: it is the one place the
+    # deployment scripts already check, so a release that is older than the data
+    # it was pointed at fails here rather than serving an unknown shape.
+    ledger = await schema_migrations.status(db)
+    if not ledger.compatible:
+        raise HTTPException(
+            status_code=503,
+            detail="Nexus database schema is incompatible with this release",
+        )
+    return {
+        "status": "ready",
+        "service": "nexusops-api",
+        "version": "3.0.0",
+        "schema": ledger.as_dict(),
+    }
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -687,6 +702,12 @@ async def stripe_webhook(request: FastAPIRequest):
 # Startup event
 @app.on_event("startup")
 async def startup_event():
+    # The schema gate runs before any boot work. _boot_warmup performs data-shape
+    # changes (index creation and the event backfills), and those must never run
+    # against a database this release cannot reason about. In a blocking runtime
+    # an incompatible ledger stops startup instead of serving a shape the code
+    # does not understand; see app/services/schema_migrations.py.
+    await schema_migrations.startup_schema_gate(db)
     # Kick heavy DB seeding + ticket backfill off to a background task so uvicorn
     # completes startup fast and production readiness probes (/health) pass on time.
     try:

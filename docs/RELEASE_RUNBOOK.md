@@ -69,7 +69,10 @@ Then complete `docs/PRODUCTION_READINESS.md` §7 (freeze writes, capture logs,
 validate login/tenant isolation/ticket history/billing/agent heartbeat). If the
 rolled-back release applied a database migration, the migration's documented
 rollback must run **before** older images start; the image pin alone does not
-revert schema or data changes.
+revert schema or data changes. `backend/scripts/nexus_migrate.py --status` tells
+you what this database has actually recorded, and
+[Database migrations and their rollback](#database-migrations-and-their-rollback)
+below gives the apply and rollback commands.
 
 ### Rehearse the rollback before you need it
 
@@ -98,7 +101,141 @@ twice, because that tier carries the application logic and the migration risk;
 the web tier is rolled with the identical pin mechanism but is not
 version-discriminated. **Database migration rollback is not rehearsed by this
 drill** — it stays a per-migration procedure that runs before older images
-start, and it remains open on the production-readiness checklist.
+start, and it is rehearsed separately by `scripts/Test-NexusMigrationRollback.ps1`
+(see [Database migrations and their rollback](#database-migrations-and-their-rollback)).
+It remains open on the production-readiness checklist until that drill has run
+on the deployment Docker host.
+
+## Database migrations and their rollback
+
+Nexus keeps its operational records in MongoDB, so a release's data-shape change
+is an ordered, recorded migration rather than a schema DDL script.
+`backend/app/services/schema_migrations.py` owns the migration registry and the
+`schema_migrations` ledger; `backend/scripts/nexus_migrate.py` is the operator
+entry point and ships inside the API image at `/app/scripts/nexus_migrate.py`, so
+a change window never needs a host checkout.
+
+The ledger has five states, and only two of them block:
+
+- **applied** / **adopted** — recorded as done. `adopted` means an existing
+  pre-ledger database already received the work and was recorded without being
+  executed again.
+- **pending** — this release defines a migration the database has not recorded.
+  Reported and logged, deliberately not fatal: the previous release is still
+  serving while the window opens.
+- **unknown** — the database records a migration this release does not define,
+  so the running code is older than the data. **Blocking.**
+- **drifted** — an already-applied migration's description was edited in this
+  release, so the ledger can no longer certify it. **Blocking.**
+
+An incompatible database is refused in three places, so it cannot pass a change
+window unnoticed: `/api/ready` answers 503, the API's own startup gate stops the
+container instead of serving a shape it does not understand, and `--status`
+exits 1.
+
+The ordering contract is the part that matters:
+
+1. Migrations are **applied before the images are rolled** forward, during the
+   change window. Rolling forward first would run new code against a shape it
+   has not prepared.
+2. On rollback, restore the database state the previous release expects and
+   **roll the images back only after** that. The image pin cannot revert a
+   recorded migration by itself.
+
+```powershell
+# Before the window: what has this database already applied?
+# Add --json for machine-readable output. Exit 1 means it is not compatible.
+python backend/scripts/nexus_migrate.py --status
+
+# During the window, before the images are rolled forward.
+python backend/scripts/nexus_migrate.py --apply
+
+# A database that predates this ledger: record the work it already received,
+# without running it again. Refuses a ledger that already has rows.
+python backend/scripts/nexus_migrate.py --adopt-baseline
+
+# Roll back to the migration a previous release expects to remain applied...
+python backend/scripts/nexus_migrate.py --rollback-to 0001-adopt-prelaunch-event-backfills
+# ...or clear the ledger back to the pre-ledger state.
+python backend/scripts/nexus_migrate.py --rollback-all
+```
+
+Every action accepts `--dry-run` (report and change nothing) and `--actor <name>`
+(recorded in the ledger as `applied_by`). Exit codes are part of the interface:
+**0** succeeded (for `--status`, the database is compatible), **1** refused with
+nothing changed, **2** usage error.
+
+A migration declares a `down` path when its change can be undone exactly, and
+must then state why if it cannot. The registry's first migration,
+`0001-adopt-prelaunch-event-backfills`, is irreversible: it adopts the
+platform-event metadata and Black Box integrity backfills that previously ran
+unversioned on every boot, and a one-way integrity seal cannot be reversed by
+rewriting it. Rolling through such a migration refuses before changing anything
+and names the recovery-capture restore as the real rollback path
+(`docs/PLATFORM_RECOVERY_RUNBOOK.md`), so a rollback that crosses one is a
+restore decision rather than a command.
+
+The registry's first reversible migration is
+`0002-index-platform-event-retention`. The event retention purge selects
+`platform_events` by `retention_until` and sorts by that same field every six
+hours, and no index covered it, so each pass scanned the platform's
+fastest-growing collection. The migration creates that index; its down path drops
+it, restoring the previous index set exactly. Reversing it cannot lose a record
+or change a stored value, which is why it is the first migration whose rollback
+is a command rather than a restore:
+
+```powershell
+# Roll the reversible migration back, leaving 0001 applied.
+python backend/scripts/nexus_migrate.py --rollback-to 0001-adopt-prelaunch-event-backfills
+```
+
+The index is created *only* by the ledger, deliberately not by the boot-time
+`ensure_*_indexes` family. An index the API recreated on every start could not be
+rolled back — the next start would bring it straight back and the ledger would be
+recording a down path that does not hold.
+
+`NEXUS_ALLOW_SCHEMA_MISMATCH=1` is the explicit break-glass acknowledgement for a
+recovery-capture restore that legitimately lands a newer ledger against older
+code. Every use is logged as a warning; it must never be set to get past a
+refusal whose cause has not been understood.
+
+### Rehearse the migration ledger before you need it
+
+Run on the deployment Docker host:
+
+```powershell
+./scripts/Test-NexusMigrationRollback.ps1
+```
+
+The drill builds the release from the checkout into a disposable Compose project
+(unique project name, generated database contents and test-only secrets), starts
+it with `APP_ENV=production`, and applies the ledger through the shipped CLI
+inside the API container. It then writes the ledger row a newer release leaves
+behind and requires the refusal to be visible in all three places above: the CLI
+exit code, `/api/ready` returning 503, and the API's startup failing with a log
+line that names the remedy. It also verifies that the irreversible
+`--rollback-all` refusal names the recovery runbook, that a refused rollback
+changes nothing, and that the service recovers once the ledger matches the
+release. The evidence is retained as
+`artifacts/release-drills/migration-drill-*.json`.
+
+The drill also rehearses a reversible migration's apply, rollback and re-apply.
+It reads the migration's whole database effect back from MongoDB (the
+`event_retention_until` index on `platform_events`), rolls
+`0002-index-platform-event-retention` back with
+`--rollback-to 0001-adopt-prelaunch-event-backfills`, and requires the index to
+be gone, the ledger row to be removed and `--status` to report the migration
+pending again before re-applying it. Nothing in that sequence is taken from the
+rollback's own report of what it did.
+
+Scope is disclosed rather than implied. The newer-release ledger row is
+*written*, not built, because a ledger row for a migration id this release does
+not define is the only thing a newer release leaves behind that affects this
+release's decision; the evidence records it as `newer_release_simulation`. The
+reversible migration the drill rolls back indexes an existing field, so its down
+path restores the previous index set and cannot lose a record. A reversible
+migration that *transforms* customer data does not exist yet, so the rollback of
+one remains uncovered until it does.
 
 ## Windows Agent release and Authenticode signing
 
@@ -133,5 +270,14 @@ Retain with every release:
       (`artifacts/release-drills/release-drill-*.json`) from
       `scripts/Test-NexusApplicationRollback.ps1`, run on the deployment Docker
       host after any change to the image pin, registry or roll command.
+- [ ] Migration ledger drill evidence
+      (`artifacts/release-drills/migration-drill-*.json`) from
+      `scripts/Test-NexusMigrationRollback.ps1`, run on the deployment Docker
+      host after any change to the migration registry, the ledger gate or the
+      migration CLI, and before any release that applies a migration to customer
+      data.
+- [ ] Migration ledger status captured before the change window
+      (`python backend/scripts/nexus_migrate.py --status`), showing the applied
+      and adopted migration ids for the target database.
 - [ ] Golden-workflow acceptance evidence (`docs/PRODUCTION_READINESS.md` §5).
 - [ ] The exact previous release tag or digest that rollback will pin.

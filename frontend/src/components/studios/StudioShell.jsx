@@ -402,7 +402,7 @@ export default function StudioShell({ studioId }) {
     return (
       <div className="space-y-4" data-testid="studio-not-found">
         <OperationalPageHeader eyebrow="Studio fleet" title="Studio not found" description={error} icon={ShieldAlert} tone="amber" />
-        <Button asChild variant="outline"><a href="/studios"><ArrowLeft className="w-4 h-4 mr-1" />Back to Studio Fleet</a></Button>
+        <Button asChild variant="outline"><a href="/studios"><ArrowLeft className="w-4 h-4 mr-1" />Back to the Market Place</a></Button>
       </div>
     );
   }

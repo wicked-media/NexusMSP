@@ -146,7 +146,14 @@ def test_the_gate_is_recorded_as_unclosed_until_a_deployment_host_run_exists():
     assert "scripts/Test-NexusApplicationRollback.ps1" in checklist
     # The row must still name the work that only a deployment host can do...
     assert "run the drill on the deployment Docker host" in checklist
-    assert "rehearse a real database migration's rollback" in checklist
+    # ...and must not let the migration ledger's arrival look like a rehearsed
+    # migration rollback. The ledger added the mechanism
+    # (backend/app/services/schema_migrations.py), and a reversible migration now
+    # exists, so the row has to state precisely which rollback the drill rehearses
+    # and which one still has no rehearsal path at all.
+    assert "rehearses its apply, rollback and re-apply for real" in checklist
+    assert "reversible migration that transforms customer data still does not exist" in checklist
+    assert "nothing is proven on a host" in checklist
     # ...and the cycle record must say the drill could not be executed while it
     # was authored, rather than implying a passing rehearsal.
     assert "Not re-verifiable in this environment" in checklist

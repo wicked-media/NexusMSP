@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import ClientPaymentMethodsPanel from "@/components/clients/ClientPaymentMethodsPanel";
+import { EmptyState } from "@/components/design-system";
 import { toast } from "sonner";
 import { Loader2, Package, Boxes, Server, Cloud, ShieldCheck, ShieldAlert, DollarSign, TrendingUp, AlertCircle, CheckCircle2, Users, KeyRound, ListChecks, ReceiptText, Activity, ArrowRight, CalendarClock, CircleDollarSign, CreditCard, MailCheck, RefreshCw, Settings2, Repeat2 } from "lucide-react";
 import { Responsive, WidthProvider } from "react-grid-layout";
@@ -63,7 +64,7 @@ export function Client360Subscriptions({ clientId, token }) {
     label: "Subscriptions",
   });
   if (loading) return <Loader label="Loading subscriptions…" />;
-  if (!data?.items?.length) return <EmptyState icon={Package} msg="No subscriptions linked. Connect this client to Pax8 / Acronis in Integrations tab, or add a recurring invoice." />;
+  if (!data?.items?.length) return <EmptyState className="rounded-md border border-zinc-800 p-8" icon={<Package className="h-8 w-8" />} title="No subscriptions linked. Connect this client to Pax8 / Acronis in Integrations tab, or add a recurring invoice." />;
 
   const byLabel = {};
   (data.items || []).forEach((s) => { byLabel[s.source_label] = (byLabel[s.source_label] || 0) + 1; });
@@ -449,7 +450,7 @@ export function Client360Billing({ clientId, token }) {
 export function Client360Assets({ clientId, token }) {
   const { data, loading } = useApiGet(`/clients/${clientId}/assets-detail`, token);
   if (loading) return <Loader label="Loading assets…" />;
-  if (!data?.total) return <EmptyState icon={Server} msg="No devices linked to this client." />;
+  if (!data?.total) return <EmptyState className="rounded-md border border-zinc-800 p-8" icon={<Server className="h-8 w-8" />} title="No devices linked to this client." />;
 
   return (
     <div className="space-y-4" data-testid="client360-assets">
@@ -496,10 +497,6 @@ export function Client360Assets({ clientId, token }) {
 
 /* ──────────────── Helpers ──────────────── */
 function Loader({ label }) { return <div className="py-10 flex items-center justify-center gap-2 text-sm text-zinc-500"><Loader2 className="w-4 h-4 animate-spin" />{label}</div>; }
-
-function EmptyState({ icon: Icon, msg }) {
-  return <div className="border border-zinc-800 rounded-md p-8 text-center text-sm text-zinc-500"><Icon className="w-8 h-8 mx-auto mb-2 opacity-40" />{msg}</div>;
-}
 
 function Stat({ label, value, color = "sky", icon: Icon }) {
   return (

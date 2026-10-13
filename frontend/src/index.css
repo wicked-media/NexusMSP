@@ -92,6 +92,23 @@
         --nx-tone-critical: 355 84% 61%;
         --nx-tone-info: 187 85% 48%;
 
+        /* Shared status and identity chip hues, owned by the design system's chips
+           (StatusPill, IntegrationChip). They used to be fixed Tailwind -500
+           literals, which measured 2.15-4.47:1 as text on the light theme's white
+           card — under the 4.5:1 the 9px uppercase chip copy needs, and a chip whose
+           label cannot be read is a chip that says nothing. The dark theme keeps the
+           hue and lightness the chips shipped with, so the default theme is
+           unchanged apart from indigo, which measured 4.10:1 on a card at -500. The
+           light theme restates every hue deep enough to clear 4.5:1 over the card.
+           Measured by `pnpm audit:accessibility`, including the 5% tint the label
+           actually sits on. */
+        --nx-chip-sky: 199 89% 48%;        /* #0ea5e9, unchanged */
+        --nx-chip-blue: 217 91% 60%;       /* #3b82f6, unchanged */
+        --nx-chip-indigo: 239 84% 72%;     /* -500 was 4.10:1 on a card */
+        --nx-chip-amber: 38 92% 50%;       /* #f59e0b, unchanged */
+        --nx-chip-emerald: 160 84% 39%;    /* #10b981, unchanged */
+        --nx-chip-rose: 350 89% 60%;       /* #f43f5e, unchanged */
+
         /* One motion rhythm across Nexus: acknowledge, transition, reveal. */
         --nx-motion-instant: 100ms;
         --nx-motion-fast: 160ms;
@@ -113,7 +130,7 @@
         --secondary: 240 5% 96%;
         --secondary-foreground: 240 10% 4%;
         --muted: 240 5% 96%;               /* zinc-100 */
-        --muted-foreground: 240 4% 46%;    /* zinc-500 */
+        --muted-foreground: 240 4% 45%;    /* zinc-500, deepened to hold 4.5:1 on --muted and --card */
         --accent: 240 5% 96%;
         --accent-foreground: 240 10% 4%;
         --destructive: 0 84% 60%;
@@ -155,6 +172,15 @@
         --nx-tone-watch: 32 95% 30%;
         --nx-tone-critical: 0 72% 45%;
         --nx-tone-info: 217 91% 40%;
+
+        /* Chip hues deepened for the white card: each clears 4.5:1 as chip copy, and
+           the tint the label sits on is composited in by the audit. */
+        --nx-chip-sky: 201 96% 32%;
+        --nx-chip-blue: 224 76% 40%;
+        --nx-chip-indigo: 243 75% 59%;
+        --nx-chip-amber: 26 90% 37%;
+        --nx-chip-emerald: 152 72% 26%;
+        --nx-chip-rose: 347 77% 41%;
     }
 }
 

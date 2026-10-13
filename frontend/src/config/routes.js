@@ -23,9 +23,12 @@ export const routeConfig = [
   { path: "/nexus-data-quality", component: page("NexusDataQualityPage"), auth: true, layout: true },
   { path: "/nexus-pulse", component: page("NexusPulsePage"), auth: true, layout: true },
   { path: "/nexus-proving-ground", component: page("NexusProvingGroundPage"), auth: true, layout: true },
-  // Studio fleet: one hub + one parameterised spine route, so a studio is a
-  // registry entry rather than a parallel product (docs/NEXUS_STUDIO_FLEET.md).
+  // The Market Place: one searchable studio catalogue + one parameterised spine
+  // route, so a studio is a registry entry rather than a parallel product
+  // (docs/NEXUS_STUDIO_FLEET.md, docs/NEXUS_INVENT_BATCH_6.md). `/marketplace`
+  // is the alias the navigation label names, so a shared link matches the label.
   { path: "/studios", component: page("StudiosHubPage"), auth: true, layout: true },
+  { path: "/marketplace", component: page("StudiosHubPage"), auth: true, layout: true },
   { path: "/studios/:studioId", component: page("StudioDetailPage"), auth: true, layout: true },
   // The three foundations: one customer-scoped operating view, one verified
   // operational-outcome report, one governed extension review surface

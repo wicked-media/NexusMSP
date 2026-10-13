@@ -119,7 +119,29 @@ BATCH_2_CATALOGUE = {
     "customer-promise-guardian",
 }
 
-CATALOGUE = BATCH_2_CATALOGUE | BATCH_3_CATALOGUE | BATCH_4_CATALOGUE | BATCH_5_CATALOGUE
+# Batch 6 (156-185): communications and collaboration, data protection and
+# governance, physical infrastructure and specialist services. It takes the
+# catalogue to 185 and is the batch that turned the catalogue into a product
+# portfolio: eight of its ten communications studios are plans, one is a section
+# of Voice Studio and one is a named gap on the voice service desk.
+BATCH_6_CATALOGUE = {
+    # 156-165, communications and collaboration.
+    "contact-centre", "business-sms", "cloud-fax", "unified-communications",
+    "sip", "video-conferencing", "voice-quality", "number-management",
+    "messaging-compliance", "reception",
+    # 166-175, data, protection and governance.
+    "data-governance", "data-loss-prevention", "ediscovery", "privacy-operations",
+    "encryption", "secrets", "threat-exposure", "software-supply-chain",
+    "identity-threat", "data-recovery",
+    # 176-185, physical infrastructure and specialist services.
+    "rack", "cabling", "fibre", "environmental", "ups", "kiosk",
+    "laboratory-equipment", "broadcast", "satellite", "edge",
+}
+
+CATALOGUE = (
+    BATCH_2_CATALOGUE | BATCH_3_CATALOGUE | BATCH_4_CATALOGUE | BATCH_5_CATALOGUE
+    | BATCH_6_CATALOGUE
+)
 
 # Work items the consolidation created, which are the merge target of concepts
 # that arrived under several names and had no single id to keep.
@@ -460,6 +482,105 @@ def test_endpoint_and_commerce_hold_the_specialisations_the_batch_names():
     assert dispositions["customer-profitability"] == "section"
 
 
+def test_batch_6_files_communications_under_one_product():
+    """The batch's own instruction: these sit inside Nexus Communications."""
+    catalogue = {product["id"]: product for product in studio_registry.product_catalogue()}
+    communications = catalogue["nexus-communications"]
+    assert communications["planned_studios"] == [
+        "contact-centre", "business-sms", "cloud-fax", "unified-communications",
+        "sip", "video-conferencing", "number-management", "messaging-compliance",
+    ]
+    dispositions = {p["id"]: p["disposition"] for p in communications["proposals"]}
+    # Voice Quality is a view over Voice Studio, which already owns voice, and
+    # Reception is a gap on the service desk that already answers calls with a
+    # ticket — so neither is a second voice or reception product.
+    assert dispositions["voice-quality"] == "section"
+    assert dispositions["reception"] == "extend"
+    assert studio_registry.STUDIOS["voice"]["product"] == "nexus-communications"
+    # Telecom Studio stays the technical administration hub the batch names.
+    assert studio_registry.STUDIOS["telecom"]["product"] == "nexus-communications"
+
+
+def test_batch_6_physical_infrastructure_is_not_filed_as_telemetry():
+    """Hardware provider families stay plans rather than sections of Monitoring."""
+    catalogue = {product["id"]: product for product in studio_registry.product_catalogue()}
+    infrastructure = set(catalogue["nexus-infrastructure"]["planned_studios"])
+    assert {"rack", "cabling", "fibre", "ups", "broadcast", "satellite"} <= infrastructure
+    observability = set(catalogue["nexus-observability"]["planned_studios"])
+    assert {"environmental", "laboratory-equipment"} <= observability
+    endpoint = set(catalogue["nexus-endpoint"]["planned_studios"])
+    assert "edge" in endpoint
+    # Kiosk is a named gap on the kiosk surface that already ships.
+    assert studio_proposals.PROPOSALS["kiosk"]["disposition"] == "extend"
+    assert "kiosk" not in endpoint
+
+
+def test_batch_6_plans_name_the_decision_that_blocks_them():
+    """A batch-6 plan names a real gate instead of restating the capability."""
+    for proposal_id in BATCH_6_CATALOGUE:
+        proposal = studio_proposals.PROPOSALS[proposal_id]
+        assert proposal["sources"], proposal_id
+        assert proposal["sources"][0].startswith("batch 6 #"), proposal_id
+        assert proposal["note"], proposal_id
+        if proposal["disposition"] == "studio":
+            assert proposal["gates"], proposal_id
+            for gate_id in proposal["gates"]:
+                assert "batch 6" in studio_proposals.GATES[gate_id]["recorded_in"], gate_id
+    # One missing model decides five of the ten governance studios, so it is
+    # declared once and referenced by all five.
+    model = {
+        proposal_id
+        for proposal_id in BATCH_6_CATALOGUE
+        if "data-classification-model" in studio_proposals.PROPOSALS[proposal_id]["gates"]
+    }
+    assert model == {
+        "messaging-compliance", "data-governance", "data-loss-prevention",
+        "ediscovery", "privacy-operations",
+    }
+
+
+# ============== COMMERCIAL TIERS ==============
+
+
+def test_every_product_declares_one_declared_tier():
+    """The portfolio has a packaging, and it is a declaration rather than a guess."""
+    assert list(studio_registry.TIERS) == ["core", "specialist", "platform"]
+    for tier in studio_registry.TIERS.values():
+        assert tier["label"] and tier["blurb"]
+    for product in studio_registry.PRODUCTS.values():
+        assert product["tier"] in studio_registry.TIERS, product["id"]
+    placed = [
+        product_id
+        for tier in studio_registry.tier_rollup()
+        for product_id in tier["products"]
+    ]
+    assert sorted(placed) == sorted(studio_registry.PRODUCTS), (
+        "a product is missing from the tiers or counted under two"
+    )
+
+
+def test_a_tier_is_never_claimed_for_unadmitted_studios():
+    """A tier describes a product's packaging, not a capability Nexus shipped."""
+    for tier in studio_registry.tier_rollup():
+        assert tier["studio_count"] >= 0
+        assert tier["planned_count"] > 0, tier["id"]
+        for product_id in tier["products"]:
+            product = studio_registry.PRODUCTS[product_id]
+            assert tier["id"] == product["tier"]
+    # Every studio row and detail contract carries the tier of its product, so a
+    # consumer never has to re-derive the packaging from the product list.
+    payload = studio_registry.list_studios()
+    for row in payload["studios"]:
+        assert row["tier"] == studio_registry.PRODUCTS[row["product"]]["tier"]
+        assert row["tier_label"] == studio_registry.TIERS[row["tier"]]["label"]
+    assert studio_registry.get_studio("voice")["tier"] == "specialist"
+
+
+def test_the_register_refuses_an_undeclared_tier():
+    with pytest.raises(ValueError, match="unknown tier"):
+        studio_registry._product("nexus-imaginary", "Nexus Imaginary", "t", "platinum")
+
+
 def test_the_register_refuses_a_broken_consolidation(monkeypatch):
     """The invariants are enforced, not merely documented."""
     studio_products = {s["id"]: s["product"] for s in studio_registry.STUDIOS.values()}
@@ -565,6 +686,26 @@ def test_the_register_refuses_a_broken_consolidation(monkeypatch):
         "partner-tenancy": all_gates["partner-tenancy"],
     }
     refuse("cites missing evidence", proposal("x", "studio"), gates=cleared_without_evidence)
+
+
+def test_list_endpoint_reports_the_commercial_tiers():
+    """The catalogue's packaging reaches the hub, so it can be searched by tier."""
+    response = asyncio.run(studio_fleet.list_studios(current_user=USER))
+    assert response["tier_note"]
+    tiers = {tier["id"]: tier for tier in response["tiers"]}
+    assert list(tiers) == ["core", "specialist", "platform"]
+    for tier in tiers.values():
+        assert tier["label"] and tier["blurb"] and tier["products"]
+        assert tier["studio_count"] == sum(
+            product["count"]
+            for product in response["products"]
+            if product["tier"] == tier["id"]
+        )
+    assert response["summary"]["by_tier"] == {
+        tier["id"]: tier["studio_count"] for tier in response["tiers"]
+    }
+    for product in response["products"]:
+        assert product["tier_label"] == tiers[product["tier"]]["label"]
 
 
 def test_list_endpoint_reports_products_alongside_studios():

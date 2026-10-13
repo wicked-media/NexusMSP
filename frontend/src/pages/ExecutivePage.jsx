@@ -63,6 +63,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ErrorState, LoadingState } from "@/components/design-system";
 import {
   Dialog,
   DialogContent,
@@ -157,31 +158,6 @@ const OWNER_WORKSPACES = [
   { label: "Purchase orders", detail: "Committed cost and vendors", route: "/purchase-orders", icon: Banknote, keywords: "procurement vendors committed" },
   { label: "Scheduled reports", detail: "Recurring owner delivery", route: "/scheduled-reports", icon: CalendarRange, keywords: "schedule recurring delivery" },
 ];
-
-function LoadingState() {
-  return (
-    <div className="flex min-h-[420px] items-center justify-center">
-      <div className="text-center">
-        <Loader2 className="mx-auto h-7 w-7 animate-spin text-emerald-500" />
-        <p className="mt-3 text-sm font-medium">Building the owner briefing…</p>
-        <p className="mt-1 text-xs text-muted-foreground">Correlating commercial and operational evidence</p>
-      </div>
-    </div>
-  );
-}
-
-function ErrorState({ message, onRetry }) {
-  return (
-    <Card className="border-rose-500/20 bg-rose-500/[0.04]">
-      <CardContent className="flex flex-col items-center px-5 py-14 text-center">
-        <ShieldAlert className="h-9 w-9 text-rose-500" />
-        <h2 className="mt-3 text-lg font-semibold">The owner briefing could not load</h2>
-        <p className="mt-1 max-w-xl text-sm text-muted-foreground">{message}</p>
-        <Button className="mt-5" onClick={onRetry}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button>
-      </CardContent>
-    </Card>
-  );
-}
 
 function FlowMetric({ icon: Icon, label, value, detail, tone = "emerald", last = false }) {
   const tones = {
@@ -792,8 +768,8 @@ export default function ExecutivePage() {
         </div>
       </WorkspaceControlBar>
 
-      {error && !data ? <ErrorState message={error} onRetry={() => load(windowDays)} /> : !data ? (
-        <div className="space-y-5"><LoadingState /></div>
+      {error && !data ? <ErrorState error={error} title="The owner briefing could not load" description="Nexus could not read the commercial and operational evidence for this window. Nothing is hidden — the briefing is simply not available until the read succeeds." icon={<ShieldAlert className="h-9 w-9" />} retryLabel="Retry" onRetry={() => load(windowDays)} className="rounded-xl border border-rose-500/20 bg-rose-500/[0.04]" /> : !data ? (
+        <div className="space-y-5"><LoadingState label="Building the owner briefing…" rows={5} /></div>
       ) : (
         <>
           {error && (

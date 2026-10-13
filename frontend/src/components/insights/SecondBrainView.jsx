@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { EmptyState } from "@/components/design-system";
 import HeroTile from "@/components/HeroTile";
 import NexusWorkflowDialog from "@/components/NexusWorkflowDialog";
 import { Badge } from "@/components/ui/badge";
@@ -61,16 +62,6 @@ function ConfidenceBadge({ confidence }) {
     <Badge variant="outline" className={tone}>
       {confidence?.label || "Emerging"} · {score}% · {confidence?.evidence_count || 0} records
     </Badge>
-  );
-}
-
-function EmptyState({ icon: Icon = Sparkles, title, body }) {
-  return (
-    <div className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10 text-center">
-      <Icon className="mx-auto h-7 w-7 text-muted-foreground" />
-      <p className="mt-3 text-sm font-semibold">{title}</p>
-      <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-muted-foreground">{body}</p>
-    </div>
   );
 }
 
@@ -173,7 +164,7 @@ function MemorySearch({ api }) {
                 })}
               </div>
             ) : (
-              <EmptyState icon={FileSearch} title="No direct evidence matched" body="Try a client name, ticket subject, device, category, technician or phrase from the original record. Nexus will not fabricate a result." />
+              <EmptyState icon={<FileSearch className="h-7 w-7" />} title="No direct evidence matched" description="Try a client name, ticket subject, device, category, technician or phrase from the original record. Nexus will not fabricate a result." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
             )}
           </div>
         )}
@@ -270,7 +261,7 @@ function PatternsPanel({ signals }) {
             </div>
           </details>
         )) : (
-          <EmptyState title="No repeated pattern meets the evidence threshold" body="Nexus needs at least two matching ticket records before it surfaces a pattern. Keep categorisation and resolutions current." />
+          <EmptyState icon={<Sparkles className="h-7 w-7" />} title="No repeated pattern meets the evidence threshold" description="Nexus needs at least two matching ticket records before it surfaces a pattern. Keep categorisation and resolutions current." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
         )}
       </CardContent>
     </Card>
@@ -313,7 +304,7 @@ function ExpertisePanel({ profiles }) {
             ))}
           </div>
         ) : (
-          <EmptyState icon={UserRoundCheck} title="Expertise evidence is still forming" body="Resolved or closed tickets with a recorded technician owner will build explainable team expertise profiles." />
+          <EmptyState icon={<UserRoundCheck className="h-7 w-7" />} title="Expertise evidence is still forming" description="Resolved or closed tickets with a recorded technician owner will build explainable team expertise profiles." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
         )}
       </CardContent>
     </Card>
@@ -474,7 +465,7 @@ export default function SecondBrainView({ api }) {
             {recommendations.length ? recommendations.slice(0, 8).map((item) => (
               <RecommendationCard key={item.id} item={item} onDecision={chooseDecision} saving={saving} />
             )) : (
-              <EmptyState icon={Check} title="No open recommendations" body="Either the current evidence does not support a recommendation or this technician has reviewed the available items." />
+              <EmptyState icon={<Check className="h-7 w-7" />} title="No open recommendations" description="Either the current evidence does not support a recommendation or this technician has reviewed the available items." className="rounded-2xl border border-dashed border-border/70 bg-muted/[0.12] px-5 py-10" />
             )}
           </CardContent>
         </Card>

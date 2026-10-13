@@ -25,6 +25,13 @@ go build -trimpath -o dist\nexus-agent-windows-amd64.exe .\cmd\nexus-agent
 
 CI must also build both containers and validate `docker-compose.production.yml`.
 
+The release also carries a database-migration ledger gate. Before the change
+window, confirm the target database is compatible with the release being
+deployed by running `python backend/scripts/nexus_migrate.py --status`. Exit 1
+means the database records a migration this release does not define, or an
+already-applied migration was edited, and the release must not proceed until
+that is resolved — see Section 7.
+
 ## 2. Environment and secrets
 
 1. Supply Compose variables through the deployment host's secret manager or a private host-only environment file. Do not commit the file or reuse local, CI, or vendor credentials.
@@ -120,7 +127,7 @@ Fail the release if an action reports success without a durable record, audit en
 
 1. Freeze new writes and automation execution.
 2. Capture logs and the last known correlation IDs before replacing containers.
-3. Roll back application images to the last accepted immutable tag. Pin the previous tag or digest with `scripts/Deploy-NexusImageTag.ps1` (see `docs/RELEASE_RUNBOOK.md`); if the rolled-back release applied a database migration, that migration's documented rollback runs before the older images start.
+3. Roll back application images to the last accepted immutable tag. Pin the previous tag or digest with `scripts/Deploy-NexusImageTag.ps1` (see `docs/RELEASE_RUNBOOK.md`); if the rolled-back release applied a database migration, that migration's documented rollback runs before the older images start, and `python backend/scripts/nexus_migrate.py --status` confirms the ledger now matches the release being restored.
 4. Restore MongoDB or uploads only when the incident commander confirms data rollback is necessary.
 5. Validate login, client isolation, ticket history, billing integrity, and agent heartbeat before reopening.
 6. Record the decision, evidence, operator, and customer impact in the audit ledger.
@@ -133,7 +140,34 @@ verified by the running container's exact image identity plus a healthy API on
 data that survived the roll. It writes retained JSON evidence under
 `artifacts/release-drills/`. Retain that evidence with the release record after
 running it on the deployment Docker host. Database migration rollback is a
-separate, per-migration procedure and is not covered by the drill.
+separate, per-migration procedure and is not covered by that drill.
+
+### Database migration rollback
+
+Release-window order is what makes a rollback safe, and the platform enforces it
+rather than only documenting it. `backend/app/services/schema_migrations.py`
+records every applied data-shape change in the `schema_migrations` ledger, and an
+incompatible database — one that records a migration this release does not
+define, or an applied migration whose description changed — is refused before it
+can serve anyone: `/api/ready` answers 503 and the API's own startup gate stops
+the container instead of reading a shape it does not understand. Run
+`python backend/scripts/nexus_migrate.py --status` before the window and
+`--apply` during it; on rollback, `--rollback-to <id>` or `--rollback-all`
+restores the state the previous release expects, and the older images start only
+after that. The full command set, exit codes and ordering contract are in
+[the release runbook](RELEASE_RUNBOOK.md).
+
+`scripts/Test-NexusMigrationRollback.ps1` rehearses that gate on a disposable
+Compose project and retains its JSON evidence as
+`artifacts/release-drills/migration-drill-*.json`. It rehearses a real rollback as
+well as the gate: `0002-index-platform-event-retention` is reversible — its down
+path drops the `platform_events` retention index its up path created — so the
+drill rolls it back through the shipped CLI, requires the migration's database
+effect to be gone and the migration to be pending again, and then re-applies it.
+It has not been executed on a deployment host yet, so this gate stays open in
+[the production-readiness checklist](NEXUS_PRODUCTION_READINESS_CHECKLIST.md)
+until that run and its evidence exist, and a reversible migration that transforms
+customer data still does not exist.
 
 ## 8. Release decision
 

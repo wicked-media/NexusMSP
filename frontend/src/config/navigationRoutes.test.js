@@ -1,4 +1,4 @@
-import { getAllNavItems, navGroups } from "./navigation";
+import { MODULE_GROUPS, getAllNavItems, navGroups } from "./navigation";
 import { routeConfig } from "./routes";
 
 /** A route pattern like "/studios/:studioId" matches one real path segment. */
@@ -19,33 +19,48 @@ describe("navigation destinations", () => {
   });
 });
 
-describe("MSP Studios section", () => {
+describe("Market Place section", () => {
+  // The id is deliberately unchanged: visibility preferences and enabled modules
+  // are stored against it, so the rename to Market Place must not orphan them.
   const group = navGroups.find((candidate) => candidate.id === "msp_studios");
 
   test("is its own titled section rather than a Platform entry", () => {
     expect(group).toBeTruthy();
-    expect(group.title).toBe("MSP Studios");
+    expect(group.title).toBe("Market Place");
     expect(navGroups.find((candidate) => candidate.id === "platform").items.some((item) => item.path === "/studios")).toBe(false);
+    expect(MODULE_GROUPS.find((candidate) => candidate.id === "msp_studios").label).toBe("Market Place");
   });
 
-  test("lists each admitted studio at its own operating surface", () => {
-    const labels = group.items.map((item) => item.label);
-    expect(labels).toEqual([
-      "Studio fleet",
-      "Proxmox Studio",
-      "Windows Studio",
-      "Endpoint Performance Studio",
-      "Customer Environment Studio",
-      "Operations Assurance Studio",
-      "Extension Studio",
-      "Web Studio",
-      "M365 Studio",
+  test("leads with the searchable catalogue instead of one link per studio", () => {
+    expect(group.items.map((item) => item.path)).toEqual(["/studios"]);
+    expect(group.items[0].label).toBe("Studio catalogue");
+  });
+
+  test("keeps every admitted studio resolvable under the catalogue", () => {
+    const children = group.items[0].children.map((item) => item.path);
+    expect(children).toEqual([
+      "/proxmox",
+      "/fleet-baseline?platform=windows",
+      "/fleet-baseline?view=recurrence",
+      "/customer-environment",
+      "/operations-assurance",
+      "/extension-studio",
+      "/studios/web",
+      "/studios/m365",
     ]);
-  });
+    // The catalogue is the one sidebar row and every admitted surface hangs off
+    // it, so no path is claimed twice.
+    const declared = [group.items[0].path, ...children];
+    expect(new Set(declared).size).toBe(declared.length);
 
-  test("keeps the studio operating surfaces distinct from the fleet hub", () => {
-    const paths = group.items.map((item) => item.path);
-    expect(new Set(paths).size).toBe(paths.length);
-    expect(paths.filter((path) => path.startsWith("/studios"))).toEqual(["/studios", "/studios/web", "/studios/m365"]);
+    // Sidebar search and the command palette read this list, so a studio that is
+    // no longer a top-level row is still resolvable by name.
+    const resolvable = getAllNavItems().map((item) => item.path);
+    expect(resolvable.filter((path) => path === "/proxmox")).toHaveLength(1);
+    expect(resolvable.filter((path) => path.startsWith("/studios"))).toEqual([
+      "/studios", "/studios/web", "/studios/m365",
+    ]);
+    // The label's alias route exists, but the catalogue stays the canonical path.
+    expect(resolvable).not.toContain("/marketplace");
   });
 });

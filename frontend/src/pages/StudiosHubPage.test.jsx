@@ -12,6 +12,13 @@ jest.mock("@/lib/apiErrorMessage", () => jest.requireActual("../lib/apiErrorMess
 // Same reason: the `@` alias has no jest mapping, so the page's product-grouping
 // import resolves through the real module rather than a stand-in.
 jest.mock("@/lib/studioProducts", () => jest.requireActual("../lib/studioProducts"), { virtual: true });
+// The catalogue index is real: the search behaviour is what this suite proves,
+// so standing it in would assert the stand-in instead of the ranking.
+jest.mock("@/lib/studioCatalogue", () => jest.requireActual("../lib/studioCatalogue"), { virtual: true });
+jest.mock("@/components/design-system", () => jest.requireActual("../components/design-system"), { virtual: true });
+jest.mock("@/components/ui/input", () => ({
+  Input: ({ className, ...props }) => <input className={className} {...props} />,
+}), { virtual: true });
 // The fleet-baseline tabs are rendered by the studio panel, so the shell's
 // routing to it is real behaviour here rather than a stand-in.
 jest.mock("@/components/studios/FleetBaselinePanel", () => jest.requireActual("../components/studios/FleetBaselinePanel"), { virtual: true });
@@ -112,10 +119,17 @@ const FLEET = {
   note: "Static capability contract.",
   product_note: "Products are the navigation boundary.",
   proposal_note: "Every catalogue idea is recorded once with one disposition.",
+  tier_note: "Tiers are the commercial packaging of the same portfolio.",
+  tiers: [
+    { id: "core", label: "Core", blurb: "Everyday MSP operations.", products: ["nexus-endpoint"], studio_count: 0, planned_count: 1 },
+    { id: "specialist", label: "Specialist", blurb: "Advanced capability.", products: ["nexus-infrastructure"], studio_count: 2, planned_count: 1 },
+    { id: "platform", label: "Platform", blurb: "Shared engines.", products: ["nexus-knowledge"], studio_count: 0, planned_count: 0 },
+  ],
   products: [
     {
       id: "nexus-infrastructure", name: "Nexus Infrastructure",
       tagline: "Virtualisation, network and cloud resources.",
+      tier: "specialist", tier_label: "Specialist",
       studios: ["proxmox", "cloud"], count: 2, planned_studios: ["connectivity-diagnostics"],
       proposal_count: 3,
       proposals: [
@@ -145,6 +159,7 @@ const FLEET = {
     },
     {
       id: "nexus-build", name: "Nexus Build", tagline: "Build and release.",
+      tier: "platform", tier_label: "Platform",
       studios: ["web"], count: 1, planned_studios: ["devops"], proposal_count: 3,
       proposals: [
         {
@@ -173,6 +188,7 @@ const FLEET = {
     // Declared with no admitted studio: a plan, not a delivered capability.
     {
       id: "nexus-knowledge", name: "Nexus Knowledge", tagline: "Documentation.",
+      tier: "platform", tier_label: "Platform",
       studios: [], count: 0, planned_studios: [], proposal_count: 0, proposals: [],
     },
   ],
@@ -180,6 +196,7 @@ const FLEET = {
     {
       id: "proxmox", name: "Proxmox Studio", domain: "Virtualisation", tagline: "Clusters and power actions.",
       product: "nexus-infrastructure", product_name: "Nexus Infrastructure",
+      tier: "specialist", tier_label: "Specialist",
       status: "Testing", priority: "P1", release: "R1-R2", owner: "Platform + Infrastructure",
       home_route: "/proxmox", provider: { name: "proxmox_ve_rest_api", state: "wired" },
       spine: SPINE,
@@ -190,6 +207,7 @@ const FLEET = {
     {
       id: "cloud", name: "Cloud Studio", domain: "Cloud", tagline: "Hyperscaler estates.",
       product: "nexus-infrastructure", product_name: "Nexus Infrastructure",
+      tier: "specialist", tier_label: "Specialist",
       status: "Discovery required", priority: "P2", release: "R3", owner: "Unassigned",
       home_route: null, provider: { name: "none", state: "planned" },
       spine: SPINE, tab_states: {}, wired_tabs: [], admission_state: "open",
@@ -197,6 +215,7 @@ const FLEET = {
     {
       id: "web", name: "Web Studio", domain: "Websites", tagline: "WordPress operations.",
       product: "nexus-build", product_name: "Nexus Build",
+      tier: "platform", tier_label: "Platform",
       status: "Partially implemented", priority: "P1", release: "R2", owner: "Experience",
       home_route: "/web-studio", provider: { name: "wordpress_wp_json", state: "wired" },
       spine: SPINE, tab_states: {}, wired_tabs: ["overview"], admission_state: "complete",
@@ -204,6 +223,7 @@ const FLEET = {
     {
       id: "unfiled", name: "Unfiled Studio", domain: "Legacy", tagline: "A survival from before the products.",
       product: "nexus-imaginary", product_name: "Nexus Imaginary",
+      tier: "", tier_label: "",
       status: "Discovery required", priority: "P3", release: "R7", owner: "Unassigned",
       home_route: null, provider: { name: "none", state: "planned" },
       spine: SPINE, tab_states: {}, wired_tabs: [], admission_state: "open",
@@ -355,6 +375,54 @@ const flush = async () => {
   for (let i = 0; i < 12; i += 1) await Promise.resolve();
 };
 
+/**
+ * A faithful stand-in for the router.
+ *
+ * The catalogue keeps its filters in the address, so the page cannot mount
+ * without a router, and `react-router/dom` does not resolve under this jest
+ * resolver (the same reason `FleetBaselinePage.test.jsx` stands in for
+ * `useSearchParams`). Nothing is stubbed through: the mock owns a real
+ * `URLSearchParams`, re-renders on a write the way the router does, and exposes
+ * the address so a test can read back exactly what the page wrote.
+ */
+jest.mock("react-router-dom", () => {
+  const React = require("react");
+  const RouterState = React.createContext(null);
+  return {
+    __esModule: true,
+    MemoryRouter: ({ initialEntries = ["/studios"], children }) => {
+      const [params, setParams] = React.useState(() => {
+        const entry = String(initialEntries[0] || "/studios");
+        const [, search = ""] = entry.split("?");
+        return new URLSearchParams(search);
+      });
+      const value = React.useMemo(
+        () => ({ params, setParams: (next) => setParams(new URLSearchParams(next || "")) }),
+        [params],
+      );
+      return <RouterState.Provider value={value}>{children}</RouterState.Provider>;
+    },
+    useSearchParams: () => {
+      const state = React.useContext(RouterState);
+      if (!state) throw new Error("useSearchParams requires a router");
+      return [state.params, state.setParams];
+    },
+    useLocation: () => {
+      const state = React.useContext(RouterState);
+      const search = state ? state.params.toString() : "";
+      return { pathname: "/studios", search: search ? `?${search}` : "" };
+    },
+  };
+}, { virtual: true });
+
+const { MemoryRouter, useLocation } = jest.requireMock("react-router-dom");
+
+/** How the deep-link test reads back the address the page wrote. */
+function AddressProbe() {
+  const location = useLocation();
+  return <span data-testid="address">{`${location.pathname}${location.search}`}</span>;
+}
+
 function seedGet(overrides = {}) {
   axios.get.mockImplementation((url) => {
     if (overrides[url]) return Promise.resolve({ data: overrides[url] });
@@ -380,8 +448,12 @@ describe("Studio Fleet hub", () => {
     delete global.IS_REACT_ACT_ENVIRONMENT;
   });
 
-  const render = () => act(async () => {
-    root.render(<StudiosHubPage />);
+  const render = (entry = "/studios") => act(async () => {
+    root.render(
+      <MemoryRouter initialEntries={[entry]}>
+        <StudiosHubPage />
+      </MemoryRouter>,
+    );
     await flush();
   });
 
@@ -442,7 +514,11 @@ describe("Studio Fleet hub", () => {
   test("surfaces a load failure instead of an empty fleet", async () => {
     axios.get.mockRejectedValue({ response: { data: { detail: "Auth expired" } } });
     await act(async () => {
-      root.render(<StudiosHubPage />);
+      root.render(
+        <MemoryRouter initialEntries={["/studios"]}>
+          <StudiosHubPage />
+        </MemoryRouter>,
+      );
       await flush();
     });
     expect(host.querySelector('[data-testid="fleet-error"]')).not.toBeNull();
@@ -515,6 +591,150 @@ describe("Studio Fleet hub", () => {
     expect(infrastructure.textContent).not.toContain("consolidated");
     // A declared product with nothing at all still discloses that it is a plan.
     expect(host.querySelector('[data-testid="product-empty-nexus-knowledge"]')).not.toBeNull();
+  });
+
+  const type = async (value) => act(async () => {
+    const input = host.querySelector('[data-testid="catalogue-search"]');
+    expect(input).not.toBeNull();
+    // The page is controlled, so React's own value setter is what drives it.
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await flush();
+  });
+
+  const click = async (testid) => act(async () => {
+    const node = host.querySelector(`[data-testid="${testid}"]`);
+    expect(node).not.toBeNull();
+    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await flush();
+  });
+
+  test("searches admitted studios and catalogue ideas from one catalogue", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    // The unfiltered hub is still the product view: the catalogue answering a
+    // question is the change, not a second way to render the fleet.
+    expect(host.querySelector('[data-testid="catalogue-results"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-summary"]').textContent)
+      .toContain("10 of 10 catalogue entries · 4 admitted studios · 6 catalogue ideas");
+
+    await type("port historian");
+    const results = host.querySelector('[data-testid="catalogue-results"]');
+    expect(results).not.toBeNull();
+    // A flattened search replaces the product sections rather than adding to them.
+    expect(host.querySelector('[data-testid^="product-section-"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-result-port-historian"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="studio-card-cloud"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-summary"]').textContent)
+      .toContain("1 of 10 catalogue entries");
+  });
+
+  test("a plan is searchable but never offers a surface it does not have", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    await type("devops");
+    const plan = host.querySelector('[data-testid="catalogue-result-devops"]');
+    expect(plan.textContent).toContain("Proposed studio");
+    expect(plan.textContent).toContain("Blocked on Provider ingestion for build data");
+    expect(plan.textContent).not.toContain("Open studio");
+
+    // An admitted studio says what it is and can be opened.
+    await type("proxmox");
+    const studio = host.querySelector('[data-testid="catalogue-result-proxmox"]');
+    expect(studio.textContent).toContain("Testing");
+    expect(studio.textContent).toContain("Nexus Infrastructure · Specialist");
+    expect(studio.textContent).toContain("Open studio");
+
+    // A section of a registered studio points at the studio that owns it.
+    await type("reception");
+    expect(host.querySelector('[data-testid="catalogue-empty"]')).not.toBeNull();
+  });
+
+  test("narrows by tier and by what an entry is, and clears back to the fleet", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    await click("catalogue-tier-platform");
+    expect(host.querySelector('[data-testid="catalogue-result-web"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-result-proxmox"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-tier-platform"]').getAttribute("aria-pressed"))
+      .toBe("true");
+
+    await click("catalogue-kind-studio");
+    expect(host.querySelector('[data-testid="catalogue-result-web"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-result-devops"]')).toBeNull();
+
+    await click("catalogue-clear");
+    expect(host.querySelector('[data-testid="catalogue-results"]')).toBeNull();
+    expect(host.querySelector('[data-testid="studio-card-proxmox"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-tier-all"]').getAttribute("aria-pressed"))
+      .toBe("true");
+  });
+
+  test("a search with no match says so instead of showing an empty catalogue", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await render();
+
+    await type("kerberos delegation");
+    const empty = host.querySelector('[data-testid="catalogue-empty"]');
+    expect(empty).not.toBeNull();
+    expect(empty.textContent).toContain("No catalogue entry matches this search yet");
+    expect(host.querySelector('[data-testid="catalogue-results"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-summary"]').textContent)
+      .toContain("0 of 10 catalogue entries");
+  });
+
+  test("opens already filtered from the address and keeps the address in step", async () => {
+    seedGet({ [`${BASE}/studios`]: FLEET });
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/studios?q=devops&tier=platform&view=kept"]}>
+          <StudiosHubPage />
+          <AddressProbe />
+        </MemoryRouter>,
+      );
+      await flush();
+    });
+
+    // A pasted catalogue link opens the catalogue it was copied from: the words
+    // and the facet are read back, and the view is already narrowed.
+    expect(host.querySelector('[data-testid="catalogue-results"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-result-devops"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-result-proxmox"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-search"]').value).toBe("devops");
+    expect(host.querySelector('[data-testid="catalogue-tier-platform"]').getAttribute("aria-pressed"))
+      .toBe("true");
+
+    // Clearing drops the three keys the catalogue owns and keeps the rest of the
+    // address exactly as it found it, so clearing is not a rewrite of the URL.
+    await click("catalogue-clear");
+    expect(host.querySelector('[data-testid="address"]').textContent).toBe("/studios?view=kept");
+    expect(host.querySelector('[data-testid="studio-card-proxmox"]')).not.toBeNull();
+  });
+
+  test("a payload that declares no tiers still searches without a tier facet", async () => {
+    const legacy = {
+      ...FLEET,
+      tiers: [],
+      // The omitted keys are the packaging this payload never declared.
+      products: FLEET.products.map(({ tier: _tier, tier_label: _tierLabel, ...rest }) => rest),
+      studios: FLEET.studios.map(({ tier: _studioTier, tier_label: _studioTierLabel, ...rest }) => rest),
+    };
+    seedGet({ [`${BASE}/studios`]: legacy });
+    await render();
+
+    // No declaration, no chip: the hub never invents a packaging.
+    expect(host.querySelector('[data-testid="catalogue-tier-all"]')).toBeNull();
+    expect(host.querySelector('[data-testid="catalogue-kind-all"]')).not.toBeNull();
+
+    await type("historian");
+    expect(host.querySelector('[data-testid="catalogue-result-port-historian"]')).not.toBeNull();
+    // The blocker is still named, which is the part a technician needs.
+    expect(host.querySelector('[data-testid="catalogue-result-port-historian"]').textContent)
+      .toContain("Blocked on Switch port and VLAN inventory");
   });
 });
 
@@ -683,6 +903,6 @@ describe("StudioShell spine", () => {
     const missing = host.querySelector('[data-testid="studio-not-found"]');
     expect(missing).not.toBeNull();
     expect(missing.textContent).toContain("Unknown studio 'nope'");
-    expect(missing.textContent).toContain("Back to Studio Fleet");
+    expect(missing.textContent).toContain("Back to the Market Place");
   });
 });

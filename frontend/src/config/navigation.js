@@ -323,25 +323,38 @@ export const navGroups = [
     ]
   },
   {
-    // The Studio fleet is its own navigation section rather than one more
-    // Platform entry: every admitted studio opens on its own operating surface
-    // (docs/NEXUS_STUDIO_FLEET.md). A studio whose capability is only proposed
-    // stays on the fleet hub, which reports its admission gate honestly instead
-    // of presenting a plan as a delivered workspace.
+    // The Market Place is its own navigation section rather than one more
+    // Platform entry, and it holds **one** destination: the searchable studio
+    // catalogue (docs/NEXUS_INVENT_BATCH_6.md). The fleet is 185+ studios across
+    // 14 products, so listing one sidebar link per studio is how a capability
+    // becomes unfindable. A technician searches the catalogue and opens a studio
+    // from there, and an admitted studio keeps its own operating surface as a
+    // child of the catalogue so sidebar search and the command palette still
+    // resolve it by name. A studio whose capability is only proposed stays a
+    // proposal in the catalogue, which reports its admission gate honestly
+    // instead of presenting a plan as a delivered workspace.
+    //
+    // The group id stays `msp_studios` so visibility preferences and enabled
+    // modules keep resolving through the rename.
     id: "msp_studios",
-    title: "MSP Studios",
+    title: "Market Place",
     items: [
-      { path: "/studios", icon: LayoutGrid, label: "Studio fleet" },
-      { path: "/proxmox", icon: Server, label: "Proxmox Studio" },
-      { path: "/fleet-baseline?platform=windows", icon: Monitor, label: "Windows Studio" },
-      { path: "/fleet-baseline?view=recurrence", icon: Activity, label: "Endpoint Performance Studio" },
-      // The foundations, each at its own operating surface
-      // (docs/NEXUS_FOUNDATIONS_BATCH_4.md).
-      { path: "/customer-environment", icon: Users, label: "Customer Environment Studio" },
-      { path: "/operations-assurance", icon: ShieldCheck, label: "Operations Assurance Studio" },
-      { path: "/extension-studio", icon: Boxes, label: "Extension Studio" },
-      { path: "/studios/web", icon: LayoutGrid, label: "Web Studio" },
-      { path: "/studios/m365", icon: LayoutGrid, label: "M365 Studio" },
+      {
+        path: "/studios", icon: LayoutGrid, label: "Studio catalogue",
+        workspacePaths: ["/studios/web", "/studios/m365"],
+        children: [
+          { path: "/proxmox", label: "Proxmox Studio" },
+          { path: "/fleet-baseline?platform=windows", label: "Windows Studio" },
+          { path: "/fleet-baseline?view=recurrence", label: "Endpoint Performance Studio" },
+          // The foundations, each at its own operating surface
+          // (docs/NEXUS_FOUNDATIONS_BATCH_4.md).
+          { path: "/customer-environment", label: "Customer Environment Studio" },
+          { path: "/operations-assurance", label: "Operations Assurance Studio" },
+          { path: "/extension-studio", label: "Extension Studio" },
+          { path: "/studios/web", label: "Web Studio" },
+          { path: "/studios/m365", label: "M365 Studio" },
+        ],
+      },
     ],
   },
   {
@@ -428,7 +441,7 @@ export const MODULE_GROUPS = [
   { id: "security", label: "Security", description: "SOC, endpoint, compliance, DR" },
   { id: "intelligence", label: "AI & Intelligence", description: "AI copilot, predictions, knowledge base" },
   { id: "reports", label: "Reports & Comms", description: "Reports, email, comms" },
-  { id: "msp_studios", label: "MSP Studios", description: "Specialist studios over canonical Nexus objects" },
+  { id: "msp_studios", label: "Market Place", description: "One searchable catalogue over every studio, product and tier" },
   { id: "platform", label: "Platform", description: "Settings, integrations, system health" },
   { id: "help", label: "Help", description: "Knowledge base, technician documentation, guides, and planning" },
 ];

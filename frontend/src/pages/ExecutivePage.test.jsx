@@ -6,10 +6,11 @@ import { toast } from "sonner";
 
 import ExecutivePage from "./ExecutivePage";
 
-// The `@/` alias is a webpack/craco alias with no jest mapping, so every aliased
-// module the page reaches is registered here. The executive component kit and the
-// briefing helpers are the real modules: this test is about what the cockpit does
-// with a real briefing payload, not about how a kit sub-component looks.
+// `@/` resolves in Jest through the alias mapping in craco.config.js, so the real
+// aliased modules load; the mocks below stub the network and the page chrome rather
+// than working around resolution. The executive component kit and the briefing
+// helpers are the real modules: this test is about what the cockpit does with a real
+// briefing payload, not about how a kit sub-component looks.
 const mockNavigate = jest.fn();
 
 jest.mock("axios", () => ({ __esModule: true, default: { get: jest.fn(), post: jest.fn(), put: jest.fn(), delete: jest.fn() } }));

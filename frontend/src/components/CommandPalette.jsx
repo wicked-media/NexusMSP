@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { API, useAuth } from "@/App";
 import { getAllNavItems } from "@/config/navigation";
+import { catalogueQueryString } from "@/lib/studioCatalogue";
 import { toast } from "sonner";
 import {
   ArrowRight,
@@ -18,6 +19,7 @@ import {
   FileText,
   HardDrive,
   History,
+  LayoutGrid,
   Monitor,
   Phone,
   Receipt,
@@ -438,6 +440,27 @@ export default function CommandPalette() {
           hint: `${product.sku || "No SKU"} · ${product.category || "Product"}`,
           id: product.id,
         })),
+      });
+    }
+
+    // The Market Place is the one surface where a topic that names no workspace
+    // is still a destination: 185+ studios are found by searching them, so the
+    // palette hands the words to the catalogue's own address contract instead of
+    // reimplementing the search. The row sits last, so it never crowds out a
+    // record that really matched.
+    if (query.length >= 2) {
+      list.push({
+        heading: "Market Place",
+        icon: LayoutGrid,
+        items: [
+          {
+            kind: "page",
+            label: `Search the studio catalogue for “${q.trim()}”`,
+            hint: "Admitted studios and catalogue ideas, each with the gate that blocks it",
+            path: `/studios${catalogueQueryString({ query: q.trim() })}`,
+            icon: LayoutGrid,
+          },
+        ],
       });
     }
 
