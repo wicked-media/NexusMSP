@@ -134,6 +134,24 @@ through `--nx-chip-*`, a scale declared once per theme: the dark theme keeps the
 chips shipped with, and the light theme restates each hue deep enough to clear 4.5:1 —
 measured on the 5% tint the label actually sits on, not on the plain card.
 
+Two further pairs had never been measured at all, and a browser pass over `/studios` rendered
+in both themes found both (`artifacts/design-qa-market-place.md`):
+
+- **The workspace header's accent was declared once and never restated.**
+  `--nx-header-accent` carries the lightness the dark canvas needs, and no `.light` rule
+  overrode it — on the header element itself, where an inherited value cannot reach it. In the
+  light theme the eyebrow, the identity mark, the state chip and the action-rail copy therefore
+  rendered as neon on a white card: the eyebrow measured **1.79:1** at 9.8px, on *every* routed
+  workspace, because every workspace renders through this header. Each tone now restates its
+  hue at the depth the light chip scale already uses (the cyan tone measures 5.95:1).
+- **Four light-theme accent fills sat under the bar the filled `Button` needs.**
+  The dark theme draws `--primary-foreground` as near-black on the bright fill and the light
+  theme draws it as white on the deep one, so the same preset pair cannot serve both. Measured
+  as white text on the fill: emerald **4.32:1**, sky **4.34:1**, orange **4.17:1**, cyan
+  **4.08:1**. Each keeps its hue and saturation and drops only the lightness the light theme
+  needs (4.70-4.84:1), and `--ring` follows the same token, so the focus indicator deepens with
+  it rather than against it.
+
 ### Focus visibility
 
 `Button` shipped `focus-visible:ring-primary/35`. A 35% ring composites with whatever is

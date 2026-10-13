@@ -747,6 +747,19 @@ html[data-motion="minimal"] [data-sonner-toaster] .nx-toast__spinner { animation
 .nx-workspace-header[data-tone="emerald"] { --nx-header-accent: 158 64% 52%; }
 .nx-workspace-header[data-tone="amber"] { --nx-header-accent: 42 92% 60%; }
 .nx-workspace-header[data-tone="rose"] { --nx-header-accent: 347 77% 61%; }
+/* The header accent is declared once, at the lightness the dark canvas needs, and it
+   was never restated for the light theme — so the eyebrow, the identity mark, the
+   state chip and the action-rail copy rendered as neon on a white card. The
+   `/studios` eyebrow (tone cyan) measured 1.79:1 in a browser against the 4.5:1 that
+   9.8px uppercase copy needs, on every routed workspace, because every workspace
+   renders through this header. Each tone now restates its hue at the depth the light
+   chip scale already uses, so the light theme keeps the identity and can read it. */
+.light .nx-workspace-header { --nx-header-accent: 262 83% 53%; }
+.light .nx-workspace-header[data-tone="sky"],
+.light .nx-workspace-header[data-tone="cyan"] { --nx-header-accent: 201 96% 32%; }
+.light .nx-workspace-header[data-tone="emerald"] { --nx-header-accent: 152 72% 26%; }
+.light .nx-workspace-header[data-tone="amber"] { --nx-header-accent: 26 90% 37%; }
+.light .nx-workspace-header[data-tone="rose"] { --nx-header-accent: 347 77% 41%; }
 .nx-workspace-header__identity {
     display: flex;
     min-width: 0;

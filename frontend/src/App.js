@@ -57,14 +57,26 @@ const THEME_PRESETS = {
   phantom: { label: "Phantom", bg: "#0a0a12", sidebar: "#0d0d18", accent: "violet", font: "Inter" },
 };
 
+/**
+ * The eight accent presets, per theme.
+ *
+ * The dark theme draws `--primary-foreground` as near-black on the bright fill; the
+ * light theme draws it as white on the deep one, so the *same* preset pair cannot be
+ * shared. Four light fills sat just under the 4.5:1 that the shared Button's white label
+ * needs — measured in a browser as emerald 4.32:1, sky 4.34:1, orange 4.17:1 and cyan
+ * 4.08:1 on `/studios`, and the same pair is on every filled primary control in the
+ * product. Each keeps its hue and saturation and drops only the lightness the light
+ * theme needs: emerald 4.77:1, sky 4.76:1, orange 4.70:1, cyan 4.84:1. `--ring` follows
+ * the same token, so the focus indicator deepens with it rather than against it.
+ */
 const ACCENT_COLORS = {
-  emerald: { primary: "142 72% 45%", lightPrimary: "142 72% 32%" },
+  emerald: { primary: "142 72% 45%", lightPrimary: "142 72% 30%" },
   blue: { primary: "217 91% 60%", lightPrimary: "217 91% 48%" },
-  cyan: { primary: "188 95% 43%", lightPrimary: "188 95% 32%" },
+  cyan: { primary: "188 95% 43%", lightPrimary: "188 95% 29%" },
   violet: { primary: "258 90% 66%", lightPrimary: "258 72% 52%" },
-  orange: { primary: "25 95% 53%", lightPrimary: "25 90% 42%" },
+  orange: { primary: "25 95% 53%", lightPrimary: "25 90% 39%" },
   red: { primary: "0 84% 60%", lightPrimary: "0 72% 48%" },
-  sky: { primary: "199 89% 48%", lightPrimary: "199 89% 38%" },
+  sky: { primary: "199 89% 48%", lightPrimary: "199 89% 36%" },
   rose: { primary: "347 77% 50%", lightPrimary: "347 72% 42%" },
 };
 

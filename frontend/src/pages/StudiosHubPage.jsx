@@ -331,7 +331,10 @@ function FacetChip({ active, label, count, testid, onClick }) {
       data-testid={testid}
     >
       {label}
-      <span className="text-[10px] opacity-70 tabular-nums">{count}</span>
+      {/* The count is a fact, not decoration: dimming it with a sub-1 opacity dropped it
+          to about 3:1 on the light theme's filled chip, so it now reads at the same
+          weight as the label and takes its hierarchy from size and tabular figures. */}
+      <span className="text-[10px] tabular-nums">{count}</span>
     </Button>
   );
 }
