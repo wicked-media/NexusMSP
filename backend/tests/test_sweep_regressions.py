@@ -25,25 +25,16 @@ os.environ.setdefault("JWT_SECRET", "test-only-secret-that-is-long-and-random-en
 os.environ.setdefault("MONGO_URL", "mongodb://127.0.0.1:27017")
 os.environ.setdefault("DB_NAME", "nexusops-tests")
 
-from starlette.routing import Match  # noqa: E402
-
-
 def _first_match(app, path: str, method: str = "GET"):
-    for route in app.routes:
-        scope = {
-            "type": "http",
-            "method": method,
-            "path": path,
-            "root_path": "",
-            "headers": [],
-        }
-        try:
-            match, _ = route.matches(scope)
-        except Exception:
-            continue
-        if match == Match.FULL:
-            return route
-    return None
+    """The live operation a request would hit, unwrapped from include wrappers.
+
+    FastAPI keeps an included router in ``app.routes`` as a wrapper, so the
+    resolution is delegated to the fleet contract's shared probe instead of
+    reading a wrapper's own ``matches`` result as if it were the operation.
+    """
+    from test_studio_fleet import _mounted_operation
+
+    return _mounted_operation(method, path, app)
 
 
 class TestRouteShadowRegressions:

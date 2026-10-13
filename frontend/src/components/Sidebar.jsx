@@ -26,6 +26,12 @@ import {
   writeSidebarPreferences,
 } from "@/lib/sidebarNavigation";
 
+// Navigation groups that stay visible even when a saved per-technician module
+// list predates them, so a migration can never remove access to something a
+// technician could already open. Help is documentation; MSP Studios holds the
+// studio workspaces that used to live inside the always-enabled Platform group.
+const ALWAYS_VISIBLE_GROUP_IDS = ["help", "msp_studios"];
+
 const notificationTypeVisuals = {
   sla_breach: { icon: ShieldAlert, label: "SLA breach", tone: "critical" },
   sla_warning: { icon: Clock3, label: "SLA warning", tone: "warning" },
@@ -703,10 +709,8 @@ export const Sidebar = ({
     () => user?.enabled_modules || navGroups.map((group) => group.id),
     [user?.enabled_modules],
   );
-  // Help remains available during module migrations so technicians always have
-  // access to documentation, even for accounts saved before this group existed.
   const visibleGroups = useMemo(
-    () => navGroups.filter((group) => enabledModules.includes(group.id) || group.id === "help"),
+    () => navGroups.filter((group) => enabledModules.includes(group.id) || ALWAYS_VISIBLE_GROUP_IDS.includes(group.id)),
     [enabledModules],
   );
   const visibleNavigationItems = useMemo(

@@ -11,8 +11,42 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Server, Play, Square, RotateCcw, Power, RefreshCw, CheckCircle, XCircle, Archive, Calendar, Loader2 } from "lucide-react";
+import { Server, Play, Square, RotateCcw, Power, RefreshCw, CheckCircle, XCircle, Archive, Calendar, Loader2, ShieldAlert } from "lucide-react";
 import OperationalPageHeader from "@/components/OperationalPageHeader";
+import WorkspaceActionMenu, { WorkspaceActionMenuItem } from "@/components/WorkspaceActionMenu";
+import { apiErrorMessage } from "@/lib/apiErrorMessage";
+
+/** A cadence an operator can read, or null when the server did not report one. */
+function intervalLabel(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value % 60 === 0) return `${value / 60} hour${value === 60 ? "" : "s"}`;
+  return `${value} minute${value === 1 ? "" : "s"}`;
+}
+
+/**
+ * What this studio may claim about automatic reconciliation — nothing more.
+ *
+ * The server reconciles the guest inventory from Proxmox itself on a schedule,
+ * so the schedule and the last pass are the honest statement. When the schedule
+ * is switched off (or was never reported) the studio says so instead of letting
+ * a manual Sync inventory imply the inventory keeps itself current.
+ */
+function reconciliationStatement(reconciliation) {
+  if (!reconciliation || typeof reconciliation !== "object") return null;
+  if (!reconciliation.enabled) {
+    return (
+      "Automatic reconciliation is switched off for this platform, so this inventory "
+      + "only changes when an operator runs Sync inventory."
+    );
+  }
+  const interval = intervalLabel(reconciliation.interval_minutes);
+  const lastPass = reconciliation.last_run_at
+    ? `${String(reconciliation.last_run_at).substring(0, 16).replace("T", " ")} UTC`
+    : null;
+  return `Nexus reconciles this inventory from Proxmox itself${interval ? ` every ${interval}` : ""}, so it stays current without pressing sync.`
+    + (lastPass ? ` Last automatic pass ${lastPass}.` : "");
+}
 
 export default function ProxmoxPage() {
   const { token } = useAuth();
@@ -21,21 +55,24 @@ export default function ProxmoxPage() {
   const [vms, setVms] = useState([]);
   const [backups, setBackups] = useState([]);
   const [schedules, setSchedules] = useState([]);
+  const [connection, setConnection] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const [backupDialog, setBackupDialog] = useState(false);
   const [backupForm, setBackupForm] = useState({ vm_id: "", vm_name: "", type: "full", storage: "local-zfs", retention_days: 30 });
   const [scheduleDialog, setScheduleDialog] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [scheduleForm, setScheduleForm] = useState({ name: "", schedule: "0 2 * * *", type: "full", storage: "local-zfs", retention_days: 30, vms: [] });
 
   const fetchData = useCallback(async () => {
     try {
-      const [nRes, vRes, bRes, sRes] = await Promise.all([
+      const [cRes, nRes, vRes, bRes, sRes] = await Promise.all([
+        axios.get(`${API}/proxmox/connection`, { headers }),
         axios.get(`${API}/proxmox/nodes`, { headers }),
         axios.get(`${API}/proxmox/vms`, { headers }),
         axios.get(`${API}/proxmox/backups`, { headers }),
         axios.get(`${API}/proxmox/backup-schedules`, { headers }),
       ]);
-      setNodes(nRes.data); setVms(vRes.data); setBackups(bRes.data); setSchedules(sRes.data);
+      setConnection(cRes.data); setNodes(nRes.data); setVms(vRes.data); setBackups(bRes.data); setSchedules(sRes.data);
     } catch { toast.error("Failed to load Proxmox data"); }
     finally { /* retain the existing data while a refresh is in flight */ }
   }, [headers]);
@@ -44,10 +81,20 @@ export default function ProxmoxPage() {
   const handleVmAction = async (vmId, action) => {
     setActionLoading(`${vmId}-${action}`);
     try {
-      await axios.post(`${API}/proxmox/vms/${vmId}/action`, { action }, { headers });
-      toast.success(`VM ${action} executed`);
+      // The backend reports what actually happened: verified, simulated,
+      // awaiting approval, unverified or blocked. Never claim more than that.
+      const res = await axios.post(`${API}/proxmox/vms/${vmId}/action`, { action }, { headers });
+      const { status, message } = res.data || {};
+      if (status === "simulated") toast.info(message || `Simulated ${action} — Nexus did not call Proxmox; nothing changed.`);
+      else if (status === "pending_approval") toast.warning(message || `${action} is awaiting admin approval. Nothing has been executed.`);
+      else if (status === "completed_unverified") toast.warning(message || `${action} completed, but the observed state did not match — review the evidence.`);
+      else toast.success(message || `VM ${action} verified`);
       fetchData();
-    } catch { toast.error(`Failed to ${action} VM`); }
+    } catch (err) {
+      // A refused or failed attempt is still recorded server-side; show why.
+      toast.error(apiErrorMessage(err, `Could not ${action} VM. Nothing was changed.`));
+      fetchData();
+    }
     finally { setActionLoading(null); }
   };
 
@@ -59,6 +106,42 @@ export default function ProxmoxPage() {
     try { await axios.post(`${API}/proxmox/backup-schedules`, scheduleForm, { headers }); toast.success("Schedule created"); setScheduleDialog(false); fetchData(); } catch { toast.error("Failed"); }
   };
 
+  // Observation is an explicit operator action, never a silent write: the studio
+  // reports how many guests Proxmox actually reported for each connection, and
+  // says plainly when a connection could not be observed at all.
+  const handleSyncInventory = async () => {
+    const targets = (connection?.connections || []).filter(entry => entry.configured);
+    if (targets.length === 0) {
+      toast.info("No Proxmox connection is configured, so there is no cluster to observe. Add one in Infrastructure, then sync.");
+      return;
+    }
+    setSyncing(true);
+    const observed = [];
+    const failures = [];
+    try {
+      for (const target of targets) {
+        try {
+          const res = await axios.post(`${API}/proxmox/servers/${target.server_id}/sync`, {}, { headers });
+          observed.push(res.data || {});
+        } catch (err) {
+          failures.push(apiErrorMessage(err, `${target.name || target.server_id} could not be observed. Nothing was stored.`));
+        }
+      }
+      fetchData();
+      const guestCount = observed.reduce((total, row) => total + (row.observed || 0), 0);
+      const removed = observed.reduce((total, row) => total + (row.removed || 0), 0);
+      const summary = `Proxmox reported ${guestCount} guest${guestCount === 1 ? "" : "s"} across ${observed.length} connection${observed.length === 1 ? "" : "s"}.`
+        + (removed ? ` ${removed} stored guest${removed === 1 ? "" : "s"} were no longer reported and left the inventory.` : "");
+      if (failures.length === 0) toast.success(summary);
+      else if (observed.length === 0) toast.error(failures[0]);
+      else toast.warning(`${summary} ${failures.length} connection${failures.length === 1 ? "" : "s"} could not be observed: ${failures[0]}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const reconciliation = reconciliationStatement(connection?.reconciliation);
+
   const statusColor = { running: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20", stopped: "bg-red-500/10 text-red-500 border-red-500/20", suspended: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" };
 
   return (
@@ -67,7 +150,48 @@ export default function ProxmoxPage() {
           <Button variant="outline" onClick={fetchData}><RefreshCw className="w-4 h-4 mr-1" />Refresh</Button>
           <Button variant="outline" onClick={() => setScheduleDialog(true)} data-testid="create-schedule-btn"><Calendar className="w-4 h-4 mr-1" />Schedule</Button>
           <Button onClick={() => setBackupDialog(true)} data-testid="create-backup-btn"><Archive className="w-4 h-4 mr-1" />New backup</Button>
+          <WorkspaceActionMenu label="More" testId="proxmox-more-menu">
+            <WorkspaceActionMenuItem icon={RefreshCw} onSelect={handleSyncInventory} disabled={syncing} testId="sync-inventory-btn">
+              {syncing ? "Syncing inventory..." : "Sync inventory"}
+            </WorkspaceActionMenuItem>
+          </WorkspaceActionMenu>
         </>} />
+
+      {connection?.configured && reconciliation && (
+        <p className="text-xs text-muted-foreground -mt-3" data-testid="proxmox-reconciliation-note">{reconciliation}</p>
+      )}
+
+      {connection && !connection.configured && (
+        <Card data-testid="proxmox-unconfigured-banner" className="border-dashed border-yellow-500/40 bg-yellow-500/5">
+          <CardContent className="pt-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-yellow-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium text-sm">No Proxmox connection configured</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Nexus has never observed a cluster in your scope, so the inventory below is empty rather
+                than demo data. Add a connection in Infrastructure → Proxmox servers to observe nodes and
+                execute verified power actions; until then an execution request is refused and nothing changes.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {connection?.connections?.some(c => c.configured && c.health !== "ok") && (
+        <Card className="border-yellow-500/30 bg-yellow-500/5">
+          <CardContent className="pt-4 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-yellow-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium text-sm">A configured connection is not answering</p>
+              <ul className="text-xs text-muted-foreground mt-1 space-y-1">
+                {connection.connections.filter(c => c.configured && c.health !== "ok").map(c => (
+                  <li key={c.server_id}>{c.name || c.host}: {c.error || `health: ${c.health}`}</li>
+                ))}
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         {nodes.map(n => (
@@ -95,7 +219,8 @@ export default function ProxmoxPage() {
                   <TableCell>{vm.vcpu}</TableCell>
                   <TableCell>{vm.ram_gb}GB</TableCell>
                   <TableCell className="text-xs font-mono">{vm.ip_address}</TableCell>
-                  <TableCell>{vm.backup_enabled ? <Badge className="bg-emerald-500/10 text-emerald-500 text-[9px]">{vm.backup_schedule}</Badge> : <Badge className="bg-red-500/10 text-red-500 text-[9px]">off</Badge>}</TableCell>
+                  {/* A guest Proxmox has not told Nexus anything about is 'unknown', never 'off'. */}
+                  <TableCell>{vm.backup_enabled === true ? <Badge className="bg-emerald-500/10 text-emerald-500 text-[9px]">{vm.backup_schedule}</Badge> : vm.backup_enabled === false ? <Badge className="bg-red-500/10 text-red-500 text-[9px]">off</Badge> : <Badge variant="outline" className="text-[9px] text-muted-foreground">unknown</Badge>}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       {vm.status !== "running" && <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700 text-[11px] px-2.5 gap-1" onClick={() => handleVmAction(vm.id, "start")} disabled={!!actionLoading} data-testid={`start-vm-${vm.id}`}>{actionLoading === `${vm.id}-start` ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}Start</Button>}
@@ -118,7 +243,7 @@ export default function ProxmoxPage() {
             <TableHeader><TableRow><TableHead>VM</TableHead><TableHead>Type</TableHead><TableHead>Size</TableHead><TableHead>Duration</TableHead><TableHead>Storage</TableHead><TableHead>Status</TableHead><TableHead>Verified</TableHead><TableHead>Date</TableHead></TableRow></TableHeader>
             <TableBody>
               {backups.map(b => (
-                <TableRow key={b.id}><TableCell className="font-medium">{b.vm_name}</TableCell><TableCell><Badge variant="outline" className="text-[10px] capitalize">{b.type}</Badge></TableCell><TableCell>{b.size_gb} GB</TableCell><TableCell>{b.duration_minutes}m</TableCell><TableCell className="text-xs font-mono">{b.storage}</TableCell><TableCell><Badge className={b.status === "completed" ? "bg-emerald-500/10 text-emerald-500" : b.status === "running" ? "bg-blue-500/10 text-blue-500" : "bg-red-500/10 text-red-500"}>{b.status}</Badge></TableCell><TableCell>{b.verified ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-muted-foreground" />}</TableCell><TableCell className="text-xs">{b.created_at?.substring(0, 16).replace("T", " ")}</TableCell></TableRow>
+                <TableRow key={b.id}><TableCell className="font-medium">{b.vm_name}</TableCell><TableCell><Badge variant="outline" className="text-[10px] capitalize">{b.type}</Badge></TableCell><TableCell>{b.size_gb} GB</TableCell><TableCell>{b.duration_minutes}m</TableCell><TableCell className="text-xs font-mono">{b.storage}</TableCell>                <TableCell><Badge className={b.status === "completed" ? "bg-emerald-500/10 text-emerald-500" : (b.status === "running" || b.status === "requested") ? "bg-blue-500/10 text-blue-500" : "bg-red-500/10 text-red-500"}>{b.status}</Badge></TableCell><TableCell>{b.verified ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <XCircle className="w-4 h-4 text-muted-foreground" />}</TableCell><TableCell className="text-xs">{b.created_at?.substring(0, 16).replace("T", " ")}</TableCell></TableRow>
               ))}
             </TableBody>
           </Table>
@@ -136,10 +261,11 @@ export default function ProxmoxPage() {
       <Dialog open={backupDialog} onOpenChange={setBackupDialog}>
         <DialogContent><DialogHeader><DialogTitle>Create Backup</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>VM</Label><Select value={backupForm.vm_id} onValueChange={v => { const vm = vms.find(x => x.id === v); setBackupForm({ ...backupForm, vm_id: v, vm_name: vm?.name || "" }); }}><SelectTrigger data-testid="backup-vm-select"><SelectValue placeholder="Select VM" /></SelectTrigger><SelectContent>{vms.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label>VM</Label><Select value={backupForm.vm_id} onValueChange={v => { const vm = vms.find(x => x.id === v); setBackupForm({ ...backupForm, vm_id: v, vm_name: vm?.name || "" }); }}><SelectTrigger data-testid="backup-vm-select"><SelectValue placeholder="Select VM" /></SelectTrigger><SelectContent>{vms.map(v => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent></Select>
+              {vms.length === 0 ? <p className="text-xs text-muted-foreground mt-1">No Proxmox guest has been observed yet, so there is nothing to back up. Sync a connection inventory first.</p> : null}</div>
             <div className="grid grid-cols-2 gap-3"><div><Label>Type</Label><Select value={backupForm.type} onValueChange={v => setBackupForm({ ...backupForm, type: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="full">Full</SelectItem><SelectItem value="incremental">Incremental</SelectItem><SelectItem value="differential">Differential</SelectItem></SelectContent></Select></div><div><Label>Retention (days)</Label><Input type="number" value={backupForm.retention_days} onChange={e => setBackupForm({ ...backupForm, retention_days: parseInt(e.target.value) || 30 })} /></div></div>
           </div>
-          <DialogFooter><Button onClick={handleCreateBackup} data-testid="submit-backup-btn"><Archive className="w-4 h-4 mr-1" />Create Backup</Button></DialogFooter>
+          <DialogFooter><Button onClick={handleCreateBackup} disabled={!backupForm.vm_id} data-testid="submit-backup-btn"><Archive className="w-4 h-4 mr-1" />Create Backup</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

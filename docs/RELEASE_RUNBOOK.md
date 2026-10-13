@@ -48,6 +48,13 @@ the pinned images, and rolls `api`, `worker` and `web` with `--no-build` — no
 rebuild can silently substitute different code. Use `-ValidateOnly` to check a
 pin without touching the running stack.
 
+On a host that stages images ahead of the change window (air-gapped deployment,
+or a pre-loaded release), add `-SkipPull` to roll to images already present on
+the host without a registry round-trip. `-SkipPull` refuses a reference it
+cannot find locally instead of silently rolling something else, and it does not
+relax the immutable-reference checks: `:latest` and tagless references are
+still rejected.
+
 ## Rollback to a previous tag
 
 Rollback is the identical command with the previous accepted release:
@@ -63,6 +70,35 @@ validate login/tenant isolation/ticket history/billing/agent heartbeat). If the
 rolled-back release applied a database migration, the migration's documented
 rollback must run **before** older images start; the image pin alone does not
 revert schema or data changes.
+
+### Rehearse the rollback before you need it
+
+The application-rollback gate is not satisfied by this procedure existing. Run
+the rehearsal on the deployment Docker host:
+
+```powershell
+./scripts/Test-NexusApplicationRollback.ps1
+```
+
+The drill generates its own Compose project name, generated database name and
+test-only secrets; builds two genuinely different API releases from the
+checkout; deploys the previous release through
+`scripts/Deploy-NexusImageTag.ps1`; seeds database and upload markers; adopts the
+newer release; rolls back to the previous one; and then verifies that the API
+container is running the previous release's **exact image identity**, that
+`/api/health` answers, that the seeded data survived an application-only
+rollback, that a mutable `:latest` reference is still refused, and that a
+`-ValidateOnly` pass changes nothing. It writes retained JSON evidence
+(image identities in/out, rollback duration, verification results) under
+`artifacts/release-drills/`, cleans up its disposable project and removes the
+drill images it built.
+
+Scope is disclosed rather than implied: the drill pins the API/worker tier
+twice, because that tier carries the application logic and the migration risk;
+the web tier is rolled with the identical pin mechanism but is not
+version-discriminated. **Database migration rollback is not rehearsed by this
+drill** — it stays a per-migration procedure that runs before older images
+start, and it remains open on the production-readiness checklist.
 
 ## Windows Agent release and Authenticode signing
 
@@ -93,5 +129,9 @@ Retain with every release:
 - [ ] Recovery drill evidence (`artifacts/recovery-drills/recovery-drill-*.json`)
       from `scripts/Smoke-Test-NexusDockerRecovery.ps1`, run on the deployment
       Docker host after any change to the capture/storage/restore path.
+- [ ] Application rollback drill evidence
+      (`artifacts/release-drills/release-drill-*.json`) from
+      `scripts/Test-NexusApplicationRollback.ps1`, run on the deployment Docker
+      host after any change to the image pin, registry or roll command.
 - [ ] Golden-workflow acceptance evidence (`docs/PRODUCTION_READINESS.md` §5).
 - [ ] The exact previous release tag or digest that rollback will pin.

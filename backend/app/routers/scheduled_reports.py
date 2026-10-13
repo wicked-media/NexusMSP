@@ -8,7 +8,7 @@ from app.database import db
 from app.database import JWT_SECRET, JWT_ALGORITHM
 from app.auth import get_current_user
 from app.routers.financial_reports import build_accounts_receivable_aging
-from app.services.nexus_document_pdf import render_nexus_document_pdf
+from app.services.nexus_document_pdf import document_label, render_nexus_document_pdf
 from app.services.supabase_storage import archive_generated_pdf
 from app.services.scope_permissions import assert_client_scope, effective_scope, platform_tenant_id, scoped_query, tenant_scoped_query
 
@@ -290,20 +290,6 @@ async def get_generated_report(output_id: str, current_user: dict = Depends(get_
     return {"history": history, "output": output}
 
 
-def _pdf_value(value):
-    if value is None:
-        return "Not available"
-    if isinstance(value, bool):
-        return "Yes" if value else "No"
-    if isinstance(value, (int, float, str)):
-        return str(value)
-    if isinstance(value, list):
-        return ", ".join(_pdf_value(item) for item in value) or "None"
-    if isinstance(value, dict):
-        return "; ".join(f"{str(key).replace('_', ' ').title()}: {_pdf_value(item)}" for key, item in value.items()) or "None"
-    return str(value)
-
-
 def _pdf_timestamp(value):
     """Use a concise, human-readable timestamp in client-facing documents."""
     if not value:
@@ -326,23 +312,39 @@ async def download_generated_report_pdf(output_id: str, current_user: dict = Dep
     branding_record = await db.settings.find_one({"type": "branding"}, {"_id": 0}) or {}
     branding = branding_record.get("value") or branding_record
     summary = output.get("sections", {}).get("summary", {})
+    scope = output.get("scope") or {}
+    scoped_client_ids = output.get("client_ids") or scope.get("client_ids") or []
+    scope_label = (
+        f"{len(scoped_client_ids)} client{'s' if len(scoped_client_ids) != 1 else ''} in scope"
+        if scoped_client_ids
+        else "All permitted clients"
+    )
+    devices_total = summary.get("devices_total", 0)
+    devices_online = summary.get("devices_online", 0)
+    online_share = (
+        f"{round(devices_online / devices_total * 100)}% of the recorded estate"
+        if devices_total
+        else "No estate evidence recorded"
+    )
     pdf_bytes = render_nexus_document_pdf(
         title=history.get("name") or output.get("schedule_name") or "Generated report",
-        document_kind=str(history.get("report_type") or output.get("report_type") or "standard").replace("_", " ").title(),
+        document_kind=document_label(history.get("report_type") or output.get("report_type") or "standard"),
         subtitle=branding.get("report_header_text") or "Managed service evidence and operational assurance.",
         metadata=[
             ("Generated", _pdf_timestamp(output.get("generated_at"))),
             ("Prepared by", output.get("generated_by", "System")),
-            ("Evidence", "Retained snapshot"),
+            ("Client scope", scope_label),
+            ("Document", output.get("id") or output_id),
         ],
         metric_cards=[
-            ("Managed devices", summary.get("devices_total", 0)),
-            ("Devices online", summary.get("devices_online", 0)),
-            ("Open tickets", summary.get("tickets_open", 0)),
-            ("Active alerts", summary.get("active_alerts", 0)),
+            ("Managed devices", devices_total, scope_label),
+            ("Devices online", devices_online, online_share),
+            ("Open tickets", summary.get("tickets_open", 0), f"of {summary.get('tickets_total', 0)} recorded"),
+            ("Active alerts", summary.get("active_alerts", 0), "Recorded at generation"),
         ],
-        sections=[(section.replace("_", " ").title(), values) for section, values in (output.get("sections") or {}).items()],
+        sections=[(document_label(section), values) for section, values in (output.get("sections") or {}).items()],
         branding=branding,
+        generated_by=output.get("generated_by"),
     )
     safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in (history.get("name") or "nexusmsp-report")).strip("-")
     artifact_path = await archive_generated_pdf("scheduled-reports", output_id, pdf_bytes)
@@ -365,139 +367,6 @@ async def download_generated_report_pdf(output_id: str, current_user: dict = Dep
             "X-Nexus-Artifact-Storage": "archived" if artifact_path else "local-only",
         },
     )
-
-    from reportlab.lib import colors
-    from reportlab.lib.enums import TA_RIGHT
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import mm
-    from reportlab.platypus import KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-    from xml.sax.saxutils import escape
-
-    buffer = BytesIO()
-    document = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=16 * mm, leftMargin=16 * mm, topMargin=20 * mm, bottomMargin=18 * mm)
-    styles = getSampleStyleSheet()
-    primary_hex = branding.get("primary_color", "#2563EB")
-    try:
-        primary_color = colors.HexColor(primary_hex)
-    except (TypeError, ValueError):
-        primary_color = colors.HexColor("#2563EB")
-    company_name = branding.get("company_name") or "NexusMSP"
-    document_theme = branding.get("document_theme", "executive")
-    report_type_label = str(history.get("report_type") or output.get("report_type") or "standard").replace("_", " ").title()
-    ink = colors.HexColor("#102033")
-    slate = colors.HexColor("#526276")
-    surface = colors.HexColor("#F5F8FC")
-    line = colors.HexColor("#DCE5EF")
-    title_style = ParagraphStyle("NexusTitle", parent=styles["Title"], textColor=ink, fontSize=23 if document_theme == "executive" else 21, leading=28, spaceAfter=5)
-    eyebrow_style = ParagraphStyle("NexusEyebrow", parent=styles["Normal"], textColor=primary_color, fontSize=8, leading=10, spaceAfter=7, uppercase=True, fontName="Helvetica-Bold")
-    heading_style = ParagraphStyle("NexusHeading", parent=styles["Heading2"], textColor=ink, fontSize=13, leading=17, spaceBefore=15, spaceAfter=7, fontName="Helvetica-Bold")
-    muted_style = ParagraphStyle("NexusMuted", parent=styles["Normal"], textColor=slate, fontSize=9, leading=14)
-    value_style = ParagraphStyle("NexusMetricValue", parent=styles["Normal"], textColor=ink, fontSize=16, leading=19, fontName="Helvetica-Bold")
-    metric_label_style = ParagraphStyle("NexusMetricLabel", parent=styles["Normal"], textColor=slate, fontSize=7, leading=9, uppercase=True, fontName="Helvetica-Bold")
-    footer_style = ParagraphStyle("NexusFooter", parent=styles["Normal"], textColor=colors.HexColor("#64748B"), fontSize=7, alignment=TA_RIGHT)
-    summary = output.get("sections", {}).get("summary", {})
-    metric_values = [
-        ("Managed devices", summary.get("devices_total", 0)),
-        ("Devices online", summary.get("devices_online", 0)),
-        ("Open tickets", summary.get("tickets_open", 0)),
-        ("Active alerts", summary.get("active_alerts", 0)),
-    ]
-    metric_cells = [[Paragraph(label, metric_label_style), Paragraph(_pdf_value(value), value_style)] for label, value in metric_values]
-    metric_table = Table([metric_cells], colWidths=[43 * mm] * 4)
-    metric_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), surface), ("BOX", (0, 0), (-1, -1), 0.6, line),
-        ("INNERGRID", (0, 0), (-1, -1), 0.6, line), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-    ]))
-    story = [
-        Paragraph(f"{company_name.upper()} - REPORTING & EVIDENCE", eyebrow_style),
-        Paragraph(history.get("name") or output.get("schedule_name") or "Generated report", title_style),
-        Paragraph(branding.get("report_header_text") or "Managed service evidence and operational assurance", muted_style),
-        Spacer(1, 3 * mm),
-        Paragraph(f"{report_type_label.upper()}  •  GENERATED {_pdf_timestamp(output.get('generated_at'))}  •  PREPARED BY {output.get('generated_by', 'System')}  •  RETAINED EVIDENCE SNAPSHOT", ParagraphStyle("NexusMeta", parent=muted_style, fontSize=7, leading=10, textColor=slate, fontName="Helvetica-Bold")),
-        Spacer(1, 6 * mm), metric_table, Spacer(1, 6 * mm),
-    ]
-    for section, values in (output.get("sections") or {}).items():
-        story.append(Paragraph(section.replace("_", " ").title(), heading_style))
-        if section == "accounts_receivable_aging" and isinstance(values, dict):
-            rows = [[Paragraph("Age bucket", styles["BodyText"]), Paragraph("Invoices", styles["BodyText"]), Paragraph("Outstanding balance", styles["BodyText"])]]
-            for bucket in (values.get("buckets") or {}).values():
-                rows.append([
-                    Paragraph(escape(str(bucket.get("label") or "Not recorded")), styles["BodyText"]),
-                    Paragraph(str(bucket.get("invoice_count") or 0), styles["BodyText"]),
-                    Paragraph(f"${float(bucket.get('balance') or 0):,.2f}", styles["BodyText"]),
-                ])
-            rows.append([
-                Paragraph("Total receivables", ParagraphStyle("NexusAgingTotal", parent=styles["BodyText"], fontName="Helvetica-Bold")),
-                Paragraph(str(values.get("total_invoices") or 0), ParagraphStyle("NexusAgingTotalCount", parent=styles["BodyText"], fontName="Helvetica-Bold")),
-                Paragraph(f"${float(values.get('grand_total') or 0):,.2f}", ParagraphStyle("NexusAgingTotalBalance", parent=styles["BodyText"], fontName="Helvetica-Bold")),
-            ])
-            table = Table(rows, colWidths=[79 * mm, 35 * mm, 56 * mm], repeatRows=1)
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), primary_color), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("GRID", (0, 0), (-1, -1), 0.35, line),
-                ("BACKGROUND", (0, -1), (-1, -1), surface), ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, surface]), ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 7), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ]))
-            story.extend([KeepTogether([table]), Spacer(1, 3 * mm)])
-            continue
-        if section == "outstanding_invoices" and isinstance(values, list):
-            rows = [[Paragraph("Invoice", styles["BodyText"]), Paragraph("Client", styles["BodyText"]), Paragraph("Due", styles["BodyText"]), Paragraph("Age", styles["BodyText"]), Paragraph("Balance", styles["BodyText"])]]
-            for invoice in values:
-                rows.append([
-                    Paragraph(escape(str(invoice.get("invoice_number") or "Invoice")), styles["BodyText"]),
-                    Paragraph(escape(str(invoice.get("client_name") or "Unassigned client")), styles["BodyText"]),
-                    Paragraph(escape(str(invoice.get("due_date") or "Not recorded")), styles["BodyText"]),
-                    Paragraph(f"{int(invoice.get('days_overdue') or 0)} days", styles["BodyText"]),
-                    Paragraph(f"${float(invoice.get('balance') or 0):,.2f}", styles["BodyText"]),
-                ])
-            if len(rows) == 1:
-                rows.append([Paragraph("No outstanding invoices", styles["BodyText"]), Paragraph("—", styles["BodyText"]), Paragraph("—", styles["BodyText"]), Paragraph("—", styles["BodyText"]), Paragraph("$0.00", styles["BodyText"])])
-            table = Table(rows, colWidths=[30 * mm, 52 * mm, 32 * mm, 25 * mm, 31 * mm], repeatRows=1)
-            table.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0), primary_color), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("GRID", (0, 0), (-1, -1), 0.35, line),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, surface]),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ]))
-            story.extend([table, Spacer(1, 3 * mm)])
-            continue
-        rows = [[Paragraph("Measure", styles["BodyText"]), Paragraph("Value", styles["BodyText"])]]
-        if isinstance(values, dict):
-            rows.extend([[Paragraph(str(key).replace("_", " ").title(), styles["BodyText"]), Paragraph(_pdf_value(value), styles["BodyText"])] for key, value in values.items()])
-        else:
-            rows.append([Paragraph("Evidence", styles["BodyText"]), Paragraph(_pdf_value(values), styles["BodyText"])])
-        table = Table(rows, colWidths=[58 * mm, 112 * mm], repeatRows=1)
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), primary_color),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("GRID", (0, 0), (-1, -1), 0.35, line),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, surface]),
-            ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-            ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
-        story.extend([KeepTogether([table]), Spacer(1, 3 * mm)])
-    story.extend([Spacer(1, 6 * mm), Paragraph(branding.get("report_footer_text") or "This document is a retained point-in-time evidence snapshot.", footer_style)])
-    def draw_page(canvas, doc):
-        canvas.saveState()
-        canvas.setFillColor(primary_color)
-        canvas.rect(0, A4[1] - 7 * mm, A4[0], 7 * mm, fill=1, stroke=0)
-        canvas.setStrokeColor(line)
-        canvas.line(16 * mm, 12 * mm, A4[0] - 16 * mm, 12 * mm)
-        canvas.setFillColor(slate)
-        canvas.setFont("Helvetica", 7)
-        canvas.drawString(16 * mm, 7.5 * mm, f"{company_name}  |  Confidential managed service evidence")
-        canvas.drawRightString(A4[0] - 16 * mm, 7.5 * mm, f"Page {doc.page}")
-        canvas.restoreState()
-    document.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
-    safe_name = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in (history.get("name") or "nexusmsp-report")).strip("-")
-    return StreamingResponse(BytesIO(buffer.getvalue()), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{safe_name}.pdf"'})
 
 
 @router.get("/scheduled-reports")

@@ -125,6 +125,16 @@ Fail the release if an action reports success without a durable record, audit en
 5. Validate login, client isolation, ticket history, billing integrity, and agent heartbeat before reopening.
 6. Record the decision, evidence, operator, and customer impact in the audit ledger.
 
+A documented procedure is not a rehearsal. `scripts/Test-NexusApplicationRollback.ps1`
+rehearses steps 3–5 on a disposable Compose project: two distinct API releases
+are built, the previous one is deployed through
+`scripts/Deploy-NexusImageTag.ps1`, the newer one is adopted, and the rollback is
+verified by the running container's exact image identity plus a healthy API on
+data that survived the roll. It writes retained JSON evidence under
+`artifacts/release-drills/`. Retain that evidence with the release record after
+running it on the deployment Docker host. Database migration rollback is a
+separate, per-migration procedure and is not covered by the drill.
+
 ## 8. Release decision
 
 Production-ready means all critical and high risks are closed, every golden workflow has current evidence, recovery has been demonstrated, monitoring has an owner, and rollback has been rehearsed. Unimplemented provider actions must be labelled as simulations or pending integrations; they must never present a false success state.

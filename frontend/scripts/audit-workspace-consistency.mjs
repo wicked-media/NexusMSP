@@ -60,6 +60,7 @@ const delegatedHeaderPages = new Set([
   "Security2FAPage",
   "ServiceCatalogPage",
   "SmartAutomationPage",
+  "StudioDetailPage",
   "TeamHubPage",
   "TicketsPage",
   "TriageQueuePage",

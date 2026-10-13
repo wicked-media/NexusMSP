@@ -14,6 +14,11 @@ Everything else in the batch is deferred below with the gate that blocks it and
 the existing workspace it should extend when that gate opens. No concept here is
 recorded as "underway", and nothing in this document is a delivery claim.
 
+Consolidated by: [Nexus studio merge review](NEXUS_STUDIO_MERGE_REVIEW.md) — every
+concept here is recorded once in `backend/app/services/studio_proposals.py`, and a
+proposal that is not already served either names its gate or names the records it
+projects from.
+
 ## Shipped in this batch
 
 ### Nexus Technician Wish Engine (`wish_engine.py`, `docs/DATA_OWNERSHIP.md`)
@@ -94,27 +99,27 @@ unnamed "later" is not.
 | **Undo Everything** | The device State Engine (`nexus_device_state.py`) reports desired state and drift, but nothing retains the *previous value* of an arbitrary setting per change, with provenance, and nothing can check whether anything else has changed since. Undo needs captured before-values plus a dependency check and an explicit "this is irreversible" list. Until then it would be an undo button that promises more than it can restore — which the brief itself rules out. |
 | **Preflight** | Depends on the same dependency graph with provenance as the consequence-engine concepts in batch 2, plus authoritative backup *restore* verification. Disk space, DNS and replication health are per-provider reads that each need their own integration acceptance. |
 | **Nexus Last Known Human** | Buildable from existing records (`activity_logs`, ticket history, `change_management`) with no new store — the work is a scoped projection plus a consent rule for contacting a person. Ranked P2 rather than built now: it competes for the same contact-policy decision as Customer Memory Shield. |
-| **Technician Radar** | **Already covered in part by shipped work locks** (`work_locks`, "before you touch it"), which prevent two technicians unknowingly working the same device. The genuinely missing pieces are visibility of scheduled `change_management` and `maintenance_windows` in the same panel. Merge into the existing fleet/device workspace; do not build a second collision system. |
-| **Safe Experiment** | Needs reversible endpoint execution with automatic restoration, which is an Agent command capability with its own isolation and approval model. Overlaps Nexus Proving Ground (simulation) and the Phantom concept. Forge's `sandbox_plan` check is the design-time half; the runtime half is the gate. |
+| **Technician Radar** | **Already covered in part by shipped work locks** (`work_locks`, "before you touch it"), which prevent two technicians unknowingly working the same device. The genuinely missing pieces are visibility of scheduled `change_management` and `maintenance_windows` in the same panel. Merge into the existing fleet/device workspace; do not build a second collision system. Recorded as a section of `devices`. |
+| **Safe Experiment** | Needs reversible endpoint execution with automatic restoration, which is an Agent command capability with its own isolation and approval model. Overlaps Nexus Proving Ground (simulation) and the Phantom concept. Forge's `sandbox_plan` check is the design-time half; the runtime half is the gate. Recorded with `lab`, which is the same isolation and destruction decision. |
 | **Permission Microscope** | Needs authoritative effective-access evaluation from identity providers and file systems with per-object ACL evidence. `m365_access_governance.py` measures tenant readiness and `permission_elevation.py` governs JIT access; neither answers "which rule denied this file operation". The brief's own distinction — verified evaluation versus inferred explanation — is the whole design constraint, so this stays a provider integration, not a Nexus-internal feature. |
 | **Application Black Box** | Needs bounded endpoint capture (process, DNS, connection, token events) from an agent, and a consent/retention policy for it. The privacy boundary ("never record unrelated customer content") is a policy deliverable before a feature, exactly as batch 2 concluded for the customer-continuity concepts. |
-| **Smart Maintenance Window** | `maintenance_windows` already owns the window; the differentiator needs authoritative backup-job schedules and customer operating patterns to evaluate impact. Rides along with the Recovery Confidence Map gate below. |
-| **Technician Sandbox** | An isolated per-technician practice environment is infrastructure plus a licence/ownership decision, and the training half overlaps Nexus University (existing idea #356). Forge's sandbox plan requirement is the governed subset shipped today. |
+| **Smart Maintenance Window** | `maintenance_windows` already owns the window; the differentiator needs authoritative backup-job schedules and customer operating patterns to evaluate impact. Rides along with the Recovery Confidence Map gate below. Recorded with `sla`: one contract-terms clock rather than two. |
+| **Technician Sandbox** | An isolated per-technician practice environment is infrastructure plus a licence/ownership decision, and the training half overlaps Nexus University (existing idea #356). Forge's sandbox plan requirement is the governed subset shipped today. Recorded with `lab`. |
 | **Error Translator** | Needs OS build, process identity, permission and surrounding evidence joined to a specific operation. Feasible from existing records once the operation context is captured; ranked P2, and it must not become a generic "this error might mean" lookup — the batch's own point is that a generic explanation is worth little. |
-| **Live Runbook** | Needs live environment reads while a runbook is followed, which is an Agent read capability (`nexus_agent_commands`) plus runbook versioning. The adaptive step must propose a correction for review rather than silently deviate, which is a change to the runbook contract, not a UI addition. |
-| **Handover Simulator** | **Partly shipped already.** `GET /tickets/{id}/handover` is the scoped handover projection and the ticket Outcome Contract already refuses a close-out it cannot verify. The missing piece is the *missing-items gate* (no reproduction steps, expectation unrecorded, next action unclear) in the handover panel. Merge into the ticket workspace. |
-| **Recovery Confidence Map** | Needs restore-verification evidence, not backup job success. Green jobs already exist; proving a business process is recoverable requires a recorded restore test per dependency chain (SQL, application configuration, authentication dependency). Gate: restore-test evidence retained against the business process, then the map is a projection of it. |
+| **Live Runbook** | Needs live environment reads while a runbook is followed, which is an Agent read capability (`nexus_agent_commands`) plus runbook versioning. The adaptive step must propose a correction for review rather than silently deviate, which is a change to the runbook contract, not a UI addition. Recorded with `runbook`: one contract change. |
+| **Handover Simulator** | **Partly shipped already.** `GET /tickets/{id}/handover` is the scoped handover projection and the ticket Outcome Contract already refuses a close-out it cannot verify. The missing piece is the *missing-items gate* (no reproduction steps, expectation unrecorded, next action unclear) in the handover panel. Merge into the ticket workspace. Recorded as an extension of `backend/app/routers/tickets.py`. |
+| **Recovery Confidence Map** | Needs restore-verification evidence, not backup job success. Green jobs already exist; proving a business process is recoverable requires a recorded restore test per dependency chain (SQL, application configuration, authentication dependency). Gate: restore-test evidence retained against the business process, then the map is a projection of it. Recorded as `storage-recovery`, the same projection under batch 5's name. |
 | **Nexus Mission Mode** | The largest claim in the brief and the one most likely to become a fourth parallel orchestrator. It needs a durable work object spanning tickets, devices, approvals, automation and time — with a declared owner for progress, evidence and interruption. Nexus already has the pieces it would aggregate (`nexus_investigate`, `mission_control` portfolio briefing, Proving Ground, Expected State, Change Management), so the gate is an explicit mission lifecycle contract and an ownership decision, not more endpoints. See the naming note in `docs/PLATFORM_PRIORITY_MAP.md`. |
 | **Nexus Port Historian** | Needs authoritative switch/port/VLAN inventory over time (SNMP or controller APIs) with change attribution. There is no source of truth for switch-port state today. |
-| **Nexus Certificate Detective** | Needs certificate inventory plus service, binding, dependency and renewal-ownership relationships. The first slice (expiry plus dependent services) is a plausible Forge design composed from existing capabilities; the dependency half needs the relationship graph with provenance. |
-| **Nexus DNS Propagation Lab** | Needs authorised authoritative and recursive DNS queries against customer zones from selected locations — a network capability with its own access and rate policy, not a Nexus-internal join. |
-| **Nexus Login Journey Recorder** | Needs identity-provider sign-in and Conditional Access ingestion (Entra first). This is batch 2's Authentication Journey gate, unchanged. |
+| **Nexus Certificate Detective** | Needs certificate inventory plus service, binding, dependency and renewal-ownership relationships. The first slice (expiry plus dependent services) is a plausible Forge design composed from existing capabilities; the dependency half needs the relationship graph with provenance. Recorded as `certificate-trust`, with batch 4's Certificate Trust. |
+| **Nexus DNS Propagation Lab** | Needs authorised authoritative and recursive DNS queries against customer zones from selected locations — a network capability with its own access and rate policy, not a Nexus-internal join. Recorded with `connectivity-diagnostics`. |
+| **Nexus Login Journey Recorder** | Needs identity-provider sign-in and Conditional Access ingestion (Entra first). This is batch 2's Authentication Journey gate, unchanged. Recorded as `authentication`, where batches 2, 4 and 5 recorded the same capability. |
 | **Nexus Print Path Visualiser** | Needs print topology (application → spooler → driver → queue → server → device) that no current source records. Endpoint discovery telemetry is the prerequisite. |
-| **Nexus Update Compatibility Gate** | Needs a customer-specific application/hardware dependency map plus update inventory. Application Manager, Third-Party Patching and Patch Compliance own the update half; the dependency half is the relationship graph again. |
-| **Nexus Hardware Swap Assistant** | Buildable from existing asset, configuration and relationship records — the configuration transfer itself is the endpoint-execution half, so the guide can ship before the automation. Ranked P2; must not promise transfer of what it cannot read. |
-| **Nexus Temporary Access Expiry** | **Mostly shipped.** `permission_elevation.py` already time-boxes approvals with auto-expiry, break-glass and session evidence; `nexus_access.py` owns the rotation register. The missing piece is a post-work review that revokes temporary privileges granted outside Nexus and reports the ones it cannot see. Merge into Nexus Elevate. |
-| **Nexus Change Witness** | Needs an independent verification signal per approved change. The pre-rollout bench in the Proving Ground verifies a *candidate* before rollout; witnessing an executed change needs the outcome-contract verification kinds, which exist. Ranked P2 as an extension of Change Management plus Outcome Contract. |
-| **Nexus Vendor Escalation Tracker** | Needs external vendor case ingestion (per-vendor API or mailbox parsing) and a diagnostic-evidence diff against it. A provider integration with its own sandbox acceptance, exactly as batch 2 concluded for Vendor Case Companion. |
+| **Nexus Update Compatibility Gate** | Needs a customer-specific application/hardware dependency map plus update inventory. Application Manager, Third-Party Patching and Patch Compliance own the update half; the dependency half is the relationship graph again. Recorded with `update-compatibility`. |
+| **Nexus Hardware Swap Assistant** | Buildable from existing asset, configuration and relationship records — the configuration transfer itself is the endpoint-execution half, so the guide can ship before the automation. Ranked P2; must not promise transfer of what it cannot read. Recorded as an extension of `backend/app/routers/assets.py`. |
+| **Nexus Temporary Access Expiry** | **Mostly shipped.** `permission_elevation.py` already time-boxes approvals with auto-expiry, break-glass and session evidence; `nexus_access.py` owns the rotation register. The missing piece is a post-work review that revokes temporary privileges granted outside Nexus and reports the ones it cannot see. Merge into Nexus Elevate. Recorded as an extension of `backend/app/routers/permission_elevation.py`. |
+| **Nexus Change Witness** | Needs an independent verification signal per approved change. The pre-rollout bench in the Proving Ground verifies a *candidate* before rollout; witnessing an executed change needs the outcome-contract verification kinds, which exist. Ranked P2 as an extension of Change Management plus Outcome Contract. Recorded as an extension of `backend/app/routers/change_management.py`. |
+| **Nexus Vendor Escalation Tracker** | Needs external vendor case ingestion (per-vendor API or mailbox parsing) and a diagnostic-evidence diff against it. A provider integration with its own sandbox acceptance, exactly as batch 2 concluded for Vendor Case Companion. Recorded with `escalation`, which also owns batch 4's Escalation and that companion. |
 
 ## The five Forge-family follow-ons
 
@@ -124,7 +129,7 @@ unnamed "later" is not.
 | **Nexus Tool Evolution** | Deferred. It needs *sequences* of technician actions to notice that Certificate Detective is run after DNS diagnostics; the learned workspace ordering deliberately stores counts per target, not sequences, and stores no record identifiers. The gate is an explicit decision to retain ordered per-technician action sequences with a retention and privacy rule — a decision this batch declines to make on the user's behalf. The evidence it would consume (`nexus_forge_requests.versions` plus usage) already exists, so the feature is one decision away. |
 | **Nexus Repair Exchange** | Deferred. Distributing signed tools between MSPs is a trust, signing and liability model before it is code: who reviews an MSP-authored tool, what a signature attests, how a customer's data is provably excluded, and who is accountable when a shared procedure damages a customer. An ownership decision with a security review comes first. |
 | **Nexus Zero-Friction Workspace** | Deferred, with a concrete reason visible in the code: workspace composition already exists per browser (`useWidgetGrid`, localStorage), so a *shared* workspace needs server-side persisted workspace definitions, a capability/permission contract for every component that may be composed, and a tenancy model for sharing it with a colleague. That is an ownership decision plus a UI contract, and it is the honest prerequisite for anything Forge might later generate. |
-| **Nexus Instant Lab** | Deferred with the Phantom gate: disposable, policy-controlled environments need infrastructure provisioning, isolation, expiry and destruction evidence. |
+| **Nexus Instant Lab** | Deferred with the Phantom gate: disposable, policy-controlled environments need infrastructure provisioning, isolation, expiry and destruction evidence. Recorded with `lab`, alongside Technician Sandbox and Safe Experiment. |
 
 ## How this batch would be proven worth further investment
 
@@ -146,6 +151,36 @@ Both shipped tools are measurable, and neither number is flattering by default:
    overridden should be deleted, not explained.
 
 Until those numbers exist, treat this batch's ranking as a strategy assessment.
+
+## Consolidated in the catalogue register
+
+Everything deferred above is recorded once in
+`backend/app/services/studio_proposals.py` with a disposition, and a proposal
+that is not already served either names the gate blocking it or names the records
+it is a projection of. [Nexus studio merge review](NEXUS_STUDIO_MERGE_REVIEW.md)
+is the readable record of those merges.
+
+| This batch's concept | Disposition in the register |
+|---|---|
+| Wish Engine, Forge | `served` — the two tools this batch shipped, retained so the catalogue is complete |
+| Recovery Confidence Map | merges into `storage-recovery`: batch 5 proposed the same restore-evidence projection under a second name |
+| DNS Propagation Lab | merges into `connectivity-diagnostics` — both need an authorised probe at each observation point |
+| Login Journey Recorder | merges into `authentication`, where batches 2, 4 and 5 recorded the same gate |
+| Certificate Detective | merges into `certificate-trust`, with batch 4's Certificate Trust |
+| Smart Maintenance Window | merges into `sla`, whose gate is that the clock reads contract terms, calendars and exclusions |
+| Live Runbook | merges into `runbook` — one contract change for executable, versioned procedures |
+| Vendor Escalation Tracker | merges into `escalation`, with batch 4's Escalation and batch 2's Vendor Case Companion |
+| Update Compatibility Gate | merges into `update-compatibility`, with batch 4's Software Deployment and batch 2's Update Autopsy |
+| Instant Lab, Technician Sandbox, Safe Experiment | one work item, `lab` — provisioning, isolation, expiry and destruction evidence is one infrastructure decision |
+| Technician Radar | a section of `devices`, as this document already concluded |
+| Handover Simulator | extends `backend/app/routers/tickets.py` |
+| Temporary Access Expiry | extends `backend/app/routers/permission_elevation.py` |
+| Change Witness | extends `backend/app/routers/change_management.py` |
+| Hardware Swap Assistant | extends `backend/app/routers/assets.py` |
+| Undo Everything, Preflight, Permission Microscope, Application Black Box, Error Translator, Mission Mode, Port Historian, Print Path Visualiser, Tool Evolution, Repair Exchange, Zero-Friction Workspace | still their own gated records, and therefore still not built |
+
+Nothing above is a delivery claim: the only `served` entries are the two tools
+this batch shipped.
 
 ## Verification
 

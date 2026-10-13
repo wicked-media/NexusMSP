@@ -221,11 +221,15 @@ def fleet_plugin_intelligence(sites) -> list[dict]:
     return sorted(aggregate.values(), key=lambda item: (-item["security_findings"], -item["sites_with_updates"], item["name"].lower()))
 
 
-def _inventory_freshness(site: dict) -> dict:
+def _inventory_freshness(site: dict, *, now: datetime | None = None) -> dict:
+    # Freshness must be judged at the caller's evaluation instant: preflight
+    # takes an injected `now` so policy is deterministic, and a second source
+    # of wall-clock time here would make the same call answer differently.
+    now = now or _now()
     synced = _parse(site.get("last_wordpress_sync_at"))
     if not synced:
         return {"assessed": False, "stale": True}
-    return {"assessed": True, "stale": (_now() - synced) > timedelta(hours=HEALTH_FRESHNESS_HOURS), "synced_at": synced.isoformat()}
+    return {"assessed": True, "stale": (now - synced) > timedelta(hours=HEALTH_FRESHNESS_HOURS), "synced_at": synced.isoformat()}
 
 
 def backup_evidence(site: dict, *, now: datetime | None = None) -> dict:
@@ -399,7 +403,7 @@ def update_preflight(site: dict, items, *, now: datetime | None = None) -> dict:
         checks.append(_check("connection", "WordPress connection", "block", "Link a WordPress management connection first"))
         blockers.append("connection")
 
-    freshness = _inventory_freshness(site)
+    freshness = _inventory_freshness(site, now=now)
     if not freshness["assessed"]:
         checks.append(_check("inventory", "Plugin inventory", "block", "No WordPress inventory has been synced for this site"))
         blockers.append("inventory")

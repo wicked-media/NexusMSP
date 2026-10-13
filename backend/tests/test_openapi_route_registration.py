@@ -9,17 +9,22 @@ from collections import Counter
 import warnings
 
 from fastapi import APIRouter
-from fastapi.routing import APIRoute
 import pytest
 
 import server
+from test_studio_fleet import effective_operations  # noqa: E402
 
+
+# FastAPI keeps an included router in ``app.routes`` as a wrapper, so the live
+# operations are read through ``effective_operations`` rather than by filtering
+# ``app.routes`` for ``APIRoute`` (which now matches almost nothing and would
+# silently assert over an empty tree).  Keys use the same structural path the
+# application's own registration guard uses.
 
 def _http_operation_keys():
     return [
-        (route.path_format, method)
-        for route in server.app.routes
-        if isinstance(route, APIRoute)
+        (server._canonical_http_path(path), method.upper())
+        for path, route in effective_operations()
         for method in (route.methods or set())
     ]
 
@@ -32,14 +37,16 @@ def test_auto_discovered_http_operations_have_one_owner():
         if count > 1
     ]
 
+    # A duplicate check over an empty key list passes without checking anything,
+    # which is exactly how the unwrapped route tree regressed before.
+    assert operation_keys, "no HTTP operations were resolved from the application"
     assert duplicates == []
 
 
 def test_documented_legacy_route_owners_match_live_handlers():
     route_owners = {
-        (server._canonical_http_path(route.path_format), method): route.endpoint.__module__.rsplit(".", 1)[-1]
-        for route in server.app.routes
-        if isinstance(route, APIRoute)
+        (server._canonical_http_path(path), method.upper()): route.endpoint.__module__.rsplit(".", 1)[-1]
+        for path, route in effective_operations()
         for method in (route.methods or set())
     }
 

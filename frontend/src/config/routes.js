@@ -1,7 +1,11 @@
 import { lazy } from "react";
 
-// Lazy-loaded page components
-const page = (name) => lazy(() => import(`@/pages/${name}`));
+// Lazy-loaded page components.
+// This dynamic import is a webpack context module over the whole `src/pages`
+// directory, so colocated `*.test.*` files would otherwise be bundled into the
+// production app. React's production build (NODE_ENV=production) does not
+// export `act`, which the tests import, so bundling them breaks the build.
+const page = (name) => lazy(() => import(/* webpackExclude: /\.test\./ */ `@/pages/${name}`));
 // Keep this direct import explicit.  Deployment Hub can be introduced after a
 // local dev server has already started; a direct lazy chunk avoids the generic
 // dynamic-import context falling through to the application catch-all route.
@@ -19,6 +23,21 @@ export const routeConfig = [
   { path: "/nexus-data-quality", component: page("NexusDataQualityPage"), auth: true, layout: true },
   { path: "/nexus-pulse", component: page("NexusPulsePage"), auth: true, layout: true },
   { path: "/nexus-proving-ground", component: page("NexusProvingGroundPage"), auth: true, layout: true },
+  // Studio fleet: one hub + one parameterised spine route, so a studio is a
+  // registry entry rather than a parallel product (docs/NEXUS_STUDIO_FLEET.md).
+  { path: "/studios", component: page("StudiosHubPage"), auth: true, layout: true },
+  { path: "/studios/:studioId", component: page("StudioDetailPage"), auth: true, layout: true },
+  // The three foundations: one customer-scoped operating view, one verified
+  // operational-outcome report, one governed extension review surface
+  // (docs/NEXUS_FOUNDATIONS_BATCH_4.md). Each is also a fleet studio, so the
+  // shared spine renders its tabs and these routes stay its home_route.
+  { path: "/customer-environment", component: page("CustomerEnvironmentPage"), auth: true, layout: true },
+  { path: "/operations-assurance", component: page("OperationsAssurancePage"), auth: true, layout: true },
+  { path: "/extension-studio", component: page("ExtensionStudioPage"), auth: true, layout: true },
+  // The estate comparison Windows Studio and Endpoint Performance Studio were
+  // admitted against: one endpoint against the measured median of its own
+  // operating-system cohort (docs/NEXUS_INVENT_BATCH_5.md).
+  { path: "/fleet-baseline", component: page("FleetBaselinePage"), auth: true, layout: true },
   // The component name must match the file on disk exactly: this route resolves
   // through a webpack dynamic-import context, which does not case-fold, so the
   // mixed-case name previously used here failed to load on Linux builds.

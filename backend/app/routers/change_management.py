@@ -148,6 +148,15 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
     if risk_level in {"medium", "high"} and len(rollback_plan) < 8:
         raise HTTPException(400, "Record a rollback plan for medium and high-risk changes")
 
+    # A change raised from derived evidence ("the fleet baseline says three
+    # endpoints share this shape") keeps two things a hand-written request does
+    # not need: how the repair will be verified, and the evidence it came from.
+    # Both are optional here so an ordinary request is unchanged, and both are
+    # declared here rather than in the caller so a derived change cannot carry a
+    # source this owner would not persist.
+    verification = str(payload.get("verification") or "").strip()
+    source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+
     client_id = str(payload.get("client_id") or "").strip()
     if client_id:
         await assert_client_scope(user, client_id, operation="change_management.create")
@@ -165,6 +174,8 @@ async def create_change_request(payload: dict = Body(...), user=Depends(get_curr
         "risk_level": risk_level,
         "impact": impact,
         "rollback_plan": rollback_plan,
+        "verification": verification,
+        "source": source,
         "client_id": client_id,
         "client_name": (client or {}).get("name") or str(payload.get("client_name") or ""),
         "devices_affected": payload.get("devices_affected") or [],

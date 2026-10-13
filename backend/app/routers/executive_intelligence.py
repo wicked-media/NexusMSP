@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+import re
 from typing import Any
 import uuid
 
@@ -26,9 +27,33 @@ from app.services.scope_permissions import assert_global_scope
 router = APIRouter(tags=["Nexus Executive"])
 
 WINDOW_DAYS = 30
+# Only these periods are accepted. A free-form window would silently change what
+# "capacity", "overdue" and "trend" mean from one request to the next.
+WINDOW_OPTIONS = (30, 90, 365)
+WINDOW_LABELS = {
+    30: "Trailing 30 days",
+    90: "Trailing 90 days",
+    365: "Trailing 12 months",
+}
 ACTIVE_TICKET_STATES = {"open", "in_progress", "pending", "waiting"}
 CLOSED_INVOICE_STATES = {"cancelled", "voided"}
 OPEN_PO_STATES = {"draft", "submitted", "approved", "ordered", "partially_received", "open"}
+
+# One full-time month, used only to model aggregate availability. It is not a
+# presence measure and is never attributed to an individual.
+HOURS_PER_FULL_TIME_MONTH = 160
+
+# Days a renewal is considered urgent/soon look-ahead for the owner calendar.
+RENEWAL_WINDOW_DAYS = 180
+RENEWAL_URGENT_DAYS = 30
+RENEWAL_SOON_DAYS = 90
+
+# The owner-stated recurring-revenue goal. It is a recorded statement, not a
+# derived figure, so it is bounded and validated like one.
+MRR_TARGET_MAX = 1_000_000_000
+MRR_TARGET_MONTH_MIN = (2000, 1)
+MRR_TARGET_MONTH_MAX = (2100, 12)
+MRR_TARGET_REVISION_LIMIT = 12
 
 
 from app.services.time_utils import now_iso as _now
@@ -181,7 +206,435 @@ def build_profit_killers(
     )[:8]
 
 
-def build_board_brief(summary: dict, risks: list[dict], profit_killers: list[dict], quality: list[dict]) -> dict:
+def normalise_window(value: Any) -> int:
+    """Accept only the reviewed periods; anything else falls back to the default."""
+    if isinstance(value, bool):
+        return WINDOW_DAYS
+    try:
+        requested = int(value)
+    except (TypeError, ValueError):
+        return WINDOW_DAYS
+    return requested if requested in WINDOW_OPTIONS else WINDOW_DAYS
+
+
+AGING_BUCKETS = (
+    ("not_due", "Not yet due", 0, 0),
+    ("overdue_1_30", "1-30 days overdue", 1, 30),
+    ("overdue_31_60", "31-60 days overdue", 31, 60),
+    ("overdue_61_90", "61-90 days overdue", 61, 90),
+    ("overdue_90_plus", "90+ days overdue", 91, None),
+)
+
+
+def build_receivables_aging(invoices: list[dict], now: datetime) -> dict:
+    """Age the open invoice ledger from the due date each invoice records.
+
+    An invoice with no usable due date is never quietly treated as current: it
+    gets its own bucket so the owner can see how much of the ledger carries no
+    dated obligation. The outstanding total is the same figure the summary
+    reports, so the two can never disagree.
+    """
+    buckets = {
+        key: {"key": key, "label": label, "count": 0, "total": 0.0, "overdue": key != "not_due"}
+        for key, label, _lower, _upper in AGING_BUCKETS
+    }
+    buckets["undated"] = {
+        "key": "undated",
+        "label": "No due date recorded",
+        "count": 0,
+        "total": 0.0,
+        "overdue": False,
+    }
+    outstanding = 0.0
+    overdue_total = 0.0
+    oldest_overdue_days = 0
+    for invoice in invoices:
+        balance = _invoice_balance(invoice)
+        if balance <= 0:
+            continue
+        outstanding += balance
+        due_at = _parse_datetime(invoice.get("due_date"))
+        if due_at is None:
+            buckets["undated"]["count"] += 1
+            buckets["undated"]["total"] += balance
+            continue
+        days_overdue = (now.date() - due_at.date()).days
+        if days_overdue <= 0:
+            key = "not_due"
+        else:
+            key = next(
+                (
+                    bucket_key
+                    for bucket_key, _label, lower, upper in AGING_BUCKETS
+                    if bucket_key != "not_due"
+                    and days_overdue >= lower
+                    and (upper is None or days_overdue <= upper)
+                ),
+                "overdue_90_plus",
+            )
+            overdue_total += balance
+            oldest_overdue_days = max(oldest_overdue_days, days_overdue)
+        buckets[key]["count"] += 1
+        buckets[key]["total"] += balance
+
+    ordered = [buckets[key] for key, _label, _lower, _upper in AGING_BUCKETS] + [buckets["undated"]]
+    for bucket in ordered:
+        bucket["total"] = _round_money(bucket["total"])
+        bucket["share_pct"] = round(bucket["total"] / outstanding * 100, 1) if outstanding else None
+    return {
+        "state": "verified" if outstanding else "insufficient_evidence",
+        "outstanding_total": _round_money(outstanding),
+        "overdue_total": _round_money(overdue_total),
+        "oldest_overdue_days": oldest_overdue_days or None,
+        "buckets": ordered,
+        "method": (
+            "Open invoice balances aged from the due date recorded on each invoice. "
+            "Bank balances, payment timing and disputed balances are not modelled."
+        ),
+    }
+
+
+def build_revenue_concentration(client_mrr: dict[str, float], client_names: dict[str, str] | None = None) -> dict:
+    """Share of contract-backed MRR held by the largest accounts.
+
+    This is arithmetic over recorded contract value, not a churn forecast: it
+    answers "how much of the run rate rests on one relationship" and nothing
+    more. A tenant with no recorded recurring value is reported as
+    insufficient evidence rather than as perfectly diversified.
+    """
+    names = client_names or {}
+    positive = sorted(
+        ((str(client_id), _number(value)) for client_id, value in client_mrr.items() if _number(value) > 0),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    total = sum(value for _client_id, value in positive)
+    if not positive or total <= 0:
+        return {
+            "state": "insufficient_evidence",
+            "total": 0.0,
+            "client_count": 0,
+            "top_client": None,
+            "top_three_share_pct": None,
+            "level": "insufficient_evidence",
+            "detail": "No contract-backed recurring value is recorded, so concentration cannot be measured.",
+            "method": "Contract-backed MRR share per client; client fallback MRR is used only where no contract value exists.",
+        }
+    top_client_id, top_mrr = positive[0]
+    top_share = top_mrr / total * 100
+    top_three_share = sum(value for _client_id, value in positive[:3]) / total * 100
+    if top_share >= 40:
+        level = "dependency"
+    elif top_share >= 25:
+        level = "concentrated"
+    else:
+        level = "spread"
+    top_name = names.get(top_client_id) or "The largest client"
+    return {
+        "state": "verified",
+        "total": _round_money(total),
+        "client_count": len(positive),
+        "top_client": {
+            "client_id": top_client_id,
+            "name": top_name,
+            "mrr": _round_money(top_mrr),
+            "share_pct": round(top_share, 1),
+        },
+        "top_three_share_pct": round(top_three_share, 1),
+        "level": level,
+        "detail": (
+            f"{top_name} is {round(top_share, 1)}% of {money_hint(total)} contract-backed MRR; "
+            f"the three largest accounts together are {round(top_three_share, 1)}%."
+        ),
+        "method": (
+            "Recorded contract monthly value plus client fallback MRR. Share is arithmetic over current records; "
+            "it is not a churn probability and does not predict when an account leaves."
+        ),
+    }
+
+
+def money_hint(value: Any) -> str:
+    """A compact dollar phrasing for generated sentences (not a formatter)."""
+    return f"${_number(value):,.0f}"
+
+
+def build_renewal_calendar(
+    contracts: list[dict],
+    clients: list[dict],
+    now: datetime,
+    window_days: int = RENEWAL_WINDOW_DAYS,
+) -> dict:
+    """Active contracts whose recorded end date falls inside the owner window."""
+    names = {str(client.get("id")): (client.get("name") or "Unknown client") for client in clients}
+    rows = []
+    for contract in contracts:
+        end_at = _parse_datetime(contract.get("end_date"))
+        if end_at is None or not (now <= end_at <= now + timedelta(days=window_days)):
+            continue
+        client_id = str(contract.get("client_id") or "")
+        days_until = max(0, (end_at.date() - now.date()).days)
+        rows.append({
+            "contract_id": str(contract.get("id") or ""),
+            "client_id": client_id,
+            "client_name": names.get(client_id) or contract.get("client_name") or "Unknown client",
+            "value": _round_money(_monthly_value(contract)),
+            "end_date": end_at.date().isoformat(),
+            "days_until": days_until,
+            "urgency": (
+                "immediate" if days_until <= RENEWAL_URGENT_DAYS
+                else "soon" if days_until <= RENEWAL_SOON_DAYS
+                else "planned"
+            ),
+            "route": f"/clients?client={client_id}" if client_id else "/contracts",
+        })
+    rows.sort(key=lambda row: (row["days_until"], -row["value"]))
+    return {
+        "state": "verified" if rows else "insufficient_evidence",
+        "window_days": window_days,
+        "total_value": _round_money(sum(row["value"] for row in rows)),
+        "rows": rows[:12],
+        "method": (
+            f"Active contracts with a recorded end date inside {window_days} days, ordered by date then value. "
+            "Contracts without an end date are not listed and are not assumed to be evergreen."
+        ),
+    }
+
+
+def build_revenue_trend(invoices: list[dict], now: datetime, months: int = 6) -> dict:
+    """Invoiced and collected totals per month, from invoice records only.
+
+    The month is the invoice's own created date. A month with no invoice rows is
+    reported as no evidence rather than as a zero-revenue month.
+    """
+    buckets: dict[str, dict] = {}
+    for offset in range(months - 1, -1, -1):
+        month_start = (now.replace(day=1) - timedelta(days=offset * 30)).replace(day=1)
+        buckets[month_start.strftime("%Y-%m")] = {
+            "key": month_start.strftime("%Y-%m"),
+            "label": month_start.strftime("%b %Y"),
+            "invoiced": 0.0,
+            "collected": 0.0,
+            "count": 0,
+        }
+    for invoice in invoices:
+        if str(invoice.get("status") or "").lower() in CLOSED_INVOICE_STATES:
+            continue
+        raised_at = _parse_datetime(invoice.get("created_at") or invoice.get("due_date"))
+        if raised_at is None:
+            continue
+        bucket = buckets.get(raised_at.strftime("%Y-%m"))
+        if bucket is None:
+            continue
+        bucket["invoiced"] += _number(invoice.get("total"))
+        bucket["collected"] += _number(invoice.get("amount_paid"))
+        bucket["count"] += 1
+    series = list(buckets.values())
+    for bucket in series:
+        bucket["invoiced"] = _round_money(bucket["invoiced"])
+        bucket["collected"] = _round_money(bucket["collected"])
+    recorded = [bucket for bucket in series if bucket["count"]]
+    return {
+        "state": "verified" if len(recorded) >= 2 else "insufficient_evidence",
+        "months": series,
+        "recorded_months": len(recorded),
+        "method": (
+            "Invoiced and paid totals per month, keyed on the invoice's recorded created date. "
+            "A month with no invoice records is shown as no evidence, not as zero revenue."
+        ),
+    }
+
+
+def normalise_mrr_target(payload: dict | None) -> dict:
+    """Validate the goal an owner recorded as their recurring-revenue target.
+
+    A goal is only meaningful with an amount, so the amount is required and
+    bounded. The target month is optional: without it progress is still
+    measurable, but no pace can honestly be stated.
+    """
+    payload = payload or {}
+    raw_target = payload.get("target_mrr")
+    if raw_target in (None, ""):
+        raise ValueError("A monthly recurring revenue target is required")
+    target_mrr = _number(raw_target)
+    if not 0 < target_mrr <= MRR_TARGET_MAX:
+        raise ValueError("The MRR goal must be greater than $0 and at most $1,000,000,000")
+    raw_month = str(payload.get("target_month") or "").strip()
+    target_month = None
+    if raw_month:
+        match = re.fullmatch(r"(\d{4})-(\d{2})", raw_month)
+        if not match:
+            raise ValueError("The target month must be recorded as YYYY-MM")
+        year, month = int(match.group(1)), int(match.group(2))
+        if not 1 <= month <= 12:
+            raise ValueError("The target month must be a real calendar month")
+        if not MRR_TARGET_MONTH_MIN <= (year, month) <= MRR_TARGET_MONTH_MAX:
+            raise ValueError("The target month must be between 2000-01 and 2100-12")
+        target_month = f"{year:04d}-{month:02d}"
+    return {
+        "target_mrr": round(target_mrr, 2),
+        "target_month": target_month,
+        "note": str(payload.get("note") or "").strip()[:280],
+    }
+
+
+def _target_month_label(target_month: str | None) -> str | None:
+    if not target_month:
+        return None
+    try:
+        year, month = (int(part) for part in str(target_month).split("-"))
+        return datetime(year, month, 1).strftime("%b %Y")
+    except (TypeError, ValueError):
+        return None
+
+
+def _quality_state(state: dict, key: str) -> str:
+    """The evidence state the briefing already published for one source."""
+    return next(
+        (str(item.get("state") or "missing") for item in (state or {}).get("data_quality") or [] if item.get("id") == key),
+        "missing",
+    )
+
+
+def build_mrr_target_progress(target: dict | None, current_mrr: Any, now: datetime) -> dict:
+    """How far the current run rate is from the goal the owner recorded.
+
+    The comparison is arithmetic over the *same* contract-backed MRR the rest of
+    the briefing reports, so the two figures can never disagree. A pace figure is
+    produced only when the owner recorded a target month and whole months
+    actually remain, and it is labelled as the required step rather than as a
+    forecast. With no recorded goal nothing is assumed: progress is absent, not
+    zero.
+
+    The recorded goal also carries the contract-backed run rate observed when it
+    was recorded, so progress is stated both as the distance to the target and as
+    the growth achieved since the goal was set. That starting line is a recorded
+    snapshot, not a second authority: it is captured from the same figure the
+    cockpit reports, it is absent when no revenue evidence existed at record time,
+    and a revision never rewrites it.
+    """
+    current = max(0.0, _number(current_mrr))
+    absent = {
+        "state": "not_recorded",
+        "target_mrr": None,
+        "target_month": None,
+        "target_month_label": None,
+        "note": "",
+        "recorded_at": None,
+        "recorded_by": None,
+        "current_mrr": _round_money(current),
+        "starting_mrr": None,
+        "starting_recorded_at": None,
+        "growth": None,
+        "growth_pct": None,
+        "progress_pct": None,
+        "gap": None,
+        "months_remaining": None,
+        "required_monthly_growth": None,
+        "required_growth_pct_per_month": None,
+        "revisions": [],
+        "method": (
+            "Progress is contract-backed MRR divided by the revenue goal the owner recorded. "
+            "It is arithmetic over current records, not a forecast, and no goal is assumed when none is recorded. "
+            "Growth is measured from the run rate recorded with the goal, which is a snapshot of the same figure, "
+            "not a second source of revenue truth."
+        ),
+    }
+    if not target or target.get("target_mrr") is None:
+        return absent
+    target_mrr = max(0.0, _number(target.get("target_mrr")))
+    target_month = str(target.get("target_month") or "") or None
+    gap = round(target_mrr - current, 2)
+    achieved = current >= target_mrr
+    progress_pct = round(current / target_mrr * 100, 1) if target_mrr > 0 else None
+    months_remaining = None
+    if target_month:
+        year, month = (int(part) for part in target_month.split("-"))
+        months_remaining = (year - now.year) * 12 + (month - now.month)
+    if achieved:
+        status = "achieved"
+    elif months_remaining is not None and months_remaining < 0:
+        # The goal month has passed without the run rate reaching it. Reporting
+        # that as "behind" would imply time is left that is not there.
+        status = "overdue"
+    else:
+        status = "in_progress"
+    required_monthly_growth = None
+    required_growth_pct_per_month = None
+    if not achieved and gap > 0 and months_remaining is not None and months_remaining > 0:
+        required_monthly_growth = round(gap / months_remaining, 2)
+        if current > 0:
+            required_growth_pct_per_month = round(gap / months_remaining / current * 100, 1)
+    raw_starting = target.get("starting_mrr")
+    # An absent starting line is reported as absent. Treating it as $0 would state
+    # growth from a figure the owner never recorded, so no growth is stated at all.
+    starting_mrr = max(0.0, _number(raw_starting)) if raw_starting is not None else None
+    growth = round(current - starting_mrr, 2) if starting_mrr is not None else None
+    growth_pct = (
+        round(growth / starting_mrr * 100, 1)
+        if starting_mrr is not None and starting_mrr > 0 and growth is not None
+        else None
+    )
+    return {
+        **absent,
+        "state": status,
+        "target_mrr": _round_money(target_mrr),
+        "target_month": target_month,
+        "target_month_label": _target_month_label(target_month),
+        "note": str(target.get("note") or ""),
+        "recorded_at": target.get("recorded_at") or target.get("created_at"),
+        "recorded_by": target.get("recorded_by") or target.get("created_by"),
+        "current_mrr": _round_money(current),
+        "starting_mrr": _round_money(starting_mrr) if starting_mrr is not None else None,
+        "starting_recorded_at": target.get("starting_recorded_at"),
+        "growth": growth,
+        "growth_pct": growth_pct,
+        "progress_pct": progress_pct,
+        "gap": gap,
+        "months_remaining": months_remaining,
+        "required_monthly_growth": required_monthly_growth,
+        "required_growth_pct_per_month": required_growth_pct_per_month,
+        "revisions": [
+            {
+                "target_mrr": _round_money(row.get("target_mrr")),
+                "target_month": row.get("target_month"),
+                "note": str(row.get("note") or ""),
+                "starting_mrr": row.get("starting_mrr"),
+                "changed_at": row.get("changed_at"),
+                "changed_by": row.get("changed_by"),
+            }
+            for row in (target.get("revisions") or [])
+            if isinstance(row, dict)
+        ],
+    }
+
+
+def _goal_growth_phrase(goal: dict) -> str | None:
+    """One self-contained clause stating movement since the goal was recorded.
+
+    The growth line exists only because the recorded goal captured a starting run
+    rate. A goal recorded without one states no growth, rather than measuring the
+    run rate against a starting point nobody recorded, and no movement is ever
+    reported as a bare "growth of $0".
+    """
+    growth = goal.get("growth")
+    if growth is None or goal.get("starting_mrr") is None:
+        return None
+    starting = f"the {money_hint(goal.get('starting_mrr'))} run rate recorded with the goal"
+    if growth == 0:
+        return f"no change from {starting}"
+    pct = goal.get("growth_pct")
+    pct_clause = f" ({'+' if growth > 0 else '-'}{abs(pct)}%)" if pct is not None else ""
+    verb = "growth of" if growth > 0 else "a fall of"
+    return f"{verb} {money_hint(abs(growth))}{pct_clause} from {starting}"
+
+
+def build_board_brief(
+    summary: dict,
+    risks: list[dict],
+    profit_killers: list[dict],
+    quality: list[dict],
+    mrr_target: dict | None = None,
+) -> dict:
     critical_count = sum(1 for item in risks if item.get("severity") == "critical")
     headline = (
         f"{critical_count} critical owner decision{'s' if critical_count != 1 else ''} need attention."
@@ -195,6 +648,14 @@ def build_board_brief(summary: dict, risks: list[dict], profit_killers: list[dic
         wins.append(f"Average assessed client health is {summary['average_client_health']}.")
     if summary.get("at_risk_clients", 0) == 0 and summary.get("assessed_clients", 0):
         wins.append("No assessed clients currently fall below the at-risk health threshold.")
+    goal = mrr_target or {}
+    growth_clause = _goal_growth_phrase(goal)
+    if goal.get("state") == "achieved":
+        wins.append(
+            f"The recorded owner goal of {money_hint(goal.get('target_mrr'))} MRR is met "
+            f"({goal.get('progress_pct')}% of target)"
+            + (f", with {growth_clause}." if growth_clause else ".")
+        )
     if not wins:
         wins.append("The briefing is current and every statement links back to retained Nexus evidence.")
 
@@ -211,6 +672,18 @@ def build_board_brief(summary: dict, risks: list[dict], profit_killers: list[dic
     if summary.get("net_cash_30d") is not None:
         direction = "positive" if summary["net_cash_30d"] >= 0 else "negative"
         projections.append(f"Recorded 30-day receivables less open purchase commitments are {direction} ${abs(summary['net_cash_30d']):,.0f}.")
+    if goal.get("state") == "in_progress":
+        by_when = f" by {goal.get('target_month_label')}" if goal.get("target_month_label") else ""
+        projections.append(
+            f"The recorded owner goal is {money_hint(goal.get('target_mrr'))} MRR{by_when}; "
+            f"contract-backed MRR is {goal.get('progress_pct')}% of it"
+            + (f", {growth_clause}." if growth_clause else ".")
+        )
+    elif goal.get("state") == "overdue":
+        projections.append(
+            f"The recorded owner goal of {money_hint(goal.get('target_mrr'))} MRR by "
+            f"{goal.get('target_month_label')} is not met ({goal.get('progress_pct')}% of target)."
+        )
     missing = [item["label"] for item in quality if item.get("state") != "verified"]
     if missing:
         projections.append(f"Forecast confidence is constrained by: {', '.join(missing[:3])}.")
@@ -302,9 +775,10 @@ def build_executive_scenario(
     }
 
 
-async def _load_executive_state(user: dict) -> dict:
+async def _load_executive_state(user: dict, window_days: int = WINDOW_DAYS) -> dict:
+    window_days = normalise_window(window_days)
     now = datetime.now(timezone.utc)
-    threshold = now - timedelta(days=WINDOW_DAYS)
+    threshold = now - timedelta(days=window_days)
     tenant_query = _tenant_query(user)
     clients = await db.clients.find(tenant_query, {"_id": 0}).sort("name", 1).to_list(2000)
     client_ids = [str(client.get("id")) for client in clients if client.get("id")]
@@ -322,6 +796,8 @@ async def _load_executive_state(user: dict) -> dict:
         contract_lines,
         subscriptions,
         snapshots,
+        watchlist_rows,
+        mrr_target_row,
     ) = await asyncio.gather(
         db.contracts.find(_and(client_query, {"status": "active"}), {"_id": 0}).to_list(10000),
         db.invoices.find(_and(client_query, {"is_split_parent": {"$ne": True}}), {"_id": 0}).to_list(20000),
@@ -334,6 +810,17 @@ async def _load_executive_state(user: dict) -> dict:
         db.contract_line_items.find(client_query, {"_id": 0}).to_list(20000),
         db.service_subscriptions.find(client_query, {"_id": 0}).to_list(20000),
         db.executive_board_snapshots.find({"tenant_id": str(user.get("tenant_id") or "nexus-local")}, {"_id": 0}).sort("created_at", -1).to_list(6),
+        db.executive_watchlist.find(
+            {
+                "tenant_id": str(user.get("tenant_id") or "nexus-local"),
+                "user_id": str(user.get("id") or ""),
+            },
+            {"_id": 0},
+        ).sort("created_at", -1).to_list(100),
+        db.executive_mrr_targets.find_one(
+            {"tenant_id": str(user.get("tenant_id") or "nexus-local")},
+            {"_id": 0},
+        ),
     )
 
     # Legacy purchase orders are not always client-linked. Keep only current
@@ -360,6 +847,7 @@ async def _load_executive_state(user: dict) -> dict:
         if client_id and client_mrr.get(client_id, 0) <= 0 and client.get("mrr") is not None:
             client_mrr[client_id] = max(0.0, _number(client.get("mrr")))
     total_mrr = sum(client_mrr.values())
+    mrr_target = build_mrr_target_progress(mrr_target_row, total_mrr, now)
 
     cost_rows = [*contract_lines, *subscriptions, *recent_entries]
     explicit_costs = [cost for row in cost_rows if (cost := _direct_cost(row)) is not None]
@@ -404,7 +892,9 @@ async def _load_executive_state(user: dict) -> dict:
     ]
     recorded_hours = sum(_number(row.get("minutes")) for row in recent_entries) / 60
     billable_hours = sum(_number(row.get("minutes")) for row in recent_entries if row.get("billable")) / 60
-    available_hours = len(technicians) * 160
+    # Availability is modelled across the same window the evidence covers, so a
+    # 90-day view is not divided by a single month of nominal capacity.
+    available_hours = len(technicians) * HOURS_PER_FULL_TIME_MONTH * (window_days / 30)
     capacity_pct = round(recorded_hours / available_hours * 100, 1) if available_hours else None
 
     health_scores = await asyncio.gather(*[_compute_health(client, user) for client in clients]) if clients else []
@@ -420,7 +910,7 @@ async def _load_executive_state(user: dict) -> dict:
     expiring_contracts = []
     for contract in contracts:
         end_at = _parse_datetime(contract.get("end_date"))
-        if end_at and now <= end_at <= now + timedelta(days=90):
+        if end_at and now <= end_at <= now + timedelta(days=RENEWAL_SOON_DAYS):
             expiring_contracts.append(contract)
     overdue_projects = [
         row for row in projects
@@ -432,6 +922,22 @@ async def _load_executive_state(user: dict) -> dict:
     unbilled_entries = [
         row for row in recent_entries
         if row.get("billable") and not (row.get("invoice_id") or row.get("invoiced") or row.get("invoice_number"))
+    ]
+
+    client_names = {str(client.get("id")): (client.get("name") or "Unknown client") for client in clients}
+    concentration = build_revenue_concentration(client_mrr, client_names)
+    renewals = build_renewal_calendar(contracts, clients, now)
+    receivables = build_receivables_aging(live_invoices, now)
+    revenue_trend = build_revenue_trend(invoices, now)
+    watchlist = [
+        {
+            "client_id": str(row.get("client_id") or ""),
+            "client_name": client_names.get(str(row.get("client_id") or ""), "Unknown client"),
+            "note": str(row.get("note") or ""),
+            "created_at": row.get("created_at"),
+        }
+        for row in watchlist_rows
+        if str(row.get("client_id") or "") in client_names
     ]
 
     risks = []
@@ -456,11 +962,32 @@ async def _load_executive_state(user: dict) -> dict:
             "route": "/client-insights?tab=client-health",
             "source": "Client Health",
         })
+    if concentration["level"] == "dependency":
+        top = concentration["top_client"] or {}
+        risks.append({
+            "id": "revenue-concentration",
+            "severity": "high",
+            "title": f"{top.get('share_pct')}% of contract MRR sits with one client ({top.get('name')})",
+            "detail": concentration["detail"],
+            "decision": "Agree a diversification or retention plan for the largest account.",
+            "route": f"/clients?client={top.get('client_id')}" if top.get("client_id") else "/clients",
+            "source": "Contract register",
+        })
+    if receivables["oldest_overdue_days"] and receivables["oldest_overdue_days"] > 90:
+        risks.append({
+            "id": "aged-receivables",
+            "severity": "high",
+            "title": f"Oldest overdue invoice is {receivables['oldest_overdue_days']} days past its due date",
+            "detail": f"${receivables['overdue_total']:,.0f} is overdue in total across {sum(1 for bucket in receivables['buckets'] if bucket['overdue'] and bucket['count'])} ageing bucket(s).",
+            "decision": "Decide write-off, payment plan, or escalation for debt older than 90 days.",
+            "route": "/invoices",
+            "source": "Invoice ledger",
+        })
     if expiring_contracts:
         risks.append({
             "id": "contract-renewals",
             "severity": "high",
-            "title": f"{len(expiring_contracts)} active contract(s) expire within 90 days",
+            "title": f"{len(expiring_contracts)} active contract(s) expire within {RENEWAL_SOON_DAYS} days",
             "detail": "Renewal dates are taken from active contract records.",
             "decision": "Confirm renewal ownership, pricing review, and client meeting dates.",
             "route": "/contracts",
@@ -496,6 +1023,24 @@ async def _load_executive_state(user: dict) -> dict:
             "decision": "Review the oldest or highest-value approval first.",
             "route": "/team-hub?tab=command&view=approvals",
             "source": "Approval ledger",
+        })
+    if mrr_target["state"] == "overdue":
+        # The owner's own recorded goal has lapsed. Nexus reports it as an
+        # evidenced miss rather than quietly dropping the goal from the view.
+        risks.append({
+            "id": "mrr-target-missed",
+            "severity": "high",
+            "title": (
+                f"The recorded MRR goal of {money_hint(mrr_target['target_mrr'])} by "
+                f"{mrr_target['target_month_label']} was not met"
+            ),
+            "detail": (
+                f"Contract-backed MRR is {money_hint(total_mrr)}, "
+                f"{mrr_target['progress_pct']}% of the goal the owner recorded."
+            ),
+            "decision": "Replan the goal, the sales motion, or the price book — the recorded target is now historical.",
+            "route": "/executive",
+            "source": "Owner goal",
         })
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     risks.sort(key=lambda item: severity_order.get(item["severity"], 9))
@@ -535,6 +1080,13 @@ async def _load_executive_state(user: dict) -> dict:
         "at_risk_clients": len(at_risk),
         "at_risk_mrr": _round_money(at_risk_mrr),
         "staff_capacity_pct": capacity_pct,
+        "top_client_name": (concentration["top_client"] or {}).get("name"),
+        "top_client_share_pct": (concentration["top_client"] or {}).get("share_pct"),
+        "top_three_share_pct": concentration["top_three_share_pct"],
+        "oldest_overdue_days": receivables["oldest_overdue_days"],
+        "renewals_next_90d": sum(1 for row in renewals["rows"] if row["days_until"] <= RENEWAL_SOON_DAYS),
+        "renewal_value_180d": renewals["total_value"],
+        "watchlist_count": len(watchlist),
         "risk_count": len(risks),
         "critical_risk_count": sum(1 for item in risks if item["severity"] == "critical"),
     }
@@ -561,7 +1113,10 @@ async def _load_executive_state(user: dict) -> dict:
             "id": "capacity",
             "label": "Team capacity",
             "state": "verified" if recent_entries and technicians else "partial" if technicians else "missing",
-            "detail": "Aggregate recorded hours versus 160 hours per active service-team member; not presence or productivity surveillance.",
+            "detail": (
+                f"Aggregate recorded hours versus {int(HOURS_PER_FULL_TIME_MONTH * (window_days / 30))} hours "
+                "per active service-team member across the selected period; not presence or productivity surveillance."
+            ),
         },
         {
             "id": "cash",
@@ -569,11 +1124,51 @@ async def _load_executive_state(user: dict) -> dict:
             "state": "verified" if live_invoices or open_pos else "missing",
             "detail": "Open receivables due within 30 days less current open purchase commitments; bank balance and tax are excluded.",
         },
+        {
+            "id": "concentration",
+            "label": "Revenue concentration",
+            "state": concentration["state"],
+            "detail": concentration["detail"],
+        },
+        {
+            "id": "mrr_target",
+            "label": "Recorded revenue goal",
+            "state": "verified" if mrr_target["state"] != "not_recorded" else "missing",
+            "detail": (
+                (
+                    f"Goal of {money_hint(mrr_target['target_mrr'])} MRR"
+                    + (f" by {mrr_target['target_month_label']}" if mrr_target["target_month_label"] else " with no target month")
+                    + f"; progress is measured against the {money_hint(total_mrr)} contract-backed MRR reported above."
+                    + (
+                        f" The starting run rate recorded with the goal was {money_hint(mrr_target['starting_mrr'])}."
+                        if mrr_target.get("starting_mrr") is not None
+                        else " No starting run rate was recorded with the goal, so growth since it was set cannot be stated."
+                    )
+                )
+                if mrr_target["state"] != "not_recorded"
+                else "No owner revenue goal is recorded, so progress cannot be measured against one."
+            ),
+        },
+        {
+            "id": "renewals",
+            "label": "Renewal calendar",
+            "state": renewals["state"],
+            "detail": (
+                f"{len(renewals['rows'])} renewal(s) inside {RENEWAL_WINDOW_DAYS} days"
+                + (f" worth {money_hint(renewals['total_value'])} monthly." if renewals["rows"] else "; no contract records an end date in that window.")
+            ),
+        },
     ]
-    board_brief = build_board_brief(summary, risks, profit_killers, quality)
+    board_brief = build_board_brief(summary, risks, profit_killers, quality, mrr_target)
     return {
         "generated_at": _now(),
-        "period": {"days": WINDOW_DAYS, "label": "Trailing 30 days"},
+        "period": {
+            "days": window_days,
+            "label": WINDOW_LABELS[window_days],
+            "options": [
+                {"days": days, "label": WINDOW_LABELS[days]} for days in WINDOW_OPTIONS
+            ],
+        },
         "summary": summary,
         "financial": {
             "contract_mrr": _round_money(total_mrr),
@@ -597,9 +1192,10 @@ async def _load_executive_state(user: dict) -> dict:
         },
         "team": {
             "active_service_team": len(technicians),
-            "recorded_hours_30d": round(recorded_hours, 1),
-            "billable_hours_30d": round(billable_hours, 1),
-            "available_hours_model": available_hours,
+            "window_days": window_days,
+            "recorded_hours": round(recorded_hours, 1),
+            "billable_hours": round(billable_hours, 1),
+            "available_hours_model": round(available_hours, 1),
             "capacity_pct": capacity_pct,
             "method": "Aggregate time evidence only. CEO Mode does not expose individual movement, breaks, or presence.",
         },
@@ -608,6 +1204,12 @@ async def _load_executive_state(user: dict) -> dict:
         "portfolio": portfolio[:15],
         "board_brief": board_brief,
         "data_quality": quality,
+        "receivables": receivables,
+        "concentration": concentration,
+        "renewals": renewals,
+        "revenue_trend": revenue_trend,
+        "watchlist": watchlist,
+        "mrr_target": mrr_target,
         "recent_board_snapshots": snapshots,
         "model_context": {
             "client_mrr": {key: _round_money(value) for key, value in client_mrr.items()},
@@ -619,10 +1221,341 @@ async def _load_executive_state(user: dict) -> dict:
 @router.get("/executive/overview")
 async def executive_overview(
     request: Request,
+    window: int | None = None,
     current_user: dict = Depends(require_action("executive.intelligence.view")),
 ):
     await assert_global_scope(current_user, operation="executive.intelligence.view", request=request)
-    return await _load_executive_state(current_user)
+    return await _load_executive_state(current_user, normalise_window(window))
+
+
+async def _watchlist_entry(current_user: dict, client_id: str) -> dict | None:
+    return await db.executive_watchlist.find_one(
+        {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "user_id": str(current_user.get("id") or ""),
+            "client_id": client_id,
+        },
+        {"_id": 0},
+    )
+
+
+@router.get("/executive/watchlist")
+async def list_executive_watchlist(
+    request: Request,
+    current_user: dict = Depends(require_action("executive.intelligence.view")),
+):
+    """The clients this owner has personally flagged, within their tenant only."""
+    await assert_global_scope(current_user, operation="executive.intelligence.view", request=request)
+    rows = await db.executive_watchlist.find(
+        {
+            "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+            "user_id": str(current_user.get("id") or ""),
+        },
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(100)
+    tenant_query = _tenant_query(current_user)
+    client_ids = {str(row.get("client_id") or "") for row in rows}
+    names: dict[str, str] = {}
+    if client_ids:
+        clients = await db.clients.find(
+            _and(tenant_query, {"id": {"$in": sorted(client_ids)}}),
+            {"_id": 0, "id": 1, "name": 1},
+        ).to_list(len(client_ids))
+        names = {str(client.get("id")): (client.get("name") or "Unknown client") for client in clients}
+    return {
+        "watchlist": [
+            {
+                "client_id": str(row.get("client_id") or ""),
+                "client_name": names.get(str(row.get("client_id") or "")),
+                "note": str(row.get("note") or ""),
+                "created_at": row.get("created_at"),
+            }
+            for row in rows
+            if str(row.get("client_id") or "") in names
+        ],
+        "method": "A personal owner watchlist. It grants no access and changes no client record.",
+    }
+
+
+@router.post("/executive/watchlist")
+async def add_executive_watchlist_entry(
+    payload: dict,
+    request: Request,
+    current_user: dict = Depends(require_action("executive.watchlist.manage")),
+):
+    """Flag a client for owner attention. Idempotent per tenant, user and client."""
+    await assert_global_scope(current_user, operation="executive.watchlist.manage", request=request)
+    client_id = str((payload or {}).get("client_id") or "").strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="A client is required")
+    note = str((payload or {}).get("note") or "").strip()[:280]
+    client = await db.clients.find_one(_and(_tenant_query(current_user), {"id": client_id}), {"_id": 0, "id": 1, "name": 1})
+    if not client:
+        # A client the caller cannot see inside their own tenant never becomes a watchlist row.
+        raise HTTPException(status_code=404, detail="Client not found in this tenant")
+    existing = await _watchlist_entry(current_user, client_id)
+    if existing:
+        if existing.get("note", "") == note:
+            return {"created": False, "watchlist": {
+                "client_id": client_id,
+                "client_name": client.get("name"),
+                "note": existing.get("note", ""),
+                "created_at": existing.get("created_at"),
+            }}
+        await db.executive_watchlist.update_one(
+            {"id": existing.get("id")},
+            {"$set": {"note": note, "updated_at": _now()}},
+        )
+        existing["note"] = note
+        return {"created": False, "watchlist": {
+            "client_id": client_id,
+            "client_name": client.get("name"),
+            "note": note,
+            "created_at": existing.get("created_at"),
+        }}
+    record = {
+        "id": str(uuid.uuid4()),
+        "tenant_id": str(current_user.get("tenant_id") or "nexus-local"),
+        "user_id": str(current_user.get("id") or ""),
+        "client_id": client_id,
+        "note": note,
+        "created_at": _now(),
+        "created_by": _actor(current_user),
+        "correlation_id": request_correlation_id(request),
+    }
+    await db.executive_watchlist.insert_one(record.copy())
+    await emit_platform_event(
+        subject="executive.watchlist.changed",
+        source="nexus.executive",
+        payload={"client_id": client_id, "action": "added"},
+        actor=current_user,
+        correlation_id=record["correlation_id"],
+        idempotency_key=f"executive-watchlist:{record['id']}",
+    )
+    return {"created": True, "watchlist": {
+        "client_id": client_id,
+        "client_name": client.get("name"),
+        "note": note,
+        "created_at": record["created_at"],
+    }}
+
+
+@router.delete("/executive/watchlist/{client_id}")
+async def remove_executive_watchlist_entry(
+    client_id: str,
+    request: Request,
+    current_user: dict = Depends(require_action("executive.watchlist.manage")),
+):
+    """Remove the caller's own watchlist entry. Another owner's entry is untouched."""
+    await assert_global_scope(current_user, operation="executive.watchlist.manage", request=request)
+    existing = await _watchlist_entry(current_user, client_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Not on the watchlist")
+    await db.executive_watchlist.delete_one({"id": existing.get("id")})
+    await emit_platform_event(
+        subject="executive.watchlist.changed",
+        source="nexus.executive",
+        payload={"client_id": client_id, "action": "removed"},
+        actor=current_user,
+        correlation_id=request_correlation_id(request),
+        idempotency_key=f"executive-watchlist-remove:{existing.get('id')}",
+    )
+    return {"removed": True, "client_id": client_id}
+
+
+async def _mrr_target_document(current_user: dict) -> dict | None:
+    """The tenant's one authoritative recorded goal, if one has been recorded."""
+    return await db.executive_mrr_targets.find_one(
+        {"tenant_id": str(current_user.get("tenant_id") or "nexus-local")},
+        {"_id": 0},
+    )
+
+
+@router.get("/executive/mrr-target")
+async def read_mrr_target(
+    request: Request,
+    current_user: dict = Depends(require_action("executive.intelligence.view")),
+):
+    """The recorded recurring-revenue goal, its progress, and its revision history.
+
+    Progress is computed from the same loader the briefing uses, so the goal can
+    never be measured against a different MRR figure than the cockpit reports.
+    """
+    await assert_global_scope(current_user, operation="executive.intelligence.view", request=request)
+    state = await _load_executive_state(current_user)
+    return {"mrr_target": state["mrr_target"]}
+
+
+@router.put("/executive/mrr-target")
+async def record_mrr_target(
+    payload: dict,
+    request: Request,
+    current_user: dict = Depends(require_action("executive.mrr_target.manage")),
+):
+    """Record or revise the tenant's owner-stated MRR goal.
+
+    Tenant-scoped: one goal per tenant, and the trailing value is retained so a
+    revised goal never erases the one it replaced. Recording a goal also captures
+    the contract-backed run rate at that moment as its starting line, so progress
+    can be stated as growth since the goal was recorded.
+    """
+    await assert_global_scope(current_user, operation="executive.mrr_target.manage", request=request)
+    try:
+        goal = normalise_mrr_target(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    tenant_id = str(current_user.get("tenant_id") or "nexus-local")
+    actor = _actor(current_user)
+    existing = await _mrr_target_document(current_user)
+    if existing and all(existing.get(field) == goal[field] for field in ("target_mrr", "target_month", "note")):
+        # Re-recording the same goal is a no-op: no new revision, no second audit event.
+        state = await _load_executive_state(current_user)
+        return {"created": False, "mrr_target": state["mrr_target"]}
+
+    timestamp = _now()
+    if existing and existing.get("target_mrr") is not None:
+        # A revision keeps the run rate the goal was recorded against, so changing
+        # the target can never quietly reset the growth the owner has achieved.
+        starting = {
+            "starting_mrr": existing.get("starting_mrr"),
+            "starting_recorded_at": existing.get("starting_recorded_at"),
+            "starting_evidence_state": existing.get("starting_evidence_state"),
+        }
+    else:
+        # A first recording (or a re-recording after a clear) captures a fresh
+        # starting line from the same contract-backed MRR the cockpit reports.
+        baseline_state = await _load_executive_state(current_user)
+        revenue_state = _quality_state(baseline_state, "revenue")
+        has_evidence = revenue_state == "verified"
+        starting = {
+            "starting_mrr": _round_money(baseline_state["summary"].get("mrr")) if has_evidence else None,
+            "starting_recorded_at": timestamp if has_evidence else None,
+            "starting_evidence_state": revenue_state,
+        }
+    # History is monotonic: a goal recorded after a clear still retains every goal
+    # that came before it, so clearing is never a way to erase a target.
+    revisions = [row for row in (existing.get("revisions") if existing else []) or [] if isinstance(row, dict)]
+    if existing and existing.get("target_mrr") is not None:
+        revisions.insert(0, {
+            "target_mrr": _round_money(existing.get("target_mrr")),
+            "target_month": existing.get("target_month"),
+            "note": str(existing.get("note") or ""),
+            "starting_mrr": existing.get("starting_mrr"),
+            "changed_at": timestamp,
+            "changed_by": actor,
+        })
+    revisions = revisions[:MRR_TARGET_REVISION_LIMIT]
+    if existing:
+        await db.executive_mrr_targets.update_one(
+            {"id": existing.get("id")},
+            {"$set": {
+                **goal,
+                **starting,
+                "revisions": revisions,
+                "updated_at": timestamp,
+                "updated_by": actor,
+                "cleared_at": None,
+                "cleared_by": None,
+            }},
+        )
+        target_id = existing.get("id")
+        created = False
+    else:
+        target_id = str(uuid.uuid4())
+        created = True
+        await db.executive_mrr_targets.insert_one({
+            "id": target_id,
+            "tenant_id": tenant_id,
+            **goal,
+            **starting,
+            "revisions": revisions,
+            "created_at": timestamp,
+            "created_by": actor,
+            "updated_at": timestamp,
+            "updated_by": actor,
+            "correlation_id": request_correlation_id(request),
+        })
+
+    await emit_platform_event(
+        subject="executive.mrr_target.changed",
+        source="nexus.executive",
+        payload={
+            "target_id": target_id,
+            "action": "recorded" if created else "revised",
+            "target_mrr": goal["target_mrr"],
+            "target_month": goal["target_month"],
+            "starting_mrr": starting["starting_mrr"],
+            "previous_target_mrr": _round_money(existing.get("target_mrr")) if existing and existing.get("target_mrr") is not None else None,
+        },
+        actor=current_user,
+        correlation_id=request_correlation_id(request),
+        idempotency_key=f"executive-mrr-target:{target_id}:{timestamp}",
+    )
+    state = await _load_executive_state(current_user)
+    return {"created": created, "mrr_target": state["mrr_target"]}
+
+
+@router.delete("/executive/mrr-target")
+async def clear_mrr_target(
+    request: Request,
+    current_user: dict = Depends(require_action("executive.mrr_target.manage")),
+):
+    """Clear the recorded goal. The cleared value is retained as its last revision."""
+    await assert_global_scope(current_user, operation="executive.mrr_target.manage", request=request)
+    existing = await _mrr_target_document(current_user)
+    if not existing or existing.get("target_mrr") is None:
+        raise HTTPException(status_code=404, detail="No revenue goal is recorded")
+    timestamp = _now()
+    actor = _actor(current_user)
+    revisions = [
+        {
+            "target_mrr": _round_money(existing.get("target_mrr")),
+            "target_month": existing.get("target_month"),
+            "note": str(existing.get("note") or ""),
+            "starting_mrr": existing.get("starting_mrr"),
+            "changed_at": timestamp,
+            "changed_by": actor,
+        },
+        *list(existing.get("revisions") or []),
+    ][:MRR_TARGET_REVISION_LIMIT]
+    await db.executive_mrr_targets.update_one(
+        {"id": existing.get("id")},
+        {"$set": {
+            "target_mrr": None,
+            "target_month": None,
+            "note": "",
+            # Clearing removes the starting line with the goal it measured. The
+            # value that had been recorded survives in the retained revision.
+            "starting_mrr": None,
+            "starting_recorded_at": None,
+            "starting_evidence_state": None,
+            "revisions": revisions,
+            "cleared_at": timestamp,
+            "cleared_by": actor,
+            "updated_at": timestamp,
+            "updated_by": actor,
+        }},
+    )
+    await emit_platform_event(
+        subject="executive.mrr_target.changed",
+        source="nexus.executive",
+        payload={
+            "target_id": existing.get("id"),
+            "action": "cleared",
+            "previous_target_mrr": _round_money(existing.get("target_mrr")),
+            "previous_starting_mrr": existing.get("starting_mrr"),
+        },
+        actor=current_user,
+        correlation_id=request_correlation_id(request),
+        idempotency_key=f"executive-mrr-target-clear:{existing.get('id')}:{timestamp}",
+    )
+    state = await _load_executive_state(current_user)
+    return {
+        "cleared": True,
+        "removed_target_mrr": _round_money(existing.get("target_mrr")),
+        "mrr_target": state["mrr_target"],
+    }
 
 
 @router.post("/executive/scenarios")
@@ -636,7 +1569,7 @@ async def simulate_executive_scenario(
         scenario = normalise_scenario(payload)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    state = await _load_executive_state(current_user)
+    state = await _load_executive_state(current_user, normalise_window((payload or {}).get("window")))
     result = build_executive_scenario(
         state["summary"],
         state["model_context"]["client_mrr"],

@@ -658,6 +658,28 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "legacy": ("financial_reports", "create"),
     },
     {
+        "id": "executive.watchlist.manage",
+        "category": "Executive",
+        "label": "Manage the owner watchlist",
+        "description": "Flag or unflag a tenant client for owner attention. It grants no access and changes no client record.",
+        "impact": "low",
+        "approval_required": False,
+        "legacy": ("financial_reports", "view"),
+    },
+    {
+        "id": "executive.mrr_target.manage",
+        "category": "Executive",
+        "label": "Record the recurring-revenue goal",
+        "description": (
+            "Record, revise, or clear the tenant's owner-stated MRR goal that CEO Mode measures progress against. "
+            "Recording it also captures the current contract-backed run rate as the goal's starting line, which is "
+            "a recorded snapshot of the same reported figure and never a second source of revenue truth."
+        ),
+        "impact": "medium",
+        "approval_required": False,
+        "legacy": ("financial_reports", "create"),
+    },
+    {
         "id": "voice.pbx.modify",
         "category": "Voice",
         "label": "Modify PBX connection",
@@ -981,6 +1003,18 @@ ACTION_PERMISSIONS: tuple[dict[str, Any], ...] = (
         "approval_required": True,
         "legacy": ("devices", "delete"),
     },
+    {
+        "id": "virtualization.vm.control",
+        "category": "Infrastructure",
+        "label": "Control virtual machine power state",
+        "description": (
+            "Start, stop, reboot, suspend or reset a managed virtual machine through its "
+            "provider adapter. Destructive power actions still require independent approval."
+        ),
+        "impact": "high",
+        "approval_required": True,
+        "legacy": ("settings", "edit"),
+    },
 )
 
 ACTION_PERMISSION_BY_ID = {item["id"]: item for item in ACTION_PERMISSIONS}
@@ -1036,6 +1070,8 @@ SERVICE_DESK_MANAGER_DEFAULTS = frozenset(
         "executive.intelligence.view",
         "executive.scenario.simulate",
         "executive.board.snapshot",
+        "executive.watchlist.manage",
+        "executive.mrr_target.manage",
     }
 )
 

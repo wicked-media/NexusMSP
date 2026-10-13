@@ -6,6 +6,7 @@ import {
   ShieldCheck, Radar, Workflow, TrendingUp, ShieldAlert, GitBranch,
   MessageSquare, HardDrive, Layers, BrainCircuit,
   Siren, Sparkles, Bookmark, Briefcase, Boxes, ArrowRightLeft, DatabaseBackup, Database, Activity,
+  LayoutGrid,
 } from "lucide-react";
 
 export const navGroups = [
@@ -322,6 +323,28 @@ export const navGroups = [
     ]
   },
   {
+    // The Studio fleet is its own navigation section rather than one more
+    // Platform entry: every admitted studio opens on its own operating surface
+    // (docs/NEXUS_STUDIO_FLEET.md). A studio whose capability is only proposed
+    // stays on the fleet hub, which reports its admission gate honestly instead
+    // of presenting a plan as a delivered workspace.
+    id: "msp_studios",
+    title: "MSP Studios",
+    items: [
+      { path: "/studios", icon: LayoutGrid, label: "Studio fleet" },
+      { path: "/proxmox", icon: Server, label: "Proxmox Studio" },
+      { path: "/fleet-baseline?platform=windows", icon: Monitor, label: "Windows Studio" },
+      { path: "/fleet-baseline?view=recurrence", icon: Activity, label: "Endpoint Performance Studio" },
+      // The foundations, each at its own operating surface
+      // (docs/NEXUS_FOUNDATIONS_BATCH_4.md).
+      { path: "/customer-environment", icon: Users, label: "Customer Environment Studio" },
+      { path: "/operations-assurance", icon: ShieldCheck, label: "Operations Assurance Studio" },
+      { path: "/extension-studio", icon: Boxes, label: "Extension Studio" },
+      { path: "/studios/web", icon: LayoutGrid, label: "Web Studio" },
+      { path: "/studios/m365", icon: LayoutGrid, label: "M365 Studio" },
+    ],
+  },
+  {
     id: "platform",
     title: "Platform",
     items: [
@@ -405,6 +428,7 @@ export const MODULE_GROUPS = [
   { id: "security", label: "Security", description: "SOC, endpoint, compliance, DR" },
   { id: "intelligence", label: "AI & Intelligence", description: "AI copilot, predictions, knowledge base" },
   { id: "reports", label: "Reports & Comms", description: "Reports, email, comms" },
+  { id: "msp_studios", label: "MSP Studios", description: "Specialist studios over canonical Nexus objects" },
   { id: "platform", label: "Platform", description: "Settings, integrations, system health" },
   { id: "help", label: "Help", description: "Knowledge base, technician documentation, guides, and planning" },
 ];

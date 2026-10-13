@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -102,14 +103,13 @@ export default function ScriptLibraryPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6">
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200">Automation</p>
-        <h1 className="mt-1 text-2xl font-semibold text-foreground">Nexus Script Library</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          The curated, reviewed script collection — PowerShell, Bash and Batch, each with declared parameters,
-          execution profile and safety posture. Install any script into the scripting workspace with one click.
-        </p>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Automation"
+        title="Nexus Script Library"
+        description="The curated, reviewed script collection — PowerShell, Bash and Batch, each with declared parameters, execution profile and safety posture. Install any script into the scripting workspace with one click."
+        icon={Terminal}
+        tone="cyan"
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">

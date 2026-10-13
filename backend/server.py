@@ -442,6 +442,7 @@ def background_worker_specs():
         ("event-delivery", _event_delivery_loop),
         ("event-retention", _event_retention_loop),
         ("automation-runtime", _automation_runtime_loop),
+        ("proxmox-inventory", _proxmox_inventory_reconcile_loop),
         ("maintenance-windows", maintenance_window_scheduler),
     )
 
@@ -855,6 +856,47 @@ async def _automation_runtime_loop():
         except Exception as e:
             logger.error(f"Automation runtime worker failed: {e}")
             await asyncio.sleep(10)
+
+
+async def _proxmox_inventory_reconcile_loop():
+    """Keep the Proxmox guest inventory current without an operator pressing sync.
+
+    The reconciliation policy lives in ``app.services.proxmox_inventory``; this
+    loop owns only the cadence, so the scheduled and operator-triggered paths
+    can never reconcile the projection by two different rules. A pass isolates
+    every failure — one customer's unreachable cluster is counted and disclosed
+    and never stops another tenant's reconciliation — and returns the cadence to
+    follow, so an operator's interval change applies after the current sleep.
+    """
+    import asyncio
+    from app.services.proxmox_inventory import (
+        MIN_INTERVAL_MINUTES,
+        reconcile_configured_connections,
+    )
+
+    # Let boot reconciliation settle before the first customer provider call.
+    await asyncio.sleep(90)
+    while True:
+        interval_minutes = MIN_INTERVAL_MINUTES
+        try:
+            summary = await reconcile_configured_connections()
+            interval_minutes = max(
+                MIN_INTERVAL_MINUTES, int(summary.get("interval_minutes") or MIN_INTERVAL_MINUTES)
+            )
+            if not summary.get("enabled"):
+                logger.debug("Proxmox inventory reconciliation is disabled in settings")
+            elif summary.get("configured"):
+                logger.info(
+                    "Proxmox inventory reconciliation: %s of %s configured connection(s) "
+                    "observed, %s guest(s) in the projection, %s failed, %s skipped",
+                    summary["observed"], summary["configured"], summary["guests"],
+                    summary["failed"], summary["unconfigured"],
+                )
+        except Exception as e:
+            logger.error(f"Proxmox inventory reconciliation worker failed: {e}")
+            await asyncio.sleep(600)
+            continue
+        await asyncio.sleep(interval_minutes * 60)
 
 
 async def _trmm_scheduled_broadcast_loop():

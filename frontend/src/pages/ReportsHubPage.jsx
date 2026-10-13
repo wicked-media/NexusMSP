@@ -20,6 +20,16 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { ResponsiveContainer, Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  documentValueText,
+  distributionRows,
+  formatCount,
+  isMoneyField,
+  isNumericValue,
+  labelFor,
+  looksLikeDistribution,
+  recordColumns,
+} from "@/lib/documentValueFormat";
 
 const TABS = ["overview", "operations", "security", "governance", "commercial", "clients", "postmortems", "delivery"];
 const LEGACY_TAB_MAP = { operational: "operations", executive: "overview", client: "clients", financial: "commercial", roi: "clients", postmortem: "postmortems" };
@@ -256,23 +266,118 @@ export default function ReportsHubPage() {
   </div>;
 }
 
+/** The document's numbered section bar, so a review can cite "section 03". */
+function SectionBar({ index, title }) {
+  return <div className="flex items-center gap-3 border-l-[3px] border-primary bg-[#0B172A] px-4 py-2.5"><span className="text-[11px] font-semibold tabular-nums text-sky-200">{String(index).padStart(2, "0")}</span><h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white">{labelFor(title)}</h3></div>;
+}
+
+function SubHeading({ title }) {
+  return <p className="border-b border-border/70 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">{labelFor(title)}</p>;
+}
+
+/** Share of total, drawn so a breakdown reads as ranked evidence. */
+function ShareBar({ share }) {
+  const width = Math.max(2, Math.min(100, Number(share) || 0));
+  return <span className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted"><span className="h-full rounded-full bg-primary" style={{ width: `${width}%` }} /></span>;
+}
+
+function DistributionTable({ values }) {
+  const { rows, total } = distributionRows(values);
+  if (!rows.length) return <EmptyState>No recorded distribution was included in this section.</EmptyState>;
+  return <div className="overflow-hidden rounded-xl border border-border/70"><Table>
+    <TableHeader><TableRow><TableHead>Category</TableHead><TableHead className="text-right">Count</TableHead><TableHead className="w-[38%]">Share of total</TableHead><TableHead className="text-right">%</TableHead></TableRow></TableHeader>
+    <TableBody>
+      {rows.map((row) => <TableRow key={row.key}>
+        <TableCell className="font-medium">{row.label}</TableCell>
+        <TableCell className="text-right tabular-nums">{formatCount(row.value)}</TableCell>
+        <TableCell><ShareBar share={row.share} /></TableCell>
+        <TableCell className="text-right tabular-nums text-muted-foreground">{row.share.toFixed(1)}%</TableCell>
+      </TableRow>)}
+      <TableRow className="bg-muted/40">
+        <TableCell className="font-semibold">Total</TableCell>
+        <TableCell className="text-right font-semibold tabular-nums">{formatCount(total)}</TableCell>
+        <TableCell />
+        <TableCell className="text-right font-semibold tabular-nums">{total ? "100.0%" : "—"}</TableCell>
+      </TableRow>
+    </TableBody>
+  </Table></div>;
+}
+
+function ValueTable({ values }) {
+  const entries = Object.entries(values || {});
+  if (!entries.length) return <EmptyState>No recorded evidence was included in this section.</EmptyState>;
+  return <div className="overflow-hidden rounded-xl border border-border/70"><Table>
+    <TableHeader><TableRow><TableHead>Measure</TableHead><TableHead className="text-right">Recorded evidence</TableHead></TableRow></TableHeader>
+    <TableBody>{entries.map(([key, value]) => <TableRow key={key}>
+      <TableCell className="font-medium">{labelFor(key)}</TableCell>
+      <TableCell className={`text-right ${isNumericValue(value) ? "tabular-nums" : ""} ${isMoneyField(key) && isNumericValue(value) ? "font-medium" : ""}`}>{documentValueText(key, value)}</TableCell>
+    </TableRow>)}</TableBody>
+  </Table></div>;
+}
+
+function RecordsTable({ rows }) {
+  const columns = recordColumns(rows);
+  if (!columns.length) return <EmptyState>No retained entries were included in this section.</EmptyState>;
+  const numericColumns = columns.filter((key) => rows.every((row) => {
+    const value = row?.[key];
+    return value == null || value === "" || isNumericValue(value);
+  }));
+  return <div className="overflow-hidden rounded-xl border border-border/70"><Table>
+    <TableHeader><TableRow>{columns.map((key) => <TableHead key={key} className={numericColumns.includes(key) ? "text-right" : ""}>{labelFor(key)}</TableHead>)}</TableRow></TableHeader>
+    <TableBody>{rows.map((row, index) => <TableRow key={row?.id || row?.invoice_id || index}>
+      {columns.map((key) => <TableCell key={key} className={numericColumns.includes(key) ? "text-right tabular-nums" : ""}>{documentValueText(key, row?.[key])}</TableCell>)}
+    </TableRow>)}</TableBody>
+  </Table></div>;
+}
+
+/** One evidence section, rendered in the document's own visual language. */
+function SectionBody({ sectionKey, values }) {
+  if (Array.isArray(values)) return <RecordsTable rows={values} />;
+  if (values && typeof values === "object") {
+    const isNestedObject = (item) => Boolean(item) && typeof item === "object" && !Array.isArray(item);
+    const scalars = Object.fromEntries(Object.entries(values).filter(([, item]) => !isNestedObject(item)));
+    const nested = Object.entries(values).filter(([, item]) => isNestedObject(item));
+    return <div className="space-y-4">
+      {Object.keys(scalars).length ? <ValueTable values={scalars} /> : null}
+      {nested.map(([key, item]) => <div key={key} className="space-y-2">
+        <SubHeading title={key} />
+        {looksLikeDistribution(key, item) ? <DistributionTable values={item} /> : <ValueTable values={item} />}
+      </div>)}
+    </div>;
+  }
+  return <div className="rounded-xl border border-border/70 bg-muted/15 px-4 py-3 text-sm leading-6 text-muted-foreground">{documentValueText(sectionKey, values)}</div>;
+}
+
 function ReportPreview({ report, onDownload }) {
   const output = report.output || {};
   const history = report.history || {};
   const summary = output.sections?.summary || {};
+  const scope = output.scope || {};
   const isAgingReport = (history.report_type || output.report_type) === "accounts_receivable_aging";
   const agingEvidence = output.sections?.accounts_receivable_aging || {};
   const agingBuckets = Object.entries(agingEvidence.buckets || {});
   const agingInvoices = output.sections?.outstanding_invoices || [];
   const title = history.name || output.schedule_name || "Generated report";
+  const scopedClientIds = output.client_ids || scope.client_ids || [];
+  const clientScopeLabel = scopedClientIds.length ? `${scopedClientIds.length} client${scopedClientIds.length === 1 ? "" : "s"} in scope` : "All permitted clients";
+  const devicesTotal = summary.devices_total ?? 0;
+  const devicesOnline = summary.devices_online ?? 0;
   const metrics = [
-    ["Managed devices", summary.devices_total ?? 0], ["Devices online", summary.devices_online ?? 0],
-    ["Open tickets", summary.tickets_open ?? 0], ["Active alerts", summary.active_alerts ?? 0],
+    ["Managed devices", devicesTotal, clientScopeLabel],
+    ["Devices online", devicesOnline, devicesTotal ? `${Math.round((devicesOnline / devicesTotal) * 100)}% of the recorded estate` : "No estate evidence recorded"],
+    ["Open tickets", summary.tickets_open ?? 0, `of ${summary.tickets_total ?? 0} recorded`],
+    ["Active alerts", summary.active_alerts ?? 0, "Recorded at generation"],
   ];
-  const renderValue = (value) => {
-    if (value == null) return "Not available";
-    if (typeof value === "object") return Object.entries(value).map(([key, item]) => `${key.replace(/_/g, " ")}: ${typeof item === "object" ? JSON.stringify(item) : item}`).join(" • ") || "No evidence recorded";
-    return String(value);
-  };
-  return <article className="overflow-hidden bg-card"><DialogHeader className="border-b border-border/60 bg-gradient-to-r from-primary/10 via-card to-card px-6 py-5 text-left"><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">NexusMSP reporting & evidence</p><DialogTitle className="mt-1 text-2xl tracking-tight">{title}</DialogTitle><DialogDescription id="report-preview-description" className="mt-2 text-sm">Managed service evidence and operational assurance <span className="px-1">•</span> Generated {date(output.generated_at)} by {output.generated_by || "System"}</DialogDescription><div className="mt-4 flex flex-wrap gap-2"><Badge variant="outline" className="capitalize">{String(history.report_type || output.report_type || "standard").replace(/_/g, " ")}</Badge><Badge variant="outline">Retained evidence snapshot</Badge><Button size="sm" className="ml-auto" onClick={onDownload}><Download className="mr-1.5 h-3.5 w-3.5" />Download PDF</Button></div></DialogHeader><div className="space-y-6 p-6"><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{metrics.map(([label, value], index) => <HeroTile key={label} label={label} value={value} animated={typeof value === "number"} icon={[MonitorCog, CheckCircle2, Activity, BellRing][index]} glow={["sky", "emerald", "amber", "rose"][index]} />)}</div>{isAgingReport && <section className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-300">Receivables evidence</p><h3 className="mt-1 text-base font-semibold">Ageing snapshot · {agingEvidence.as_of || "current"}</h3></div><Badge className="bg-rose-500/15 text-rose-200">{money(agingEvidence.grand_total)} outstanding</Badge></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{agingBuckets.map(([key, bucket]) => <HeroTile key={key} label={bucket.label || key.replace(/_/g, " ")} value={money(bucket.balance)} subtitle={`${bucket.invoice_count || 0} invoice${bucket.invoice_count === 1 ? "" : "s"}`} icon={WalletCards} glow={key === "over_90" ? "rose" : key === "current" ? "emerald" : "amber"} animated={false} />)}</div>{agingInvoices.length ? <div className="overflow-hidden rounded-xl border border-border/70"><Table><TableHeader><TableRow><TableHead>Invoice</TableHead><TableHead>Client</TableHead><TableHead>Due</TableHead><TableHead>Age</TableHead><TableHead className="text-right">Balance</TableHead></TableRow></TableHeader><TableBody>{agingInvoices.map((invoice) => <TableRow key={`${invoice.invoice_id}-${invoice.bucket}`}><TableCell className="font-medium">{invoice.invoice_number || "Invoice"}</TableCell><TableCell>{invoice.client_name || "Unassigned client"}</TableCell><TableCell>{invoice.due_date || "Not recorded"}</TableCell><TableCell><Badge variant="outline" className={invoice.days_overdue > 90 ? "border-rose-500/30 text-rose-300" : invoice.days_overdue > 0 ? "border-amber-500/30 text-amber-300" : "border-emerald-500/30 text-emerald-300"}>{invoice.days_overdue > 0 ? `${invoice.days_overdue} days overdue` : "Current"}</Badge></TableCell><TableCell className="text-right font-medium">{money(invoice.balance)}</TableCell></TableRow>)}</TableBody></Table></div> : <EmptyState>No outstanding invoices were included in this report snapshot.</EmptyState>}</section>}{Object.entries(output.sections || {}).filter(([section]) => section !== "summary" && (!isAgingReport || !["accounts_receivable_aging", "outstanding_invoices"].includes(section))).map(([section, values]) => <section key={section} className="overflow-hidden rounded-xl border border-border/70"><div className="border-b border-border/60 bg-muted/25 px-4 py-3"><h3 className="text-sm font-semibold capitalize">{section.replace(/_/g, " ")}</h3></div><div className="divide-y divide-border/60">{typeof values === "object" && !Array.isArray(values) ? Object.entries(values).map(([key, value]) => <div key={key} className="grid grid-cols-[minmax(140px,0.35fr)_1fr] gap-4 px-4 py-3 text-sm"><p className="font-medium capitalize text-foreground/85">{key.replace(/_/g, " ")}</p><p className="leading-6 text-muted-foreground">{renderValue(value)}</p></div>) : <div className="px-4 py-3 text-sm text-muted-foreground">{renderValue(values)}</div>}</div></section>)}</div><footer className="border-t border-border/60 bg-muted/20 px-6 py-3 text-xs text-muted-foreground">This report is a retained point-in-time evidence snapshot. PDF output follows the same branded document format.</footer></article>;
+  const documentControl = [
+    ["Generated", date(output.generated_at)],
+    ["Prepared by", output.generated_by || "System"],
+    ["Client scope", clientScopeLabel],
+    ["Document", output.id || "Retained snapshot"],
+  ];
+  // Every section is listed once, numbered, except the aging pair which the
+  // receivables block below renders as its own evidence.
+  const sectionEntries = Object.entries(output.sections || {}).filter(([section]) => section !== "summary" && (!isAgingReport || !["accounts_receivable_aging", "outstanding_invoices"].includes(section)));
+  const documentControlRow = <div className="grid gap-px overflow-hidden rounded-xl border border-border/70 bg-border/60 sm:grid-cols-2 xl:grid-cols-4">{documentControl.map(([label, value]) => <div key={label} className="bg-card px-4 py-3"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>)}</div>;
+  const contentsRow = sectionEntries.length >= 3 ? <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">In this document</p><ol className="mt-2 grid gap-x-6 gap-y-1 rounded-xl border border-border/70 bg-muted/15 px-4 py-3 text-xs text-muted-foreground sm:grid-cols-2">{sectionEntries.map(([section], index) => <li key={section} className="flex gap-2"><span className="tabular-nums text-primary">{String(index + 1).padStart(2, "0")}</span><span className="capitalize">{section.replace(/_/g, " ")}</span></li>)}</ol></div> : null;
+  return <article className="overflow-hidden bg-card"><DialogHeader className="border-b border-border/60 bg-gradient-to-r from-primary/10 via-card to-card px-6 py-5 text-left"><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">NexusMSP reporting & evidence</p><DialogTitle className="mt-1 text-2xl tracking-tight">{title}</DialogTitle><DialogDescription id="report-preview-description" className="mt-2 text-sm">Managed service evidence and operational assurance <span className="px-1">•</span> Generated {date(output.generated_at)} by {output.generated_by || "System"}</DialogDescription><div className="mt-4 flex flex-wrap gap-2"><Badge variant="outline" className="capitalize">{String(history.report_type || output.report_type || "standard").replace(/_/g, " ")}</Badge><Badge variant="outline">Retained evidence snapshot</Badge><Button size="sm" className="ml-auto" onClick={onDownload}><Download className="mr-1.5 h-3.5 w-3.5" />Download PDF</Button></div></DialogHeader><div className="space-y-6 p-6"><div className="grid grid-cols-2 gap-3 md:grid-cols-4">{metrics.map(([label, value, caption], index) => <HeroTile key={label} label={label} value={value} subtitle={caption} animated={typeof value === "number"} icon={[MonitorCog, CheckCircle2, Activity, BellRing][index]} glow={["sky", "emerald", "amber", "rose"][index]} />)}</div>{documentControlRow}{contentsRow}{isAgingReport && <section className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-300">Receivables evidence</p><h3 className="mt-1 text-base font-semibold">Ageing snapshot · {agingEvidence.as_of || "current"}</h3></div><Badge className="bg-rose-500/15 text-rose-200">{money(agingEvidence.grand_total)} outstanding</Badge></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{agingBuckets.map(([key, bucket]) => <HeroTile key={key} label={bucket.label || key.replace(/_/g, " ")} value={money(bucket.balance)} subtitle={`${bucket.invoice_count || 0} invoice${bucket.invoice_count === 1 ? "" : "s"}`} icon={WalletCards} glow={key === "over_90" ? "rose" : key === "current" ? "emerald" : "amber"} animated={false} />)}</div>{agingInvoices.length ? <div className="overflow-hidden rounded-xl border border-border/70"><Table><TableHeader><TableRow><TableHead>Invoice</TableHead><TableHead>Client</TableHead><TableHead>Due</TableHead><TableHead>Age</TableHead><TableHead className="text-right">Balance</TableHead></TableRow></TableHeader><TableBody>{agingInvoices.map((invoice) => <TableRow key={`${invoice.invoice_id}-${invoice.bucket}`}><TableCell className="font-medium">{invoice.invoice_number || "Invoice"}</TableCell><TableCell>{invoice.client_name || "Unassigned client"}</TableCell><TableCell>{invoice.due_date || "Not recorded"}</TableCell><TableCell><Badge variant="outline" className={invoice.days_overdue > 90 ? "border-rose-500/30 text-rose-300" : invoice.days_overdue > 0 ? "border-amber-500/30 text-amber-300" : "border-emerald-500/30 text-emerald-300"}>{invoice.days_overdue > 0 ? `${invoice.days_overdue} days overdue` : "Current"}</Badge></TableCell><TableCell className="text-right font-medium">{money(invoice.balance)}</TableCell></TableRow>)}</TableBody></Table></div> : <EmptyState>No outstanding invoices were included in this report snapshot.</EmptyState>}</section>}{sectionEntries.map(([section, values], index) => <section key={section} className="space-y-3"><SectionBar index={index + 1} title={section} /><SectionBody sectionKey={section} values={values} /></section>)}</div><footer className="border-t border-border/60 bg-muted/20 px-6 py-4 text-xs leading-5 text-muted-foreground"><p className="font-medium text-foreground/85">This report is a retained point-in-time evidence snapshot.</p><p className="mt-1">Evidence basis: retained Nexus records captured at generation. Dimensions without recorded evidence are reported as not recorded, and the same document is available as a branded PDF.</p></footer></article>;
 }

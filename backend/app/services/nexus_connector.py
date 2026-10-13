@@ -75,6 +75,10 @@ CAPABILITIES: dict[str, dict] = {
         "category": "service", "description": "Open a service ticket in the PSA",
         "params": ["summary", "client", "priority"],
     },
+    "workload.power.manage": {
+        "category": "infrastructure", "description": "Set a virtual machine's power state through its provider",
+        "params": ["workload", "state"],
+    },
 }
 
 # Adapter registry: which vendors implement which verbs, and how honestly.
@@ -112,6 +116,13 @@ ADAPTERS: dict[str, dict] = {
     "synergy_wholesale": {
         "vendor": "Synergy Wholesale", "implementation": "app.services.synergy_wholesale",
         "capabilities": {"network.dns.record_set": "wired", "license.assign": "planned"},
+    },
+    # First *executing* adapter: app.services.proxmox_adapter performs the
+    # provider call, verifies the Proxmox task outcome and fails closed when
+    # unconfigured — the shape every future executing adapter must follow.
+    "proxmox": {
+        "vendor": "Proxmox", "implementation": "app.services.proxmox_adapter",
+        "capabilities": {"workload.power.manage": "wired"},
     },
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -70,19 +71,18 @@ export default function NexusGuardianPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200">Nexus Security</p>
-          <h1 className="mt-1 text-2xl font-semibold text-foreground">Nexus Guardian</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Managed detection and response built on Windows Defender and Nexus Agent evidence. The triage
-            queue adapts to how your team triages — every rank explains itself.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={load} data-testid="guardian-refresh">
-          {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Refresh
-        </Button>
-      </div>
+      <OperationalPageHeader
+        eyebrow="Nexus Security"
+        title="Nexus Guardian"
+        description="Managed detection and response built on Windows Defender and Nexus Agent evidence. The triage queue adapts to how your team triages — every rank explains itself."
+        icon={ShieldCheck}
+        tone="cyan"
+        actions={
+          <Button variant="outline" size="sm" onClick={load} data-testid="guardian-refresh">
+            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}Refresh
+          </Button>
+        }
+      />
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="rounded-2xl border-border/60 bg-background/65">

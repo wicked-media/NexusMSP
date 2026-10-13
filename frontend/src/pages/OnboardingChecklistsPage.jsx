@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -284,23 +285,17 @@ export default function OnboardingChecklistsPage() {
 
   return (
     <div className="space-y-5" data-testid="onboarding-checklists-page">
-      <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.2),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)] sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><ClipboardCheck className="h-5 w-5" /></span>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Team workspace</p>
-              <h1 className="text-2xl font-bold tracking-tight">Onboarding checklists</h1>
-            </div>
-          </div>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Build your own hugely customisable checklists, hook them to services, and launch runs for technicians — so nothing that matters gets missed.
-          </p>
-        </div>
-        <Button onClick={() => setEditing("new")} data-testid="new-checklist">
-          <Plus className="h-4 w-4 mr-1.5" />New checklist
-        </Button>
-      </section>
+      <OperationalPageHeader
+        eyebrow="Team workspace"
+        title="Onboarding checklists"
+        description="Build your own hugely customisable checklists, hook them to services, and launch runs for technicians — so nothing that matters gets missed."
+        icon={ClipboardCheck}
+        actions={
+          <Button onClick={() => setEditing("new")} data-testid="new-checklist">
+            <Plus className="h-4 w-4 mr-1.5" />New checklist
+          </Button>
+        }
+      />
 
       {coverage && !!coverage.uncovered_service_ids?.length && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-3 text-xs text-amber-200">

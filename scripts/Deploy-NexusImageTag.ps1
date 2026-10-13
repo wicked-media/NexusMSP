@@ -25,8 +25,17 @@ param(
   [string]$ProjectName = '',
 
   # Validate the pinned model without pulling or restarting anything.
-  [switch]$ValidateOnly
+  [switch]$ValidateOnly,
+
+  # Roll to images that are already present on the host instead of pulling
+  # them. This is the rollback path on a host that stages images ahead of a
+  # change window (air-gapped or pre-loaded deployments), and it is what the
+  # release rollback drill uses so it can rehearse the real roll command
+  # without a registry round-trip. It never makes an unpinned or mutable
+  # reference acceptable: the immutable-reference checks above still run.
+  [switch]$SkipPull
 )
+
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -88,8 +97,19 @@ if ($ValidateOnly) {
 
 $action = "Roll the web tier to $WebImage and the API/worker tier to $ApiImage"
 if ($PSCmdlet.ShouldProcess($ComposeFile, $action)) {
-  Write-Host 'Pulling the pinned images...'
-  Invoke-NexusDeployCompose -Arguments @('pull', 'api', 'worker', 'web')
+  if ($SkipPull) {
+    Write-Host 'Skipping the registry pull; rolling to images already present on this host.'
+    foreach ($reference in @($ApiImage, $WebImage)) {
+      $inspect = & docker image inspect --format '{{.Id}}' $reference 2>$null
+      if ($LASTEXITCODE -ne 0) {
+        throw "-SkipPull was requested but '$reference' is not present on this host. Stage the pinned image first or drop -SkipPull."
+      }
+    }
+  }
+  else {
+    Write-Host 'Pulling the pinned images...'
+    Invoke-NexusDeployCompose -Arguments @('pull', 'api', 'worker', 'web')
+  }
 
   Write-Host 'Rolling the services to the pinned images (no rebuild)...'
   Invoke-NexusDeployCompose -Arguments @('up', '-d', '--no-build', 'api', 'worker', 'web')
@@ -101,5 +121,6 @@ if ($PSCmdlet.ShouldProcess($ComposeFile, $action)) {
   Write-Host '  Check /api/ready through the web tier, then run the golden-workflow smoke checks.'
   Write-Host ''
   Write-Host 'Rollback is the same command with the previous immutable tag or digest for -ApiImage and -WebImage.'
+  Write-Host 'On a host that stages images ahead of the change window, add -SkipPull to roll without a registry round-trip.'
   Write-Host 'If a database migration was applied, follow the migration rollback procedure in docs/RELEASE_RUNBOOK.md before rolling images back.'
 }

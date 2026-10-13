@@ -27,7 +27,10 @@ from app.services.web_studio_fleet import (
     version_distance,
 )
 
-NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+# The freshness policy mixes injected evaluation instants (the pure tests) with
+# the router's real-time preflight call, so the fixture anchor must track wall
+# time. A pinned date silently starts failing the moment real time passes it.
+NOW = datetime.now(timezone.utc)
 
 
 # ── fake database ────────────────────────────────────────────────────────────

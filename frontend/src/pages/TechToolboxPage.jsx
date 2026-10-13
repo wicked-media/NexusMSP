@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { PageShell } from "@/components/design-system";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,22 +67,18 @@ export default function TechToolboxPage() {
   return (
     <PageShell>
       <div className="space-y-4" data-testid="tech-toolbox-page">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-violet-400 mb-1 flex items-center gap-2">
-              <Gamepad2 className="w-3 h-3" />Tech Toolbox
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Toys, tools & tiny triumphs</h1>
-            <p className="text-sm text-muted-foreground">
-              Everything here runs on real Nexus data — the wheel picks real tickets, the arcade measures real latency,
-              and every point lands in the real ledger.
-            </p>
-          </div>
-          <Button variant="outline" size="sm" onClick={toggleSound} data-testid="sound-toggle" title={soundOn ? "Mute delight sounds" : "Enable delight sounds (off by default)"}>
-            {soundOn ? <Volume2 className="mr-1 h-3 w-3" /> : <VolumeX className="mr-1 h-3 w-3" />}
-            {soundOn ? "Sounds on" : "Sounds off"}
-          </Button>
-        </div>
+        <OperationalPageHeader
+          eyebrow="Tech Toolbox"
+          title="Toys, tools & tiny triumphs"
+          description="Everything here runs on real Nexus data — the wheel picks real tickets, the arcade measures real latency, and every point lands in the real ledger."
+          icon={Gamepad2}
+          actions={
+            <Button variant="outline" size="sm" onClick={toggleSound} data-testid="sound-toggle" title={soundOn ? "Mute delight sounds" : "Enable delight sounds (off by default)"}>
+              {soundOn ? <Volume2 className="mr-1 h-3 w-3" /> : <VolumeX className="mr-1 h-3 w-3" />}
+              {soundOn ? "Sounds on" : "Sounds off"}
+            </Button>
+          }
+        />
         {/* Featured: the orchestration layer and the primitives underneath it */}
         <section aria-labelledby="toolbox-featured-heading" data-testid="toolbox-featured">
           <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-violet-500/25 bg-violet-500/[0.07] p-3">

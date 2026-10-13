@@ -164,6 +164,28 @@ Celebrate a measurable operational outcome—such as completed recovery coverage
 - Prefer CSS transform/opacity; pause off-screen or hidden visualisations.
 - Spatial/topology and replay views must offer a static list/table alternative.
 
+## Client-facing documents
+
+Reports, invoices, purchase orders, estimates and portal audit records are documents rather
+than screens: they are read away from Nexus, printed, and attached to a customer file. Every
+document surface renders through `backend/app/services/nexus_document_pdf.py`, so one
+document language governs all of them, and the on-screen report reader
+(`frontend/src/pages/ReportsHubPage.jsx`) borrows the same rules through
+`frontend/src/lib/documentValueFormat.js` so the screen and the printed pack cannot describe
+the same recorded number two different ways.
+
+- A stored field name is never printed as a database column: `sla_compliance_pct` reads as
+  "SLA Compliance", and acronyms keep their case (SLA, RPO, M365, ID) instead of becoming
+  "Sla" and "Pct".
+- A unit is read from the field name, never from magnitude: a count called `tickets_total`
+  never becomes currency, money keeps its cents, and a measured value drops float padding
+  (96.4%, 6.4 hours).
+- An unrecorded dimension is disclosed as not recorded with its reason — never as a zero and
+  never as a clean, healthy state.
+- A section is numbered so a review can cite it, a record group renders as ranked evidence
+  with its share of total rather than one line of joined strings, the masthead and footer
+  carry provenance, and the footer states "Page X of Y" rather than an unbound page number.
+
 ## Review checklist for a new workspace
 
 - Does the header explain the operational question the page answers?
@@ -183,5 +205,7 @@ Celebrate a measurable operational outcome—such as completed recovery coverage
 - `NexusVerifiedSequence`: Work Session, Tickets, Nexus Verify, Diagnostics, and Assurance completion language.
 - `Nexus Expected State`: explicit evidence boundary and canonical Nexus Agent heartbeat coverage.
 - Appearance settings: user-controlled System, Full, Minimal, and Static motion modes.
+- Report documents: the shared Nexus document language above, proven by
+  `backend/tests/test_report_document_output.py` and `frontend/src/lib/documentValueFormat.test.js`.
 
 This document is the source of truth for future Nexus visual and interaction work. Changes must update both this standard and the shared implementation primitives.

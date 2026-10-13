@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { API, useAuth } from "@/App";
+import OperationalPageHeader from "@/components/OperationalPageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -148,29 +149,24 @@ export default function TechRewardsPage() {
 
   return (
     <div className="space-y-5" data-testid="tech-rewards-page">
-      <section className="flex flex-col gap-4 overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_86%_0%,hsl(var(--primary)/0.22),transparent_38%),linear-gradient(120deg,hsl(var(--card)),hsl(var(--background)))] p-5 shadow-[0_16px_42px_-30px_hsl(var(--primary)/0.7)] sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary"><Trophy className="h-5 w-5" /></span>
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">Achievements &amp; rewards</p>
-              <h1 className="text-2xl font-bold tracking-tight">Earn points. Adopt pets. Flex skins.</h1>
+      <OperationalPageHeader
+        eyebrow="Achievements & rewards"
+        title="Earn points. Adopt pets. Flex skins."
+        description="Every achievement and completed checklist earns points — spend them on pets, profile skins and titles that are uniquely yours."
+        icon={Trophy}
+        tone="amber"
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded-xl border border-amber-400/30 bg-amber-400/[0.08] px-4 py-2 text-center">
+              <p className="text-xl font-black text-amber-300 flex items-center gap-1.5 justify-center"><Coins className="h-4 w-4" />{points.balance?.toLocaleString?.() ?? points.balance}</p>
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wide">points balance</p>
             </div>
+            <Button variant="outline" size="sm" onClick={checkAchievements} data-testid="check-achievements">
+              <Sparkles className="h-3.5 w-3.5 mr-1.5" />Check achievements
+            </Button>
           </div>
-          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Every achievement and completed checklist earns points — spend them on pets, profile skins and titles that are uniquely yours.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="rounded-xl border border-amber-400/30 bg-amber-400/[0.08] px-4 py-2 text-center">
-            <p className="text-xl font-black text-amber-300 flex items-center gap-1.5 justify-center"><Coins className="h-4 w-4" />{points.balance?.toLocaleString?.() ?? points.balance}</p>
-            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">points balance</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={checkAchievements} data-testid="check-achievements">
-            <Sparkles className="h-3.5 w-3.5 mr-1.5" />Check achievements
-          </Button>
-        </div>
-      </section>
+        }
+      />
 
       {/* Equipped loadout */}
       <Card>

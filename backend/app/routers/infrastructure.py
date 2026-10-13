@@ -1,22 +1,44 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user, hash_password
-from app.services.scope_permissions import assert_client_scope, assert_record_scope, scoped_query
+from app.services.secret_store import encrypt_secret
+from app.services.scope_permissions import (
+    assert_client_scope,
+    assert_record_scope,
+    assert_tenant_record_scope,
+    platform_tenant_id,
+    scoped_query,
+    tenant_scoped_query,
+)
 from app.models import *
 
 router = APIRouter()
 
 # ============== PROXMOX ENDPOINTS ==============
 
+def _scoped_proxmox_servers(user: dict) -> dict:
+    """Connection records are customer-scoped: tenant partition + client scope."""
+    return tenant_scoped_query(user, scoped_query(user, {}))
+
+
 @router.get("/proxmox/servers")
 async def get_proxmox_servers(current_user: dict = Depends(get_current_user)):
-    servers = await db.proxmox_servers.find({}, {"_id": 0, "token_value": 0}).to_list(100)
+    servers = await db.proxmox_servers.find(
+        _scoped_proxmox_servers(current_user), {"_id": 0, "token_value": 0}
+    ).to_list(100)
     return servers
 
 @router.post("/proxmox/servers")
 async def create_proxmox_server(server_data: dict, current_user: dict = Depends(get_current_user)):
+    # A connection binds Nexus to a customer's infrastructure: the caller must
+    # be inside that client's scope before any credential is stored.
+    await assert_client_scope(
+        current_user,
+        server_data.get("client_id") or None,
+        operation="proxmox.connection.create",
+    )
     client_name = None
     if server_data.get('client_id'):
         client = await db.clients.find_one({"id": server_data['client_id']}, {"_id": 0})
@@ -36,11 +58,21 @@ async def create_proxmox_server(server_data: dict, current_user: dict = Depends(
     )
     doc = server.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
+    doc['tenant_id'] = platform_tenant_id(current_user)
+    if doc.get('token_value'):
+        # API tokens are integration secrets: encrypted at rest, and never
+        # returned by any route (the read projection excludes token_value).
+        doc['token_value'] = encrypt_secret(str(doc['token_value']))
     await db.proxmox_servers.insert_one(doc)
     return {"id": server.id, "name": server.name}
 
 @router.delete("/proxmox/servers/{server_id}")
-async def delete_proxmox_server(server_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_proxmox_server(server_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+    await assert_tenant_record_scope(
+        current_user, db.proxmox_servers, server_id,
+        operation="proxmox.connection.delete", request=request,
+        resource_name="Proxmox connection",
+    )
     await db.proxmox_servers.delete_one({"id": server_id})
     await db.proxmox_vms.delete_many({"server_id": server_id})
     return {"message": "Server deleted"}

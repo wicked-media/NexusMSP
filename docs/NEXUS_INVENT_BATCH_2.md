@@ -11,6 +11,9 @@ measure it by how many problems technicians no longer have to solve twice* — i
 better served by two capabilities that are complete than by thirty that are
 route registrations.
 
+Consolidated by: [Nexus studio merge review](NEXUS_STUDIO_MERGE_REVIEW.md) — every
+concept here is recorded once in `backend/app/services/studio_proposals.py`.
+
 ## What shipped
 
 Both merged into a workspace that already owns the problem space. No parallel
@@ -92,14 +95,14 @@ None of the remaining twenty-eight is started.
 
 | Concepts | Blocking gate |
 |---|---|
-| Fix Fallout, Repair Side-Effect Map, Ticket Collision Detector, Work Collision Forecast | Need a relationship graph **with provenance** and change-time attribution (P0 #5 plus change evidence on the graph), so a consequence can be linked to the change that produced it instead of inferred from timing alone. |
-| Customer Memory Shield, Customer Frustration Prevention, The Customer Who Never Calls, Zero-Question Support | Need consent-aware customer continuity: what Nexus may recall about a person, how it is redacted, and how it is scoped. The batch's own rule — never invent facts when identity or device mapping is uncertain — makes this a policy deliverable before a feature. |
-| Technician Second Brain, The Technician Who Never Has to Ask Twice, Escalation Quality Gate, Support Passport, Escalation Packet | Depend on the assembled-context primitives (`nexus_investigate`, `nexus_fleet_shell`, Evidence Engine). Partially present; the per-technician operational memory needs a retention decision first. |
-| False Fix Detector, Fix Expiry, Diagnostic Replay, Known-Good Library, Maintenance Debt | Need recurring-failure evidence keyed to a stable service/fault identity. Support Debt now supplies the recurrence half for *tickets*; the *per-service restart/recurrence* half has no authoritative source yet. |
-| Reboot Negotiator, Service Dependency Doctor, Invisible Dependency Hunter, Network Path Memory, Driver Compatibility Radar, Software Conflict Investigator | Need discovery telemetry and a dependency graph with provenance. The batch's own distinction — inferred vs verified dependency — is the whole design constraint, so these stay Labs until the graph can carry it. |
-| Authentication Journey, Update Autopsy, Vendor Case Companion | Need identity-provider, update-pipeline and external-case ingestion respectively. Each is a provider integration with its own sandbox acceptance, not a Nexus-internal feature. |
-| Customer Promise Guardian, Escalation Quality Gate | Overlap existing SLA/timer and notification surfaces; the honest next step is a review of those workspaces, not a new tool. |
-| All personality candidates from batch 1 | Still last, for the same reason: cheap, but they must never appear during a critical incident. |
+| Fix Fallout, Repair Side-Effect Map, Ticket Collision Detector, Work Collision Forecast | Need a relationship graph **with provenance** and change-time attribution (P0 #5 plus change evidence on the graph), so a consequence can be linked to the change that produced it instead of inferred from timing alone. Recorded as one work item, `dependency-map`. |
+| Customer Memory Shield, Customer Frustration Prevention, The Customer Who Never Calls, Zero-Question Support | Need consent-aware customer continuity: what Nexus may recall about a person, how it is redacted, and how it is scoped. The batch's own rule — never invent facts when identity or device mapping is uncertain — makes this a policy deliverable before a feature. Recorded as one work item, `customer-continuity`. |
+| Technician Second Brain, The Technician Who Never Has to Ask Twice, Escalation Quality Gate, Support Passport, Escalation Packet | Depend on the assembled-context primitives (`nexus_investigate`, `nexus_fleet_shell`, Evidence Engine). Partially present; the per-technician operational memory needs a retention decision first. Recorded as one work item, `technician-memory`. |
+| False Fix Detector, Fix Expiry, Diagnostic Replay, Known-Good Library, Maintenance Debt | Need recurring-failure evidence keyed to a stable service/fault identity. Support Debt now supplies the recurrence half for *tickets*; the *per-service restart/recurrence* half has no authoritative source yet. Recorded as one work item, `recurring-failure-evidence`. |
+| Reboot Negotiator, Service Dependency Doctor, Invisible Dependency Hunter, Network Path Memory, Driver Compatibility Radar, Software Conflict Investigator | Need discovery telemetry and a dependency graph with provenance. The batch's own distinction — inferred vs verified dependency — is the whole design constraint, so these stay Labs until the graph can carry it. Recorded with `dependency-map`, the same substrate as the row above. |
+| Authentication Journey, Update Autopsy, Vendor Case Companion | Need identity-provider, update-pipeline and external-case ingestion respectively. Each is a provider integration with its own sandbox acceptance, not a Nexus-internal feature. Recorded as merges into `authentication`, `update-compatibility` and `escalation`, where batches 3 to 5 proposed the same three capabilities. |
+| Customer Promise Guardian, Escalation Quality Gate | Overlap existing SLA/timer and notification surfaces; the honest next step is a review of those workspaces, not a new tool. Customer Promise Guardian is recorded as a section of `service-desk`; **this row lists Escalation Quality Gate a second time** — the register records it once, with the assembled-context work item above. |
+| All personality candidates from batch 1 | Still last, for the same reason: cheap, but they must never appear during a critical incident. Outside the register's scope, which covers batches 2–5. |
 
 ## How this batch would be proven worth further investment
 
@@ -115,6 +118,34 @@ Support Debt makes an existing claim measurable, so the evidence is immediate:
    signal to remove the detector, not to explain it better.
 
 Until those numbers exist, treat the batch's ranking as a strategy assessment.
+
+## Consolidated in the catalogue register
+
+Every concept in this document is recorded once in
+`backend/app/services/studio_proposals.py` with one disposition, because the
+batch documents were written separately and never cross-referenced each other.
+[Nexus studio merge review](NEXUS_STUDIO_MERGE_REVIEW.md) is the readable record
+of those merges.
+
+| This batch's concept | Disposition in the register |
+|---|---|
+| Dead End Detector, Support Debt | `served` — the two tools this batch shipped, retained in the register so the catalogue is complete |
+| Reality Replay, The Missing Technician, Operational Antibodies | `studio` — each still gated, and each names the gate that blocks it |
+| Fix Fallout, Repair Side-Effect Map, Ticket Collision Detector, Work Collision Forecast, Reboot Negotiator, Service Dependency Doctor, Invisible Dependency Hunter, Network Path Memory, Driver Compatibility Radar, Software Conflict Investigator | one work item, `dependency-map` — ten names for the one missing substrate |
+| Customer Memory Shield, Customer Frustration Prevention, The Customer Who Never Calls, Zero-Question Support | one work item, `customer-continuity` — one consent rule for what Nexus may recall about a person |
+| Technician Second Brain, The Technician Who Never Has to Ask Twice, Escalation Quality Gate, Support Passport, Escalation Packet | one work item, `technician-memory` — one retention decision before any memory is assembled |
+| False Fix Detector, Fix Expiry, Diagnostic Replay, Known-Good Library, Maintenance Debt | one work item, `recurring-failure-evidence` — one fault identity to key recurrence to |
+| Authentication Journey | merges into `authentication`, with batch 3's Login Journey Recorder and batch 5's Authentication Studio |
+| Update Autopsy | merges into `update-compatibility`, with batch 4's Software Deployment and batch 3's Update Compatibility Gate |
+| Vendor Case Companion | merges into `escalation`, with batch 4's Escalation and batch 3's Vendor Escalation Tracker |
+| Customer Promise Guardian | a section of `service-desk` — the review of the existing SLA, timer and notification surfaces |
+| Personality candidates (batch 1) | outside the register's scope, which covers batches 2–5 |
+
+The register changes nothing about what is built. It changes where each idea is
+recorded: a product's `planned_studios` now lists only the gated studios it is
+intended to hold, and every other idea carries the disposition that says what
+happened to it — a section, a merge, a named gap on an existing surface, or a
+delivered capability.
 
 ## Verification
 
