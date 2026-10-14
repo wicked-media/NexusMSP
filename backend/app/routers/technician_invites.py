@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.database import db
 from app.auth import get_current_user, hash_password, password_policy_error
+from app.services.technician_onboarding import build_technician_onboarding
 from app.routers.email_utils import send_email, is_microsoft365_configured
 from app.routers.tech_intel import _log_audit
 from app.routers.technicians import _access_role_ids
@@ -235,6 +236,11 @@ async def accept_invite(data: dict):
         "is_active": True,
         "created_at": now,
     }
+    user["technician_onboarding"] = build_technician_onboarding(
+        technician=user,
+        now=now,
+        enforce_operational_gate=True,
+    )
     await db.users.insert_one(user)
 
     # Mark invite as accepted

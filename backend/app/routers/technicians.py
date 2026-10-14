@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 import re
 from app.database import db
 from app.auth import get_current_user, hash_password, password_policy_error
+from app.services.technician_onboarding import build_technician_onboarding
 from app.services.action_permissions import (
     default_permissions_for_role,
     normalise_action_permissions,
@@ -332,6 +333,13 @@ async def create_technician(tech_data: dict, current_user: dict = Depends(get_cu
         **scope,
     )
     user_dict = user.model_dump()
+    # A staff account created by an administrator is a deliberate first-use
+    # onboarding case. Persist the policy at creation time rather than making
+    # the login route infer it from a missing record.
+    user_dict["technician_onboarding"] = build_technician_onboarding(
+        technician=user_dict,
+        enforce_operational_gate=True,
+    )
     if permissions:
         user_dict["permissions"] = permissions
     user_dict["password_hash"] = hash_password(password)

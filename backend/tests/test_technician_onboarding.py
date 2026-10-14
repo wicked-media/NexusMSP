@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.routers import auth, technician_onboarding
-from app.services.technician_onboarding import TECHNICIAN_ONBOARDING_STEPS
+from app.services.technician_onboarding import TECHNICIAN_ONBOARDING_STEPS, build_technician_onboarding
 
 
 def _get_path(document: dict, path: str):
@@ -96,7 +96,7 @@ def _admin():
     return {"id": "admin-a", "name": "Ada Admin", "role": "admin", "is_admin": True}
 
 
-def test_me_initialises_account_owned_checklist_and_auth_flags(monkeypatch):
+def test_legacy_account_gets_an_informational_checklist_without_a_login_gate(monkeypatch):
     database = _Database()
     monkeypatch.setattr(technician_onboarding, "db", database)
     monkeypatch.setattr(auth, "db", database)
@@ -105,22 +105,33 @@ def test_me_initialises_account_owned_checklist_and_auth_flags(monkeypatch):
     flags = asyncio.run(auth._technician_onboarding_flags(_technician()))
 
     onboarding = result["onboarding"]
-    assert onboarding["must_complete_before_operational_work"] is True
+    assert onboarding["enforce_operational_gate"] is False
+    assert onboarding["must_complete_before_operational_work"] is False
     assert onboarding["is_compliant"] is False
     assert [step["id"] for step in onboarding["steps"]] == [step["id"] for step in TECHNICIAN_ONBOARDING_STEPS]
     assert onboarding["audit_log"][0]["evidence_type"] == "system_initialized"
-    assert flags == {"onboarding_required": True, "is_onboarding_compliant": False}
+    assert flags == {"onboarding_required": False, "is_onboarding_compliant": False}
 
 
-def test_auth_me_exposes_gate_flags_without_leaking_onboarding_evidence(monkeypatch):
+def test_auth_me_exposes_non_blocking_legacy_learning_flags_without_leaking_evidence(monkeypatch):
     database = _Database()
     monkeypatch.setattr(auth, "db", database)
 
     result = asyncio.run(auth.get_me(current_user=_technician()))
 
-    assert result["onboarding_required"] is True
+    assert result["onboarding_required"] is False
     assert result["is_onboarding_compliant"] is False
     assert "technician_onboarding" not in result
+
+
+def test_deliberately_created_technician_keeps_the_server_owned_gate():
+    onboarding = build_technician_onboarding(
+        technician=_technician(),
+        enforce_operational_gate=True,
+    )
+
+    assert onboarding["enforce_operational_gate"] is True
+    assert onboarding["must_complete_before_operational_work"] is True
 
 
 def test_step_completion_is_attested_audited_and_idempotent(monkeypatch):
@@ -203,7 +214,7 @@ def test_admin_team_view_is_compact_and_does_not_expose_evidence(monkeypatch):
     result = asyncio.run(technician_onboarding.list_technician_onboarding(current_user=_admin()))
 
     assert result["summary"]["total"] == 2
-    assert result["summary"]["required"] == 2
+    assert result["summary"]["required"] == 0
     assert {row["technician_id"] for row in result["technicians"]} == {"tech-a", "admin-a"}
     assert all("audit_log" not in row and "steps" not in row for row in result["technicians"])
 

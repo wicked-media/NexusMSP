@@ -95,14 +95,27 @@ def _step_state(step: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def build_technician_onboarding(*, technician: dict[str, Any], now: str | None = None) -> dict[str, Any]:
-    """Return a safe default onboarding record for a technician account."""
+def build_technician_onboarding(
+    *,
+    technician: dict[str, Any],
+    now: str | None = None,
+    enforce_operational_gate: bool = False,
+) -> dict[str, Any]:
+    """Return a safe default onboarding record for a technician account.
+
+    A lazily-created record belongs to an existing account and is therefore
+    informational by default.  Only the deliberate staff-creation and invite
+    paths set ``enforce_operational_gate``.  This prevents a new feature from
+    unexpectedly locking established operators into the Academy on their next
+    sign-in while retaining a server-owned first-use gate for new staff.
+    """
     timestamp = now or _now()
     return {
         "version": TECHNICIAN_ONBOARDING_VERSION,
         "status": "not_started",
         "is_compliant": False,
-        "must_complete_before_operational_work": True,
+        "enforce_operational_gate": bool(enforce_operational_gate),
+        "must_complete_before_operational_work": bool(enforce_operational_gate),
         "created_at": timestamp,
         "updated_at": timestamp,
         "completed_at": None,
@@ -144,6 +157,10 @@ def _normalise_progress(technician: dict[str, Any]) -> dict[str, Any]:
         }
 
     completed = all(step.get("status") == "completed" for step in normalised_steps.values())
+    # Older records predate the explicit enforcement marker. Treat them as
+    # legacy learning records rather than silently imposing a new lockout.
+    # New technician/invite flows persist this marker at account creation.
+    enforce_operational_gate = bool(existing.get("enforce_operational_gate", False))
     step_completion_times = [
         str(step.get("completed_at"))
         for step in normalised_steps.values()
@@ -155,7 +172,8 @@ def _normalise_progress(technician: dict[str, Any]) -> dict[str, Any]:
         "version": existing.get("version") or TECHNICIAN_ONBOARDING_VERSION,
         "status": "compliant" if completed else (existing.get("status") if existing.get("status") in {"not_started", "in_progress"} else "in_progress"),
         "is_compliant": completed,
-        "must_complete_before_operational_work": not completed,
+        "enforce_operational_gate": enforce_operational_gate,
+        "must_complete_before_operational_work": bool(enforce_operational_gate and not completed),
         "technician_id": str(technician.get("id") or existing.get("technician_id") or ""),
         "completed_at": completion_at if completed else None,
         "completed_by_id": existing.get("completed_by_id") or (str(technician.get("id") or "") if completed else None),
